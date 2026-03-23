@@ -2,24 +2,24 @@
 
 Full-stack streaming application with:
 
-* ⚛️ Next.js (Frontend)
-* ⚡ FastAPI (Backend)
-* 🌐 Nginx (Reverse Proxy)
-* 🐳 Docker (Deployment)
+- ⚛️ Next.js (Frontend)
+- ⚡ FastAPI (Backend)
+- 🌐 Nginx (Reverse Proxy)
+- 🐳 Docker (Deployment)
 
 ---
 
-# 🚀 Features
+## 🚀 Features
 
-* Stream proxy (`/api/proxy`)
-* EPG support (`/api/epg`)
-* Unified port (8001)
-* No CORS issues
-* Works locally and in production (CasaOS)
+- Stream proxy (`/api/proxy`)
+- EPG support (`/api/epg`)
+- Unified port (8001)
+- No CORS issues
+- Works locally and in production (CasaOS)
 
 ---
 
-# 📁 Project Structure
+## 📁 Project Structure
 
 ```
 tv-app/
@@ -32,9 +32,9 @@ tv-app/
 
 ---
 
-# 🧪 Run Locally (Development)
+## 🧪 Run Locally (Development)
 
-## 🔹 Backend
+### 🔹 Backend
 
 ```bash
 cd backend
@@ -48,14 +48,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open:
-
-```
 http://localhost:8000/docs
-```
 
 ---
 
-## 🔹 Frontend
+### 🔹 Frontend
 
 ```bash
 cd frontend
@@ -65,30 +62,25 @@ npm run dev
 ```
 
 Open:
-
-```
 http://localhost:3000
-```
 
 ---
 
-## 🔹 Environment (Frontend)
+### 🔹 Environment (Frontend)
 
-Create:
+Create file:
 
-```
 frontend/.env.local
-```
 
-```env
+```
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 ```
 
 ---
 
-# 🐳 Run with Docker (Production)
+## 🐳 Run with Docker (Production)
 
-## 🔹 Start everything
+### 🔹 Start everything
 
 ```bash
 docker compose up -d --build
@@ -96,27 +88,23 @@ docker compose up -d --build
 
 ---
 
-## 🔹 Open app
+### 🔹 Open app
 
-```
 http://localhost:8001
-```
 
 ---
 
-## 🔹 API endpoints
+### 🔹 API endpoints
 
-```
-http://localhost:8001/api/epg
-http://localhost:8001/api/proxy
-http://localhost:8001/api/docs
-```
+http://localhost:8001/api/epg  
+http://localhost:8001/api/proxy  
+http://localhost:8001/api/docs  
 
 ---
 
-# ⚙️ Environment Variables
+## ⚙️ Environment Variables
 
-## Backend (docker-compose)
+### Backend (docker-compose)
 
 ```yaml
 environment:
@@ -125,7 +113,7 @@ environment:
 
 ---
 
-## Frontend (docker-compose)
+### Frontend (docker-compose)
 
 ```yaml
 environment:
@@ -134,16 +122,16 @@ environment:
 
 ---
 
-# 🌐 Nginx Configuration
+## 🌐 Nginx Configuration
 
-The app uses Nginx to route everything through a single port.
+Routes:
 
-* `/` → Frontend
-* `/api/*` → Backend
+- `/` → Frontend
+- `/api/*` → Backend
 
 ---
 
-# 🔁 API Usage (Frontend)
+## 🔁 API Usage (Frontend)
 
 ❌ Do NOT use:
 
@@ -160,21 +148,17 @@ fetch("/api/proxy?...")
 
 ---
 
-# 🎥 Streaming Proxy
-
-The backend rewrites `.m3u8` playlists and proxies all segments.
+## 🎥 Streaming Proxy
 
 Example:
 
-```
 /api/proxy?url=<STREAM_URL>&referer=<REFERER>
-```
 
 ---
 
-# 🚀 Deploy on CasaOS
+## 🚀 Deploy on CasaOS
 
-## 🔹 Step 1 — Clone repo
+### 🔹 Step 1 — Clone repo
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/tv-app.git
@@ -183,7 +167,7 @@ cd tv-app
 
 ---
 
-## 🔹 Step 2 — Run
+### 🔹 Step 2 — Run
 
 ```bash
 docker compose up -d --build
@@ -191,17 +175,15 @@ docker compose up -d --build
 
 ---
 
-## 🔹 Step 3 — Open
+### 🔹 Step 3 — Open
 
-```
 http://YOUR_SERVER_IP:8001
-```
 
 ---
 
-# ⚠️ Troubleshooting
+## ⚠️ Troubleshooting
 
-## ❗ Port not working
+### ❗ Port not working
 
 ```bash
 docker ps
@@ -209,9 +191,7 @@ docker ps
 
 ---
 
-## ❗ Proxy errors
-
-Check logs:
+### ❗ Proxy errors
 
 ```bash
 docker logs nginx
@@ -220,7 +200,7 @@ docker logs backend
 
 ---
 
-## ❗ Wrong API URL
+### ❗ Wrong API URL
 
 Make sure frontend uses:
 
@@ -230,9 +210,7 @@ Make sure frontend uses:
 
 ---
 
-## ❗ Changes not applied
-
-Rebuild without cache:
+### ❗ Changes not applied
 
 ```bash
 docker compose build --no-cache
@@ -241,14 +219,14 @@ docker compose up -d
 
 ---
 
-# 💡 Notes
+## 💡 Notes
 
-* Backend automatically detects `/api` using `ROOT_PATH`
-* Nginx passes correct host + port using `$http_host`
-* Works both locally and behind reverse proxy
+- Backend uses `ROOT_PATH=/api`
+- Nginx forwards correct host and port using `$http_host`
+- Works locally and in production
 
 ---
 
-# 👨‍💻 Author
+## 👨‍💻 Author
 
 Vitaly Tserulnikov
