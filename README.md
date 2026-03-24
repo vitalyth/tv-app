@@ -341,5 +341,4 @@ docker compose up -d
 ---
 
 ## 👨‍💻 Author
-
 Vitaly Thirulnikov
