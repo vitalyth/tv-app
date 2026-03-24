@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+httpx
+requests
+python-dotenv
+email-validator
+python-multipart
+xmltodict
+questionary
+
+[dev]
+pytest
+black
+ruff
+ipython
+rich
+typer

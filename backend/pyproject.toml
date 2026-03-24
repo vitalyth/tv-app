@@ -1,0 +1,32 @@
+[project]
+name = "tv-channels"
+version = "0.1.0"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "requests",
+    "python-dotenv",
+    "email-validator",
+    "python-multipart",
+    "xmltodict",
+    "questionary"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "ruff",
+    "ipython",
+    "rich",
+    "typer"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["plugin_video_idanplus*"]
+exclude = ["debug*", "profile*"]
