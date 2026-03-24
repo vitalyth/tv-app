@@ -3,8 +3,8 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from urllib.parse import urlparse, urljoin, quote, urlencode
 from pydantic import BaseModel
-from plugin_video_idanplus_.resources import main as idan_main
-import plugin_video_idanplus_.resources.lib.epg as epg
+from plugin_video_idanplus.resources import main as idan_main
+import plugin_video_idanplus.resources.lib.epg as epg
 import xbmcplugin
 from fastapi.middleware.cors import CORSMiddleware
 import re
