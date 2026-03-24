@@ -84,9 +84,10 @@ def live_channel(channel: Channel):
 
     return {'stream': xbmcplugin.getStream()}
 
-
+'''
 def build_proxy_url(base_proxy, full_url):
     return f"{base_proxy}/proxy?{urlencode({'url': full_url})}"
+'''
 
 @app.get("/proxy")
 def proxy(request: Request, url: str, referer: str = None):
@@ -94,7 +95,10 @@ def proxy(request: Request, url: str, referer: str = None):
     origin = f"{parsed.scheme}://{parsed.netloc}"
 
     headers = {
-        "User-Agent": request.headers.get("user-agent", "Mozilla/5.0"),
+        "User-Agent": request.headers.get(
+            "user-agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        ),
         "Accept": "*/*",
         "Origin": origin,
         "Referer": referer or origin + "/",
@@ -103,23 +107,48 @@ def proxy(request: Request, url: str, referer: str = None):
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
-    r = requests.get(url, headers=headers, stream=True)
+    # IMPORTANT: allow redirects
+    r = requests.get(url, headers=headers, stream=True, allow_redirects=True)
 
-    content_type = r.headers.get("content-type", "")
+    content_type = r.headers.get("content-type", "").lower()
 
-    # segments
-    if "video" in content_type or url.endswith((".ts", ".m4s", ".mp4")):
+    # -----------------------------
+    # DASH (livx / mpd) -> FULL passthrough
+    # -----------------------------
+    if (
+        "livedash" in url
+        or url.endswith(".livx")
+        or "dash+xml" in content_type
+    ):
+        return StreamingResponse(
+            r.iter_content(chunk_size=1024 * 1024),
+            status_code=r.status_code,
+            media_type=r.headers.get("content-type", "application/dash+xml"),
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Accept-Ranges": r.headers.get("accept-ranges", "bytes"),
+                "Content-Length": r.headers.get("content-length", ""),
+            }
+        )
+
+    # -----------------------------
+    # Video segments
+    # -----------------------------
+    if any(x in content_type for x in ["video", "mp2t"]) or url.endswith((".ts", ".m4s", ".mp4")):
         return StreamingResponse(
             r.iter_content(chunk_size=1024 * 1024),
             status_code=r.status_code,
             media_type=content_type,
             headers={
-                "Content-Range": r.headers.get("Content-Range", ""),
+                "Access-Control-Allow-Origin": "*",
                 "Accept-Ranges": "bytes",
-                "Access-Control-Allow-Origin": "*"
+                "Content-Range": r.headers.get("Content-Range", ""),
             }
         )
 
+    # -----------------------------
+    # HLS (m3u8)
+    # -----------------------------
     text = r.text
 
     is_m3u8 = (
@@ -136,12 +165,10 @@ def proxy(request: Request, url: str, referer: str = None):
         )
 
     base_url = url.rsplit("/", 1)[0] + "/"
-    root_path = request.scope.get("root_path", "")
 
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("host", "localhost")
-
-    base_proxy = f"{proto}://{host}{root_path}"
+    base_proxy = f"{proto}://{host}"
 
     new_lines = []
 
@@ -156,7 +183,13 @@ def proxy(request: Request, url: str, referer: str = None):
             def replace_uri(match):
                 uri = match.group(1)
                 full_url = urljoin(base_url, uri)
-                proxied = f"{base_proxy}/proxy?{urlencode({'url': full_url, 'referer': referer or origin + '/'})}"
+
+                params = {
+                    "url": full_url,
+                    "referer": referer or origin + "/"
+                }
+
+                proxied = f"{base_proxy}/proxy?{urlencode(params)}"
                 return f'URI="{proxied}"'
 
             line = re.sub(r'URI="([^"]+)"', replace_uri, line)
@@ -165,7 +198,12 @@ def proxy(request: Request, url: str, referer: str = None):
 
         full_url = urljoin(base_url, line)
 
-        proxied = f"{base_proxy}/proxy?{urlencode({'url': full_url, 'referer': referer or origin + '/'})}"
+        params = {
+            "url": full_url,
+            "referer": referer or origin + "/"
+        }
+
+        proxied = f"{base_proxy}/proxy?{urlencode(params)}"
 
         new_lines.append(proxied)
 
