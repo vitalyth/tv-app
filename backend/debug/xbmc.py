@@ -1,4 +1,6 @@
 from constants import Color
+import zipfile
+import re
 
 LOGDEBUG = 0
 LOGINFO = 1
@@ -16,5 +18,24 @@ def getInfoLabel(label):
     return ""
 
 def executebuiltin(cmd, *args):
-    #print(f"{Color.YELLOW}[XBMC BUILTIN] {cmd}{Color.RESET}")
-    pass
+    print(f"{Color.YELLOW}[XBMC BUILTIN] {cmd}{Color.RESET}")
+    
+    if cmd.startswith("Extract("):
+        match = re.match(r'Extract\((.*?),\s*(.*?)\)', cmd)
+        if not match:
+            print("Invalid Extract command format")
+            return
+
+        zip_path = match.group(1).strip().strip('"').strip("'")
+        dest_path = match.group(2).strip().strip('"').strip("'")
+
+        try:
+            print(f"Extracting {zip_path} -> {dest_path}")
+
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(dest_path)
+
+            print("✅ Extraction completed")
+
+        except Exception as e:
+            print(f"Extraction failed: {e}")
