@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import re
 import xmltodict
 import os
+from typing import Dict, Any
 
 ROOT_PATH = os.getenv("ROOT_PATH", "")
 
@@ -29,13 +30,15 @@ app.add_middleware(
 
 class Channel(BaseModel):
     id: str
+    index: int
     name: str
     logo: str
     category: str
-    streamUrl: str
+    linkDetails: Dict[str, Any]
     module: str
     channelID: str
     mode: int
+    type: str
 
 
 '''
@@ -53,7 +56,25 @@ def read_item(item_id: int, q: str | None = None):
 def live_channels():
     #epg_items = epg.GetEPG()
     channels = idan_main.GetUserChannels(type='tv')
-    return channels
+
+    results = []
+    for channel in channels:
+        print('channel===>', channel)
+        ch = Channel(
+            id=channel["channelID"],
+            index=channel["index"],
+            name=channel["name"],
+            mode=channel["mode"],
+            logo=channel["image"],
+            category='',
+            module=channel["module"],
+            channelID=channel["channelID"],
+            type=channel["type"],
+            linkDetails = channel["linkDetails"]
+        )
+
+        results.append(ch)
+    return results
 
 @app.post('/live_channel')
 def live_channel(channel: Channel):
@@ -72,7 +93,6 @@ def proxy(request: Request, url: str, referer: str = None):
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
 
-    # 🔥 פה הקסם
     headers = {
         "User-Agent": request.headers.get("user-agent", "Mozilla/5.0"),
         "Accept": "*/*",
@@ -87,7 +107,7 @@ def proxy(request: Request, url: str, referer: str = None):
 
     content_type = r.headers.get("content-type", "")
 
-    # 🎥 וידאו/segments
+    # segments
     if "video" in content_type or url.endswith((".ts", ".m4s", ".mp4")):
         return StreamingResponse(
             r.iter_content(chunk_size=1024 * 1024),
@@ -116,7 +136,6 @@ def proxy(request: Request, url: str, referer: str = None):
         )
 
     base_url = url.rsplit("/", 1)[0] + "/"
-    #base_proxy = str(request.base_url).rstrip("/")
     root_path = request.scope.get("root_path", "")
 
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
@@ -134,7 +153,6 @@ def proxy(request: Request, url: str, referer: str = None):
             continue
 
         if line.startswith("#"):
-            # גם פה חשוב לטפל ב-URI=
             def replace_uri(match):
                 uri = match.group(1)
                 full_url = urljoin(base_url, uri)

@@ -43,7 +43,7 @@ export function SidebarChannelList({
         </Button>
         <div className="flex-1 w-full overflow-y-auto styled-scrollbar">
           <div className="flex flex-col items-center gap-2 px-2">
-            {channels.slice(0, 15).map((channel) => (
+            {channels.map((channel) => (
               <button
                 key={channel.id}
                 onClick={() => onSelectChannel(channel)}

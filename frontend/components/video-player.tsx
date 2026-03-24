@@ -14,7 +14,6 @@ import type Player from "video.js/dist/types/player"
 import "video.js/dist/video-js.css"
 
 const api = (path: any) => {
-  console.log('=====process.env.NEXT_PUBLIC_API_BASE======', process.env.NEXT_PUBLIC_API_BASE);
   return `${process.env.NEXT_PUBLIC_API_BASE || ""}${path}`;
 }
 
@@ -31,15 +30,17 @@ interface LinkDetails {
 
 interface Channel {
   id: string
+  index: string
   name: string
   logo: string
   category: string
-  streamUrl: string
+  //streamUrl: string
 
   channelID: string
   module: string
   mode: number
   linkDetails: LinkDetails
+  type: string
 }
 
 interface VideoPlayerProps {
