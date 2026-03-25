@@ -135,6 +135,9 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
     const referer = channel?.linkDetails?.referer || ""
     const isDash = channel?.linkDetails?.manifest_type === 'mpd';
+    const isSafari =
+      typeof navigator !== "undefined" &&
+      /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
     const player = videojs(videoElement, {
       autoplay: true,
@@ -145,8 +148,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       playbackRates: [0.5, 1, 1.5, 2],
       html5: {
         vhs: {
-          overrideNative: true,
-          //withCredentials: true,
+          overrideNative: !isSafari,
           withCredentials: false,
         },
         nativeAudioTracks: false,
