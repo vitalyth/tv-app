@@ -12,35 +12,10 @@ import {
 import videojs from "video.js"
 import type Player from "video.js/dist/types/player"
 import "video.js/dist/video-js.css"
+import { type Channel } from "@/lib/channels-data"
 
 const api = (path: any) => {
   return `${process.env.NEXT_PUBLIC_API_BASE || ""}${path}`;
-}
-
-type ManifestType = "hls" | "mpd"
-
-interface LinkDetails {
-  link: string
-  referer?: string
-  final?: boolean
-  manifest_type?: ManifestType
-  ch?: string
-  regex?: string
-}
-
-interface Channel {
-  id: string
-  index: string
-  name: string
-  logo: string
-  category: string
-  //streamUrl: string
-
-  channelID: string
-  module: string
-  mode: number
-  linkDetails: LinkDetails
-  type: string
 }
 
 interface VideoPlayerProps {

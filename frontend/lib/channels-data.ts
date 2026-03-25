@@ -9,7 +9,7 @@ interface LinkDetails {
   regex?: string
 }
 
-interface Channel {
+export interface Channel {
   id: string
   index: number
   name: string
