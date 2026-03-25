@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -27,7 +30,7 @@ jobs:
         with:
           context: ./frontend
           push: true
-          tags: YOUR_DOCKERHUB/tv-app-frontend:latest
+          tags: vitalyth/tv-app-frontend:latest
 
       # 🔹 BACKEND
       - name: 🧱 Build & Push Backend
@@ -35,7 +38,7 @@ jobs:
         with:
           context: ./backend
           push: true
-          tags: YOUR_DOCKERHUB/tv-app-backend:latest
+          tags: vitalyth/tv-app-backend:latest
 
       # 🔹 NGINX
       - name: 🧱 Build & Push Nginx
@@ -43,5 +46,5 @@ jobs:
         with:
           context: ./nginx
           push: true
-          tags: YOUR_DOCKERHUB/tv-app-nginx:latest
+          tags: vitalyth/tv-app-nginx:latest
 
