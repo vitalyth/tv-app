@@ -12,6 +12,7 @@ import {
 import videojs from "video.js"
 import type Player from "video.js/dist/types/player"
 import "video.js/dist/video-js.css"
+import "videojs-contrib-dash"
 import { type Channel } from "@/lib/channels-data"
 
 const api = (path: any) => {
@@ -32,7 +33,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   const [isCasting, setIsCasting] = useState(false)
   const [castAvailable, setCastAvailable] = useState(false)
   const [airplayAvailable, setAirplayAvailable] = useState(false)
-  const [streamUrl, setStreamUrl] = useState(null);
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
 
   // Check for casting availability
   useEffect(() => {
@@ -132,7 +133,8 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     videoElement.classList.add("vjs-big-play-centered", "vjs-fluid")
     videoRef.current.appendChild(videoElement)
 
-    const referer = channel.linkDetails?.referer || ""
+    const referer = channel?.linkDetails?.referer || ""
+    const isDash = channel?.linkDetails?.manifest_type === 'mpd';
 
     const player = videojs(videoElement, {
       autoplay: true,
@@ -153,7 +155,9 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       sources: [
         {
           src: api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}`),
-          type: "application/x-mpegURL",
+          type: isDash
+            ? "application/dash+xml"
+            : "application/x-mpegURL",
         },
       ],
     })

@@ -4,11 +4,18 @@ import { useState, useMemo } from "react"
 import { Tv, Menu, Search, X } from "lucide-react"
 import { channels, categories, type Channel } from "@/lib/channels-data"
 import { SidebarChannelList } from "@/components/sidebar-channel-list"
-import { VideoPlayer } from "@/components/video-player"
+//import { VideoPlayer } from "@/components/video-player"
 import { ChannelCard } from "@/components/channel-card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import Header from "@/components/Header"
+
+import dynamic from "next/dynamic"
+
+const VideoPlayer = dynamic(
+  () => import("@/components/video-player").then(m => m.VideoPlayer),
+  { ssr: false }
+)
 
 export default function TVChannelsPage() {
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null)
