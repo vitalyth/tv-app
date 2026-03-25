@@ -14,10 +14,8 @@ import type Player from "video.js/dist/types/player"
 import "video.js/dist/video-js.css"
 import "videojs-contrib-dash"
 import { type Channel } from "@/lib/channels-data"
-
-const api = (path: any) => {
-  return `${process.env.NEXT_PUBLIC_API_BASE || ""}${path}`;
-}
+import { channelService } from "@/lib/services/channel-service";
+import { api } from "@/lib/api";
 
 interface VideoPlayerProps {
   channel: Channel | null
@@ -89,25 +87,31 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     }
   }, [channel])
 
-  useEffect( () => {
+  useEffect(() => {
     if (!channel) return;
 
+    let isMounted = true;
+
     setIsLoading(true);
-    async function fetchData() {
-      const res = await fetch(api("/live_channel"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(channel), // 👈 שולח את כל האובייקט
+
+    channelService
+      .getLiveChannel(channel)
+      .then((data: { stream: string }) => {
+        if (!isMounted) return;
+        setStreamUrl(data.stream);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        console.error("Failed to load stream:", err);
+        setHasError(true);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false);
       });
 
-      const data = await res.json();
-      console.log("stream URL:", data.stream);
-      setStreamUrl(data.stream);
-    }
-
-    fetchData();
+    return () => {
+      isMounted = false;
+    };
   }, [channel]);
 
 

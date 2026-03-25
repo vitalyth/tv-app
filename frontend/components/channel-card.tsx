@@ -2,14 +2,7 @@
 
 import { Play, Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-interface Channel {
-  id: string
-  name: string
-  logo: string
-  category: string
-  streamUrl: string
-}
+import { type Channel } from "@/lib/channels-data"
 
 interface ChannelCardProps {
   channel: Channel
