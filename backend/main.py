@@ -12,6 +12,21 @@ import xmltodict
 import os
 from typing import Dict, Any
 
+# 🔥 session עם retry
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+session = requests.Session()
+
+retries = Retry(
+    total=3,
+    backoff_factor=0.3,
+    status_forcelist=[500, 502, 503, 504],
+)
+
+session.mount("https://", HTTPAdapter(max_retries=retries))
+session.mount("http://", HTTPAdapter(max_retries=retries))
+
 ROOT_PATH = os.getenv("ROOT_PATH", "")
 
 app = FastAPI(
@@ -112,14 +127,30 @@ def proxy(request: Request, url: str, referer: str = None):
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
-    r = requests.get(url, headers=headers, stream=True)
+    # 🔥 request עם retry + timeout
+    try:
+        r = session.get(url, headers=headers, stream=True, timeout=10)
+    except requests.exceptions.RequestException as e:
+        print("Proxy request failed:", e)
+        return Response(status_code=502)
 
     content_type = r.headers.get("content-type", "")
 
-    # 🎥 וידאו/segments
+    # 🎥 וידאו / fragments
     if "video" in content_type or url.endswith((".ts", ".m4s", ".mp4")):
+
+        def generate():
+            try:
+                for chunk in r.iter_content(chunk_size=1024 * 64):  # 🔥 chunk קטן ליציבות
+                    if chunk:
+                        yield chunk
+            except Exception as e:
+                print("Stream interrupted:", e)
+            finally:
+                r.close()
+
         return StreamingResponse(
-            r.iter_content(chunk_size=1024 * 1024),
+            generate(),
             status_code=r.status_code,
             media_type=content_type,
             headers={
@@ -129,7 +160,11 @@ def proxy(request: Request, url: str, referer: str = None):
             }
         )
 
-    text = r.text
+    # 📄 טקסט (m3u8 או אחר)
+    try:
+        text = r.text
+    except Exception:
+        return Response(status_code=500)
 
     is_m3u8 = (
         "mpegurl" in content_type
@@ -137,6 +172,7 @@ def proxy(request: Request, url: str, referer: str = None):
         or "#EXTM3U" in text
     )
 
+    # לא m3u8 → תחזיר רגיל
     if not is_m3u8:
         return Response(
             content=r.content,
@@ -144,10 +180,10 @@ def proxy(request: Request, url: str, referer: str = None):
             headers={"Access-Control-Allow-Origin": "*"}
         )
 
+    # 🎯 rewrite ל־m3u8
     base_url = url.rsplit("/", 1)[0] + "/"
-    #base_proxy = str(request.base_url).rstrip("/")
-    root_path = request.scope.get("root_path", "")
 
+    root_path = request.scope.get("root_path", "")
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("host", "localhost")
 
