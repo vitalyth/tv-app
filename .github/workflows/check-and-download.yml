@@ -5,9 +5,6 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  
 permissions:
   contents: write
 
@@ -22,14 +19,14 @@ jobs:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y jq unzip
 
-      # 🔥 INIT - יצירת מבנה אם חסר
+      # 🔥 הכל בתוך backend
       - name: Ensure structure exists
         run: |
-          mkdir -p temp old
+          mkdir -p backend/temp backend/old
 
-          [ -f current_version.txt ] || echo "none" > current_version.txt
-          [ -f active_version.txt ] || echo "none" > active_version.txt
-          [ -f current_file.txt ] || echo "none" > current_file.txt
+          [ -f backend/current_version.txt ] || echo "none" > backend/current_version.txt
+          [ -f backend/active_version.txt ] || echo "none" > backend/active_version.txt
+          [ -f backend/current_file.txt ] || echo "none" > backend/current_file.txt
 
       - name: Get latest zip file
         id: get_file
@@ -38,7 +35,7 @@ jobs:
           FILE=$(echo "$DATA" | jq -r '.[].name' | grep plugin.video.idanplus- | sort -V | tail -n 1)
 
           if [ -z "$FILE" ]; then
-            echo "❌ No valid file found"
+            echo "❌ No file found"
             exit 1
           fi
 
@@ -54,7 +51,7 @@ jobs:
       - name: Read active version
         id: active
         run: |
-          ACTIVE=$(cat active_version.txt)
+          ACTIVE=$(cat backend/active_version.txt)
           echo "active=$ACTIVE" >> $GITHUB_OUTPUT
 
       - name: Compare versions
@@ -63,15 +60,10 @@ jobs:
           ACTIVE="${{ steps.active.outputs.active }}"
           NEW="${{ steps.version.outputs.version }}"
 
-          echo "Active: $ACTIVE"
-          echo "New: $NEW"
-
-          if [ "$ACTIVE" = "none" ]; then
+          if [ "$ACTIVE" = "none" ] || [ "$ACTIVE" != "$NEW" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
-          elif [ "$ACTIVE" = "$NEW" ]; then
-            echo "changed=false" >> $GITHUB_OUTPUT
           else
-            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Download and extract
@@ -80,51 +72,39 @@ jobs:
           FILE=${{ steps.get_file.outputs.file }}
           URL="https://raw.githubusercontent.com/Fishenzon/repo/master/zips/plugin.video.idanplus/$FILE"
 
-          rm -rf temp/*
-          mkdir -p temp
+          rm -rf backend/temp/*
+          mkdir -p backend/temp
 
-          curl -L "$URL" -o temp/$FILE
-          unzip -o temp/$FILE -d temp/
+          curl -L "$URL" -o backend/temp/$FILE
+          unzip -o backend/temp/$FILE -d backend/temp/
 
-          mv temp/plugin.video.idanplus temp/plugin_video_idanplus || true
+          mv backend/temp/plugin.video.idanplus backend/temp/plugin_video_idanplus || true
 
-      - name: Validate extraction
+      # 🔥 הוספת __init__.py
+      - name: Add __init__.py
         if: steps.check_version.outputs.changed == 'true'
         run: |
-          if [ ! -d temp/plugin_video_idanplus ]; then
-            echo "❌ Extraction failed"
-            exit 1
-          fi
+          touch backend/temp/plugin_video_idanplus/__init__.py
 
       - name: Remove zip
         if: steps.check_version.outputs.changed == 'true'
-        run: rm -f temp/*.zip
+        run: rm -f backend/temp/*.zip
 
       - name: Save metadata
         if: steps.check_version.outputs.changed == 'true'
         run: |
-          echo "${{ steps.version.outputs.version }}" > current_version.txt
-          echo "${{ steps.get_file.outputs.file }}" > current_file.txt
-
-          echo "Version: ${{ steps.version.outputs.version }}" > temp/info.txt
-          echo "Downloaded: $(date)" >> temp/info.txt
+          echo "${{ steps.version.outputs.version }}" > backend/current_version.txt
+          echo "${{ steps.get_file.outputs.file }}" > backend/current_file.txt
 
       - name: Mark READY
         if: steps.check_version.outputs.changed == 'true'
-        run: echo "ready $(date)" > temp/READY
-
-      # 🔔 summary
-      - name: Summary
-        run: |
-          echo "### IdanPlus Check" >> $GITHUB_STEP_SUMMARY
-          echo "- Latest: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Changed: ${{ steps.check_version.outputs.changed }}" >> $GITHUB_STEP_SUMMARY
+        run: echo "ready $(date)" > backend/temp/READY
 
       - name: Commit changes
         if: steps.check_version.outputs.changed == 'true'
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add .
+          git add backend
           git commit -m "New idanplus version ${{ steps.version.outputs.version }}" || echo "No changes"
           git push
