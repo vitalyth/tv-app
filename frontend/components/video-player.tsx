@@ -16,6 +16,7 @@ import "videojs-contrib-dash"
 import { type Channel } from "@/lib/channels-data"
 import { channelService } from "@/lib/services/channel-service";
 import { api } from "@/lib/api";
+import ProgramDisplay from "@/components/program-display"
 
 interface VideoPlayerProps {
   channel: Channel | null
@@ -32,6 +33,23 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   const [castAvailable, setCastAvailable] = useState(false)
   const [airplayAvailable, setAirplayAvailable] = useState(false)
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isHoveringRef = useRef(false)
+
+  const showControls = () => {
+    setShowOverlay(true)
+
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current)
+    }
+
+    if (isHoveringRef.current) return
+
+    hideTimeoutRef.current = setTimeout(() => {
+      setShowOverlay(false)
+    }, 3000)
+  }
 
   // Check for casting availability
   useEffect(() => {
@@ -173,8 +191,9 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     })
 
     player.on("playing", () => {
-      setIsLoading(false)
-      setHasError(false)
+      setIsLoading(false);
+      setHasError(false);
+      showControls();
     })
 
     player.on("error", () => {
@@ -196,6 +215,14 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     }
   }, [streamUrl])
 
+  useEffect(() => {
+    return () => {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current)
+      }
+    }
+  }, [])
+
   if (!channel) {
     return (
       <div className="relative aspect-video bg-card rounded-xl overflow-hidden flex items-center justify-center border border-border">
@@ -208,9 +235,22 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   }
 
   return (
-    <div className="relative rounded-xl overflow-hidden bg-black">
+    <div
+      className="relative rounded-xl overflow-hidden bg-black"
+      onMouseEnter={() => {
+        isHoveringRef.current = true
+        showControls()
+      }}
+      onMouseLeave={() => {
+        isHoveringRef.current = false
+        showControls() // countdown start
+      }}
+      onClick={showControls}
+    >
       {/* Header with channel info and close button */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between">
+      <div
+        className={`absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between transition-opacity duration-300 ${showOverlay ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+      >
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
             <span className="text-lg"><img src={`/ch/${channel.logo}`} /></span>
@@ -222,7 +262,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
               </span>
-              <span className="text-xs text-primary">LIVE</span>
+              <span className="text-xs"><ProgramDisplay program={channel.programs?.[0]} /></span>
             </div>
           </div>
         </div>
