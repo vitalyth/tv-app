@@ -4,7 +4,7 @@ from fastapi.responses import Response, StreamingResponse
 from urllib.parse import urlparse, urljoin, quote, urlencode
 from pydantic import BaseModel
 from plugin_video_idanplus.resources import main as idan_main
-from plugin_video_idanplus.resources.lib.epg import GetEPG
+from plugin_video_idanplus.resources.lib.epg import GetEPG, GetNowEPG
 import xbmcplugin
 from fastapi.middleware.cors import CORSMiddleware
 import re
@@ -28,6 +28,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class Program(BaseModel):
+    start: int
+    end: int
+    name: str
+    description: str
+
 class Channel(BaseModel):
     id: str
     index: int
@@ -39,6 +45,7 @@ class Channel(BaseModel):
     channelID: str
     mode: int
     type: str
+    programs: list[Program]
 
 
 '''
@@ -55,11 +62,15 @@ def read_item(item_id: int, q: str | None = None):
 @app.get('/live_channels')
 def live_channels():
     #epg_items = GetEPG()
+    nowEPG = GetNowEPG()
+    #nowEPG = GetEPG(deltaInSec=0)
+    #print('====now EPG====', nowEPG)
 
     channels = idan_main.GetUserChannels(type='tv')
 
     results = []
     for channel in channels:
+        programs = [] if channel['tvgID'] == '' else nowEPG.get(channel['tvgID'], [])
         ch = Channel(
             id=channel["channelID"],
             index=channel["index"],
@@ -70,7 +81,8 @@ def live_channels():
             module=channel["module"],
             channelID=channel["channelID"],
             type=channel["type"],
-            linkDetails = channel["linkDetails"]
+            linkDetails = channel["linkDetails"],
+            programs = programs
         )
 
         results.append(ch)

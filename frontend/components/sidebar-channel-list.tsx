@@ -149,7 +149,9 @@ export function SidebarChannelList({
                     )}>
                       {channel.name}
                     </h3>
-                    <p className="text-xs text-muted-foreground">{channel.category}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {channel.programs?.[0]?.name}
+                    </p>
                   </div>
 
 

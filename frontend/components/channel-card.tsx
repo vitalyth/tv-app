@@ -42,7 +42,7 @@ export function ChannelCard({ channel, isActive, onClick }: ChannelCardProps) {
 
       {/* Category badge */}
       <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-        {channel.category}
+        {channel.programs?.[0]?.name}
       </span>
 
       {/* Play overlay on hover */}

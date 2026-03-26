@@ -9,6 +9,13 @@ interface LinkDetails {
   regex?: string
 }
 
+interface Program {
+    start: number
+    end: number
+    name: string
+    description: string
+}
+
 export interface Channel {
   id: string
   index: number
@@ -22,8 +29,10 @@ export interface Channel {
   mode: number
   linkDetails: LinkDetails
   type: string
+  programs: Program[]
 }
 
+/*
 export const channels: Channel[] = [
   { index: 1, id: "ch_11", name: "כאן 11", logo: "kan.jpg", category: "חדשות", module: "kan", channelID: "ch_11", mode: 10, type: "tv", linkDetails: { link: "https://r.il.cdn-redge.media/livehls/oil/kancdn-live/live/kan11/live.livx/playlist.m3u8" } },
   { index: 2, id: "ch_11b", name: "כאן 11 - גיבוי", logo: "kan.jpg", category: "חדשות", module: "tv", channelID: "ch_11b", mode: 10, type: "tv", linkDetails: { link: "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/kan11/live.livx", final: true, manifest_type: "mpd" } },
@@ -94,7 +103,6 @@ export const channels: Channel[] = [
   { index: 46, id: "ch_ninja", name: "נינג'ה ישראל", logo: "ninja.jpg", category: "בידור", module: "keshet", channelID: "ch_ninja", mode: 10, type: "tv", linkDetails: { link: "/free/hls/live/2111419/ninja/index.m3u8?b-in-range=0-1800" } }
 ]
 
-/*
 export const channels: Channel[] = [
   {
     id: "ch_11",
