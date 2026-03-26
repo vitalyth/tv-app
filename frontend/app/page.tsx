@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { Search } from "lucide-react";
 import { categories, type Channel } from "@/lib/channels-data";
 import { SidebarChannelList } from "@/components/sidebar-channel-list";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import Header from "@/components/Header";
 import { channelService } from "@/lib/services/channel-service";
 import dynamic from "next/dynamic";
+import useSWR from "swr";
 
 // Load VideoPlayer only on client to avoid SSR issues
 const VideoPlayer = dynamic(
@@ -17,56 +18,34 @@ const VideoPlayer = dynamic(
   { ssr: false }
 );
 
+// Fetcher
+const fetchChannels = async (): Promise<Channel[]> => {
+  return await channelService.getLiveChannels();
+};
+
 export default function TVChannelsPage() {
-  // Selected channel state (null = grid view)
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
-  // UI states
+  // UI state
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-  // Data states
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [isLoading, setIsLoading] = useState(true); // start true to prevent flicker
-  const [error, setError] = useState<string | null>(null);
+  // 🚀 SWR במקום useEffect
+  const {
+    data: channels = [],
+    error,
+    isLoading,
+    mutate,
+  } = useSWR("channels", fetchChannels, {
+    refreshInterval: 60 * 1000, // כל 1 דקות
+    revalidateOnFocus: true, // חוזר לטאב → רענון
+    dedupingInterval: 10000, // מונע קריאות כפולות
+    errorRetryCount: 3,
+  });
 
-  // Fetch channels with retry support and cleanup protection
-  const loadChannels = useCallback(() => {
-    let isMounted = true;
-
-    setIsLoading(true);
-    setError(null);
-
-    channelService
-      .getLiveChannels()
-      .then((data: Channel[]) => {
-        if (!isMounted) return;
-        setChannels(data);
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        console.error("Failed to load channels:", err);
-        setError("שגיאה בטעינת הערוצים");
-      })
-      .finally(() => {
-        if (isMounted) setIsLoading(false);
-      });
-
-    // Cleanup to avoid setting state after unmount
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Initial load
-  useEffect(() => {
-    const cleanup = loadChannels();
-    return cleanup;
-  }, [loadChannels]);
-
-  // Filter channels by search and category
+  // Filtering
   const filteredChannels = useMemo(() => {
     const query = searchQuery.toLowerCase();
 
@@ -85,22 +64,24 @@ export default function TVChannelsPage() {
     setIsMobileSidebarOpen(false);
   };
 
-  const handleClose = () => {
-    setSelectedChannel(null);
-  };
+  const handleClose = () => setSelectedChannel(null);
 
-  const toggleMobileSidebar = () => {
+  const toggleMobileSidebar = () =>
     setIsMobileSidebarOpen((prev) => !prev);
+
+  // 🧠 רענון ידני (אם תרצה)
+  const refreshNow = () => {
+    mutate(); // fetch מחדש בלי flicker
   };
 
-  // Grid view (no channel selected)
+  // Grid view
   if (!selectedChannel) {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Header />
 
         <main className="flex-1 px-4 py-6 max-w-7xl mx-auto w-full">
-          {/* Search and category filters */}
+          {/* Search + filters */}
           <div className="flex flex-col sm:flex-row gap-4 mb-6">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -127,17 +108,24 @@ export default function TVChannelsPage() {
                 </Button>
               ))}
             </div>
+
+            {/* 🔥 כפתור רענון */}
+            <Button onClick={refreshNow} variant="outline">
+              רענן
+            </Button>
           </div>
 
-          {/* Loading / Error / Success handling */}
+          {/* States */}
           {isLoading ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground">טוען ערוצים...</p>
             </div>
           ) : error ? (
             <div className="text-center py-12">
-              <p className="text-red-500 text-lg">{error}</p>
-              <button onClick={loadChannels} className="mt-4 underline">
+              <p className="text-red-500 text-lg">
+                שגיאה בטעינת הערוצים
+              </p>
+              <button onClick={refreshNow} className="mt-4 underline">
                 נסה שוב
               </button>
             </div>
@@ -154,14 +142,10 @@ export default function TVChannelsPage() {
                 ))}
               </div>
 
-              {/* Empty state shown only after loading */}
               {filteredChannels.length === 0 && (
                 <div className="text-center py-12">
                   <p className="text-muted-foreground text-lg">
                     לא נמצאו ערוצים
-                  </p>
-                  <p className="text-muted-foreground text-sm mt-2">
-                    נסה לחפש משהו אחר
                   </p>
                 </div>
               )}
@@ -172,7 +156,7 @@ export default function TVChannelsPage() {
     );
   }
 
-  // Player view (channel selected)
+  // Player view
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       <Header
@@ -181,7 +165,6 @@ export default function TVChannelsPage() {
       />
 
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Video player area */}
         <main className="flex-1 flex flex-col p-4 lg:p-6 overflow-hidden">
           <div className="flex-1 flex items-center justify-center">
             <div className="w-full max-w-6xl">
@@ -193,7 +176,6 @@ export default function TVChannelsPage() {
           </div>
         </main>
 
-        {/* Desktop sidebar */}
         <div className="hidden lg:flex h-full">
           <SidebarChannelList
             channels={filteredChannels}
@@ -210,7 +192,6 @@ export default function TVChannelsPage() {
           />
         </div>
 
-        {/* Mobile overlay */}
         {isMobileSidebarOpen && (
           <div
             className="lg:hidden fixed inset-0 bg-background/80 backdrop-blur-sm z-40"
@@ -218,7 +199,6 @@ export default function TVChannelsPage() {
           />
         )}
 
-        {/* Mobile sidebar */}
         <div
           className={`lg:hidden fixed top-0 left-0 h-screen z-50 transition-transform duration-300 ${
             isMobileSidebarOpen
