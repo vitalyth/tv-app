@@ -152,7 +152,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     }
 
     const videoElement = document.createElement("video-js")
-    videoElement.classList.add("vjs-big-play-centered", "vjs-fluid")
+    videoElement.classList.add("vjs-big-play-centered")
     videoRef.current.appendChild(videoElement)
 
     const referer = channel?.linkDetails?.referer || ""
@@ -165,7 +165,7 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       autoplay: true,
       controls: true,
       responsive: true,
-      fluid: true,
+      //fluid: true,
       liveui: true,
       playbackRates: [0.5, 1, 1.5, 2],
       html5: {
@@ -319,8 +319,10 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       </div>
 
       {/* Video.js container */}
-      <div data-vjs-player>
-        <div ref={videoRef} className="video-js-container" />
+      <div className="relative w-full h-[70vh] bg-black">
+        <div data-vjs-player className="absolute inset-0">
+          <div ref={videoRef} className="video-js-container w-full h-full" />
+        </div>
       </div>
 
       {/* Loading state */}
@@ -361,8 +363,11 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
       {/* Custom styles for Video.js */}
       <style jsx global>{`
-        .video-js-container {
-          width: 100%;
+        .video-js,
+        .video-js-container
+        .video-js video {
+          width: 100% !important;
+          height: 100% !important;
         }
         
         .video-js {
