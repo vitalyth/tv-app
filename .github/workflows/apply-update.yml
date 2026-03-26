@@ -1,0 +1,77 @@
+name: Apply IdanPlus Update
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      # 🔥 INIT
+      - name: Ensure structure exists
+        run: |
+          mkdir -p temp old
+          [ -f active_version.txt ] || echo "none" > active_version.txt
+
+      # 🔐 validation
+      - name: Validate READY
+        run: |
+          if [ ! -f temp/READY ]; then
+            echo "❌ No READY file"
+            exit 1
+          fi
+
+          if [ ! -d temp/plugin_video_idanplus ]; then
+            echo "❌ Missing extracted folder"
+            exit 1
+          fi
+
+      - name: Read current version
+        id: version
+        run: |
+          VERSION=$(cat active_version.txt)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # 📦 backup
+      - name: Backup current version
+        run: |
+          if [ -d plugin_video_idanplus ]; then
+            zip -r old/plugin_video_idanplus_${{ steps.version.outputs.version }}.zip plugin_video_idanplus
+          else
+            echo "No version to backup"
+          fi
+
+      - name: Apply new version
+        run: |
+          rm -rf plugin_video_idanplus
+          mv temp/plugin_video_idanplus ./plugin_video_idanplus
+
+      - name: Update active version
+        run: |
+          if [ -f current_version.txt ]; then
+            cp current_version.txt active_version.txt
+          fi
+
+      - name: Cleanup temp
+        run: rm -rf temp
+
+      # 🔔 summary
+      - name: Summary
+        run: |
+          echo "### Apply Update" >> $GITHUB_STEP_SUMMARY
+          echo "- New version: $(cat active_version.txt)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -m "Apply idanplus version $(cat active_version.txt)" || echo "No changes"
+          git push
