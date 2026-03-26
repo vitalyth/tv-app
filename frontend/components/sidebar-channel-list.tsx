@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 //import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { type Channel, categories } from "@/lib/channels-data"
+import ProgramDisplay from "@/components/program-display"
 
 interface SidebarChannelListProps {
   channels: Channel[]
@@ -150,7 +151,7 @@ export function SidebarChannelList({
                       {channel.name}
                     </h3>
                     <p className="text-xs text-muted-foreground">
-                      {channel.programs?.[0]?.name}
+                      <ProgramDisplay program={channel.programs?.[0]} />
                     </p>
                   </div>
 

@@ -3,6 +3,7 @@
 import { Play, Radio } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { type Channel } from "@/lib/channels-data"
+import ProgramDisplay from "@/components/program-display"
 
 interface ChannelCardProps {
   channel: Channel
@@ -42,7 +43,7 @@ export function ChannelCard({ channel, isActive, onClick }: ChannelCardProps) {
 
       {/* Category badge */}
       <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-        {channel.programs?.[0]?.name}
+        <ProgramDisplay program={channel.programs?.[0]} />
       </span>
 
       {/* Play overlay on hover */}

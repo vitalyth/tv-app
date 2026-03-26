@@ -4,7 +4,7 @@ from fastapi.responses import Response, StreamingResponse
 from urllib.parse import urlparse, urljoin, quote, urlencode
 from pydantic import BaseModel
 from plugin_video_idanplus.resources import main as idan_main
-from plugin_video_idanplus.resources.lib.epg import GetEPG, GetNowEPG
+from services.epg_service import get_now_epg
 import xbmcplugin
 from fastapi.middleware.cors import CORSMiddleware
 import re
@@ -61,11 +61,7 @@ def read_item(item_id: int, q: str | None = None):
 
 @app.get('/live_channels')
 def live_channels():
-    #epg_items = GetEPG()
-    nowEPG = GetNowEPG()
-    #nowEPG = GetEPG(deltaInSec=0)
-    #print('====now EPG====', nowEPG)
-
+    nowEPG = get_now_epg()
     channels = idan_main.GetUserChannels(type='tv')
 
     results = []
