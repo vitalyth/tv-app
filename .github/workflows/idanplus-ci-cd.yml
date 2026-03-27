@@ -1,16 +1,22 @@
 name: IdanPlus CI/CD Pipeline
 
 on:
-  # Automatic run twice a day (CHECK ONLY)
   schedule:
     - cron: "0 6,18 * * *"
 
-  # Manual run (ONLY way to run apply)
   workflow_dispatch:
+    inputs:
+      apply:
+        description: "Run apply update (only if new version exists)"
+        required: true
+        default: "false"
+
+permissions:
+  contents: write
 
 jobs:
   # =========================
-  # JOB 1: CHECK FOR UPDATES
+  # CHECK
   # =========================
   check:
     runs-on: ubuntu-latest
@@ -20,43 +26,23 @@ jobs:
       version: ${{ steps.version.outputs.version }}
 
     steps:
-      # Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Install tools
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq unzip
+      - run: sudo apt-get update && sudo apt-get install -y jq unzip
 
-      # Get latest zip file from source repo
-      - name: Get latest zip file
-        id: get_file
+      - id: get_file
         run: |
           DATA=$(curl -s https://api.github.com/repos/Fishenzon/repo/contents/zips/plugin.video.idanplus)
-
-          FILE=$(echo "$DATA" | jq -r '.[].name' \
-            | grep plugin.video.idanplus- \
-            | sort -V \
-            | tail -n 1)
-
-          if [ -z "$FILE" ]; then
-            echo "❌ No valid file found"
-            exit 1
-          fi
-
+          FILE=$(echo "$DATA" | jq -r '.[].name' | grep plugin.video.idanplus- | sort -V | tail -n 1)
           echo "file=$FILE" >> $GITHUB_OUTPUT
 
-      # Extract version from filename
-      - name: Extract version
-        id: version
+      - id: version
         run: |
           FILE=${{ steps.get_file.outputs.file }}
           VERSION=$(echo $FILE | sed -E 's/.*-([0-9\.]+)\.zip/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # Compare installed version with latest version
-      - name: Compare with installed version
-        id: compare
+      - id: compare
         run: |
           NEW="${{ steps.version.outputs.version }}"
 
@@ -66,8 +52,8 @@ jobs:
             INSTALLED="none"
           fi
 
-          echo "Installed version: $INSTALLED"
-          echo "New version: $NEW"
+          echo "Installed: $INSTALLED"
+          echo "New: $NEW"
 
           if [ "$INSTALLED" != "$NEW" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
@@ -75,112 +61,68 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      # Download and prepare plugin ONLY if changed
-      - name: Download and prepare plugin
+      - name: Download plugin
         if: ${{ steps.compare.outputs.changed == 'true' }}
         run: |
+          mkdir -p temp
           FILE=${{ steps.get_file.outputs.file }}
           URL="https://raw.githubusercontent.com/Fishenzon/repo/master/zips/plugin.video.idanplus/$FILE"
 
-          mkdir -p temp
-
-          echo "Downloading: $URL"
           curl -L "$URL" -o temp/$FILE
-
           unzip -o temp/$FILE -d temp/
 
-          echo "Listing extracted content:"
-          ls -la temp
-
-          # Find extracted plugin folder
           DIR=$(find temp -maxdepth 1 -type d -name "plugin.video.idanplus*" | head -n1)
-
-          if [ -z "$DIR" ]; then
-            echo "❌ Plugin folder not found"
-            exit 1
-          fi
-
-          echo "Found: $DIR"
-
           mv "$DIR" temp/plugin_video_idanplus
 
-          touch temp/plugin_video_idanplus/__init__.py
-
-      # 🔥 IMPORTANT FIX: upload FULL temp folder (not inner folder)
-      - name: Upload artifact
+      - uses: actions/upload-artifact@v4
         if: ${{ steps.compare.outputs.changed == 'true' }}
-        uses: actions/upload-artifact@v4
         with:
           name: idanplus-plugin
           path: temp
 
   # =========================
-  # JOB 2: APPLY UPDATE
+  # APPLY (MANUAL CONTROL)
   # =========================
   apply:
     needs: check
-
-    # 🔒 STRICT CONDITIONS:
-    # - Only manual run
-    # - check succeeded
-    # - new version exists
-    if: ${{ github.event_name == 'workflow_dispatch' && needs.check.result == 'success' && needs.check.outputs.changed == 'true' }}
-
     runs-on: ubuntu-latest
 
-    steps:
-      # Checkout repo
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    # 🔒 STRICT CONTROL
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.apply == 'true' &&
+      needs.check.result == 'success' &&
+      needs.check.outputs.changed == 'true'
 
-      # Download artifact
-      - name: Download artifact
-        uses: actions/download-artifact@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
         with:
           name: idanplus-plugin
           path: temp
 
-      # Debug structure
-      - name: Debug temp
+      - name: Validate
         run: |
-          echo "Temp structure:"
-          ls -R temp
+          echo "Running apply..."
+          echo "Version: ${{ needs.check.outputs.version }}"
 
-      # Extra validation
-      - name: Validate update
-        run: |
-          if [ "${{ needs.check.outputs.changed }}" != "true" ]; then
-            echo "❌ No new version"
-            exit 1
-          fi
-
-      # Backup current version
-      - name: Backup current version
-        run: |
-          if [ -d backend/plugin_video_idanplus ]; then
-            zip -r backup_plugin_video_idanplus.zip backend/plugin_video_idanplus
-          fi
-
-      # 🔥 SAFE APPLY (handles both structures)
-      - name: Apply new version
+      - name: Apply update
         run: |
           rm -rf backend/plugin_video_idanplus
 
           if [ -d temp/plugin_video_idanplus ]; then
             mv temp/plugin_video_idanplus backend/plugin_video_idanplus
           else
-            echo "⚠️ Flattened structure detected, fixing..."
             mkdir -p backend/plugin_video_idanplus
             cp -r temp/* backend/plugin_video_idanplus/
           fi
 
-      # Commit changes
-      - name: Commit and push
+      - name: Commit
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
 
           git add backend
-          git commit -m "Update idanplus plugin to version ${{ needs.check.outputs.version }}" || echo "No changes"
-
+          git commit -m "Update idanplus to ${{ needs.check.outputs.version }}" || echo "No changes"
           git push
