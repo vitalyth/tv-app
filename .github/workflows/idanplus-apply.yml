@@ -5,10 +5,11 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  
+
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -80,3 +81,12 @@ jobs:
           git commit -m "Update idanplus plugin to version ${{ steps.verify.outputs.version }}" || echo "No changes"
 
           git push
+
+      - name: Trigger Docker Build workflow
+        run: |
+          echo "Triggering Docker build..."
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/build-and-push.yml/dispatches \
+            -d '{"ref":"main"}'
