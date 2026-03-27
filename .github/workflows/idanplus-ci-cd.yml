@@ -1,11 +1,11 @@
 name: IdanPlus CI/CD Pipeline
 
 on:
-  # Run automatically twice a day (06:00 and 18:00 UTC)
+  # Run automatically twice a day
   schedule:
     - cron: "0 6,18 * * *"
 
-  # Allow manual trigger with optional apply step
+  # Manual trigger (optionally apply update)
   workflow_dispatch:
     inputs:
       apply:
@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq unzip
 
-      # Get latest available zip file from GitHub repo
+      # Fetch latest zip file name from GitHub repo
       - name: Get latest zip file
         id: get_file
         run: |
@@ -45,28 +45,31 @@ jobs:
             | tail -n 1)
 
           if [ -z "$FILE" ]; then
-            echo "No valid file found"
+            echo "❌ No valid file found"
             exit 1
           fi
 
+          echo "Latest file: $FILE"
           echo "file=$FILE" >> $GITHUB_OUTPUT
 
-      # Extract version number from filename
+      # Extract version from filename
       - name: Extract version
         id: version
         run: |
           FILE=${{ steps.get_file.outputs.file }}
           VERSION=$(echo $FILE | sed -E 's/.*-([0-9\.]+)\.zip/\1/')
+          echo "Detected version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # Compare with currently installed version (from addon.xml)
+      # Compare with installed version from addon.xml
       - name: Compare with installed version
         id: compare
         run: |
           NEW="${{ steps.version.outputs.version }}"
 
           if [ -f backend/plugin_video_idanplus/addon.xml ]; then
-            INSTALLED=$(grep -oP 'version="\K[0-9\.]+' backend/plugin_video_idanplus/addon.xml || echo "none")
+            # Extract ONLY the main addon version (ignore <import>)
+            INSTALLED=$(grep -oP '<addon[^>]*version="\K[0-9\.]+' backend/plugin_video_idanplus/addon.xml | head -n1)
           else
             INSTALLED="none"
           fi
@@ -80,7 +83,12 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      # Download and prepare plugin only if version changed
+      # Debug output (helps troubleshooting)
+      - name: Debug compare result
+        run: |
+          echo "Changed = ${{ steps.compare.outputs.changed }}"
+
+      # Download and extract plugin if changed
       - name: Download and prepare plugin
         if: steps.compare.outputs.changed == 'true'
         run: |
@@ -89,18 +97,32 @@ jobs:
 
           mkdir -p temp
 
-          echo "Downloading $URL"
+          echo "Downloading: $URL"
           curl -L "$URL" -o temp/$FILE
 
+          echo "Unzipping..."
           unzip -o temp/$FILE -d temp/
 
-          # Normalize folder name for Python import
-          mv temp/plugin.video.idanplus temp/plugin_video_idanplus
+          echo "Listing extracted content:"
+          ls -la temp
+
+          # Find extracted folder dynamically (handles versioned folder names)
+          DIR=$(find temp -maxdepth 1 -type d -name "plugin.video.idanplus*" | head -n1)
+
+          if [ -z "$DIR" ]; then
+            echo "❌ Could not find extracted plugin folder"
+            exit 1
+          fi
+
+          echo "Found plugin folder: $DIR"
+
+          # Normalize folder name for Python usage
+          mv "$DIR" temp/plugin_video_idanplus
 
           # Ensure Python package structure
           touch temp/plugin_video_idanplus/__init__.py
 
-      # Upload prepared plugin as artifact for next job
+      # Upload plugin as artifact for next job
       - name: Upload artifact
         if: steps.compare.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
@@ -114,9 +136,9 @@ jobs:
   apply:
     needs: check
 
-    # Run only if:
-    # 1. User triggered manually with apply=true
-    # 2. A new version was detected
+    # Only run if:
+    # 1. Manually triggered with apply=true
+    # 2. A new version exists
     if: ${{ github.event.inputs.apply == 'true' && needs.check.outputs.changed == 'true' }}
 
     runs-on: ubuntu-latest
@@ -126,14 +148,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Download artifact from previous job
+      # Download prepared plugin artifact
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: idanplus-plugin
           path: temp
 
-      # Backup current version (optional safety)
+      # Backup current plugin (safety step)
       - name: Backup current version
         run: |
           if [ -d backend/plugin_video_idanplus ]; then
@@ -143,7 +165,7 @@ jobs:
             echo "No existing version to backup"
           fi
 
-      # Replace old plugin with new version
+      # Replace old plugin with new one
       - name: Apply new version
         run: |
           rm -rf backend/plugin_video_idanplus
