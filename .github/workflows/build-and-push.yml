@@ -1,0 +1,52 @@
+name: Build & Push Docker Images
+
+on:
+  push:
+    branches: [ "main" ]
+
+workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 🔹 FRONTEND
+      - name: 🧱 Build & Push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: vitalyth/tv-app-frontend:latest
+
+      # 🔹 BACKEND
+      - name: 🧱 Build & Push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: vitalyth/tv-app-backend:latest
+
+      # 🔹 NGINX
+      - name: 🧱 Build & Push Nginx
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nginx
+          push: true
+          tags: vitalyth/tv-app-nginx:latest
+
