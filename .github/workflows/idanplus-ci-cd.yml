@@ -1,11 +1,11 @@
 name: IdanPlus CI/CD Pipeline
 
 on:
-  # Automatic run twice a day (check only)
+  # Automatic run twice a day (CHECK ONLY)
   schedule:
     - cron: "0 6,18 * * *"
 
-  # Manual trigger (used to run apply)
+  # Manual run (ONLY way to run apply)
   workflow_dispatch:
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install required tools
+      # Install tools
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq unzip
 
@@ -44,7 +44,6 @@ jobs:
             exit 1
           fi
 
-          echo "Latest file: $FILE"
           echo "file=$FILE" >> $GITHUB_OUTPUT
 
       # Extract version from filename
@@ -53,7 +52,6 @@ jobs:
         run: |
           FILE=${{ steps.get_file.outputs.file }}
           VERSION=$(echo $FILE | sed -E 's/.*-([0-9\.]+)\.zip/\1/')
-          echo "Detected version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       # Compare installed version with latest version
@@ -63,7 +61,6 @@ jobs:
           NEW="${{ steps.version.outputs.version }}"
 
           if [ -f backend/plugin_video_idanplus/addon.xml ]; then
-            # Extract ONLY main addon version (ignore <import>)
             INSTALLED=$(grep -oP '<addon[^>]*version="\K[0-9\.]+' backend/plugin_video_idanplus/addon.xml | head -n1)
           else
             INSTALLED="none"
@@ -78,12 +75,7 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      # Debug output
-      - name: Debug compare result
-        run: |
-          echo "Changed = ${{ steps.compare.outputs.changed }}"
-
-      # Download and prepare plugin only if version changed
+      # Download and prepare plugin ONLY if changed
       - name: Download and prepare plugin
         if: ${{ steps.compare.outputs.changed == 'true' }}
         run: |
@@ -95,35 +87,32 @@ jobs:
           echo "Downloading: $URL"
           curl -L "$URL" -o temp/$FILE
 
-          echo "Unzipping..."
           unzip -o temp/$FILE -d temp/
 
           echo "Listing extracted content:"
           ls -la temp
 
-          # Find extracted folder dynamically
+          # Find extracted plugin folder
           DIR=$(find temp -maxdepth 1 -type d -name "plugin.video.idanplus*" | head -n1)
 
           if [ -z "$DIR" ]; then
-            echo "❌ Could not find extracted plugin folder"
+            echo "❌ Plugin folder not found"
             exit 1
           fi
 
-          echo "Found plugin folder: $DIR"
+          echo "Found: $DIR"
 
-          # Normalize folder name
           mv "$DIR" temp/plugin_video_idanplus
 
-          # Ensure Python package
           touch temp/plugin_video_idanplus/__init__.py
 
-      # Upload artifact
+      # 🔥 IMPORTANT FIX: upload FULL temp folder (not inner folder)
       - name: Upload artifact
         if: ${{ steps.compare.outputs.changed == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: idanplus-plugin
-          path: temp/plugin_video_idanplus
+          path: temp
 
   # =========================
   # JOB 2: APPLY UPDATE
@@ -131,57 +120,61 @@ jobs:
   apply:
     needs: check
 
-    # Run ONLY when:
-    # - manually triggered
-    # - check job succeeded
+    # 🔒 STRICT CONDITIONS:
+    # - Only manual run
+    # - check succeeded
     # - new version exists
     if: ${{ github.event_name == 'workflow_dispatch' && needs.check.result == 'success' && needs.check.outputs.changed == 'true' }}
 
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repository
+      # Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Download artifact from check job
+      # Download artifact
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: idanplus-plugin
           path: temp
 
-      # Debug artifact content
-      - name: Debug temp content
+      # Debug structure
+      - name: Debug temp
         run: |
-          echo "Temp content:"
+          echo "Temp structure:"
           ls -R temp
 
-      # Extra safety validation
-      - name: Validate update conditions
+      # Extra validation
+      - name: Validate update
         run: |
           if [ "${{ needs.check.outputs.changed }}" != "true" ]; then
-            echo "❌ No new version available"
+            echo "❌ No new version"
             exit 1
           fi
 
-      # Backup current plugin
+      # Backup current version
       - name: Backup current version
         run: |
           if [ -d backend/plugin_video_idanplus ]; then
-            echo "Creating backup..."
             zip -r backup_plugin_video_idanplus.zip backend/plugin_video_idanplus
-          else
-            echo "No existing version to backup"
           fi
 
-      # Apply new version
+      # 🔥 SAFE APPLY (handles both structures)
       - name: Apply new version
         run: |
           rm -rf backend/plugin_video_idanplus
-          mv temp/plugin_video_idanplus backend/plugin_video_idanplus
 
-      # Commit and push changes
+          if [ -d temp/plugin_video_idanplus ]; then
+            mv temp/plugin_video_idanplus backend/plugin_video_idanplus
+          else
+            echo "⚠️ Flattened structure detected, fixing..."
+            mkdir -p backend/plugin_video_idanplus
+            cp -r temp/* backend/plugin_video_idanplus/
+          fi
+
+      # Commit changes
       - name: Commit and push
         run: |
           git config user.name "github-actions"
