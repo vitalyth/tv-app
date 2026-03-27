@@ -1,0 +1,161 @@
+name: IdanPlus CI/CD Pipeline
+
+on:
+  # Run automatically twice a day (06:00 and 18:00 UTC)
+  schedule:
+    - cron: "0 6,18 * * *"
+
+  # Allow manual trigger with optional apply step
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply update after check?"
+        required: false
+        default: "false"
+
+jobs:
+  # =========================
+  # JOB 1: CHECK FOR UPDATES
+  # =========================
+  check:
+    runs-on: ubuntu-latest
+
+    outputs:
+      changed: ${{ steps.compare.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      # Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install required tools
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq unzip
+
+      # Get latest available zip file from GitHub repo
+      - name: Get latest zip file
+        id: get_file
+        run: |
+          DATA=$(curl -s https://api.github.com/repos/Fishenzon/repo/contents/zips/plugin.video.idanplus)
+
+          FILE=$(echo "$DATA" | jq -r '.[].name' \
+            | grep plugin.video.idanplus- \
+            | sort -V \
+            | tail -n 1)
+
+          if [ -z "$FILE" ]; then
+            echo "No valid file found"
+            exit 1
+          fi
+
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+
+      # Extract version number from filename
+      - name: Extract version
+        id: version
+        run: |
+          FILE=${{ steps.get_file.outputs.file }}
+          VERSION=$(echo $FILE | sed -E 's/.*-([0-9\.]+)\.zip/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # Compare with currently installed version (from addon.xml)
+      - name: Compare with installed version
+        id: compare
+        run: |
+          NEW="${{ steps.version.outputs.version }}"
+
+          if [ -f backend/plugin_video_idanplus/addon.xml ]; then
+            INSTALLED=$(grep -oP 'version="\K[0-9\.]+' backend/plugin_video_idanplus/addon.xml || echo "none")
+          else
+            INSTALLED="none"
+          fi
+
+          echo "Installed version: $INSTALLED"
+          echo "New version: $NEW"
+
+          if [ "$INSTALLED" != "$NEW" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Download and prepare plugin only if version changed
+      - name: Download and prepare plugin
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          FILE=${{ steps.get_file.outputs.file }}
+          URL="https://raw.githubusercontent.com/Fishenzon/repo/master/zips/plugin.video.idanplus/$FILE"
+
+          mkdir -p temp
+
+          echo "Downloading $URL"
+          curl -L "$URL" -o temp/$FILE
+
+          unzip -o temp/$FILE -d temp/
+
+          # Normalize folder name for Python import
+          mv temp/plugin.video.idanplus temp/plugin_video_idanplus
+
+          # Ensure Python package structure
+          touch temp/plugin_video_idanplus/__init__.py
+
+      # Upload prepared plugin as artifact for next job
+      - name: Upload artifact
+        if: steps.compare.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: idanplus-plugin
+          path: temp/plugin_video_idanplus
+
+  # =========================
+  # JOB 2: APPLY UPDATE
+  # =========================
+  apply:
+    needs: check
+
+    # Run only if:
+    # 1. User triggered manually with apply=true
+    # 2. A new version was detected
+    if: ${{ github.event.inputs.apply == 'true' && needs.check.outputs.changed == 'true' }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Download artifact from previous job
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: idanplus-plugin
+          path: temp
+
+      # Backup current version (optional safety)
+      - name: Backup current version
+        run: |
+          if [ -d backend/plugin_video_idanplus ]; then
+            echo "Creating backup..."
+            zip -r backup_plugin_video_idanplus.zip backend/plugin_video_idanplus
+          else
+            echo "No existing version to backup"
+          fi
+
+      # Replace old plugin with new version
+      - name: Apply new version
+        run: |
+          rm -rf backend/plugin_video_idanplus
+          mv temp/plugin_video_idanplus backend/plugin_video_idanplus
+
+      # Commit and push changes
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git add backend
+          git commit -m "Update idanplus plugin to version ${{ needs.check.outputs.version }}" || echo "No changes"
+
+          git push
