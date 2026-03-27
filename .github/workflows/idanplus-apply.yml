@@ -1,71 +1,21 @@
-name: IdanPlus CI/CD Pipeline
+name: IdanPlus Apply
 
 on:
-  # Automatic check twice a day
-  schedule:
-    - cron: "0 6,18 * * *"
-
-  # Manual trigger (user chooses apply)
   workflow_dispatch:
-    inputs:
-      apply:
-        description: "Apply update (true/false)"
-        required: true
-        default: "false"
 
-# Required for pushing changes
 permissions:
   contents: write
 
 jobs:
-  # =========================
-  # CHECK JOB (INFO ONLY)
-  # =========================
-  check:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Check latest version
-        run: |
-          DATA=$(curl -s https://api.github.com/repos/Fishenzon/repo/contents/zips/plugin.video.idanplus)
-
-          FILE=$(echo "$DATA" | jq -r '.[].name' | grep plugin.video.idanplus- | sort -V | tail -n 1)
-          NEW=$(echo $FILE | sed -E 's/.*-([0-9\.]+)\.zip/\1/')
-
-          if [ -f backend/plugin_video_idanplus/addon.xml ]; then
-            INSTALLED=$(grep -oP '<addon[^>]*version="\K[0-9\.]+' backend/plugin_video_idanplus/addon.xml | head -n1)
-          else
-            INSTALLED="none"
-          fi
-
-          echo "Installed version: $INSTALLED"
-          echo "Latest version: $NEW"
-
-          if [ "$INSTALLED" != "$NEW" ]; then
-            echo "✅ New version available: $NEW"
-          else
-            echo "ℹ️ Already up to date"
-          fi
-
-  # =========================
-  # APPLY JOB (MANUAL ONLY)
-  # =========================
   apply:
     runs-on: ubuntu-latest
-
-    # 🔒 ONLY manual + apply=true
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true' }}
 
     steps:
       - uses: actions/checkout@v4
 
       - run: sudo apt-get update && sudo apt-get install -y jq unzip
 
-      # 🔥 Re-check version (independent of check job)
+      # 🔥 Always verify (no dependency on check workflow)
       - name: Verify update exists
         id: verify
         run: |
@@ -90,7 +40,7 @@ jobs:
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # Download latest plugin
+      # Download plugin
       - name: Download plugin
         run: |
           mkdir -p temp
@@ -117,8 +67,8 @@ jobs:
           rm -rf backend/plugin_video_idanplus
           mv temp/plugin_video_idanplus backend/plugin_video_idanplus
 
-      # Commit changes
-      - name: Commit and push
+      # Commit
+      - name: Commit changes
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
