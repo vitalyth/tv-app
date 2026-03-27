@@ -1,9 +1,11 @@
 name: IdanPlus Check
 
 on:
+  # Run automatically twice a day
   schedule:
     - cron: "0 6,18 * * *"
 
+  # Allow manual run if needed
   workflow_dispatch:
 
 jobs:
@@ -11,16 +13,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - run: sudo apt-get update && sudo apt-get install -y jq
+      # Install jq
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Check latest version
+      # Get latest version from source repo
+      - name: Get latest version
+        id: version
         run: |
           DATA=$(curl -s https://api.github.com/repos/Fishenzon/repo/contents/zips/plugin.video.idanplus)
 
-          FILE=$(echo "$DATA" | jq -r '.[].name' | grep plugin.video.idanplus- | sort -V | tail -n 1)
-          NEW=$(echo $FILE | sed -E 's/.*-([0-9\.]+)\.zip/\1/')
+          FILE=$(echo "$DATA" | jq -r '.[].name' \
+            | grep plugin.video.idanplus- \
+            | sort -V \
+            | tail -n 1)
+
+          VERSION=$(echo $FILE | sed -E 's/.*-([0-9\.]+)\.zip/\1/')
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # Compare installed vs latest
+      - name: Compare versions
+        id: compare
+        run: |
+          NEW="${{ steps.version.outputs.version }}"
 
           if [ -f backend/plugin_video_idanplus/addon.xml ]; then
             INSTALLED=$(grep -oP '<addon[^>]*version="\K[0-9\.]+' backend/plugin_video_idanplus/addon.xml | head -n1)
@@ -32,7 +52,39 @@ jobs:
           echo "Latest version: $NEW"
 
           if [ "$INSTALLED" != "$NEW" ]; then
-            echo "✅ New version available!"
+            echo "changed=true" >> $GITHUB_OUTPUT
           else
-            echo "ℹ️ Already up to date"
+            echo "changed=false" >> $GITHUB_OUTPUT
           fi
+
+      # Pretty UI summary in GitHub Actions
+      - name: Write summary
+        run: |
+          if [ "${{ steps.compare.outputs.changed }}" = "true" ]; then
+            echo "## 🚨 New version available: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ Already up to date" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # 📧 Send email if update found
+      - name: Send email if update found
+        if: ${{ steps.compare.outputs.changed == 'true' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USER }}
+          password: ${{ secrets.EMAIL_PASS }}
+          subject: "🚨 New IdanPlus Version Available"
+          body: |
+            A new IdanPlus version was detected!
+
+            Version: ${{ steps.version.outputs.version }}
+
+            Go to GitHub Actions:
+            https://github.com/${{ github.repository }}/actions
+
+            Then run: IdanPlus Apply
+          to: ${{ secrets.EMAIL_TO }}
+          from: IdanPlus Bot <${{ secrets.EMAIL_USER }}>
