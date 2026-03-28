@@ -10,22 +10,199 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import videojs from "video.js"
-import type Player from "video.js/dist/types/player"
+//import type Player from "video.js/dist/types/player"
 import "video.js/dist/video-js.css"
 import "videojs-contrib-dash"
+//import "videojs-contrib-quality-levels"
 import { type Channel } from "@/lib/channels-data"
 import { channelService } from "@/lib/services/channel-service";
 import { api } from "@/lib/api";
 import ProgramDisplay from "@/components/program-display"
+
+if (!(videojs as any).getPlugin?.("qualityLevels")) {
+  require("videojs-contrib-quality-levels")
+}
 
 interface VideoPlayerProps {
   channel: Channel | null
   onClose: () => void
 }
 
+function addQualitySelector(player: any) {
+  const Button = videojs.getComponent("Button") as any
+
+  class QualityButton extends Button {
+    menu: HTMLDivElement
+    handleDocumentClick: (e: MouseEvent) => void
+
+    constructor(player: any, options: any) {
+      super(player, options)
+
+      this.controlText("Quality")
+      this.addClass("vjs-quality-button")
+
+      // Create menu container
+      this.menu = document.createElement("div")
+      this.menu.className = "vjs-quality-menu hidden"
+      player.el().appendChild(this.menu)
+
+      // Bind and register outside click handler
+      this.handleDocumentClick = this.onDocumentClick.bind(this)
+      document.addEventListener("click", this.handleDocumentClick)
+
+      this.updateMenu()
+    }
+
+    // Toggle menu visibility
+    handleClick(event?: Event) {
+      event?.stopPropagation()
+      this.menu.classList.toggle("hidden")
+    }
+
+    // Close menu when clicking outside
+    onDocumentClick(e: MouseEvent) {
+      const target = e.target as Node
+
+      const clickedInsideMenu = this.menu.contains(target)
+      const clickedButton = this.el().contains(target)
+
+      if (!clickedInsideMenu && !clickedButton) {
+        this.menu.classList.add("hidden")
+      }
+    }
+
+    // Cleanup listeners
+    dispose() {
+      document.removeEventListener("click", this.handleDocumentClick)
+      super.dispose()
+    }
+
+    // Check if Auto mode (all levels enabled)
+    isAuto(levels: any) {
+      for (let i = 0; i < levels.length; i++) {
+        if (!levels[i].enabled) return false
+      }
+      return true
+    }
+
+    // Get actual playing quality using selectedIndex
+    getCurrentHeight(levels: any): number | null {
+      const index = levels.selectedIndex
+      if (index === -1) return null
+
+      return levels[index]?.height || null
+    }
+
+    // Convert resolution to category label
+    getQualityLabel(height: number | null) {
+      if (!height) return "SD"
+      if (height >= 2160) return "4K"
+      if (height >= 1080) return "HD"
+      if (height >= 720) return "HD"
+      return "SD"
+    }
+
+    // Remove duplicates and sort by height descending
+    getUniqueLevels(levels: any) {
+      const map = new Map<number, any>()
+
+      for (let i = 0; i < levels.length; i++) {
+        const level = levels[i]
+        if (level.height && !map.has(level.height)) {
+          map.set(level.height, level)
+        }
+      }
+
+      return Array.from(map.values()).sort((a, b) => b.height - a.height)
+    }
+
+    // Create a menu item
+    createItem(label: string, isActive: boolean, onClick: () => void) {
+      const item = document.createElement("div")
+      item.innerText = label
+
+      if (isActive) item.classList.add("active")
+
+      item.onclick = () => {
+        onClick()
+        this.updateMenu()
+        this.handleClick()
+      }
+
+      return item
+    }
+
+    // Main render function
+    updateMenu() {
+      const levels = player.qualityLevels()
+      if (!levels || !levels.length) return
+
+      this.menu.innerHTML = ""
+
+      const autoMode = this.isAuto(levels)
+      const currentHeight = this.getCurrentHeight(levels)
+
+      // Update button label (SD / HD / 4K)
+      this.el().setAttribute(
+        "data-quality",
+        this.getQualityLabel(currentHeight)
+      )
+
+      // Auto option with current resolution indication
+      const autoLabel = currentHeight
+        ? `Auto (${currentHeight}p)`
+        : "Auto"
+
+      this.menu.appendChild(
+        this.createItem(autoLabel, autoMode, () => {
+          for (let i = 0; i < levels.length; i++) {
+            levels[i].enabled = true
+          }
+        })
+      )
+
+      // Manual options
+      const selectedHeight = autoMode ? null : currentHeight
+
+      this.getUniqueLevels(levels).forEach(level => {
+        this.menu.appendChild(
+          this.createItem(
+            `${level.height}p`,
+            level.height === selectedHeight,
+            () => {
+              for (let i = 0; i < levels.length; i++) {
+                levels[i].enabled = levels[i].height === level.height
+              }
+            }
+          )
+        )
+      })
+    }
+  }
+
+  videojs.registerComponent("QualityButton", QualityButton as any)
+
+  player.controlBar.addChild(
+    "QualityButton",
+    {},
+    player.controlBar.children().length - 1
+  )
+
+  // Sync UI with player changes
+  const levels = player.qualityLevels()
+
+  const update = () => {
+    const btn = player.controlBar.getChild("QualityButton") as any
+    btn?.updateMenu()
+  }
+
+  levels.on("addqualitylevel", update)
+  levels.on("change", update)
+}
+
 export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
   const videoRef = useRef<HTMLDivElement>(null)
-  const playerRef = useRef<Player | null>(null)
+  const playerRef = useRef<any>(null)
   const [isReady, setIsReady] = useState(false)
   const [hasError, setHasError] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -186,8 +363,9 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       ],
     })
 
-    player.on("ready", () => {
+    player.ready(() => {
       setIsReady(true)
+      addQualitySelector(player)
     })
 
     player.on("playing", () => {
@@ -440,6 +618,45 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
         
         .vjs-poster {
           background-size: cover;
+        }
+
+        .vjs-quality-button:before {
+          content: attr(data-quality); /* SD / HD / 4K */
+          font-size: 11px;
+          font-weight: 600;
+        }
+
+        .vjs-quality-menu {
+          position: absolute;
+          bottom: 30px;
+          right: 18px;
+          background: rgba(56, 54, 54, 0.75);
+          color: #fff;
+          padding: 6px 0;
+          min-width: 80px;
+          font-size: 11px;
+          z-index: 999;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+          text-align: center;
+        }
+
+        .vjs-quality-menu div {
+          padding: 6px 12px;
+          cursor: pointer;
+        }
+
+        .vjs-quality-menu div:hover {
+          background: rgba(255,255,255,0.08);
+        }
+
+        .vjs-quality-menu .active {
+          color: #272727;
+          background-color: #FFF;
+        }
+
+        .vjs-quality-menu .active:hover {
+          color: #272727;
+          background-color: #bbbbbbd6;
         }
       `}</style>
     </div>
