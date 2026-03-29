@@ -11,6 +11,7 @@ import re
 import xmltodict
 import os
 from typing import Dict, Any
+import time
 
 # 🔥 session עם retry
 from requests.adapters import HTTPAdapter
@@ -240,3 +241,79 @@ def epg():
     ]
 
     return result
+
+
+_stream_cache = {}
+CACHE_TTL = 300  # שניות
+
+@app.get("/playlist.m3u")
+def playlist(request: Request):
+    channels = live_channels()
+    base_url = str(request.base_url).rstrip("/")
+
+    lines = ["#EXTM3U"]
+
+    now = time.time()
+
+    for ch in channels:
+        name = ch.name
+        channel_id = ch.channelID
+
+        stream_url = None
+        referer = None
+
+        # ========================
+        # 🔥 CACHE
+        # ========================
+        cached = _stream_cache.get(channel_id)
+
+        if cached and now - cached["time"] < CACHE_TTL:
+            stream_url = cached["url"]
+            referer = cached.get("referer")
+
+        else:
+            try:
+                result = live_channel(ch)
+                stream_url = result["stream"]
+
+                # 🔥 קביעת referer
+                if ch.linkDetails:
+                    referer = ch.linkDetails.get("referer")
+
+                if not referer and stream_url:
+                    parsed = urlparse(stream_url)
+                    referer = f"{parsed.scheme}://{parsed.netloc}/"
+
+                # 🔥 שמירה בקאש
+                _stream_cache[channel_id] = {
+                    "url": stream_url,
+                    "referer": referer,
+                    "time": now
+                }
+
+            except Exception as e:
+                print(f"Error in channel {channel_id}: {e}")
+                continue
+
+        if not stream_url:
+            continue
+
+        # ========================
+        # 🔥 PROXY URL (FIX לשגיאה שלך)
+        # ========================
+        params = {
+            "url": stream_url,
+            "referer": referer or ""
+        }
+
+        proxy_url = f"{base_url}/proxy?{urlencode(params)}"
+
+        lines.append(
+            f'#EXTINF:-1 tvg-id="{channel_id}" tvg-name="{name}",{name}'
+        )
+        lines.append(proxy_url)
+
+    return Response(
+        content="\n".join(lines),
+        media_type="application/x-mpegURL"
+    )
