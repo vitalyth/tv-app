@@ -329,7 +329,8 @@ def playlist(request: Request):
         lines.append(
             f'#EXTINF:-1 tvg-id="{ch.channelID}" tvg-name="{ch.name}" tvg-logo="{logo}",{ch.name}'
         )
-        lines.append(proxy_url)
+        #lines.append(proxy_url)
+        lines.append(stream_url)
 
     return Response(
         content="\n".join(lines),
