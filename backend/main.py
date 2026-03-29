@@ -244,28 +244,44 @@ def epg():
 
 
 _stream_cache = {}
-CACHE_TTL = 300  # שניות
+CACHE_TTL = 0  # שניות
 
 @app.get("/playlist.m3u")
 def playlist(request: Request):
-    channels = live_channels()
+    channels = idan_main.GetUserChannels(type='tv')
     base_url = str(request.base_url).rstrip("/")
 
     lines = ["#EXTM3U"]
 
     now = time.time()
 
-    for ch in channels:
-        name = ch.name
-        channel_id = ch.channelID
+    for channel in channels:
+        ch = Channel(
+            id=channel["channelID"],
+            index=channel["index"],
+            name=channel["name"],
+            mode=channel["mode"],
+            logo=channel["image"],
+            category='',
+            module=channel["module"],
+            channelID=channel["channelID"],
+            type=channel["type"],
+            linkDetails = channel["linkDetails"],
+            programs = []
+        )
 
         stream_url = None
         referer = None
 
+        result = live_channel(ch)
+        stream_url = result["stream"]
+
+
         # ========================
         # 🔥 CACHE
         # ========================
-        cached = _stream_cache.get(channel_id)
+       
+        cached = _stream_cache.get(ch.channelID)
 
         if cached and now - cached["time"] < CACHE_TTL:
             stream_url = cached["url"]
@@ -285,15 +301,16 @@ def playlist(request: Request):
                     referer = f"{parsed.scheme}://{parsed.netloc}/"
 
                 # 🔥 שמירה בקאש
-                _stream_cache[channel_id] = {
+                _stream_cache[ch.channelID] = {
                     "url": stream_url,
                     "referer": referer,
                     "time": now
                 }
 
             except Exception as e:
-                print(f"Error in channel {channel_id}: {e}")
+                print(f"Error in channel {ch.channelID}: {e}")
                 continue
+    
 
         if not stream_url:
             continue
@@ -307,9 +324,10 @@ def playlist(request: Request):
         }
 
         proxy_url = f"{base_url}/proxy?{urlencode(params)}"
+        logo = f"http://192.168.86.75:8001/ch/{ch.logo}"
 
         lines.append(
-            f'#EXTINF:-1 tvg-id="{channel_id}" tvg-name="{name}",{name}'
+            f'#EXTINF:-1 tvg-id="{ch.channelID}" tvg-name="{ch.name}" tvg-logo="{logo}",{ch.name}'
         )
         lines.append(proxy_url)
 
