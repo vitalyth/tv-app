@@ -5,7 +5,7 @@ from models.schemas import Channel
 from services.stream_service import get_stream
 from services.cache_service import get as cache_get, set as cache_set
 
-CACHE_TTL = 0
+CACHE_TTL = 120 # seconds
 
 def generate_playlist(base_url):
     channels = idan_main.GetUserChannels(type='tv')
@@ -70,6 +70,6 @@ def generate_playlist(base_url):
             f'#EXTINF:-1 tvg-id="{ch.channelID}" tvg-name="{ch.name}" tvg-logo="{logo}",{ch.name}'
         )
 
-        lines.append(stream_url)
+        lines.append(proxy_url)
 
     return "\n".join(lines)
