@@ -365,6 +365,9 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
 
     player.ready(() => {
       setIsReady(true)
+    })
+
+    player.on("loadeddata", () => {
       addQualitySelector(player)
     })
 
