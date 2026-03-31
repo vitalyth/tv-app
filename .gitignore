@@ -26,6 +26,9 @@ __pycache__/
 # Backend specific
 # =========================
 backend/profile/
+backend/build/
+backend/tv_channels.egg-info/
+
 
 # =========================
 # CI / Temp

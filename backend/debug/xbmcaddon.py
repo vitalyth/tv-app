@@ -10,6 +10,7 @@ class Addon:
             "favSortBy": "0",
             "channelNameFormat": 1,
             "tvShortcut": 'true',
+            "useIPTV": 'true',
         }
 
         self.settingString = {}

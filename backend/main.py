@@ -8,8 +8,8 @@ from services.epg_service_ext import get_epg
 from services.playlist_service import generate_playlist
 import os
 from models.schemas import Channel
-
 from plugin_video_idanplus.resources import main as idan_main
+from plugin_video_idanplus.resources.lib.iptv import MakeIPTVlist
 
 ROOT_PATH = os.getenv("ROOT_PATH", "")
 
@@ -51,3 +51,10 @@ def playlist(request: Request):
         content=content,
         media_type="application/x-mpegURL"
     )
+
+@app.get("/iptv")
+def iptv(request: Request):
+    channels = idan_main.GetUserChannels(type='tv')
+    MakeIPTVlist(channels)
+
+    return Response(content='IPTV playlist generated', media_type="text/plain")
