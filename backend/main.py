@@ -10,13 +10,16 @@ import os
 from models.schemas import Channel
 from plugin_video_idanplus.resources import main as idan_main
 from plugin_video_idanplus.resources.lib.iptv import MakeIPTVlist
+from config import APP_VERSION
 
 ROOT_PATH = os.getenv("ROOT_PATH", "")
 
 app = FastAPI(
+    title="TV App API",
+    version=APP_VERSION,
     root_path=ROOT_PATH,
     docs_url="/docs",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
 )
 
 app.add_middleware(
@@ -26,6 +29,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/version")
+def get_version():
+    return {"version": APP_VERSION}
 
 @app.get('/live_channels')
 def live_channels():

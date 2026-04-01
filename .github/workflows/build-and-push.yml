@@ -3,7 +3,8 @@ name: Build & Push Docker Images
 on:
   push:
     branches: [ "main" ]
-
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 env:
@@ -14,39 +15,65 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 📥 Checkout
       - name: 📥 Checkout code
         uses: actions/checkout@v4
 
+      # 🐳 Login Docker Hub
       - name: 🐳 Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      # 🔧 Buildx
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # 🧠 Decide tag (main vs version)
+      - name: 🧠 Set image tag
+        id: vars
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "IS_TAG=true" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=latest" >> $GITHUB_OUTPUT
+            echo "IS_TAG=false" >> $GITHUB_OUTPUT
+          fi
+
+      # =========================
       # 🔹 FRONTEND
+      # =========================
       - name: 🧱 Build & Push Frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           push: true
-          tags: vitalyth/tv-app-frontend:latest
+          tags: |
+            vitalyth/tv-app-frontend:${{ steps.vars.outputs.TAG }}
+            ${{ steps.vars.outputs.IS_TAG == 'true' && 'vitalyth/tv-app-frontend:latest' || '' }}
 
+      # =========================
       # 🔹 BACKEND
+      # =========================
       - name: 🧱 Build & Push Backend
         uses: docker/build-push-action@v5
         with:
           context: ./backend
           push: true
-          tags: vitalyth/tv-app-backend:latest
+          tags: |
+            vitalyth/tv-app-backend:${{ steps.vars.outputs.TAG }}
+            ${{ steps.vars.outputs.IS_TAG == 'true' && 'vitalyth/tv-app-backend:latest' || '' }}
 
+      # =========================
       # 🔹 NGINX
+      # =========================
       - name: 🧱 Build & Push Nginx
         uses: docker/build-push-action@v5
         with:
           context: ./nginx
           push: true
-          tags: vitalyth/tv-app-nginx:latest
-
+          tags: |
+            vitalyth/tv-app-nginx:${{ steps.vars.outputs.TAG }}
+            ${{ steps.vars.outputs.IS_TAG == 'true' && 'vitalyth/tv-app-nginx:latest' || '' }}
