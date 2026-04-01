@@ -28,7 +28,7 @@ __pycache__/
 backend/profile/
 backend/build/
 backend/tv_channels.egg-info/
-
+backend/tv-channels/
 
 # =========================
 # CI / Temp
@@ -42,3 +42,5 @@ backend/old/
 # Logs
 # =========================
 *.log
+
+.python-version
