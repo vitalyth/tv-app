@@ -20,7 +20,7 @@ def handle_proxy(request, url, referer):
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
-    # 🔥 request עם retry + timeout
+    # 🔥 request with retry + timeout
     try:
         r = session.get(url, headers=headers, stream=True, timeout=10)
     except requests.exceptions.RequestException as e:
@@ -29,12 +29,12 @@ def handle_proxy(request, url, referer):
 
     content_type = r.headers.get("content-type", "")
 
-    # 🎥 וידאו / fragments
+    # 🎥 Video / fragments
     if "video" in content_type or url.endswith((".ts", ".m4s", ".mp4")):
 
         def generate():
             try:
-                for chunk in r.iter_content(chunk_size=1024 * 64):  # 🔥 chunk קטן ליציבות
+                for chunk in r.iter_content(chunk_size=1024 * 64):  # chunk for stability
                     if chunk:
                         yield chunk
             except Exception as e:
@@ -53,7 +53,7 @@ def handle_proxy(request, url, referer):
             }
         )
 
-    # 📄 טקסט (m3u8 או אחר)
+    # text (m3u8 or other)
     try:
         text = r.text
     except Exception:
@@ -65,7 +65,7 @@ def handle_proxy(request, url, referer):
         or "#EXTM3U" in text
     )
 
-    # לא m3u8 → תחזיר רגיל
+    # If not M3U8 → return as is
     if not is_m3u8:
         return Response(
             content=r.content,
@@ -73,7 +73,7 @@ def handle_proxy(request, url, referer):
             headers={"Access-Control-Allow-Origin": "*"}
         )
 
-    # 🎯 rewrite ל־m3u8
+    # rewrite to m3u8
     base_url = url.rsplit("/", 1)[0] + "/"
 
     root_path = request.scope.get("root_path", "")

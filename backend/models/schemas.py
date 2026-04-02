@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Dict, Any
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
 
 class Program(BaseModel):
     start: int
@@ -8,14 +8,14 @@ class Program(BaseModel):
     description: str
 
 class Channel(BaseModel):
-    id: str
+    id: Optional[str] = None
     index: int
     name: str
-    logo: str
-    category: str
-    linkDetails: Dict[str, Any]
+    logo: Optional[str] = None
+    category: Optional[str] = None
+    linkDetails: Optional[Dict[str, Any]] = None
     module: str
-    channelID: str
+    channelID: Optional[str] = None
     mode: int
-    type: str
-    programs: list[Program]
+    type: Optional[str] = None
+    programs: Optional[List["Program"]] = None

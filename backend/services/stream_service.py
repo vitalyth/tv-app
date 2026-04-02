@@ -1,7 +1,7 @@
 import xbmcplugin
 
 def get_stream(channel):
-    moreData = '1'
+    xbmcplugin.clearStream()
 
     moduleScript = __import__(
         f'resources.lib.{channel.module}',
@@ -13,7 +13,7 @@ def get_stream(channel):
         channel.channelID,
         channel.mode,
         '',
-        moreData
+        '1'
     )
 
     return xbmcplugin.getStream()
