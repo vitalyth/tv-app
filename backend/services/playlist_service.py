@@ -7,6 +7,9 @@ from services.cache_service import get as cache_get, set as cache_set
 
 CACHE_TTL = 120 # seconds
 
+def remove_api_prefix(url: str) -> str:
+    return url.replace("/api", "", 1)
+
 def generate_playlist(base_url):
     channels = idan_main.GetUserChannels(type='tv')
     lines = ["#EXTM3U"]
@@ -65,7 +68,8 @@ def generate_playlist(base_url):
         }
 
         proxy_url = f"{base_url}/proxy?{urlencode(params)}"
-        logo = f"http://192.168.86.75:8001/ch/{ch.logo}"
+        logo_base = remove_api_prefix(base_url)
+        logo = f"{logo_base}/ch/{ch.logo}"
 
         lines.append(
             f'#EXTINF:-1 tvg-id="{ch.tvgID}" tvg-name="{ch.name}" tvg-logo="{logo}",{ch.name}'
