@@ -19,3 +19,4 @@ class Channel(BaseModel):
     mode: int
     type: Optional[str] = None
     programs: Optional[List["Program"]] = None
+    tvgID: Optional[str] = None

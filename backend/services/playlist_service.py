@@ -24,7 +24,8 @@ def generate_playlist(base_url):
             channelID=channel["channelID"],
             type=channel["type"],
             linkDetails=channel["linkDetails"],
-            programs=[]
+            programs=[],
+            tvgID=channel["tvgID"]
         )
 
         stream_url = None
@@ -67,7 +68,7 @@ def generate_playlist(base_url):
         logo = f"http://192.168.86.75:8001/ch/{ch.logo}"
 
         lines.append(
-            f'#EXTINF:-1 tvg-id="{ch.channelID}" tvg-name="{ch.name}" tvg-logo="{logo}",{ch.name}'
+            f'#EXTINF:-1 tvg-id="{ch.tvgID}" tvg-name="{ch.name}" tvg-logo="{logo}",{ch.name}'
         )
 
         lines.append(proxy_url)
