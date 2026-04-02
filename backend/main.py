@@ -4,12 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.channel_service import get_live_channels
 from services.stream_service import get_stream
 from services.proxy_service import handle_proxy
-from services.epg_service_ext import get_epg
+from services.epg_service_ext import get_epg, EPGService
 from services.playlist_service import generate_playlist
 import os
 from models.schemas import Channel
 from plugin_video_idanplus.resources import main as idan_main
-from plugin_video_idanplus.resources.lib.iptv import MakeIPTVlist
+from plugin_video_idanplus.resources.lib import common, iptv, epg
 from config import APP_VERSION
 
 ROOT_PATH = os.getenv("ROOT_PATH", "")
@@ -21,6 +21,8 @@ app = FastAPI(
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
+
+epg_service = EPGService(ttl_seconds=3600)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,13 +44,25 @@ def live_channels():
 def live_channel(channel: Channel):
     return {"stream": get_stream(channel)}
 
+@app.get("/stream")
+def stream(request: Request, channel_id: str):
+    channel_data = common.GetChannel(channel_id)
+    channel = Channel.model_validate(channel_data)
+    channel.id = channel_id
+    channel.channelID = channel_id
+    url = get_stream(channel)
+    referer = (channel.linkDetails or {}).get("referer", "")
+    return handle_proxy(request, url, referer)
+
 @app.get("/proxy")
 def proxy(request: Request, url: str, referer: str = None):
     return handle_proxy(request, url, referer)
 
-@app.get("/epg")
-def epg():
-    return get_epg()
+@app.get("/epg.xml")
+def epg_xml():
+    #return get_epg()
+    xml = epg_service.get_epg_xml()
+    return Response(content=xml, media_type="application/xml")
 
 @app.get("/playlist.m3u")
 def playlist(request: Request):
@@ -60,8 +74,8 @@ def playlist(request: Request):
     )
 
 @app.get("/iptv")
-def iptv(request: Request):
+def iptv_list(request: Request):
     channels = idan_main.GetUserChannels(type='tv')
-    MakeIPTVlist(channels)
+    iptv.MakeIPTVlist(channels)
 
     return Response(content='IPTV playlist generated', media_type="text/plain")
