@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Search } from "lucide-react";
 import { categories, type Channel } from "@/lib/channels-data";
 import { SidebarChannelList } from "@/components/sidebar-channel-list";
@@ -45,6 +46,16 @@ export default function TVChannelsPage() {
     errorRetryCount: 3,
   });
 
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const channelIdFromUrl = searchParams.get("channel");
+  const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev);
+
+  const handleClose = () => {
+    setSelectedChannel(null);
+    router.push(`/tv`);
+  };
+
   // Filtering
   const filteredChannels = useMemo(() => {
     const query = searchQuery.toLowerCase();
@@ -62,12 +73,21 @@ export default function TVChannelsPage() {
   const handleSelectChannel = (channel: Channel) => {
     setSelectedChannel(channel);
     setIsMobileSidebarOpen(false);
+
+    router.push(`?channel=${channel.id}`);
   };
 
-  const handleClose = () => setSelectedChannel(null);
+  useEffect(() => {
+    if (!channels.length || !channelIdFromUrl) return;
 
-  const toggleMobileSidebar = () =>
-    setIsMobileSidebarOpen((prev) => !prev);
+    const channel = channels.find(
+      (c) => String(c.id) === String(channelIdFromUrl)
+    );
+
+    if (channel) {
+      setSelectedChannel(channel);
+    }
+  }, [channels, channelIdFromUrl]);
 
   // 🧠 רענון ידני (אם תרצה)
   const refreshNow = () => {
