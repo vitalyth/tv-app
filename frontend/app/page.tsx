@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useMemo } from "react";
 import { Search } from "lucide-react";
 import { categories, type Channel } from "@/lib/channels-data";
 import { SidebarChannelList } from "@/components/sidebar-channel-list";
@@ -46,16 +45,6 @@ export default function TVChannelsPage() {
     errorRetryCount: 3,
   });
 
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const channelIdFromUrl = searchParams.get("channel");
-  const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev);
-
-  const handleClose = () => {
-    setSelectedChannel(null);
-    router.push(`/tv`);
-  };
-
   // Filtering
   const filteredChannels = useMemo(() => {
     const query = searchQuery.toLowerCase();
@@ -73,21 +62,12 @@ export default function TVChannelsPage() {
   const handleSelectChannel = (channel: Channel) => {
     setSelectedChannel(channel);
     setIsMobileSidebarOpen(false);
-
-    router.push(`?channel=${channel.id}`);
   };
 
-  useEffect(() => {
-    if (!channels.length || !channelIdFromUrl) return;
+  const handleClose = () => setSelectedChannel(null);
 
-    const channel = channels.find(
-      (c) => String(c.id) === String(channelIdFromUrl)
-    );
-
-    if (channel) {
-      setSelectedChannel(channel);
-    }
-  }, [channels, channelIdFromUrl]);
+  const toggleMobileSidebar = () =>
+    setIsMobileSidebarOpen((prev) => !prev);
 
   // 🧠 רענון ידני (אם תרצה)
   const refreshNow = () => {
@@ -100,9 +80,9 @@ export default function TVChannelsPage() {
       <div className="min-h-screen flex flex-col bg-background">
         <Header />
 
-        <main className="flex-1 px-4 py-6 max-w-7xl mx-auto w-full">
+        <main className="flex-1 px-4 py-6 max-w-7xl mx-auto w-full lg:pt-16">
           {/* Search + filters */}
-          <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          <div className="flex flex-col sm:flex-row gap-4 mb-6 lg:sticky lg:top-16 lg:z-40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -128,11 +108,6 @@ export default function TVChannelsPage() {
                 </Button>
               ))}
             </div>
-
-            {/* 🔥 כפתור רענון */}
-            <Button onClick={refreshNow} variant="outline">
-              רענן
-            </Button>
           </div>
 
           {/* States */}

@@ -34,7 +34,7 @@ export default function TVLayout({ children,}: { children: React.ReactNode;}) {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-    const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev && currentId);
+    const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev);
 
     const { data: channels = [], mutate } = useSWR("channels", fetchChannels);
 
