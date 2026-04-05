@@ -36,7 +36,13 @@ export default function TVLayout({ children,}: { children: React.ReactNode;}) {
 
     const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev);
 
-    const { data: channels = [], mutate } = useSWR("channels", fetchChannels);
+    // 🚀 SWR במקום useEffect
+    const { data: channels = [], error, isLoading, mutate } = useSWR("channels", fetchChannels, {
+        refreshInterval: 60 * 1000, // כל 1 דקות
+        revalidateOnFocus: true, // חוזר לטאב → רענון
+        dedupingInterval: 10000, // מונע קריאות כפולות
+        errorRetryCount: 3,
+    });
 
     const filteredChannels = useMemo(() => {
         const query = searchQuery.toLowerCase();
@@ -146,17 +152,17 @@ export default function TVLayout({ children,}: { children: React.ReactNode;}) {
                 {currentId && (
                 <div className="hidden lg:flex h-full">
                     <SidebarChannelList
-                    channels={filteredChannels}
-                    selectedChannel={selectedChannel}
-                    selectedCategory={selectedCategory}
-                    searchQuery={searchQuery}
-                    isCollapsed={isSidebarCollapsed}
-                    onSelectChannel={handleSelectChannel}
-                    onCategoryChange={setSelectedCategory}
-                    onSearchChange={setSearchQuery}
-                    onToggleCollapse={() =>
-                        setIsSidebarCollapsed((prev) => !prev)
-                    }
+                        channels={filteredChannels}
+                        selectedChannel={selectedChannel}
+                        selectedCategory={selectedCategory}
+                        searchQuery={searchQuery}
+                        isCollapsed={isSidebarCollapsed}
+                        onSelectChannel={handleSelectChannel}
+                        onCategoryChange={setSelectedCategory}
+                        onSearchChange={setSearchQuery}
+                        onToggleCollapse={() =>
+                            setIsSidebarCollapsed((prev) => !prev)
+                        }
                     />
                 </div>
                 )}
