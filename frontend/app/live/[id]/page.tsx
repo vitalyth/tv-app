@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Header from "@/components/Header";
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Channel } from '@/lib/channels-data';
-import { channelService } from '@/lib/services/channel-service';
-import useSWR from 'swr';
-import { channel } from 'diagnostics_channel';
 import { SidebarChannelList } from '@/components/sidebar-channel-list';
+import { useChannelsContext } from "@/hooks/useChannelsContext";
+import { useFilteredChannels } from '@/hooks/useFilteredChannels';
 
 // Load VideoPlayer only on client to avoid SSR issues
 const VideoPlayer = dynamic(
@@ -25,21 +24,12 @@ const channelPage = () => {
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const { channels } = useChannelsContext();
+    const filteredChannels = useFilteredChannels( channels, searchQuery, selectedCategory );
     
-    const fetchChannels = async (): Promise<Channel[]> => {
-        return await channelService.getLiveChannels();
-    };
-
     const handleClose = () => {
         router.push("/live");
     };
-
-    const { data: channels = [], error, isLoading, mutate } = useSWR("channels", fetchChannels, {
-        refreshInterval: 60 * 1000, // every 1 minute
-        revalidateOnFocus: true, // refresh when returning to the tab
-        dedupingInterval: 10000, // dumps multiple requests
-        errorRetryCount: 3,
-    });
 
     useEffect(() => {
         if (!channels?.length || !params?.id) return;
@@ -56,24 +46,8 @@ const channelPage = () => {
   
     const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev);
 
-    // Filtering
-    const filteredChannels = useMemo(() => {
-        const query = searchQuery.toLowerCase();
-
-        return channels.filter((channel) => {
-            const matchesSearch = channel.name.toLowerCase().includes(query);
-            const matchesCategory =
-                selectedCategory === "הכל" ||
-                channel.category === selectedCategory;
-
-            return matchesSearch && matchesCategory;
-        });
-    }, [searchQuery, selectedCategory, channels]);
-
     const handleSelectChannel = (channel: Channel) => {
         router.push(`/live/${channel.id}`);
-        //setSelectedChannel(channel);
-        //setIsMobileSidebarOpen(false);
     };
     
     return (
