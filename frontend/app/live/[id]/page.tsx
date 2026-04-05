@@ -46,12 +46,17 @@ const page = () => {
     };
 
     useEffect(() => {
-        if (channels?.length && !selectedChannel) {
-            const channelbyId = channels.find((c) => String(c.id) === params.id);
-            setSelectedChannel(channelbyId ?? null);
-            console.log('===channel id==', params.id, channelbyId);
-        }
-    }, [channels, selectedChannel]);
+        if (!channels?.length || !params?.id) return;
+
+        const id = Array.isArray(params.id) ? params.id[0] : params.id;
+
+        const channelbyId = channels.find(
+            (c) => String(c.id) === String(id)
+        );
+
+        setSelectedChannel(channelbyId ?? null);
+
+    }, [channels, params.id]);
   
     const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev);
 
@@ -86,10 +91,12 @@ const page = () => {
                 <main className="flex-1 flex flex-col p-4 lg:p-6 overflow-hidden">
                     <div className="flex-1 flex items-center justify-center">
                         <div className="w-full max-w-6xl">
-                        <VideoPlayer
-                            channel={selectedChannel}
-                            onClose={handleClose}
-                        />
+                        {selectedChannel && (
+                            <VideoPlayer
+                                channel={selectedChannel}
+                                onClose={handleClose}
+                            />
+                        )}
                         </div>
                     </div>
                 </main>
