@@ -343,6 +343,8 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
       controls: true,
       responsive: true,
       //fluid: true,
+      muted: true, 
+      playsinline: true, 
       liveui: true,
       playbackRates: [0.5, 1, 1.5, 2],
       html5: {
@@ -364,7 +366,15 @@ export function VideoPlayer({ channel, onClose }: VideoPlayerProps) {
     })
 
     player.ready(() => {
-      setIsReady(true)
+      setIsReady(true);
+      player.muted(true);
+
+      const playPromise = player.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          console.log("Autoplay blocked");
+        });
+      }
     })
 
     player.on("loadeddata", () => {
