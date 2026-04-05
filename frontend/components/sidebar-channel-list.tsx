@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { type Channel, categories } from "@/lib/channels-data"
 import ProgramDisplay from "@/components/program-display"
+import { useEffect, useLayoutEffect, useRef } from "react"
 
 interface SidebarChannelListProps {
   channels: Channel[]
@@ -31,6 +32,32 @@ export function SidebarChannelList({
   onSearchChange,
   onToggleCollapse,
 }: SidebarChannelListProps) {
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Restore scroll position on mount and save on unmount
+  useLayoutEffect(() => {
+    const saved = sessionStorage.getItem("sidebar-scroll");
+
+    if (scrollRef.current && saved) {
+      scrollRef.current.scrollTop = Number(saved);
+    }
+  }, []);
+
+  // Save scroll position on unmount
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const handler = () => {
+      sessionStorage.setItem("sidebar-scroll", String(el.scrollTop));
+    };
+
+    el.addEventListener("scroll", handler);
+    return () => el.removeEventListener("scroll", handler);
+  }, []);
+
+  // Scroll selected channel into view when it changes
   if (isCollapsed) {
     return (
       <aside className="w-16 h-full bg-card border-l border-border flex flex-col items-center py-4 gap-2">
@@ -42,7 +69,7 @@ export function SidebarChannelList({
         >
           <ChevronLeft className="w-4 h-4" />
         </Button>
-        <div className="flex-1 w-full overflow-y-auto styled-scrollbar">
+        <div ref={scrollRef} className="flex-1 w-full overflow-y-auto styled-scrollbar">
           <div className="flex flex-col items-center gap-2 px-2">
             {channels.map((channel) => (
               <button
@@ -117,7 +144,7 @@ export function SidebarChannelList({
       </div>
 
       {/* Channels List */}
-      <div className="flex-1 overflow-y-auto styled-scrollbar">
+      <div ref={scrollRef}className="flex-1 overflow-y-auto styled-scrollbar">
         <div className="p-2">
           {channels.length > 0 ? (
             <div className="space-y-1">

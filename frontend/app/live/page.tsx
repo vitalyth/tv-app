@@ -11,7 +11,7 @@ import { channelService } from '@/lib/services/channel-service';
 import { ChannelCard } from '@/components/channel-card';
 import { useRouter } from 'next/navigation';
 
-const page = () => {
+const channelsList = () => {
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
     //const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
@@ -132,4 +132,4 @@ const page = () => {
     )
 }
 
-export default page
+export default channelsList

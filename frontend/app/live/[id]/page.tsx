@@ -16,7 +16,7 @@ const VideoPlayer = dynamic(
     { ssr: false }
 );
 
-const page = () => {
+const channelPage = () => {
     const router = useRouter();
     const params = useParams();
 
@@ -40,10 +40,6 @@ const page = () => {
         dedupingInterval: 10000, // dumps multiple requests
         errorRetryCount: 3,
     });
-
-    const refreshNow = () => {
-        mutate(); 
-    };
 
     useEffect(() => {
         if (!channels?.length || !params?.id) return;
@@ -148,4 +144,4 @@ const page = () => {
     )
 }
 
-export default page
+export default channelPage
