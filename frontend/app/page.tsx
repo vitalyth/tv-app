@@ -206,7 +206,6 @@ export default function TVChannelsPage() {
             selectedChannel={selectedChannel}
             selectedCategory={selectedCategory}
             searchQuery={searchQuery}
-            isCollapsed={false}
             onSelectChannel={handleSelectChannel}
             onCategoryChange={setSelectedCategory}
             onSearchChange={setSearchQuery}

@@ -11,8 +11,7 @@ import { useFilteredChannels } from '@/hooks/useFilteredChannels';
 
 // Load VideoPlayer only on client to avoid SSR issues
 const VideoPlayer = dynamic(
-    () => import("@/components/video-player").then((m) => m.VideoPlayer),
-    { ssr: false }
+    () => import("@/components/video-player").then((m) => m.VideoPlayer), { ssr: false }
 );
 
 const channelPage = () => {
@@ -20,10 +19,10 @@ const channelPage = () => {
     const params = useParams();
 
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const { channels } = useChannelsContext();
     const filteredChannels = useFilteredChannels( channels, searchQuery, selectedCategory );
     
@@ -95,11 +94,11 @@ const channelPage = () => {
                 )}
 
                 <div
-                className={`lg:hidden fixed top-0 left-0 h-screen z-50 transition-transform duration-300 ${
-                    isMobileSidebarOpen
-                    ? "translate-x-0"
-                    : "-translate-x-full"
-                }`}
+                    className={`lg:hidden fixed top-0 left-0 h-screen z-50 transition-transform duration-300 ${
+                        isMobileSidebarOpen
+                        ? "translate-x-0"
+                        : "-translate-x-full"
+                    }`}
                 >
                     <SidebarChannelList
                         channels={filteredChannels}
