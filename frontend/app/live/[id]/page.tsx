@@ -19,7 +19,14 @@ const channelPage = () => {
     const params = useParams();
 
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+        if (typeof window !== "undefined") {
+            const stored = sessionStorage.getItem("sidebar-collapsed");
+            return stored === "true";
+        }
+        return false;
+    });
+
     const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
@@ -29,6 +36,12 @@ const channelPage = () => {
     const handleClose = () => {
         router.push("/live");
     };
+
+    useEffect(() => {
+        console.log("isSidebarCollapsed:", isSidebarCollapsed);
+        sessionStorage.setItem("sidebar-collapsed", String(isSidebarCollapsed));
+    }, [isSidebarCollapsed]);
+
 
     useEffect(() => {
         if (!channels?.length || !params?.id) return;

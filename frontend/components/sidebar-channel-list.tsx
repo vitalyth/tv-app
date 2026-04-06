@@ -77,11 +77,16 @@ export const SidebarChannelList = ({
                                 className={cn(
                                     "w-12 h-12 rounded-lg flex items-center justify-center transition-all",
                                     "bg-secondary border border-border hover:border-primary/50",
-                                    selectedChannel?.id === channel.id && "border-primary bg-primary/20"
+                                    selectedChannel?.id === channel.id && "border-primary bg-primary/20 border-3"
                                 )}
                                 title={channel.name}
                             >
-                                <span className="text-lg font-bold"><img src={`/ch/${channel.logo}`} /></span>
+                                <span className="block w-12 h-12 overflow-hidden rounded-lg">
+                                    <img
+                                        src={`/ch/${channel.logo}`}
+                                        className="w-full h-full object-contain"
+                                    />
+                                </span>
                             </button>
                         ))}
                     </div>
@@ -165,7 +170,12 @@ export const SidebarChannelList = ({
                                         "bg-secondary border border-border",
                                         selectedChannel?.id === channel.id && "border-primary"
                                     )}>
-                                        <span className="text-xl font-bold"><img src={`/ch/${channel.logo}`} /></span>
+                                        <span className="block w-12 h-12 overflow-hidden rounded-lg">
+                                            <img
+                                                src={`/ch/${channel.logo}`}
+                                                className="w-full h-full object-contain"
+                                            />
+                                        </span>
                                     </div>
 
                                     {/* Info */}
