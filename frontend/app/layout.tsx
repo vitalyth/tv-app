@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
-import './globals.css'
+import '@/styles/globals.css'
 import 'video.js/dist/video-js.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -14,19 +14,14 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
+        url: '/tv_icon.png',
         media: '(prefers-color-scheme: dark)',
       },
       {
         url: '/icon.svg',
         type: 'image/svg+xml',
       },
-    ],
-    apple: '/apple-icon.png',
+    ]
   },
 }
 

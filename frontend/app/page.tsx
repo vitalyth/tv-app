@@ -209,6 +209,7 @@ export default function TVChannelsPage() {
             onSelectChannel={handleSelectChannel}
             onCategoryChange={setSelectedCategory}
             onSearchChange={setSearchQuery}
+            isCollapsed={true}
             onToggleCollapse={() => setIsMobileSidebarOpen(false)}
           />
         </div>
