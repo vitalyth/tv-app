@@ -26,7 +26,7 @@ const LiveLayout = ({ children }: { children: React.ReactNode }) => {
         return await channelService.getLiveChannels();
     };
 
-    const { data = [], error, isLoading, mutate } = useSWR("channels", fetchChannels,{
+    const { data: channels = [], error, isLoading, mutate } = useSWR("channels", fetchChannels,{
             refreshInterval: 60 * 1000, // every 1 minute
             revalidateOnFocus: true, // refresh when returning to the tab
             dedupingInterval: 10000, // dumps multiple requests
@@ -37,7 +37,7 @@ const LiveLayout = ({ children }: { children: React.ReactNode }) => {
   return (
     <ChannelsContext.Provider
         value={{
-            channels: data,
+            channels,
             isLoading,
             error,
             refresh: mutate,
