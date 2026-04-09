@@ -1,6 +1,6 @@
 type ManifestType = "hls" | "mpd"
 
-interface LinkDetails {
+export interface LinkDetails {
   link: string
   referer?: string
   final?: boolean
@@ -9,12 +9,12 @@ interface LinkDetails {
   regex?: string
 }
 
-interface Program {
+export interface Program {
     start: number
     end: number
     name: string
     description: string
-}
+} 
 
 export interface Channel {
   id: string

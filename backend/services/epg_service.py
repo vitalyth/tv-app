@@ -5,7 +5,13 @@ from plugin_video_idanplus.resources.lib.epg import GetEPG
 _epg_cache = None
 _last_update = 0
 
-EPG_TTL = 60  # 👈 1 minute
+EPG_TTL = 0  # 👈 1 minute
+
+WINDOW_BACK = 2 * 60 * 60     # 2 hours back
+WINDOW_FORWARD = 12 * 60 * 60 # 12 hours forward
+now = int(time.time())
+window_start = now - WINDOW_BACK
+window_end = now + WINDOW_FORWARD
 
 def get_now_epg():
     global _epg_cache, _last_update
@@ -17,7 +23,9 @@ def get_now_epg():
         epgList = copy.deepcopy(_epg_cache)
     else:
         print(">>> Refreshing EPG...")
-        epgList = GetEPG(deltaInSec=0)
+        #epgList = GetEPG(deltaInSec=0)
+        #epgList = GetEPG(deltaInSec=1 * 60 * 60) # 1 hour
+        epgList = GetEPG() # default 24 hours
         _epg_cache = epgList
         _last_update = now
         epgList = copy.deepcopy(epgList)
@@ -27,6 +35,9 @@ def get_now_epg():
         programs = []
         programsCount = len(epgList[channel])
 
+        #print('>>> Processing channel', channel, 'with', programsCount, 'programs')
+
+        '''
         for i in range(programsCount):
             start = epgList[channel][i]["start"]
             end = epgList[channel][i]["end"]
@@ -40,7 +51,23 @@ def get_now_epg():
                 programs = epgList[channel][i:i+1]
 
             break
+        '''
 
-        epgList[channel] = programs
+        for program in epgList[channel]:
+            start = program["start"]
+            end = program["end"]
+
+            # אם התוכנית נגמרה לפני החלון → דלג
+            if end <= window_start:
+                continue
+
+            # אם התוכנית מתחילה אחרי החלון → אפשר לעצור (אם ממוין)
+            if start >= window_end:
+                break
+
+            # אחרת → התוכנית בתוך החלון או חופפת אליו
+            programs.append(program)
+
+            epgList[channel] = programs
 
     return epgList
