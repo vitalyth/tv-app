@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useCallback, useMemo, useState } from "react";
+import { useRef, useCallback, useMemo, useState, useEffect } from "react";
 import { Channel, Program } from "@/lib/channels-data";
+import { useNowSec } from "@/hooks/use-now-sec";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ProgramGuideProps {
@@ -51,6 +52,7 @@ function ProgramCell({
   guideStart,  // unix seconds
   guideEnd,    // unix seconds
   totalGridW,
+  nowSec,
   onClick,
 }: {
   program: Program;
@@ -58,6 +60,7 @@ function ProgramCell({
   guideStart: number;
   guideEnd: number;
   totalGridW: number;
+  nowSec: number;
   onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -71,8 +74,9 @@ function ProgramCell({
   // RTL: right = distance from right edge of grid
   const right = (guideEnd - visEnd) * PX_PER_SEC;
 
-  const now = Math.floor(Date.now() / 1000);
-  const isLive = now >= program.start && now < program.end;
+  //const now = Math.floor(Date.now() / 1000);
+  //const isLive = now >= program.start && now < program.end;
+  const isLive = nowSec >= program.start && nowSec < program.end;
 
   return (
     <div
@@ -114,9 +118,22 @@ export default function ProgramGuide({
   onChannelClick,
   onProgramClick,
 }: ProgramGuideProps) {
+  // const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const mainRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const sideRef = useRef<HTMLDivElement>(null);
+
+  /*
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowSec(Math.floor(Date.now() / 1000));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+  */
+
+  const nowSec = useNowSec();
 
   const onMainScroll = useCallback(() => {
     if (!mainRef.current) return;
@@ -137,7 +154,7 @@ export default function ProgramGuide({
 
   // All timestamps in unix seconds
   const { guideStart, guideEnd, totalGridW, totalGridH, hourLabels, nowRight } = useMemo(() => {
-    const nowSec = Math.floor(Date.now() / 1000);
+    // const nowSec = Math.floor(Date.now() / 1000);
 
     // Snap guideStart to the beginning of the hour that is HOURS_BACK ago
     const startRaw = nowSec - HOURS_BACK * SECS_PER_HOUR;
@@ -167,7 +184,7 @@ export default function ProgramGuide({
     const nowRight = (end - nowSec) * PX_PER_SEC;
 
     return { guideStart: start, guideEnd: end, totalGridW: w, totalGridH: h, hourLabels: labels, nowRight };
-  }, [dedupedChannels.length]);
+  }, [dedupedChannels.length, nowSec]);
 
   // Auto-scroll: position "now" at ~30% from the right on load
   const didScrollRef = useRef(false);
@@ -338,6 +355,7 @@ export default function ProgramGuide({
                         guideStart={guideStart}
                         guideEnd={guideEnd}
                         totalGridW={totalGridW}
+                        nowSec={nowSec}
                         onClick={onProgramClick}
                       />
                     ))
