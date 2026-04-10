@@ -5,18 +5,17 @@ from plugin_video_idanplus.resources.lib.epg import GetEPG
 _epg_cache = None
 _last_update = 0
 
-EPG_TTL = 0  # 👈 1 minute
+EPG_TTL = 60 * 60 # 1 hour
 
 WINDOW_BACK = 2 * 60 * 60     # 2 hours back
 WINDOW_FORWARD = 12 * 60 * 60 # 12 hours forward
-now = int(time.time())
-window_start = now - WINDOW_BACK
-window_end = now + WINDOW_FORWARD
 
 def get_now_epg():
     global _epg_cache, _last_update
 
     now = int(time.time())
+    window_start = now - WINDOW_BACK
+    window_end = now + WINDOW_FORWARD
 
     # use cache if valid
     if _epg_cache is not None and (now - _last_update < EPG_TTL):

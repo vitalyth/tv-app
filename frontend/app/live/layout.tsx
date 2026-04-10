@@ -4,6 +4,7 @@ import { createContext, useContext } from "react";
 import useSWR from "swr";
 import { channelService } from "@/lib/services/channel-service";
 import { Channel } from "@/lib/channels-data";
+import "@/styles/video-player.css";
 
 type ChannelsContextType = {
     channels: Channel[];
