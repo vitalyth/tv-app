@@ -543,6 +543,49 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
                     </div>
                 </div>
             )}
+
+            {/* Custom styles for Video.js */}
+            <style jsx global>{`
+                .vjs-quality-button:before {
+                    content: attr(data-quality);
+                    /* SD / HD / 4K */
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+
+                .vjs-quality-menu {
+                    position: absolute;
+                    bottom: 30px;
+                    right: 18px;
+                    background: rgba(56, 54, 54, 0.75);
+                    color: #fff;
+                    padding: 6px 0;
+                    min-width: 80px;
+                    font-size: 11px;
+                    z-index: 999;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                    text-align: center;
+                }
+
+                .vjs-quality-menu div {
+                    padding: 6px 12px;
+                    cursor: pointer;
+                }
+
+                .vjs-quality-menu div:hover {
+                    background: rgba(255, 255, 255, 0.08);
+                }
+
+                .vjs-quality-menu .active {
+                    color: #272727;
+                    background-color: #FFF;
+                }
+
+                .vjs-quality-menu .active:hover {
+                    color: #272727;
+                    background-color: #bbbbbbd6;
+                }
+        `}  </style>
         </div>
     )
 }
