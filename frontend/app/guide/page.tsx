@@ -44,17 +44,12 @@ export default function TVGuidePage() {
             </main>
 
             {selectedChannel && (
-                <div className="absolute w-150 h-7! top-10 right-10 flex items-center justify-center z-50">
-
-                    {/* מרכז + יחס תקין */}
-                    <div className="absolute w-full h-full aspect-video">
-                        <VideoPlayer
-                            className="h-100 w-150 object-contain"
-                            channel={selectedChannel}
-                            onClose={handleClose}
-                        />
-                    </div>
-
+                <div className="absolute w-150 h-85 top-35 right-5 z-50">
+                    <VideoPlayer
+                        className="h-full w-full"
+                        channel={selectedChannel}
+                        onClose={handleClose}
+                    />
                 </div>
             )}
         </div>
