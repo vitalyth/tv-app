@@ -20,7 +20,7 @@ export default function TVGuidePage() {
     const [selectedChannel, setSelectedChannel] = useState<any>(null);
     const [isPlayerOpen, setIsPlayerOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
-    const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
+    const [selectedCategory, setSelectedCategory] = useState<string>("");
     const filteredChannels = useFilteredChannels(channels, searchQuery, selectedCategory);
 
     const handleProgramClick = (prog: any, ch: Channel, isLive: boolean) => {

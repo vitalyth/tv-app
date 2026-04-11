@@ -29,7 +29,7 @@ const channelPage = () => {
 
     const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
-    const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
+    const [selectedCategory, setSelectedCategory] = useState<string>("");
     const { channels } = useChannelsContext();
     const filteredChannels = useFilteredChannels( channels, searchQuery, selectedCategory );
     

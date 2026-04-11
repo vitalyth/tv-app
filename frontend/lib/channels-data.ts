@@ -425,3 +425,19 @@ export const categories = [
   "סרטים",
   "ממשל"
 ]
+
+export const CATEGORY_LABELS = new Map([
+  ["news", "חדשות"],
+  ["entertainment", "בידור"],
+  ["kids", "ילדים"],
+  ["music", "מוזיקה"],
+  ["sports", "ספורט"],
+  ["business", "כלכלה"],
+  ["reality", "ריאליטי"],
+  ["general", "כללי"],
+  ["religion", "דת"],
+  ["comedy", "קומדיה"],
+  ["lifestyle", "לייף סטייל"],
+  ["talk", "דיבור"],
+  ["culture", "תרבות"],
+]);

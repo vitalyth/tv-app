@@ -124,6 +124,7 @@ export const SidebarChannelList = ({
             </div>
 
             {/* Category Filter */}
+            {/*}
             <div className="p-3 border-b border-border">
                 <div className="flex items-center gap-2 mb-2">
                     <Filter className="w-4 h-4 text-muted-foreground" />
@@ -146,6 +147,7 @@ export const SidebarChannelList = ({
                     ))}
                 </div>
             </div>
+            */}
 
             {/* Channels List */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto styled-scrollbar">

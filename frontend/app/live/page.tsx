@@ -11,7 +11,7 @@ import { Channel } from '@/lib/channels-data';
 
 const ChannelsList = () => {
     const [searchQuery, setSearchQuery] = useState("");
-    const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
+    const [selectedCategory, setSelectedCategory] = useState<string>("");
     const { channels, isLoading, error, refresh } = useChannelsContext();
     const filteredChannels = useFilteredChannels( channels, searchQuery, selectedCategory );
     const router = useRouter();

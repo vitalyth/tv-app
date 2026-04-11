@@ -8,7 +8,7 @@ export const useFilteredChannels = ( channels: Channel[], searchQuery: string, s
         return channels.filter((channel) => {
             const matchesSearch = channel.name.toLowerCase().includes(query);
             const matchesCategory =
-                selectedCategory === "הכל" ||
+                selectedCategory === "" ||
                 channel.category === selectedCategory;
 
             return matchesSearch && matchesCategory;

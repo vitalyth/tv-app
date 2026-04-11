@@ -28,7 +28,7 @@ export default function TVChannelsPage() {
 
   // UI state
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
