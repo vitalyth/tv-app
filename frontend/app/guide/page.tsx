@@ -60,7 +60,7 @@ export default function TVGuidePage() {
                     />
 
                     {selectedChannel && (
-                        <div className="absolute w-150 h-85 bottom-5 right-5 z-50">
+                        <div className="absolute w-150 h-85 bottom-5 right-5 z-50" dir="rtl">
                             <VideoPlayer
                                 className="h-full w-full"
                                 channel={selectedChannel}
