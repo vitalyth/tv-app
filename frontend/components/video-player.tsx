@@ -203,7 +203,6 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
     const isHoveringRef = useRef(false)
 
     const showControls = () => {
-        console.log("show controls");
         setShowOverlay(true)
 
         if (hideTimeoutRef.current) {
