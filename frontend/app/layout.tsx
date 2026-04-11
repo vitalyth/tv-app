@@ -32,7 +32,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="he" dir="rtl">
-      <body className="font-sans antialiased">
+      <body suppressHydrationWarning className="font-sans antialiased">
         {children}
         {process.env.NEXT_PUBLIC_VERCEL === "1" && <Analytics />}
       </body>

@@ -245,7 +245,6 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
 
 
     useEffect(() => {
-        console.log('load player', channel);
         if (!streamUrl) return;
         if (!channel || !videoRef.current) return
 
@@ -309,8 +308,13 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
             }
         })
 
-        player.on("loadeddata", () => {
-            addQualitySelector(player)
+        player.on("loadedmetadata", () => {
+            try {
+                if (!player || player.isDisposed?.()) return
+                addQualitySelector(player)
+            } catch (e) {
+                console.warn("Quality selector failed:", e)
+            }
         })
 
         player.on("playing", () => {

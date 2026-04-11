@@ -251,7 +251,7 @@ export default function ProgramGuide({
         }
 
         // nowRight: px from right edge of grid to now line
-        const nowRight = (end - nowSec) * PX_PER_SEC;
+        const nowRight = Math.round((end - nowSec) * PX_PER_SEC);
 
         return { guideStart: start, guideEnd: end, totalGridW: w, totalGridH: h, hourLabels: labels, nowRight };
     }, [dedupedChannels.length, nowSec]);
@@ -398,7 +398,7 @@ export default function ProgramGuide({
                             {/* Now line */}
                             <div
                                 className="absolute top-0 bottom-0 w-0.5 bg-red-500/80 z-20 pointer-events-none"
-                                style={{ right: nowRight }}
+                                style={{ right: `${nowRight}px` }}
                             >
                                 <div className="absolute -top-1 -left-2 z-50 translate-x-1/2 w-2.5 h-2.5 rounded-full bg-red-500 shadow-md shadow-red-900" />
                             </div>

@@ -23,8 +23,6 @@ export default function TVGuidePage() {
     const filteredChannels = useFilteredChannels(channels, searchQuery, selectedCategory);
 
     const handleProgramClick = (prog: any, ch: any, isLive: boolean) => {
-        console.log("program clicked:", prog, ch, isLive);
-
         setSelectedChannel(ch);
         setIsPlayerOpen(true);
     };
