@@ -7,6 +7,7 @@ import ProgramGuide from "@/components/ProgramGuide";
 import dynamic from "next/dynamic";
 import { ChannelsFilters } from "@/components/channels-filters";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
+import { Channel } from "@/lib/channels-data";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then(m => m.VideoPlayer),
@@ -22,7 +23,12 @@ export default function TVGuidePage() {
     const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
     const filteredChannels = useFilteredChannels(channels, searchQuery, selectedCategory);
 
-    const handleProgramClick = (prog: any, ch: any, isLive: boolean) => {
+    const handleProgramClick = (prog: any, ch: Channel, isLive: boolean) => {
+        setSelectedChannel(ch);
+        setIsPlayerOpen(true);
+    };
+
+      const handleChannelClick = (ch: Channel) => {
         setSelectedChannel(ch);
         setIsPlayerOpen(true);
     };
@@ -53,7 +59,7 @@ export default function TVGuidePage() {
                     <ProgramGuide
                         channels={filteredChannels}
                         logoBasePath="/ch/"
-                        onChannelClick={(ch) => console.log("channel clicked:", ch.name)}
+                        onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
                     />
 

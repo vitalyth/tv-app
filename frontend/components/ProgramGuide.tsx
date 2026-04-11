@@ -34,7 +34,7 @@ function formatTime(ts: number): string {
 }
 
 function deduplicateChannels(channels: Channel[]): Channel[] {
-    //return channels; // for now, we want duplicates to test the UI
+    return channels; // for now, we want duplicates to test the UI
 
     const seen = new Set<number>();
     return channels.filter((ch) => {
