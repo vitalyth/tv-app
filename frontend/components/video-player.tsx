@@ -203,6 +203,7 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
     const isHoveringRef = useRef(false)
 
     const showControls = () => {
+        console.log("show controls");
         setShowOverlay(true)
 
         if (hideTimeoutRef.current) {
@@ -368,6 +369,9 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
                 isHoveringRef.current = false
                 showControls() // countdown start
             }}
+            onTouchStart={() => {
+                showControls()
+            }}
             onClick={showControls}
         >
             {/* Header with channel info and close button */}
@@ -382,8 +386,8 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
                 justify-between 
                 transition-opacity 
                 duration-300 
-                ${showOverlay 
-                    ? "opacity-100" 
+                ${showOverlay
+                    ? "opacity-100"
                     : "opacity-0 pointer-events-none"
                 }`
             }>
