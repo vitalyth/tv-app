@@ -5,9 +5,9 @@ from plugin_video_idanplus.resources.lib.epg import GetEPG
 _epg_cache = None
 _last_update = 0
 
-EPG_TTL = 60 * 60 # 1 hour
+EPG_TTL = 30 * 60 # 30 minutes
 
-WINDOW_BACK = 2 * 60 * 60     # 2 hours back
+WINDOW_BACK = 3 * 60 * 60     # 3 hours back
 WINDOW_FORWARD = 12 * 60 * 60 # 12 hours forward
 
 def get_now_epg():
