@@ -43,34 +43,20 @@ export default function TVGuidePage() {
                 />
             </main>
 
-            {/* ✅ FULLSCREEN PLAYER */}
-            <Dialog open={isPlayerOpen} onOpenChange={(open) => !open && handleClose()}>
-                <DialogContent
-                    className="
-                        w-[80vw]! h-[80vh]!
-                        max-w-none!
-                        top-1/2! left-1/2!
-                        translate-x-[-50%]! translate-y-[-50%]!
-                        p-0!
-                        bg-black
-                        flex items-center justify-center
-                    "
-                >
-                    {selectedChannel && (
-                        <div className="w-full h-full flex items-center justify-center">
+            {selectedChannel && (
+                <div className="absolute w-150 h-7! top-10 right-10 flex items-center justify-center z-50">
 
-                            {/* מרכז + יחס תקין */}
-                            <div className="w-full max-w-300 aspect-video">
-                                <VideoPlayer
-                                    channel={selectedChannel}
-                                    onClose={handleClose}
-                                />
-                            </div>
+                    {/* מרכז + יחס תקין */}
+                    <div className="absolute w-full h-full aspect-video">
+                        <VideoPlayer
+                            className="h-100 w-150 object-contain"
+                            channel={selectedChannel}
+                            onClose={handleClose}
+                        />
+                    </div>
 
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+                </div>
+            )}
         </div>
     );
 }

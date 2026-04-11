@@ -75,6 +75,7 @@ const channelPage = () => {
                         <div className="w-full max-w-6xl">
                         {selectedChannel && (
                             <VideoPlayer
+                                className="w-full h-[70vh]"
                                 channel={selectedChannel}
                                 onClose={handleClose}
                             />

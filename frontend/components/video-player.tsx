@@ -1,9 +1,8 @@
 "use client"
 
-import { useRef, useEffect, useState, useCallback } from "react"
-import { X, Radio, AlertCircle, Cast, Airplay } from "lucide-react"
+import { useRef, useEffect, useState } from "react"
+import { X, Radio, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import videojs from "video.js"
 import "videojs-contrib-dash"
 import { type Channel } from "@/lib/channels-data"
@@ -17,7 +16,8 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
 
 interface VideoPlayerProps {
     channel: Channel | null
-    onClose: () => void
+    onClose: () => void,
+    className?: string,
 }
 
 const addQualitySelector = (player: any) => {
@@ -192,15 +192,11 @@ const addQualitySelector = (player: any) => {
     levels.on("change", update)
 }
 
-export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
+export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) => {
     const videoRef = useRef<HTMLDivElement>(null)
     const playerRef = useRef<any>(null)
-    const [isReady, setIsReady] = useState(false)
     const [hasError, setHasError] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
-    const [isCasting, setIsCasting] = useState(false)
-    const [castAvailable, setCastAvailable] = useState(false)
-    const [airplayAvailable, setAirplayAvailable] = useState(false)
     const [streamUrl, setStreamUrl] = useState<string | null>(null);
     const [showOverlay, setShowOverlay] = useState(true);
     const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -219,60 +215,6 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
             setShowOverlay(false)
         }, 3000)
     }
-
-    // Check for casting availability
-    useEffect(() => {
-        // Check for Chromecast
-        const checkChromecast = () => {
-            if (typeof window !== "undefined" && (window as unknown as { chrome?: { cast?: unknown } }).chrome?.cast) {
-                setCastAvailable(true)
-            }
-        }
-
-        // Check for AirPlay (Safari)
-        const checkAirplay = () => {
-            if (typeof window !== "undefined") {
-                const video = document.createElement("video")
-                if ((video as HTMLVideoElement & { webkitShowPlaybackTargetPicker?: unknown }).webkitShowPlaybackTargetPicker) {
-                    setAirplayAvailable(true)
-                }
-            }
-        }
-
-        checkChromecast()
-        checkAirplay()
-
-        // Listen for Chromecast availability
-        window.__onGCastApiAvailable = (isAvailable: boolean) => {
-            setCastAvailable(isAvailable)
-        }
-    }, [])
-
-    // Handle AirPlay
-    const handleAirPlay = useCallback(() => {
-        const videoElement = videoRef.current?.querySelector("video")
-        if (videoElement && (videoElement as HTMLVideoElement & { webkitShowPlaybackTargetPicker?: () => void }).webkitShowPlaybackTargetPicker) {
-            (videoElement as HTMLVideoElement & { webkitShowPlaybackTargetPicker: () => void }).webkitShowPlaybackTargetPicker()
-        }
-    }, [])
-
-    // Handle Chromecast / Remote playback
-    const handleCast = useCallback(async () => {
-        const videoElement = videoRef.current?.querySelector("video")
-        if (!videoElement || !channel) return
-
-        // Try using Remote Playback API first (works on many browsers)
-        if ("remote" in videoElement) {
-            try {
-                const remote = (videoElement as HTMLVideoElement & { remote: { prompt: () => Promise<void> } }).remote
-                await remote.prompt()
-                setIsCasting(true)
-            } catch {
-                // User cancelled or no device available
-                setIsCasting(false)
-            }
-        }
-    }, [channel])
 
     useEffect(() => {
         if (!channel) return;
@@ -309,7 +251,6 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
 
         setHasError(false)
         setIsLoading(true)
-        setIsReady(false)
 
         // Clean up previous player if exists
         if (playerRef.current) {
@@ -358,7 +299,6 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
         })
 
         player.ready(() => {
-            setIsReady(true);
             //player.muted(true);
 
             const playPromise = player.play();
@@ -419,7 +359,7 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
 
     return (
         <div
-            className="relative rounded-xl overflow-hidden bg-black"
+            className={`relative rounded-xl overflow-hidden bg-black ${className || ""}`}
             onMouseEnter={() => {
                 isHoveringRef.current = true
                 showControls()
@@ -431,13 +371,29 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
             onClick={showControls}
         >
             {/* Header with channel info and close button */}
-            <div
-                className={`absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between transition-opacity duration-300 ${showOverlay ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-            >
+            <div className={`
+                absolute 
+                top-0 left-0 right-0 z-10 p-4 
+                bg-linear-to-b 
+                from-black/80 
+                to-transparent 
+                flex 
+                items-center 
+                justify-between 
+                transition-opacity 
+                duration-300 
+                ${showOverlay 
+                    ? "opacity-100" 
+                    : "opacity-0 pointer-events-none"
+                }`
+            }>
+                {/* Channel info */}
                 <div className="flex items-center gap-3">
+                    {/* Channel logo */}
                     <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
                         <span className="text-lg"><img src={`/ch/${channel.logo}`} /></span>
                     </div>
+                    {/* Channel name and current program */}
                     <div>
                         <h3 className="font-semibold text-white">{channel.name}</h3>
                         <div className="flex items-center gap-1.5">
@@ -450,46 +406,7 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {/* AirPlay button (Safari) */}
-                    {airplayAvailable && (
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={handleAirPlay}
-                                        className="text-white hover:bg-white/20"
-                                    >
-                                        <Airplay className="w-5 h-5" />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    <p>AirPlay</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    )}
-
-                    {/* Cast button */}
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={handleCast}
-                                    className={`text-white hover:bg-white/20 ${isCasting ? "text-primary" : ""}`}
-                                >
-                                    <Cast className="w-5 h-5" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>{isCasting ? "מנתק Cast" : "Cast למכשיר"}</p>
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-
+                    {/* Close button */}
                     <Button
                         variant="ghost"
                         size="icon"
@@ -502,7 +419,7 @@ export const VideoPlayer = ({ channel, onClose }: VideoPlayerProps) => {
             </div>
 
             {/* Video.js container */}
-            <div className="relative w-full h-[70vh] bg-black">
+            <div className="relative w-full h-full bg-black">
                 <div data-vjs-player className="absolute inset-0">
                     <div ref={videoRef} className="video-js-container w-full h-full" />
                 </div>
