@@ -18,23 +18,19 @@ export default function TVGuidePage() {
     const { channels, refresh } = useChannelsContext();
     const playerRef = useRef<HTMLDivElement>(null);
     const [selectedChannel, setSelectedChannel] = useState<any>(null);
-    const [isPlayerOpen, setIsPlayerOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const filteredChannels = useFilteredChannels(channels, searchQuery, selectedCategory);
 
     const handleProgramClick = (prog: any, ch: Channel, isLive: boolean) => {
         setSelectedChannel(ch);
-        setIsPlayerOpen(true);
     };
 
       const handleChannelClick = (ch: Channel) => {
         setSelectedChannel(ch);
-        setIsPlayerOpen(true);
     };
 
     const handleClose = () => {
-        setIsPlayerOpen(false);
         setSelectedChannel(null);
     };
 
@@ -87,11 +83,13 @@ export default function TVGuidePage() {
 
             <style jsx global>{`
                 .player-overlay {
-                    position: absolute;
-                    margin-left: auto;
-                    margin-right: auto;
-                    width: 100%;
-                    height: 100%;
+                    position: fixed;
+                    width: 90vw;
+                    height: auto;
+                    aspect-ratio: 16 / 9;
+                    top: 14px;
+                    left: 50%;
+                    transform: translate(-50%);
                     z-index: 50;
                 }
 
@@ -99,6 +97,7 @@ export default function TVGuidePage() {
                     position: fixed;
                     width: 99vw;
                     height: 99vh;
+                    aspect-ratio: 16 / 9;
                     top: 50%;
                     left: 50%;
                     transform: translate(-50%, -50%);
@@ -107,11 +106,14 @@ export default function TVGuidePage() {
 
                 @media (min-width: 500px) {
                     .player-overlay {
-                            width: clamp(400px, 40vw, 700px);
-                            height: auto;
-                            aspect-ratio: 16 / 9;
-                            bottom: 20px;
-                            right: 20px;
+                        position: absolute;
+                        width: clamp(400px, 40vw, 700px);
+                        bottom: 20px;
+                        right: 20px;
+                        z-index: 50;
+                        top: auto;
+                        left: auto;
+                        transform: none;
                     }
                 }
             `}</style>

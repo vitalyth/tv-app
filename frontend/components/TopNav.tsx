@@ -36,7 +36,7 @@ export default function TopNav() {
                 <NavigationMenuItem>
                     <NavigationMenuLink asChild>
                         <Link href="/guide" className={linkClass("/guide")}>
-                            🔴 שידורים חיים
+                            מדריך שידורים
                         </Link>
                     </NavigationMenuLink>
                 </NavigationMenuItem>
@@ -44,11 +44,12 @@ export default function TopNav() {
                 <NavigationMenuItem>
                     <NavigationMenuLink asChild>
                         <Link href="/live" className={linkClass("/live")}>
-                            ▶️ VOD
+                            שידורים חיים
                         </Link>
                     </NavigationMenuLink>
                 </NavigationMenuItem>
 
+                {/*
                 <NavigationMenuItem>
                     <NavigationMenuLink asChild>
                         <Link href="/movies" className={linkClass("/movies")}>
@@ -56,6 +57,7 @@ export default function TopNav() {
                         </Link>
                     </NavigationMenuLink>
                 </NavigationMenuItem>
+                */}
 
             </NavigationMenuList>
         </NavigationMenu>
