@@ -84,10 +84,10 @@ export default function TVGuidePage() {
             <style jsx global>{`
                 .player-overlay {
                     position: fixed;
-                    width: 90vw;
+                    width: 94vw;
                     height: auto;
                     aspect-ratio: 16 / 9;
-                    top: 14px;
+                    top: 90px;
                     left: 50%;
                     transform: translate(-50%);
                     z-index: 50;
