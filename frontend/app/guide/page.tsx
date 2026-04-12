@@ -52,7 +52,6 @@ export default function TVGuidePage() {
             <Header />
 
             <main className="flex-1 flex flex-col w-full px-4 py-4 overflow-hidden">
-
                 <ChannelsFilters
                     searchQuery={searchQuery}
                     setSearchQuery={setSearchQuery}
@@ -61,13 +60,6 @@ export default function TVGuidePage() {
                     onRefresh={refreshNow}
                 />
                 <div dir="ltr" className="relative flex-1 flex flex-col w-full overflow-hidden">
-                    <ProgramGuide
-                        channels={filteredChannels}
-                        logoBasePath="/ch/"
-                        onChannelClick={handleChannelClick}
-                        onProgramClick={handleProgramClick}
-                    />
-
                     {selectedChannel && (
                         <div ref={playerRef} className="player-overlay" dir="rtl">
                             <VideoPlayer
@@ -78,17 +70,24 @@ export default function TVGuidePage() {
                             />
                         </div>
                     )}
+
+                    <ProgramGuide
+                        channels={filteredChannels}
+                        logoBasePath="/ch/"
+                        onChannelClick={handleChannelClick}
+                        onProgramClick={handleProgramClick}
+                    />
                 </div>
             </main>
 
             <style jsx global>{`
                 .player-overlay {
-                    position: fixed;
+                    position: relative;
                     width: 94vw;
                     height: auto;
                     aspect-ratio: 16 / 9;
-                    top: 90px;
                     left: 50%;
+                    margin-bottom: 7px;
                     transform: translate(-50%);
                     z-index: 50;
                 }
@@ -113,6 +112,7 @@ export default function TVGuidePage() {
                         z-index: 50;
                         top: auto;
                         left: auto;
+                        margin: 0;
                         transform: none;
                     }
                 }

@@ -35,7 +35,7 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
 
                 {/* Live indicator + Mobile menu */}
                 <div className="flex items-center gap-3">
-
+<TopNav />
                     {/* Mobile menu button */}
                     {onToggleSidebar &&
                         <Button
@@ -49,7 +49,6 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
                     }
                 </div>
 
-                <TopNav />
             </div>
         </header>
     );
