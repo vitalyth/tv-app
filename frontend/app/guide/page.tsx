@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { useChannelsContext } from "./layout";
 import ProgramGuide from "@/components/ProgramGuide";
@@ -16,7 +16,7 @@ const VideoPlayer = dynamic(
 
 export default function TVGuidePage() {
     const { channels, refresh } = useChannelsContext();
-
+    const playerRef = useRef<HTMLDivElement>(null);
     const [selectedChannel, setSelectedChannel] = useState<any>(null);
     const [isPlayerOpen, setIsPlayerOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -36,6 +36,15 @@ export default function TVGuidePage() {
     const handleClose = () => {
         setIsPlayerOpen(false);
         setSelectedChannel(null);
+    };
+
+    const onResizeFull = () => {
+        console.log("Toggling fullscreen mode");
+        const el = playerRef.current?.classList;
+
+        el?.toggle("player-overlay");
+        el?.toggle("player-overlay-fullscreen");
+
     };
 
     const refreshNow = useCallback(() => {
@@ -64,26 +73,48 @@ export default function TVGuidePage() {
                     />
 
                     {selectedChannel && (
-                        <div className="
-                            absolute 
-                            mx-auto
-                            w-full h-full                            
-                            min-[500px]:w-[clamp(400px,40vw,700px)]
-                            min-[500px]:h-auto
-                            min-[500px]:aspect-video
-                            min-[500px]:bottom-5 
-                            min-[500px]:right-5
-                            z-50" 
-                        dir="rtl">
+                        <div ref={playerRef} className="player-overlay" dir="rtl">
                             <VideoPlayer
                                 className="h-full w-full"
                                 channel={selectedChannel}
                                 onClose={handleClose}
+                                onResize={onResizeFull}
                             />
                         </div>
                     )}
                 </div>
             </main>
+
+            <style jsx global>{`
+                .player-overlay {
+                    position: absolute;
+                    margin-left: auto;
+                    margin-right: auto;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 50;
+                }
+
+                .player-overlay-fullscreen {
+                    position: fixed;
+                    width: 99vw;
+                    height: 99vh;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    z-index: 50;
+                }
+
+                @media (min-width: 500px) {
+                    .player-overlay {
+                            width: clamp(400px, 40vw, 700px);
+                            height: auto;
+                            aspect-ratio: 16 / 9;
+                            bottom: 20px;
+                            right: 20px;
+                    }
+                }
+            `}</style>
         </div>
     );
 }

@@ -17,7 +17,34 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
 interface VideoPlayerProps {
     channel: Channel | null
     onClose: () => void,
+    onResize?: () => void,
     className?: string,
+}
+
+const resizetoFill = (player: any, onResize: () => void) => {
+    const Button = videojs.getComponent("Button") as any
+
+    class ResizeButton extends Button {
+        constructor(player: any, options: any) {
+            super(player, options)
+
+            this.controlText("Resize")
+            this.addClass("vjs-resize-button")
+
+            this.on(["click", "touchstart"], (e: any) => {
+                e.stopPropagation()
+                onResize()
+            })
+        }
+    }
+
+    videojs.registerComponent("ResizeButton", ResizeButton as any)
+
+    player.controlBar.addChild(
+        "ResizeButton",
+        {},
+        player.controlBar.children().length - 1
+    )
 }
 
 const addQualitySelector = (player: any) => {
@@ -192,7 +219,7 @@ const addQualitySelector = (player: any) => {
     levels.on("change", update)
 }
 
-export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) => {
+export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlayerProps) {
     const videoRef = useRef<HTMLDivElement>(null)
     const playerRef = useRef<any>(null)
     const [hasError, setHasError] = useState(false)
@@ -311,9 +338,10 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
         player.on("loadedmetadata", () => {
             try {
                 if (!player || player.isDisposed?.()) return
-                addQualitySelector(player)
+                addQualitySelector(player);
+                onResize && resizetoFill(player, onResize);
             } catch (e) {
-                console.warn("Quality selector failed:", e)
+                console.warn("Failed to add custom controls:", e);
             }
         })
 
@@ -470,6 +498,21 @@ export const VideoPlayer = ({ channel, onClose, className }: VideoPlayerProps) =
 
             {/* Custom styles for Video.js */}
             <style jsx global>{`
+                .vjs-resize-button:before {
+                    content: "⤢"; /* אייקון expand */
+                    font-size: 16px;
+                }
+
+                /* מצב מורחב */
+                .video-js.vjs-expanded {
+                    position: fixed !important;
+                    inset: 0;
+                    width: 100vw !important;
+                    height: 100vh !important;
+                    z-index: 9999;
+                    background: black;
+                }
+
                 .vjs-quality-button:before {
                     content: attr(data-quality);
                     /* SD / HD / 4K */
