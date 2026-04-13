@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Channel } from '@/lib/channels-data';
 import { SidebarChannelList } from '@/components/sidebar-channel-list';
-import { useChannelsContext } from "@/hooks/useChannelsContext";
+import { useChannelsContext } from "@/context/channels-context";
 import { useFilteredChannels } from '@/hooks/useFilteredChannels';
 
 // Load VideoPlayer only on client to avoid SSR issues
@@ -38,7 +38,6 @@ const channelPage = () => {
     };
 
     useEffect(() => {
-        console.log("isSidebarCollapsed:", isSidebarCollapsed);
         sessionStorage.setItem("sidebar-collapsed", String(isSidebarCollapsed));
     }, [isSidebarCollapsed]);
 

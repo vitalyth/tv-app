@@ -3,6 +3,6 @@ import type { NextRequest } from 'next/server';
 
 export function proxy(request: NextRequest) {
     if (request.nextUrl.pathname === '/') {
-        return NextResponse.redirect(new URL('/live', request.url));
+        return NextResponse.redirect(new URL('/guide', request.url));
     }
 }

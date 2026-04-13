@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 import Header from "@/components/Header";
 import { ChannelCard } from '@/components/channel-card';
 import { useRouter } from 'next/navigation';
-import { useChannelsContext } from "@/hooks/useChannelsContext";
+import { useChannelsContext } from "@/context/channels-context";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
 import { ChannelsFilters } from "@/components/channels-filters";
 import { Channel } from '@/lib/channels-data';

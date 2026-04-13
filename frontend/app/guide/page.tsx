@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import Header from "@/components/Header";
-import { useChannelsContext } from "./layout";
+import { useChannelsContext } from "@/context/channels-context";
 import ProgramGuide from "@/components/ProgramGuide";
 import dynamic from "next/dynamic";
 import { ChannelsFilters } from "@/components/channels-filters";
@@ -35,7 +35,6 @@ export default function TVGuidePage() {
     };
 
     const onResizeFull = () => {
-        console.log("Toggling fullscreen mode");
         const el = playerRef.current?.classList;
 
         el?.toggle("player-overlay");
