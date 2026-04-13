@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils"
 import { type Channel, categories } from "@/lib/channels-data"
 import ProgramDisplay from "@/components/program-display"
 import { useEffect, useLayoutEffect, useRef } from "react"
+import { channel } from "process"
+import { useCurrentProgram } from "@/hooks/useCurrentProgram"
 
 interface SidebarChannelListProps {
     channels: Channel[]
@@ -20,7 +22,7 @@ interface SidebarChannelListProps {
     onToggleCollapse: () => void
 }
 
-export const SidebarChannelList = ({
+export function SidebarChannelList({
     channels,
     selectedChannel,
     selectedCategory,
@@ -30,9 +32,10 @@ export const SidebarChannelList = ({
     onCategoryChange,
     onSearchChange,
     onToggleCollapse,
-}: SidebarChannelListProps) => {
+}: SidebarChannelListProps){
 
     const scrollRef = useRef<HTMLDivElement>(null);
+    const currentProgram = useCurrentProgram(selectedChannel?.programs);
 
     // Restore scroll position on mount and save on unmount
     useLayoutEffect(() => {
@@ -189,7 +192,7 @@ export const SidebarChannelList = ({
                                             {channel.name}
                                         </h3>
                                         <p className="text-xs text-muted-foreground">
-                                            <ProgramDisplay program={channel.programs?.[0]} />
+                                            <ProgramDisplay program={currentProgram || channel.programs?.[0]} />
                                         </p>
                                     </div>
 

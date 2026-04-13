@@ -9,6 +9,7 @@ import { type Channel } from "@/lib/channels-data"
 import { channelService } from "@/lib/services/channel-service";
 import { api } from "@/lib/api";
 import ProgramDisplay from "@/components/program-display"
+import { useCurrentProgram } from "@/hooks/useCurrentProgram";
 import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
@@ -228,9 +229,10 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
     const [streamUrl, setStreamUrl] = useState<string | null>(null);
     const [showOverlay, setShowOverlay] = useState(true);
     const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const isHoveringRef = useRef(false)
+    const isHoveringRef = useRef(false);
+    const currentProgram = useCurrentProgram(channel?.programs);
 
-    const showControls = () => {
+    function showControls() {
         setShowOverlay(true)
 
         if (hideTimeoutRef.current) {
@@ -437,7 +439,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                 <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                             </span>
-                            <span className="text-xs"><ProgramDisplay program={channel.programs?.[0]} /></span>
+                            <span className="text-xs"><ProgramDisplay program={currentProgram || channel.programs?.[0]} /></span>
                         </div>
                     </div>
                 </div>
