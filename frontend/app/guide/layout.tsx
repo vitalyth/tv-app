@@ -1,6 +1,6 @@
 import { ChannelsProvider } from "@/context/channels-context";
 
-export default function LiveLayout({ children }: { children: React.ReactNode }) {
+export default function GuideLayout({ children }: { children: React.ReactNode }) {
     return (
         <ChannelsProvider>
             {children}

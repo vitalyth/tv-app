@@ -9,6 +9,7 @@ import { type Channel } from "@/lib/channels-data"
 import { channelService } from "@/lib/services/channel-service";
 import { api } from "@/lib/api";
 import ProgramDisplay from "@/components/program-display"
+import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
     require("videojs-contrib-quality-levels")

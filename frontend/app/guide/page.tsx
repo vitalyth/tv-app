@@ -14,7 +14,7 @@ const VideoPlayer = dynamic(
     { ssr: false }
 );
 
-export default function TVGuidePage() {
+export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
     const playerRef = useRef<HTMLDivElement>(null);
     const [selectedChannel, setSelectedChannel] = useState<any>(null);
