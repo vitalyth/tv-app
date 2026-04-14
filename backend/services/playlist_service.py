@@ -34,6 +34,7 @@ def generate_playlist(base_url):
             tvgID=channel["tvgID"]
         )
 
+        '''
         stream_url = None
         referer = None
 
@@ -70,8 +71,13 @@ def generate_playlist(base_url):
             "url": stream_url,
             "referer": referer or ""
         }
+        '''
 
-        proxy_url = f"{base_url}/proxy?{urlencode(params)}"
+        params = {
+            "channel_id": ch.channelID
+        }
+
+        proxy_url = f"{base_url}/stream?{urlencode(params)}"
         logo_base = remove_api_prefix(base_url)
         logo = f"{logo_base}/ch/{ch.logo}"
 

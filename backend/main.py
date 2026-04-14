@@ -92,7 +92,6 @@ def proxy(request: Request, url: str, referer: str = None):
 
 @app.get("/epg.xml")
 def epg_xml():
-    #return get_epg()
     xml = epg_service.get_epg_xml()
     return Response(content=xml, media_type="application/xml")
 
