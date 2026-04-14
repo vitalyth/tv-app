@@ -1,9 +1,12 @@
 import time
+import logging
 from urllib.parse import urlparse, urlencode
 from plugin_video_idanplus.resources import main as idan_main
 from models.schemas import Channel
 from services.stream_service import get_stream
 from services.cache_service import get as cache_get, set as cache_set
+
+logger = logging.getLogger(__name__)
 
 CACHE_TTL = 30 # 30 seconds - can be adjusted based on performance needs and stream stability
 
@@ -56,7 +59,8 @@ def generate_playlist(base_url):
                     "time": now
                 })
 
-            except Exception:
+            except Exception as e:
+                logger.error(f"Failed to get stream for channel {ch.channelID} ({ch.name}): {e}", exc_info=True)
                 continue
 
         if not stream_url:

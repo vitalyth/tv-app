@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from services.channel_service import get_live_channels
@@ -77,7 +77,7 @@ def live_channel(channel: Channel):
     return {"stream": get_stream(channel)}
 
 @app.get("/stream")
-def stream(request: Request, channel_id: str):
+def stream(request: Request, channel_id: str = Query(..., min_length=1, max_length=50, regex="^[a-zA-Z0-9_-]+$")):
     channel_data = common.GetChannel(channel_id)
     channel = Channel.model_validate(channel_data)
     channel.id = channel_id
