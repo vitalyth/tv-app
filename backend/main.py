@@ -7,12 +7,44 @@ from services.proxy_service import handle_proxy
 from services.epg_service_ext import get_epg, EPGService
 from services.playlist_service import generate_playlist
 import os
+import socket
 from models.schemas import Channel
 from plugin_video_idanplus.resources import main as idan_main
 from plugin_video_idanplus.resources.lib import common, iptv, epg
 from config import APP_VERSION
 
+def get_local_addresses(port: int = 8001) -> list[str]:
+    """Auto-detect server's IP and hostname addresses"""
+    origins = [
+        "http://localhost:3000",
+    ]
+    
+    try:
+        # Get hostname
+        hostname = socket.gethostname()
+        origins.append(f"http://{hostname}:{port}")
+        
+        # Get local IP (connect to external host and check which IP was used)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        
+        origins.append(f"http://{local_ip}:{port}")
+        
+        print(f"✓ Auto-detected server addresses: {local_ip}, {hostname}")
+    except Exception as e:
+        print(f"⚠ Could not auto-detect server addresses: {e}")
+    
+    return origins
+
 ROOT_PATH = os.getenv("ROOT_PATH", "")
+
+# CORS configuration - auto-detects IP/hostname or use CORS_ORIGINS env var
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    ",".join(get_local_addresses(port=8001))
+).split(",")
 
 app = FastAPI(
     title="TV App API",
@@ -26,10 +58,10 @@ epg_service = EPGService(ttl_seconds=3600)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in CORS_ORIGINS],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+    allow_headers=["*"],  # Need all headers for streaming (Range, User-Agent, etc)
 )
 
 @app.get("/version")
