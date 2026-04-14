@@ -503,8 +503,9 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             <style jsx global>{`
                 .vjs-resize-button:before {
                     content: "⤢";
-                    font-size: 25px;
+                    font-size: 18px;
                     cursor: pointer;
+                    font-weight: 600;
                 }
 
                 /* מצב מורחב */
@@ -520,9 +521,10 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                 .vjs-quality-button:before {
                     content: attr(data-quality);
                     /* SD / HD / 4K */
-                    font-size: 12px;
-                    font-weight: 600;
+                    font-size: 10px;
+                    font-weight: 700;
                     cursor: pointer;
+                    padding-top: 7px;
                 }
 
                 .vjs-quality-menu {
