@@ -1,14 +1,7 @@
-import time
-import logging
-from urllib.parse import urlparse, urlencode
+
+from urllib.parse import urlencode
 from plugin_video_idanplus.resources import main as idan_main
 from models.schemas import Channel
-from services.stream_service import get_stream
-from services.cache_service import get as cache_get, set as cache_set
-
-logger = logging.getLogger(__name__)
-
-CACHE_TTL = 30 # 30 seconds - can be adjusted based on performance needs and stream stability
 
 def remove_api_prefix(url: str) -> str:
     return url.replace("/api", "", 1)
@@ -16,7 +9,6 @@ def remove_api_prefix(url: str) -> str:
 def generate_playlist(base_url):
     channels = idan_main.GetUserChannels(type='tv')
     lines = ["#EXTM3U"]
-    now = time.time()
 
     for channel in channels:
         ch = Channel(
@@ -34,55 +26,10 @@ def generate_playlist(base_url):
             tvgID=channel["tvgID"]
         )
 
-        '''
-        stream_url = None
-        referer = None
+        channel_id = ch.channelID
 
-        cached = cache_get(ch.channelID)
+        proxy_url = f"{base_url}/stream?{urlencode({'channel_id': channel_id})}"
 
-        if cached and now - cached["time"] < CACHE_TTL:
-            stream_url = cached["url"]
-            referer = cached.get("referer")
-        else:
-            try:
-                stream_url = get_stream(ch)
-
-                if ch.linkDetails:
-                    referer = ch.linkDetails.get("referer")
-
-                if not referer and stream_url:
-                    parsed = urlparse(stream_url)
-                    referer = f"{parsed.scheme}://{parsed.netloc}/"
-
-                cache_set(ch.channelID, {
-                    "url": stream_url,
-                    "referer": referer,
-                    "time": now
-                })
-
-            except Exception as e:
-                logger.error(f"Failed to get stream for channel {ch.channelID} ({ch.name}): {e}", exc_info=True)
-                continue
-
-        if not stream_url:
-            continue
-
-        params = {
-            "url": stream_url,
-            "referer": referer or ""
-        }
-        '''
-
-        if ch.linkDetails:
-            stream_url = ch.linkDetails.get("link")
-            referer = ch.linkDetails.get("referer")
-
-        params = {
-            "url": stream_url,
-            "referer": referer or ""
-        }
-
-        proxy_url = f"{base_url}/proxy?{urlencode(params)}"
         logo_base = remove_api_prefix(base_url)
         logo = f"{logo_base}/ch/{ch.logo}"
 
