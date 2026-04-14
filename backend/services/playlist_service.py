@@ -5,7 +5,7 @@ from models.schemas import Channel
 from services.stream_service import get_stream
 from services.cache_service import get as cache_get, set as cache_set
 
-CACHE_TTL = 120 # seconds
+CACHE_TTL = 30 # 30 seconds - can be adjusted based on performance needs and stream stability
 
 def remove_api_prefix(url: str) -> str:
     return url.replace("/api", "", 1)
