@@ -35,6 +35,17 @@ const resizetoFill = (player: any, onResize: () => void) => {
 
             this.on(["click", "touchstart"], (e: any) => {
                 e.stopPropagation()
+
+                if (player.isFullscreen?.()) {
+                    player.exitFullscreen()
+                    return
+                }
+
+                if (document.fullscreenElement) {
+                    document.exitFullscreen()
+                    return
+                }
+
                 onResize()
             })
         }
@@ -54,7 +65,8 @@ const addQualitySelector = (player: any) => {
 
     class QualityButton extends Button {
         menu: HTMLDivElement
-        handleDocumentClick: (e: MouseEvent) => void
+        handleDocumentPointerDown: (e: Event) => void
+        handleMouseLeave: () => void
 
         constructor(player: any, options: any) {
             super(player, options)
@@ -65,36 +77,53 @@ const addQualitySelector = (player: any) => {
             // Create menu container
             this.menu = document.createElement("div")
             this.menu.className = "vjs-quality-menu hidden"
-            player.el().appendChild(this.menu)
+            this.el().appendChild(this.menu)
 
-            // Bind and register outside click handler
-            this.handleDocumentClick = this.onDocumentClick.bind(this)
-            document.addEventListener("click", this.handleDocumentClick)
+            this.handleDocumentPointerDown = this.onDocumentPointerDown.bind(this)
+            this.handleMouseLeave = this.hideMenu.bind(this)
+
+            document.addEventListener("pointerdown", this.handleDocumentPointerDown)
+            this.el().addEventListener("mouseleave", this.handleMouseLeave)
 
             this.updateMenu()
+        }
+
+        showMenu() {
+            this.menu.classList.remove("hidden")
+        }
+
+        hideMenu() {
+            this.menu.classList.add("hidden")
         }
 
         // Toggle menu visibility
         handleClick(event?: Event) {
             event?.stopPropagation()
-            this.menu.classList.toggle("hidden")
+
+            if (this.menu.classList.contains("hidden")) {
+                this.showMenu()
+                return
+            }
+
+            this.hideMenu()
         }
 
-        // Close menu when clicking outside
-        onDocumentClick(e: MouseEvent) {
+        // Close menu when clicking/touching outside
+        onDocumentPointerDown(e: Event) {
             const target = e.target as Node
 
             const clickedInsideMenu = this.menu.contains(target)
             const clickedButton = this.el().contains(target)
 
             if (!clickedInsideMenu && !clickedButton) {
-                this.menu.classList.add("hidden")
+                this.hideMenu()
             }
         }
 
         // Cleanup listeners
         dispose() {
-            document.removeEventListener("click", this.handleDocumentClick)
+            document.removeEventListener("pointerdown", this.handleDocumentPointerDown)
+            this.el().removeEventListener("mouseleave", this.handleMouseLeave)
             super.dispose()
         }
 
@@ -144,10 +173,12 @@ const addQualitySelector = (player: any) => {
 
             if (isActive) item.classList.add("active")
 
-            item.onclick = () => {
+            item.onclick = (event) => {
+                event.preventDefault()
+                event.stopPropagation()
                 onClick()
                 this.updateMenu()
-                this.handleClick()
+                this.hideMenu()
             }
 
             return item
@@ -164,10 +195,10 @@ const addQualitySelector = (player: any) => {
             const currentHeight = this.getCurrentHeight(levels)
 
             // Update button label (SD / HD / 4K)
-            this.el().setAttribute(
-                "data-quality",
-                this.getQualityLabel(currentHeight)
-            )
+            const qualityLabel = this.getQualityLabel(currentHeight)
+
+            this.el().setAttribute("data-quality", qualityLabel)
+            this.el().classList.toggle("is-hd", qualityLabel === "HD")
 
             // Auto option with current resolution indication
             const autoLabel = currentHeight
@@ -203,10 +234,15 @@ const addQualitySelector = (player: any) => {
 
     videojs.registerComponent("QualityButton", QualityButton as any)
 
+    const playToggle = player.controlBar.getChild("PlayToggle")
+    const playToggleIndex = playToggle
+        ? player.controlBar.children().indexOf(playToggle)
+        : 0
+
     player.controlBar.addChild(
         "QualityButton",
         {},
-        player.controlBar.children().length - 1
+        playToggleIndex + 1
     )
 
     // Sync UI with player changes
@@ -502,8 +538,9 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             {/* Custom styles for Video.js */}
             <style jsx global>{`
                 .vjs-resize-button:before {
-                    content: "⤢";
-                    font-size: 18px;
+                    content: "▣";
+                    font-size: 1.8em;
+                    line-height: 1.8;
                     cursor: pointer;
                     font-weight: 600;
                 }
@@ -521,16 +558,25 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                 .vjs-quality-button:before {
                     content: attr(data-quality);
                     /* SD / HD / 4K */
-                    font-size: 10px;
+                    font-size: 1.4em;
+                    line-height: 1.8;
                     font-weight: 700;
                     cursor: pointer;
-                    padding-top: 7px;
+                }
+
+                .vjs-quality-button {
+                    position: relative;
+                }
+
+                .vjs-quality-button.is-hd:before {
+                    color: #e53935;
                 }
 
                 .vjs-quality-menu {
                     position: absolute;
-                    bottom: 30px;
-                    right: 18px;
+                    bottom: 100%;
+                    left: 50%;
+                    transform: translateX(-50%);
                     background: rgba(56, 54, 54, 0.75);
                     color: #fff;
                     padding: 6px 0;
