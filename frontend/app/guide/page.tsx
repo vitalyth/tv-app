@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 import { ChannelsFilters } from "@/components/channels-filters";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
 import { Channel } from "@/lib/channels-data";
+import { useDraggable } from "@/hooks/useDraggable";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then(m => m.VideoPlayer),
@@ -20,31 +21,65 @@ export default function GuidePage() {
     const [selectedChannel, setSelectedChannel] = useState<any>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
     const filteredChannels = useFilteredChannels(channels, searchQuery, selectedCategory);
 
-    const handleProgramClick = (prog: any, ch: Channel, isLive: boolean) => {
+    // ── Drag ──────────────────────────────────────────────────────────────────
+    const { position, isDragging, dragHandleProps, restorePosition } = useDraggable(
+        playerRef,
+        !!selectedChannel && !isFullscreen // disable drag when fullscreen
+    );
+
+    // ── Handlers ──────────────────────────────────────────────────────────────
+    const handleProgramClick = (prog: any, ch: Channel) => {
         setSelectedChannel(ch);
+        restorePosition();
     };
 
-      const handleChannelClick = (ch: Channel) => {
+    const handleChannelClick = (ch: Channel) => {
         setSelectedChannel(ch);
+        restorePosition();
     };
 
     const handleClose = () => {
         setSelectedChannel(null);
+        setIsFullscreen(false);
     };
 
     const onResizeFull = () => {
-        const el = playerRef.current?.classList;
+        setIsFullscreen((prev) => {
+            const next = !prev;
 
-        el?.toggle("player-overlay");
-        el?.toggle("player-overlay-fullscreen");
+            if (prev === true && next === false) {
+                restorePosition();
+            }
 
+            return next;
+        });
     };
 
     const refreshNow = useCallback(() => {
         refresh();
     }, [refresh]);
+
+    // ── Player position style ─────────────────────────────────────────────────
+    // On mobile (position===null) we fall back to CSS classes.
+    // On desktop, once the user has dragged, position is a {x,y} fixed coordinate.
+    const playerStyle: React.CSSProperties =
+        position && !isFullscreen
+            ? {
+                position: "fixed",
+                top: 0,
+                left: 0,
+                transform: "none",
+                zIndex: 50,
+                transition: isDragging ? "none" : "box-shadow 0.2s",
+                boxShadow: isDragging
+                    ? "0 24px 64px rgba(0,0,0,0.7)"
+                    : "0 8px 32px rgba(0,0,0,0.5)",
+            }
+            : {};
 
     return (
         <div className="h-screen flex flex-col bg-background">
@@ -58,9 +93,34 @@ export default function GuidePage() {
                     setSelectedCategory={setSelectedCategory}
                     onRefresh={refreshNow}
                 />
+
                 <div dir="ltr" className="relative flex-1 flex flex-col w-full overflow-hidden">
+
                     {selectedChannel && (
-                        <div ref={playerRef} className="player-overlay" dir="rtl">
+                        <div
+                            ref={playerRef}
+                            dir="rtl"
+                            style={playerStyle}
+                            className={
+                                // Only apply CSS classes when not dragged (position===null)
+                                position && !isFullscreen
+                                    ? "player-dragged"
+                                    : isFullscreen
+                                        ? "player-overlay-fullscreen"
+                                        : "player-overlay"
+                            }
+                        >
+                            {/* ── Drag handle bar ── */}
+                            {!isFullscreen && (
+                                <div
+                                    {...dragHandleProps}
+                                    className="player-drag-handle"
+                                    title="גרור להזזה"
+                                >
+                                    <span className="drag-line" />
+                                </div>
+                            )}
+
                             <VideoPlayer
                                 className="h-full w-full"
                                 channel={selectedChannel}
@@ -80,6 +140,7 @@ export default function GuidePage() {
             </main>
 
             <style jsx global>{`
+                /* ── Mobile: centered below filters ── */
                 .player-overlay {
                     position: relative;
                     width: 94vw;
@@ -89,8 +150,40 @@ export default function GuidePage() {
                     margin-bottom: 7px;
                     transform: translate(-50%);
                     z-index: 50;
+                    border-radius: 10px;
+                    overflow: hidden;
                 }
 
+                /* ── Desktop default: bottom-right corner ── */
+                @media (min-width: 500px) {
+                    .player-overlay {
+                        position: absolute;
+                        width: clamp(400px, 40vw, 700px);
+                        height: auto;
+                        aspect-ratio: 16 / 9;
+                        bottom: 20px;
+                        right: 20px;
+                        left: auto;
+                        top: auto;
+                        margin: 0;
+                        transform: none;
+                        border-radius: 10px;
+                        overflow: hidden;
+                        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+                    }
+                }
+
+                /* ── After first drag: fixed position (controlled by inline style) ── */
+                .player-dragged {
+                    width: clamp(400px, 40vw, 700px);
+                    height: auto;
+                    aspect-ratio: 16 / 9;
+                    border-radius: 10px;
+                    overflow: hidden;
+                    will-change: transform;
+                }
+
+                /* ── Fullscreen ── */
                 .player-overlay-fullscreen {
                     position: fixed;
                     width: 99vw;
@@ -100,20 +193,42 @@ export default function GuidePage() {
                     left: 50%;
                     transform: translate(-50%, -50%);
                     z-index: 50;
+                    border-radius: 0;
+                    overflow: hidden;
                 }
 
-                @media (min-width: 500px) {
-                    .player-overlay {
-                        position: absolute;
-                        width: clamp(400px, 40vw, 700px);
-                        bottom: 20px;
-                        right: 20px;
-                        z-index: 50;
-                        top: auto;
-                        left: auto;
-                        margin: 0;
-                        transform: none;
-                    }
+                /* ── Drag handle ── */
+                .player-drag-handle {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    height: 28px;
+                    background: linear-gradient(
+                        to bottom,
+                        rgba(0, 0, 0, 0.65) 0%,
+                        rgba(0, 0, 0, 0.0)  100%
+                    );
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 50;
+                    border-radius: 10px 10px 0 0;
+                    opacity: 0;
+                    transition: opacity 0.2s;
+                }
+
+                .player-dragged:hover .player-drag-handle,
+                .player-overlay:hover .player-drag-handle {
+                    opacity: 1;
+                }
+
+                .drag-line {
+                    width: 70px;
+                    height: 4px;
+                    background: rgba(255,255,255,0.7);
+                    border-radius: 2px;
+                    pointer-events: none;
                 }
             `}</style>
         </div>
