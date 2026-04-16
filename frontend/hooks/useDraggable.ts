@@ -13,7 +13,7 @@ interface UseDraggableReturn {
         onTouchStart: (e: React.TouchEvent) => void;
         style: React.CSSProperties;
     };
-    restorePosition: () => void;
+    restorePosition: (reset?: boolean) => void;
 }
 
 export function useDraggable(
@@ -114,66 +114,75 @@ export function useDraggable(
 
     // ── Touch ───────────────────────────────────────────
     const onTouchStart = useCallback((e: React.TouchEvent) => {
-      if (!enabled || window.innerWidth < 500 || !containerRef.current) return;
-  
-      const touch = e.touches[0];
-      const rect = containerRef.current.getBoundingClientRect();
-  
-      dragStart.current = {
-        mouseX: touch.clientX,
-        mouseY: touch.clientY,
-        elemX: rect.left,
-        elemY: rect.top,
-      };
-  
-      setPosition({ x: rect.left, y: rect.top });
-  
-      setIsDragging(true);
+        if (!enabled || window.innerWidth < 500 || !containerRef.current) return;
+
+        const touch = e.touches[0];
+        const rect = containerRef.current.getBoundingClientRect();
+
+        dragStart.current = {
+            mouseX: touch.clientX,
+            mouseY: touch.clientY,
+            elemX: rect.left,
+            elemY: rect.top,
+        };
+
+        setPosition({ x: rect.left, y: rect.top });
+
+        setIsDragging(true);
     }, [enabled, containerRef]);
 
-    const restorePosition = useCallback(() => {
+    const restorePosition = useCallback((reset = false) => {
+        if (reset) {
+            lastPos.current = null;
+            setPosition(null);
+            if (containerRef.current) {
+                containerRef.current.style.transform = "";
+            }
+            return;
+        }
+
         if (lastPos.current) {
             const pos = lastPos.current;
             setPosition(pos);
             updatePosition(pos.x, pos.y);
         }
-    }, []);
+    }, [containerRef, updatePosition]);
 
     useEffect(() => {
-      const onTouchMove = (e: TouchEvent) => {
-        if (!dragStart.current) return;
-  
-        e.preventDefault();
-  
-        const touch = e.touches[0];
-  
-        const dx = touch.clientX - dragStart.current.mouseX;
-        const dy = touch.clientY - dragStart.current.mouseY;
-  
-        const pos = clamp(
-          dragStart.current.elemX + dx,
-          dragStart.current.elemY + dy
-        );
-  
-        updatePosition(pos.x, pos.y);
-      };
-  
-      const onTouchEnd = () => {
-        if (dragStart.current && lastPos.current) {
-          setPosition(lastPos.current);
-        }
-  
-        dragStart.current = null;
-        setIsDragging(false);
-      };
-  
-      window.addEventListener("touchmove", onTouchMove, { passive: false });
-      window.addEventListener("touchend", onTouchEnd);
-  
-      return () => {
-        window.removeEventListener("touchmove", onTouchMove);
-        window.removeEventListener("touchend", onTouchEnd);
-      };
+        const onTouchMove = (e: TouchEvent) => {
+            if (!dragStart.current) return;
+
+            e.preventDefault();
+
+            const touch = e.touches[0];
+
+            const dx = touch.clientX - dragStart.current.mouseX;
+            const dy = touch.clientY - dragStart.current.mouseY;
+
+            const pos = clamp(
+                dragStart.current.elemX + dx,
+                dragStart.current.elemY + dy
+            );
+
+            updatePosition(pos.x, pos.y);
+        };
+
+        const onTouchEnd = () => {
+            if (dragStart.current && lastPos.current) {
+                setPosition(lastPos.current);
+            }
+
+            dragStart.current = null;
+            setIsDragging(false);
+        };
+
+        window.addEventListener("touchmove", onTouchMove, { passive: false });
+        window.addEventListener("touchend", onTouchEnd);
+
+        return () => {
+            window.removeEventListener("touchmove", onTouchMove);
+            window.removeEventListener("touchend", onTouchEnd);
+        };
     }, [clamp, updatePosition]);
 
     return {

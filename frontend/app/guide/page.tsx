@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "@/components/Header";
 import { useChannelsContext } from "@/context/channels-context";
 import ProgramGuide from "@/components/ProgramGuide";
@@ -24,11 +24,12 @@ export default function GuidePage() {
     const [isFullscreen, setIsFullscreen] = useState(false);
 
     const filteredChannels = useFilteredChannels(channels, searchQuery, selectedCategory);
+    const [isMobile, setIsMobile] = useState(false);
 
     // ── Drag ──────────────────────────────────────────────────────────────────
     const { position, isDragging, dragHandleProps, restorePosition } = useDraggable(
         playerRef,
-        !!selectedChannel && !isFullscreen // disable drag when fullscreen
+        !!selectedChannel && !isFullscreen && !isMobile  // disable drag when fullscreen and mobile (width < 500)
     );
 
     // ── Handlers ──────────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ export default function GuidePage() {
     // On mobile (position===null) we fall back to CSS classes.
     // On desktop, once the user has dragged, position is a {x,y} fixed coordinate.
     const playerStyle: React.CSSProperties =
-        position && !isFullscreen
+        position && !isFullscreen && !isMobile
             ? {
                 position: "fixed",
                 top: 0,
@@ -80,6 +81,37 @@ export default function GuidePage() {
                     : "0 8px 32px rgba(0,0,0,0.5)",
             }
             : {};
+
+    useEffect(() => {
+        const handleResize = () => {
+            if (window.innerWidth < 500) {
+                restorePosition(true); // reset drag
+            }
+        };
+
+        window.addEventListener("resize", handleResize);
+
+        return () => window.removeEventListener("resize", handleResize);
+    }, [restorePosition]);
+
+
+    useEffect(() => {
+        if (isMobile) {
+            restorePosition(true);
+        }
+    }, [isMobile, restorePosition]);
+
+
+    useEffect(() => {
+        const check = () => {
+            setIsMobile(window.innerWidth < 500);
+        };
+
+        check(); // initial
+
+        window.addEventListener("resize", check);
+        return () => window.removeEventListener("resize", check);
+    }, []);
 
     return (
         <div className="h-screen flex flex-col bg-background">
@@ -102,8 +134,7 @@ export default function GuidePage() {
                             dir="rtl"
                             style={playerStyle}
                             className={
-                                // Only apply CSS classes when not dragged (position===null)
-                                position && !isFullscreen
+                                position && !isFullscreen && !isMobile
                                     ? "player-dragged"
                                     : isFullscreen
                                         ? "player-overlay-fullscreen"
@@ -195,6 +226,12 @@ export default function GuidePage() {
                     z-index: 50;
                     border-radius: 0;
                     overflow: hidden;
+                }
+
+                @media (max-width: 500px) {
+                    .player-drag-handle {
+                        display: none;
+                    }
                 }
 
                 /* ── Drag handle ── */
