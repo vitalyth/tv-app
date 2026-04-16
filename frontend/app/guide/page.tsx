@@ -84,8 +84,28 @@ export default function GuidePage() {
 
     useEffect(() => {
         const handleResize = () => {
+            if (!playerRef.current) return;
+
+            // mobile → reset
             if (window.innerWidth < 500) {
-                restorePosition(true); // reset drag
+                restorePosition(true);
+                return;
+            }
+
+            // check if out of the screeen
+            const rect = playerRef.current.getBoundingClientRect();
+
+            const corrected = {
+                x: Math.max(0, Math.min(rect.left, window.innerWidth - rect.width)),
+                y: Math.max(0, Math.min(rect.top, window.innerHeight - rect.height)),
+            };
+
+            if (
+                rect.left !== corrected.x ||
+                rect.top !== corrected.y
+            ) {
+                playerRef.current.style.transform =
+                    `translate(${corrected.x}px, ${corrected.y}px)`;
             }
         };
 
