@@ -86,13 +86,12 @@ export default function GuidePage() {
         const handleResize = () => {
             if (!playerRef.current) return;
 
-            // mobile → reset
-            if (window.innerWidth < 500) {
+            // use ONE source of truth
+            if (isMobile) {
                 restorePosition(true);
                 return;
             }
 
-            // check if out of the screeen
             const rect = playerRef.current.getBoundingClientRect();
 
             const corrected = {
@@ -112,7 +111,7 @@ export default function GuidePage() {
         window.addEventListener("resize", handleResize);
 
         return () => window.removeEventListener("resize", handleResize);
-    }, [restorePosition]);
+    }, [restorePosition, isMobile]);
 
 
     useEffect(() => {
@@ -123,14 +122,26 @@ export default function GuidePage() {
 
 
     useEffect(() => {
-        const check = () => {
-            setIsMobile(window.innerWidth < 500);
+        const media = window.matchMedia("(max-width: 499px)");
+
+        const update = () => {
+            const matches = media.matches;
+
+            console.log("matchMedia:", matches, "width:", window.innerWidth);
+
+            setIsMobile(matches);
         };
 
-        check(); // initial
+        update();
 
-        window.addEventListener("resize", check);
-        return () => window.removeEventListener("resize", check);
+        // BOTH listeners
+        media.addEventListener("change", update);
+        window.addEventListener("resize", update);
+
+        return () => {
+            media.removeEventListener("change", update);
+            window.removeEventListener("resize", update);
+        };
     }, []);
 
     return (
