@@ -60,24 +60,44 @@ export function useDraggable(
         });
     }, [containerRef]);
 
-    // ── Mouse ───────────────────────────────────────────
-    const onMouseDown = useCallback((e: React.MouseEvent) => {
-        if (!enabled || window.innerWidth < 500 || !containerRef.current) return;
+    const startDrag = useCallback((clientX: number, clientY: number) => {
+        if (!enabled || !containerRef.current) return;
 
-        e.preventDefault();
+        containerRef.current.getBoundingClientRect();
 
         const rect = containerRef.current.getBoundingClientRect();
 
+        const startX =
+            lastPos.current?.x ??
+            position?.x ??
+            Math.round(rect.left);
+
+        const startY =
+            lastPos.current?.y ??
+            position?.y ??
+            Math.round(rect.top);
+
         dragStart.current = {
-            mouseX: e.clientX,
-            mouseY: e.clientY,
-            elemX: Math.round(rect.left),
-            elemY: Math.round(rect.top),
+            mouseX: clientX,
+            mouseY: clientY,
+            elemX: startX,
+            elemY: startY,
         };
 
-        setPosition({ x: rect.left, y: rect.top });
+        lastPos.current = { x: startX, y: startY };
+
+        containerRef.current.style.transform =
+            `translate(${startX}px, ${startY}px)`;
+
+        setPosition({ x: startX, y: startY });
         setIsDragging(true);
-    }, [enabled, containerRef]);
+    }, [enabled, containerRef, position]);
+
+    // ── Mouse ───────────────────────────────────────────
+    const onMouseDown = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        startDrag(e.clientX, e.clientY);
+    }, [startDrag]);
 
     useEffect(() => {
         const onMouseMove = (e: MouseEvent) => {
@@ -114,22 +134,9 @@ export function useDraggable(
 
     // ── Touch ───────────────────────────────────────────
     const onTouchStart = useCallback((e: React.TouchEvent) => {
-        if (!enabled || window.innerWidth < 500 || !containerRef.current) return;
-
         const touch = e.touches[0];
-        const rect = containerRef.current.getBoundingClientRect();
-
-        dragStart.current = {
-            mouseX: touch.clientX,
-            mouseY: touch.clientY,
-            elemX: rect.left,
-            elemY: rect.top,
-        };
-
-        setPosition({ x: rect.left, y: rect.top });
-
-        setIsDragging(true);
-    }, [enabled, containerRef]);
+        startDrag(touch.clientX, touch.clientY);
+    }, [startDrag]);
 
     const restorePosition = useCallback((reset = false) => {
         if (reset) {

@@ -70,15 +70,15 @@ export default function GuidePage() {
     const playerStyle: React.CSSProperties =
         position && !isFullscreen && !isMobile
             ? {
-                position: "fixed",
-                top: 0,
-                left: 0,
-                transform: "none",
-                zIndex: 50,
-                transition: isDragging ? "none" : "box-shadow 0.2s",
-                boxShadow: isDragging
-                    ? "0 24px 64px rgba(0,0,0,0.7)"
-                    : "0 8px 32px rgba(0,0,0,0.5)",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        transform: "none",
+        zIndex: 50,
+        transition: isDragging ? "none" : "box-shadow 0.2s",
+        boxShadow: isDragging
+            ? "0 24px 64px rgba(0,0,0,0.7)"
+            : "0 8px 32px rgba(0,0,0,0.5)",
             }
             : {};
 
