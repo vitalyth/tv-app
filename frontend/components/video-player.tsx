@@ -447,7 +447,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             {/* Header with channel info and close button */}
             <div className={`
                 absolute 
-                top-0 left-0 right-0 z-10 p-4 
+                top-0 left-0 right-0 z-20 p-4 
                 bg-linear-to-b 
                 from-black/80 
                 to-transparent 
@@ -501,7 +501,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
 
             {/* Loading state */}
             {isLoading && !hasError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
+                <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
                     <div className="text-center space-y-4">
                         <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto animate-pulse">
                             <span className="text-4xl"><img src={`/ch/${channel.logo}`} /></span>
@@ -513,7 +513,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
 
             {/* Error state */}
             {hasError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-20">
+                <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-10">
                     <div className="text-center space-y-4 p-6">
                         <div className="w-20 h-20 rounded-full bg-destructive/20 flex items-center justify-center mx-auto">
                             <AlertCircle className="w-10 h-10 text-destructive" />
