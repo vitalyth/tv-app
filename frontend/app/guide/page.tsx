@@ -205,8 +205,8 @@ export default function GuidePage() {
                 /* ── Mobile: centered below filters ── */
                 .player-overlay {
                     position: relative;
-                    width: 94vw;
-                    height: auto;
+                    width: auto;
+                    height: 315px;
                     aspect-ratio: 16 / 9;
                     left: 50%;
                     margin-bottom: 7px;
