@@ -17,6 +17,7 @@ def get_local_addresses(port: int = 8001) -> list[str]:
     """Auto-detect server's IP and hostname addresses"""
     origins = [
         "http://localhost:3000",
+        "http://localhost:3001",
     ]
     
     try:

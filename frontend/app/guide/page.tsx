@@ -18,6 +18,12 @@ const VideoPlayer = dynamic(
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
     const playerRef = useRef<HTMLDivElement>(null);
+    const viewportStateRef = useRef({
+        isMobile: false,
+        isMobileLandscape: false,
+    });
+    const orientationFrameRef = useRef<number | null>(null);
+    const selectedChannelRef = useRef<any>(null);
     const [selectedChannel, setSelectedChannel] = useState<any>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
@@ -25,6 +31,9 @@ export default function GuidePage() {
 
     const filteredChannels = useFilteredChannels(channels, searchQuery, selectedCategory);
     const [isMobile, setIsMobile] = useState(false);
+    const [isMobileLandscape, setIsMobileLandscape] = useState(false);
+
+    selectedChannelRef.current = selectedChannel;
 
     // ── Drag ──────────────────────────────────────────────────────────────────
     const { position, isDragging, dragHandleProps, restorePosition } = useDraggable(
@@ -33,22 +42,29 @@ export default function GuidePage() {
     );
 
     // ── Handlers ──────────────────────────────────────────────────────────────
-    const handleProgramClick = (prog: any, ch: Channel) => {
+    const handleProgramClick = useCallback((prog: any, ch: Channel) => {
         setSelectedChannel(ch);
+        setIsFullscreen(isMobileLandscape);
         restorePosition();
-    };
+    }, [isMobileLandscape, restorePosition]);
 
-    const handleChannelClick = (ch: Channel) => {
+    const handleChannelClick = useCallback((ch: Channel) => {
         setSelectedChannel(ch);
+        setIsFullscreen(isMobileLandscape);
         restorePosition();
-    };
+    }, [isMobileLandscape, restorePosition]);
 
-    const handleClose = () => {
+    const handleClose = useCallback(() => {
         setSelectedChannel(null);
         setIsFullscreen(false);
-    };
+    }, []);
 
-    const onResizeFull = () => {
+    const onResizeFull = useCallback(() => {
+        if (isMobileLandscape) {
+            setIsFullscreen(true);
+            return;
+        }
+
         setIsFullscreen((prev) => {
             const next = !prev;
 
@@ -58,7 +74,7 @@ export default function GuidePage() {
 
             return next;
         });
-    };
+    }, [isMobileLandscape, restorePosition]);
 
     const refreshNow = useCallback(() => {
         refresh();
@@ -86,9 +102,7 @@ export default function GuidePage() {
         const handleResize = () => {
             if (!playerRef.current) return;
 
-            // use ONE source of truth
             if (isMobile) {
-                restorePosition(true);
                 return;
             }
 
@@ -111,7 +125,7 @@ export default function GuidePage() {
         window.addEventListener("resize", handleResize);
 
         return () => window.removeEventListener("resize", handleResize);
-    }, [restorePosition, isMobile]);
+    }, [isMobile]);
 
 
     useEffect(() => {
@@ -120,29 +134,80 @@ export default function GuidePage() {
         }
     }, [isMobile, restorePosition]);
 
+    useEffect(() => {
+        if (!selectedChannel || !isMobile) return;
+
+        setIsFullscreen((current) =>
+            current === isMobileLandscape ? current : isMobileLandscape
+        );
+
+        if (!isMobileLandscape) {
+            restorePosition(true);
+        }
+    }, [selectedChannel, isMobile, isMobileLandscape, restorePosition]);
 
     useEffect(() => {
-        const media = window.matchMedia("(max-width: 499px)");
+        const compactWidthMedia = window.matchMedia("(max-width: 499px)");
+        const coarsePointerMedia = window.matchMedia("(hover: none) and (pointer: coarse)");
 
         const update = () => {
-            const matches = media.matches;
+            if (orientationFrameRef.current !== null) {
+                return;
+            }
 
-            console.log("matchMedia:", matches, "width:", window.innerWidth);
+            orientationFrameRef.current = requestAnimationFrame(() => {
+                orientationFrameRef.current = null;
 
-            setIsMobile(matches);
+                const phoneLikeViewport =
+                    compactWidthMedia.matches ||
+                    (coarsePointerMedia.matches && Math.min(window.innerWidth, window.innerHeight) <= 499);
+                const landscape = phoneLikeViewport && window.innerWidth > window.innerHeight;
+
+                if (
+                    viewportStateRef.current.isMobile === phoneLikeViewport &&
+                    viewportStateRef.current.isMobileLandscape === landscape
+                ) {
+                    return;
+                }
+
+                viewportStateRef.current = {
+                    isMobile: phoneLikeViewport,
+                    isMobileLandscape: landscape,
+                };
+
+                setIsMobile(phoneLikeViewport);
+                setIsMobileLandscape(landscape);
+
+                if (selectedChannelRef.current && phoneLikeViewport) {
+                    setIsFullscreen((current) =>
+                        current === landscape ? current : landscape
+                    );
+
+                    if (!landscape) {
+                        restorePosition(true);
+                    }
+                }
+            });
         };
 
         update();
 
-        // BOTH listeners
-        media.addEventListener("change", update);
+        compactWidthMedia.addEventListener("change", update);
+        coarsePointerMedia.addEventListener("change", update);
         window.addEventListener("resize", update);
+        window.addEventListener("orientationchange", update);
 
         return () => {
-            media.removeEventListener("change", update);
+            if (orientationFrameRef.current !== null) {
+                cancelAnimationFrame(orientationFrameRef.current);
+            }
+
+            compactWidthMedia.removeEventListener("change", update);
+            coarsePointerMedia.removeEventListener("change", update);
             window.removeEventListener("resize", update);
+            window.removeEventListener("orientationchange", update);
         };
-    }, []);
+    }, [restorePosition]);
 
     return (
         <div className="h-screen flex flex-col bg-background">
@@ -257,6 +322,48 @@ export default function GuidePage() {
                     z-index: 50;
                     border-radius: 0;
                     overflow: hidden;
+                }
+
+                @media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 499px) {
+                    .player-overlay,
+                    .player-overlay-fullscreen {
+                        position: fixed;
+                        width: 99vw;
+                        height: 99vh;
+                        aspect-ratio: 16 / 9;
+                        top: 50%;
+                        left: 50%;
+                        right: auto;
+                        bottom: auto;
+                        margin: 0;
+                        transform: translate(-50%, -50%);
+                        z-index: 50;
+                        border-radius: 0;
+                        overflow: hidden;
+                    }
+
+                    .player-drag-handle {
+                        display: none;
+                    }
+                }
+
+                @media (hover: none) and (pointer: coarse) and (orientation: portrait) and (max-width: 499px) {
+                    .player-overlay,
+                    .player-overlay-fullscreen {
+                        position: relative;
+                        width: auto;
+                        height: 315px;
+                        aspect-ratio: 16 / 9;
+                        left: 50%;
+                        top: auto;
+                        right: auto;
+                        bottom: auto;
+                        margin-bottom: 7px;
+                        transform: translate(-50%);
+                        z-index: 50;
+                        border-radius: 10px;
+                        overflow: hidden;
+                    }
                 }
 
                 @media (max-width: 500px) {

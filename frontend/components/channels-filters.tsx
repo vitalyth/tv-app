@@ -1,6 +1,7 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { CATEGORY_LABELS } from "@/lib/channels-data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,9 +21,62 @@ export const ChannelsFilters = ({
     setSelectedCategory,
     onRefresh,
 }: Props) => {
+    const categoryScrollRef = useRef<HTMLDivElement>(null);
+    const [scrollHint, setScrollHint] = useState({
+        left: false,
+        right: false,
+    });
+
+    const updateScrollHint = useCallback(() => {
+        const el = categoryScrollRef.current;
+        if (!el) return;
+
+        const maxScroll = el.scrollWidth - el.clientWidth;
+        if (maxScroll <= 1) {
+            setScrollHint({ left: false, right: false });
+            return;
+        }
+
+        const direction = window.getComputedStyle(el).direction;
+        const scrollLeft = el.scrollLeft;
+        let left = false;
+        let right = false;
+
+        if (direction === "rtl" && scrollLeft < 0) {
+            left = Math.abs(scrollLeft) < maxScroll - 1;
+            right = scrollLeft < -1;
+        } else {
+            left = scrollLeft > 1;
+            right = scrollLeft < maxScroll - 1;
+        }
+
+        setScrollHint((current) =>
+            current.left === left && current.right === right
+                ? current
+                : { left, right }
+        );
+    }, []);
+
+    useEffect(() => {
+        updateScrollHint();
+
+        const el = categoryScrollRef.current;
+        if (!el) return;
+
+        const resizeObserver = new ResizeObserver(updateScrollHint);
+        resizeObserver.observe(el);
+
+        window.addEventListener("resize", updateScrollHint);
+
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener("resize", updateScrollHint);
+        };
+    }, [updateScrollHint]);
+
     return (
         <div className="flex flex-col sm:flex-row gap-4 mb-2">
-            <div className="relative flex-1 max-w-md">
+            <div className="relative min-w-[240px] flex-1 max-w-md">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                     placeholder="חפש ערוץ..."
@@ -32,34 +86,66 @@ export const ChannelsFilters = ({
                 />
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            <div className="flex min-w-0 flex-1 gap-2 pb-2">
                 <Button
-                    variant={
-                        selectedCategory === "" ? "default" : "outline"
-                    }
+                    onClick={onRefresh}
                     size="sm"
-                    onClick={() => setSelectedCategory("")}
-                    className="whitespace-nowrap"
+                    className="shrink-0 whitespace-nowrap bg-emerald-600 text-white hover:bg-emerald-500"
                 >
-                    הכל
+                    <RefreshCw className="h-4 w-4" />
+                    רענן
                 </Button>
-                {[...CATEGORY_LABELS.entries()].map(([key, label]) => (
-                    <Button
-                        key={key}
-                        variant={
-                            selectedCategory === key ? "default" : "outline"
-                        }
-                        size="sm"
-                        onClick={() => setSelectedCategory(key)}
-                        className="whitespace-nowrap"
-                    >
-                        {label}
-                    </Button>
-                ))}
-            </div>
 
-            {/* reload channels */}
-            <Button onClick={onRefresh} variant="outline">רענן</Button>
+                <div className="relative min-w-0 flex-1">
+                    {scrollHint.left && (
+                        <div
+                            className="pointer-events-none absolute bottom-0 left-0 top-0 z-10 flex w-10 items-center justify-start bg-gradient-to-r from-background via-background/85 to-transparent text-muted-foreground"
+                            aria-hidden="true"
+                        >
+                            <ChevronLeft className="h-4 w-4" />
+                        </div>
+                    )}
+                    {scrollHint.right && (
+                        <div
+                            className="pointer-events-none absolute bottom-0 right-0 top-0 z-10 flex w-10 items-center justify-end bg-gradient-to-l from-background via-background/85 to-transparent text-muted-foreground"
+                            aria-hidden="true"
+                        >
+                            <ChevronRight className="h-4 w-4" />
+                        </div>
+                    )}
+                    <div
+                        ref={categoryScrollRef}
+                        onScroll={updateScrollHint}
+                        className="overflow-x-auto scrollbar-hide"
+                    >
+                        <div className="flex w-max gap-2">
+                            <Button
+                                variant={
+                                    selectedCategory === "" ? "default" : "outline"
+                                }
+                                size="sm"
+                                onClick={() => setSelectedCategory("")}
+                                className="whitespace-nowrap"
+                            >
+                                הכל
+                            </Button>
+                            {[...CATEGORY_LABELS.entries()].map(([key, label]) => (
+                                <Button
+                                    key={key}
+                                    variant={
+                                        selectedCategory === key ? "default" : "outline"
+                                    }
+                                    size="sm"
+                                    onClick={() => setSelectedCategory(key)}
+                                    className="whitespace-nowrap"
+                                >
+                                    {label}
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };

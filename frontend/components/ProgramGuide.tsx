@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useCallback, useMemo, useState, useEffect } from "react";
+import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
+import { Clock3 } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { useNowSec } from "@/hooks/use-now-sec";
 
@@ -16,7 +17,7 @@ interface ProgramGuideProps {
 
 const CELL_W = 200;       // px per hour
 const CELL_H = 60;        // px per channel row
-const CHAN_W = 130;        // channel column width
+const CHAN_W = "var(--guide-channel-width, 130px)"; // channel column width
 const HEAD_H = 48;        // header height
 const SECS_PER_HOUR = 3600;
 const PX_PER_SEC = CELL_W / SECS_PER_HOUR;
@@ -46,12 +47,15 @@ function deduplicateChannels(channels: Channel[]): Channel[] {
 
 // ─── Program Cell ─────────────────────────────────────────────────────────────
 
-function ProgramCell({
+function isProgramLive(program: Program, nowSec: number): boolean {
+    return nowSec >= program.start && nowSec < program.end;
+}
+
+const ProgramCell = memo(function ProgramCell({
     program,
     channel,
     guideStart,  // unix seconds
     guideEnd,    // unix seconds
-    totalGridW,
     nowSec,
     onClick,
     didDrag,
@@ -60,7 +64,6 @@ function ProgramCell({
     channel: Channel;
     guideStart: number;
     guideEnd: number;
-    totalGridW: number;
     nowSec: number;
     onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
     didDrag: React.MutableRefObject<boolean>;
@@ -78,7 +81,7 @@ function ProgramCell({
 
     //const now = Math.floor(Date.now() / 1000);
     //const isLive = now >= program.start && now < program.end;
-    const isLive = nowSec >= program.start && nowSec < program.end;
+    const isLive = isProgramLive(program, nowSec);
 
     return (
         <div
@@ -117,11 +120,21 @@ function ProgramCell({
             </div>
         </div>
     );
-}
+}, (prev, next) => {
+    return (
+        prev.program === next.program &&
+        prev.channel === next.channel &&
+        prev.guideStart === next.guideStart &&
+        prev.guideEnd === next.guideEnd &&
+        prev.onClick === next.onClick &&
+        prev.didDrag === next.didDrag &&
+        isProgramLive(prev.program, prev.nowSec) === isProgramLive(next.program, next.nowSec)
+    );
+});
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ProgramGuide({
+function ProgramGuide({
     channels,
     logoBasePath = "/",
     onChannelClick,
@@ -131,6 +144,8 @@ export default function ProgramGuide({
     const mainRef = useRef<HTMLDivElement>(null);
     const headRef = useRef<HTMLDivElement>(null);
     const sideRef = useRef<HTMLDivElement>(null);
+    const scrollSyncFrame = useRef<number | null>(null);
+    const scrollSyncSource = useRef<"main" | "head" | "side" | null>(null);
 
     const isDragging = useRef(false);
     const didDrag = useRef(false);
@@ -178,8 +193,7 @@ export default function ProgramGuide({
         mainRef.current.scrollLeft = scrollLeftStart.current - dx;
         mainRef.current.scrollTop = scrollTopStart.current - dy;
 
-        if (headRef.current) headRef.current.scrollLeft = mainRef.current.scrollLeft;
-        if (sideRef.current) sideRef.current.scrollTop = mainRef.current.scrollTop;
+        syncScroll("main");
     };
 
     const onMouseUp = () => {
@@ -198,6 +212,10 @@ export default function ProgramGuide({
         window.addEventListener("mouseup", onMouseUp);
 
         return () => {
+            if (scrollSyncFrame.current !== null) {
+                cancelAnimationFrame(scrollSyncFrame.current);
+            }
+
             window.removeEventListener("mousemove", onMouseMove);
             window.removeEventListener("mouseup", onMouseUp);
         };
@@ -205,20 +223,48 @@ export default function ProgramGuide({
 
     const nowSec = useNowSec();
 
+    const syncScroll = useCallback((source: "main" | "head" | "side") => {
+        scrollSyncSource.current = source;
+
+        if (scrollSyncFrame.current !== null) {
+            return;
+        }
+
+        scrollSyncFrame.current = requestAnimationFrame(() => {
+            scrollSyncFrame.current = null;
+
+            if (!mainRef.current) return;
+
+            const activeSource = scrollSyncSource.current;
+            scrollSyncSource.current = null;
+
+            if (activeSource === "head" && headRef.current) {
+                mainRef.current.scrollLeft = headRef.current.scrollLeft;
+            }
+
+            if (activeSource === "side" && sideRef.current) {
+                mainRef.current.scrollTop = sideRef.current.scrollTop;
+            }
+
+            if (headRef.current && headRef.current.scrollLeft !== mainRef.current.scrollLeft) {
+                headRef.current.scrollLeft = mainRef.current.scrollLeft;
+            }
+
+            if (sideRef.current && sideRef.current.scrollTop !== mainRef.current.scrollTop) {
+                sideRef.current.scrollTop = mainRef.current.scrollTop;
+            }
+        });
+    }, []);
+
     const onMainScroll = useCallback(() => {
-        if (!mainRef.current) return;
-        const { scrollLeft, scrollTop } = mainRef.current;
-        if (headRef.current) headRef.current.scrollLeft = scrollLeft;
-        if (sideRef.current) sideRef.current.scrollTop = scrollTop;
-    }, []);
+        syncScroll("main");
+    }, [syncScroll]);
     const onHeadScroll = useCallback(() => {
-        if (headRef.current && mainRef.current)
-            mainRef.current.scrollLeft = headRef.current.scrollLeft;
-    }, []);
+        syncScroll("head");
+    }, [syncScroll]);
     const onSideScroll = useCallback(() => {
-        if (sideRef.current && mainRef.current)
-            mainRef.current.scrollTop = sideRef.current.scrollTop;
-    }, []);
+        syncScroll("side");
+    }, [syncScroll]);
 
     const dedupedChannels = useMemo(() => deduplicateChannels(channels), [channels]);
 
@@ -300,11 +346,13 @@ export default function ProgramGuide({
                     >
                         <button
                             onClick={scrollToNow}
-                            className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 hover:bg-red-500 text-white transition-colors"
+                            className="guide-now-button text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 hover:bg-red-500 text-white transition-colors"
+                            aria-label="עכשיו"
                         >
-                            ▶ עכשיו
+                            <Clock3 className="guide-now-icon hidden h-4 w-4" aria-hidden="true" />
+                            <span className="guide-now-text">▶ עכשיו</span>
                         </button>
-                        <span className="text-xs text-zinc-500 font-bold">ערוץ</span>
+                        <span className="guide-channel-heading text-xs text-zinc-500 font-bold">ערוץ</span>
                     </div>
 
                     {/* Channel list */}
@@ -318,11 +366,11 @@ export default function ProgramGuide({
                             {dedupedChannels.map((ch) => (
                                 <div
                                     key={ch.id}
-                                    className="flex items-center gap-2 px-3 border-b border-zinc-800/70 hover:bg-zinc-800 transition-colors cursor-pointer"
+                                    className="guide-channel-cell flex items-center gap-2 px-3 border-b border-zinc-800/70 hover:bg-zinc-800 transition-colors cursor-pointer"
                                     style={{ height: CELL_H }}
                                     onClick={() => onChannelClick?.(ch)}
                                 >
-                                    <div className="w-8 h-8 shrink-0 rounded bg-zinc-800 overflow-hidden flex items-center justify-center">
+                                    <div className="guide-channel-logo w-8 h-8 shrink-0 rounded bg-zinc-800 overflow-hidden flex items-center justify-center">
                                         <img
                                             src={`${logoBasePath}${ch.logo}`}
                                             alt={ch.name}
@@ -330,7 +378,7 @@ export default function ProgramGuide({
                                             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                                         />
                                     </div>
-                                    <div className="overflow-hidden">
+                                    <div className="guide-channel-text overflow-hidden">
                                         <p className="text-xs font-semibold text-zinc-100 truncate leading-tight">{ch.name}</p>
                                         <p className="text-[10px] text-zinc-500">{ch.index}</p>
                                     </div>
@@ -425,7 +473,6 @@ export default function ProgramGuide({
                                                 channel={ch}
                                                 guideStart={guideStart}
                                                 guideEnd={guideEnd}
-                                                totalGridW={totalGridW}
                                                 nowSec={nowSec}
                                                 onClick={onProgramClick}
                                                 didDrag={didDrag}
@@ -439,6 +486,49 @@ export default function ProgramGuide({
                     </div>
                 </div>
             </div>
+
+            <style jsx global>{`
+                @media (hover: none) and (pointer: coarse) and (orientation: portrait) and (max-width: 499px) {
+                    :root {
+                        --guide-channel-width: 58px;
+                    }
+
+                    .guide-channel-cell {
+                        justify-content: center;
+                        padding-left: 0.5rem;
+                        padding-right: 0.5rem;
+                    }
+
+                    .guide-channel-logo {
+                        width: 2.25rem;
+                        height: 2.25rem;
+                    }
+
+                    .guide-channel-text {
+                        display: none;
+                    }
+
+                    .guide-channel-heading,
+                    .guide-now-text {
+                        display: none;
+                    }
+
+                    .guide-now-button {
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 0.375rem;
+                        margin-left: auto;
+                        margin-right: auto;
+                    }
+
+                    .guide-now-icon {
+                        display: block;
+                    }
+                }
+            `}</style>
         </div>
     );
 }
+
+export default memo(ProgramGuide);
