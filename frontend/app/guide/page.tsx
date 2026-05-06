@@ -260,6 +260,7 @@ export default function GuidePage() {
                     <ProgramGuide
                         channels={filteredChannels}
                         logoBasePath="/ch/"
+                        playingChannelId={selectedChannel?.id}
                         onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
                     />

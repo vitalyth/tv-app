@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
-import { Clock3 } from "lucide-react";
+import { Clock3, Play } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { useNowSec } from "@/hooks/use-now-sec";
 
@@ -9,6 +9,7 @@ import { useNowSec } from "@/hooks/use-now-sec";
 interface ProgramGuideProps {
     channels: Channel[];
     logoBasePath?: string;
+    playingChannelId?: string | null;
     onChannelClick?: (channel: Channel) => void;
     onProgramClick?: (program: Program, channel: Channel, isLive: boolean) => void;
 }
@@ -57,6 +58,7 @@ const ProgramCell = memo(function ProgramCell({
     guideStart,  // unix seconds
     guideEnd,    // unix seconds
     nowSec,
+    isPlayingProgram,
     onClick,
     didDrag,
 }: {
@@ -65,6 +67,7 @@ const ProgramCell = memo(function ProgramCell({
     guideStart: number;
     guideEnd: number;
     nowSec: number;
+    isPlayingProgram: boolean;
     onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
     didDrag: React.MutableRefObject<boolean>;
 }) {
@@ -88,9 +91,11 @@ const ProgramCell = memo(function ProgramCell({
             className={`
         absolute top-1.5 rounded-lg border px-2 py-1 cursor-pointer select-none
         transition-all duration-150
-        ${isLive
-                    ? "bg-blue-900/90 border-blue-400/60 shadow-lg shadow-blue-900/30"
-                    : "bg-zinc-800/90 border-zinc-700/50"
+        ${isPlayingProgram
+                    ? "bg-emerald-900/95 border-emerald-300/80 ring-2 ring-emerald-300/70 shadow-lg shadow-emerald-950/60"
+                    : isLive
+                        ? "bg-blue-900/90 border-blue-400/60 shadow-lg shadow-blue-900/30"
+                        : "bg-zinc-800/90 border-zinc-700/50"
                 }
         ${hovered ? "brightness-125 z-10 shadow-xl" : ""}
       `}
@@ -106,10 +111,15 @@ const ProgramCell = memo(function ProgramCell({
                 onClick?.(program, channel, isLive)
             }}
             title={program.description}
+            aria-current={isPlayingProgram ? "true" : undefined}
         >
             <div className="flex items-start gap-1 h-full overflow-hidden">
-                {isLive && (
-                    <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                {isPlayingProgram ? (
+                    <span className="shrink-0 mt-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400 text-emerald-950">
+                        <Play className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+                    </span>
+                ) : isLive && (
+                    <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" aria-hidden="true" />
                 )}
                 <div className="overflow-hidden">
                     <p className="text-xs font-semibold text-white truncate leading-tight">{program.name}</p>
@@ -126,6 +136,7 @@ const ProgramCell = memo(function ProgramCell({
         prev.channel === next.channel &&
         prev.guideStart === next.guideStart &&
         prev.guideEnd === next.guideEnd &&
+        prev.isPlayingProgram === next.isPlayingProgram &&
         prev.onClick === next.onClick &&
         prev.didDrag === next.didDrag &&
         isProgramLive(prev.program, prev.nowSec) === isProgramLive(next.program, next.nowSec)
@@ -137,6 +148,7 @@ const ProgramCell = memo(function ProgramCell({
 function ProgramGuide({
     channels,
     logoBasePath = "/",
+    playingChannelId,
     onChannelClick,
     onProgramClick,
 }: ProgramGuideProps) {
@@ -363,27 +375,46 @@ function ProgramGuide({
                         style={{ scrollbarWidth: "none" }}
                     >
                         <div style={{ height: totalGridH }}>
-                            {dedupedChannels.map((ch) => (
-                                <div
-                                    key={ch.id}
-                                    className="guide-channel-cell flex items-center gap-2 px-3 border-b border-zinc-800/70 hover:bg-zinc-800 transition-colors cursor-pointer"
-                                    style={{ height: CELL_H }}
-                                    onClick={() => onChannelClick?.(ch)}
-                                >
-                                    <div className="guide-channel-logo w-8 h-8 shrink-0 rounded bg-zinc-800 overflow-hidden flex items-center justify-center">
-                                        <img
-                                            src={`${logoBasePath}${ch.logo}`}
-                                            alt={ch.name}
-                                            className="w-full h-full object-contain"
-                                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                                        />
+                            {dedupedChannels.map((ch) => {
+                                const isPlayingChannel = ch.id === playingChannelId;
+
+                                return (
+                                    <div
+                                        key={ch.id}
+                                        className={`
+                                            guide-channel-cell flex items-center gap-2 px-3 border-b border-zinc-800/70
+                                            transition-colors cursor-pointer
+                                            ${isPlayingChannel
+                                                ? "bg-emerald-950/80 shadow-[inset_-3px_0_0_rgb(52_211_153)] hover:bg-emerald-900/70"
+                                                : "hover:bg-zinc-800"
+                                            }
+                                        `}
+                                        style={{ height: CELL_H }}
+                                        onClick={() => onChannelClick?.(ch)}
+                                        aria-current={isPlayingChannel ? "true" : undefined}
+                                    >
+                                        <div className="guide-channel-logo w-8 h-8 shrink-0 rounded bg-zinc-800 overflow-hidden flex items-center justify-center">
+                                            <img
+                                                src={`${logoBasePath}${ch.logo}`}
+                                                alt={ch.name}
+                                                className="w-full h-full object-contain"
+                                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                            />
+                                        </div>
+                                        <div className="guide-channel-text overflow-hidden">
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                                {isPlayingChannel && (
+                                                    <Play className="h-3 w-3 shrink-0 fill-emerald-300 text-emerald-300" aria-hidden="true" />
+                                                )}
+                                                <p className="text-xs font-semibold text-zinc-100 truncate leading-tight">{ch.name}</p>
+                                            </div>
+                                            <p className={isPlayingChannel ? "text-[10px] text-emerald-300" : "text-[10px] text-zinc-500"}>
+                                                {isPlayingChannel ? "מנגן עכשיו" : ch.index}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <div className="guide-channel-text overflow-hidden">
-                                        <p className="text-xs font-semibold text-zinc-100 truncate leading-tight">{ch.name}</p>
-                                        <p className="text-[10px] text-zinc-500">{ch.index}</p>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
@@ -452,35 +483,47 @@ function ProgramGuide({
                             </div>
 
                             {/* Programs */}
-                            {dedupedChannels.map((ch, ri) => (
-                                <div
-                                    key={ch.id}
-                                    className="absolute left-0 right-0"
-                                    style={{ top: ri * CELL_H, height: CELL_H }}
-                                >
-                                    {ch.programs.length === 0 ? (
-                                        <div
-                                            className="absolute top-1.5 inset-x-2 rounded-lg border border-zinc-800/40 bg-zinc-900/50 flex items-center pr-3"
-                                            style={{ height: CELL_H - 12 }}
-                                        >
-                                            <span className="text-xs text-zinc-600">אין מידע</span>
-                                        </div>
-                                    ) : (
-                                        ch.programs.map((prog, pi) => (
-                                            <ProgramCell
-                                                key={pi}
-                                                program={prog}
-                                                channel={ch}
-                                                guideStart={guideStart}
-                                                guideEnd={guideEnd}
-                                                nowSec={nowSec}
-                                                onClick={onProgramClick}
-                                                didDrag={didDrag}
+                            {dedupedChannels.map((ch, ri) => {
+                                const isPlayingChannel = ch.id === playingChannelId;
+
+                                return (
+                                    <div
+                                        key={ch.id}
+                                        className="absolute left-0 right-0"
+                                        style={{ top: ri * CELL_H, height: CELL_H }}
+                                    >
+                                        {isPlayingChannel && (
+                                            <div
+                                                className="absolute inset-x-0 top-0 border-y border-emerald-400/20 bg-emerald-950/30 pointer-events-none"
+                                                style={{ height: CELL_H }}
+                                                aria-hidden="true"
                                             />
-                                        ))
-                                    )}
-                                </div>
-                            ))}
+                                        )}
+                                        {ch.programs.length === 0 ? (
+                                            <div
+                                                className="absolute top-1.5 inset-x-2 rounded-lg border border-zinc-800/40 bg-zinc-900/50 flex items-center pr-3"
+                                                style={{ height: CELL_H - 12 }}
+                                            >
+                                                <span className="text-xs text-zinc-600">אין מידע</span>
+                                            </div>
+                                        ) : (
+                                            ch.programs.map((prog, pi) => (
+                                                <ProgramCell
+                                                    key={pi}
+                                                    program={prog}
+                                                    channel={ch}
+                                                    guideStart={guideStart}
+                                                    guideEnd={guideEnd}
+                                                    nowSec={nowSec}
+                                                    isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
+                                                    onClick={onProgramClick}
+                                                    didDrag={didDrag}
+                                                />
+                                            ))
+                                        )}
+                                    </div>
+                                );
+                            })}
 
                         </div>
                     </div>
