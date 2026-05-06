@@ -42,7 +42,7 @@ export const ChannelsFilters = ({
         let left = false;
         let right = false;
 
-        if (direction === "rtl" && scrollLeft < 0) {
+        if (direction === "rtl" && scrollLeft < 2) {
             left = Math.abs(scrollLeft) < maxScroll - 1;
             right = scrollLeft < -1;
         } else {
@@ -76,7 +76,7 @@ export const ChannelsFilters = ({
 
     return (
         <div className="flex flex-col sm:flex-row gap-4 mb-2">
-            <div className="relative min-w-[240px] flex-1 max-w-md">
+            <div className="relative min-w-60 flex-1 max-w-md">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                     placeholder="חפש ערוץ..."
