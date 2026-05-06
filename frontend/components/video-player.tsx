@@ -331,7 +331,11 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         videoRef.current.appendChild(videoElement)
 
         const referer = channel?.linkDetails?.referer || ""
-        const isDash = channel?.linkDetails?.manifest_type === 'mpd';
+        const manifestType = channel?.linkDetails?.manifest_type
+        const isDash =
+            manifestType === "mpd" ||
+            streamUrl.includes("/livedash/") ||
+            streamUrl.endsWith(".mpd")
         const isSafari =
             typeof navigator !== "undefined" &&
             /^((?!chrome|android).)*safari/i.test(navigator.userAgent)

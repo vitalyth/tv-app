@@ -1,10 +1,19 @@
-from urllib.parse import urlparse, urljoin, quote, urlencode
+from urllib.parse import urlencode, urljoin, urlparse
 from utils.http import create_session
 from fastapi.responses import Response, StreamingResponse
 import requests
 import re
 
 session = create_session()
+
+
+def _request_base_proxy(request):
+    root_path = request.scope.get("root_path", "")
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("host", "localhost")
+
+    return f"{proto}://{host}{root_path}"
+
 
 def handle_proxy(request, url, referer):
     parsed = urlparse(url)
@@ -29,8 +38,12 @@ def handle_proxy(request, url, referer):
 
     content_type = r.headers.get("content-type", "")
 
-    # 🎥 Video / fragments
-    if "video" in content_type or url.endswith((".ts", ".m4s", ".mp4")):
+    # 🎥 Video/audio fragments
+    if (
+        "video" in content_type
+        or "audio" in content_type
+        or url.endswith((".ts", ".m4s", ".mp4", ".m4a"))
+    ):
 
         def generate():
             try:
@@ -59,6 +72,19 @@ def handle_proxy(request, url, referer):
     except Exception:
         return Response(status_code=500)
 
+    is_mpd = (
+        "dash+xml" in content_type
+        or url.endswith(".mpd")
+        or "<MPD" in text[:500]
+    )
+
+    if is_mpd:
+        return Response(
+            content=r.content,
+            media_type="application/dash+xml",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
+
     is_m3u8 = (
         "mpegurl" in content_type
         or url.endswith(".m3u8")
@@ -75,12 +101,7 @@ def handle_proxy(request, url, referer):
 
     # rewrite to m3u8
     base_url = url.rsplit("/", 1)[0] + "/"
-
-    root_path = request.scope.get("root_path", "")
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("host", "localhost")
-
-    base_proxy = f"{proto}://{host}{root_path}"
+    base_proxy = _request_base_proxy(request)
 
     new_lines = []
 
