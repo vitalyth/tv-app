@@ -1,15 +1,23 @@
 "use client";
 
 import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
-import { Clock3, Play } from "lucide-react";
+import { Clock3, ListVideo, Play } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { useNowSec } from "@/hooks/use-now-sec";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ProgramGuideProps {
     channels: Channel[];
+    sourceChannels?: Channel[];
     logoBasePath?: string;
     playingChannelId?: string | null;
+    playingChannelIndex?: number | null;
     onChannelClick?: (channel: Channel) => void;
     onProgramClick?: (program: Program, channel: Channel, isLive: boolean) => void;
 }
@@ -35,15 +43,44 @@ function formatTime(ts: number): string {
     });
 }
 
-function deduplicateChannels(channels: Channel[]): Channel[] {
-    return channels; // for now, we want duplicates to test the UI
-
+function uniqueChannelsByIndex(channels: Channel[]): Channel[] {
     const seen = new Set<number>();
-    return channels.filter((ch) => {
-        if (seen.has(ch.index)) return false;
-        seen.add(ch.index);
+
+    return channels.filter((channel) => {
+        if (seen.has(channel.index)) {
+            return false;
+        }
+
+        seen.add(channel.index);
         return true;
     });
+}
+
+function groupChannelsByIndex(channels: Channel[]): Map<number, Channel[]> {
+    const groups = new Map<number, Channel[]>();
+
+    channels.forEach((channel) => {
+        const group = groups.get(channel.index);
+
+        if (group) {
+            group.push(channel);
+            return;
+        }
+
+        groups.set(channel.index, [channel]);
+    });
+
+    return groups;
+}
+
+function getSourceLabel(channel: Channel, sourceIndex: number): string {
+    const backupMatch = channel.name.match(/גיבוי\s*\d*/);
+
+    if (backupMatch?.[0]) {
+        return backupMatch[0].trim();
+    }
+
+    return sourceIndex === 0 ? "ראשי" : `מקור ${sourceIndex + 1}`;
 }
 
 // ─── Program Cell ─────────────────────────────────────────────────────────────
@@ -147,8 +184,10 @@ const ProgramCell = memo(function ProgramCell({
 
 function ProgramGuide({
     channels,
+    sourceChannels = channels,
     logoBasePath = "/",
     playingChannelId,
+    playingChannelIndex,
     onChannelClick,
     onProgramClick,
 }: ProgramGuideProps) {
@@ -278,7 +317,8 @@ function ProgramGuide({
         syncScroll("side");
     }, [syncScroll]);
 
-    const dedupedChannels = useMemo(() => deduplicateChannels(channels), [channels]);
+    const visibleChannels = useMemo(() => uniqueChannelsByIndex(channels), [channels]);
+    const channelsByIndex = useMemo(() => groupChannelsByIndex(sourceChannels), [sourceChannels]);
 
     // All timestamps in unix seconds
     const { guideStart, guideEnd, totalGridW, totalGridH, hourLabels, nowRight } = useMemo(() => {
@@ -291,7 +331,7 @@ function ProgramGuide({
         const end = start + (HOURS_BACK + HOURS_FORWARD) * SECS_PER_HOUR;
 
         const w = (end - start) * PX_PER_SEC;
-        const h = dedupedChannels.length * CELL_H;
+        const h = visibleChannels.length * CELL_H;
 
         // Hour labels: every whole hour between start and end
         const labels: { ts: number; label: string }[] = [];
@@ -312,7 +352,7 @@ function ProgramGuide({
         const nowRight = Math.round((end - nowSec) * PX_PER_SEC);
 
         return { guideStart: start, guideEnd: end, totalGridW: w, totalGridH: h, hourLabels: labels, nowRight };
-    }, [dedupedChannels.length, nowSec]);
+    }, [visibleChannels.length, nowSec]);
 
     // Auto-scroll: position "now" at ~30% from the right on load
     const didScrollRef = useRef(false);
@@ -375,14 +415,19 @@ function ProgramGuide({
                         style={{ scrollbarWidth: "none" }}
                     >
                         <div style={{ height: totalGridH }}>
-                            {dedupedChannels.map((ch) => {
-                                const isPlayingChannel = ch.id === playingChannelId;
+                            {visibleChannels.map((ch) => {
+                                const isPlayingChannel =
+                                    ch.id === playingChannelId ||
+                                    ch.index === playingChannelIndex;
+                                const sourceOptions = channelsByIndex.get(ch.index) ?? [ch];
+                                const hasSourceOptions = sourceOptions.length > 1;
+                                const activeSource = sourceOptions.find((source) => source.id === playingChannelId);
 
                                 return (
                                     <div
                                         key={ch.id}
                                         className={`
-                                            guide-channel-cell flex items-center gap-2 px-3 border-b border-zinc-800/70
+                                            guide-channel-cell relative flex items-center gap-2 px-3 border-b border-zinc-800/70
                                             transition-colors cursor-pointer
                                             ${isPlayingChannel
                                                 ? "bg-emerald-950/80 shadow-[inset_-3px_0_0_rgb(52_211_153)] hover:bg-emerald-900/70"
@@ -409,9 +454,54 @@ function ProgramGuide({
                                                 <p className="text-xs font-semibold text-zinc-100 truncate leading-tight">{ch.name}</p>
                                             </div>
                                             <p className={isPlayingChannel ? "text-[10px] text-emerald-300" : "text-[10px] text-zinc-500"}>
-                                                {isPlayingChannel ? "מנגן עכשיו" : ch.index}
+                                                {isPlayingChannel
+                                                    ? activeSource
+                                                        ? getSourceLabel(activeSource, sourceOptions.indexOf(activeSource))
+                                                        : "מנגן עכשיו"
+                                                    : ch.index}
                                             </p>
                                         </div>
+                                        {hasSourceOptions && (
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className="guide-source-button ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-700/70 hover:text-white"
+                                                        aria-label="בחר מקור"
+                                                        title="בחר מקור"
+                                                        onPointerDown={(event) => event.stopPropagation()}
+                                                        onClick={(event) => event.stopPropagation()}
+                                                    >
+                                                        <ListVideo className="h-4 w-4" aria-hidden="true" />
+                                                    </button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent
+                                                    align="end"
+                                                    side="left"
+                                                    className="min-w-44 border-zinc-700 bg-zinc-900 text-zinc-100"
+                                                >
+                                                    {sourceOptions.map((source, sourceIndex) => {
+                                                        const isActiveSource = source.id === playingChannelId;
+
+                                                        return (
+                                                            <DropdownMenuItem
+                                                                key={source.id}
+                                                                className="cursor-pointer justify-between text-right focus:bg-zinc-800 focus:text-white"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    onChannelClick?.(source);
+                                                                }}
+                                                            >
+                                                                <span className="truncate">{source.name}</span>
+                                                                {isActiveSource && (
+                                                                    <Play className="h-3.5 w-3.5 fill-emerald-300 text-emerald-300" aria-hidden="true" />
+                                                                )}
+                                                            </DropdownMenuItem>
+                                                        );
+                                                    })}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -466,7 +556,7 @@ function ProgramGuide({
                             ))}
 
                             {/* Row dividers */}
-                            {dedupedChannels.map((_, ri) => (
+                            {visibleChannels.map((_, ri) => (
                                 <div
                                     key={ri}
                                     className="absolute left-0 right-0 border-b border-zinc-800/50"
@@ -483,8 +573,10 @@ function ProgramGuide({
                             </div>
 
                             {/* Programs */}
-                            {dedupedChannels.map((ch, ri) => {
-                                const isPlayingChannel = ch.id === playingChannelId;
+                            {visibleChannels.map((ch, ri) => {
+                                const isPlayingChannel =
+                                    ch.id === playingChannelId ||
+                                    ch.index === playingChannelIndex;
 
                                 return (
                                     <div
@@ -554,6 +646,20 @@ function ProgramGuide({
                     .guide-channel-heading,
                     .guide-now-text {
                         display: none;
+                    }
+
+                    .guide-source-button {
+                        position: absolute;
+                        bottom: 0.125rem;
+                        left: 0.125rem;
+                        height: 1.25rem;
+                        width: 1.25rem;
+                        background: rgba(24, 24, 27, 0.85);
+                    }
+
+                    .guide-source-button svg {
+                        width: 0.75rem;
+                        height: 0.75rem;
                     }
 
                     .guide-now-button {

@@ -30,6 +30,7 @@ export interface Channel {
   linkDetails: LinkDetails
   type: string
   programs: Program[]
+  tvgID?: string
 }
 
 /*
