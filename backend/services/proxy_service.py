@@ -10,7 +10,7 @@ CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
     "Access-Control-Allow-Headers": "Range, Origin, Accept, Content-Type, User-Agent, Referer",
-    "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range",
+    "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range, Content-Type",
 }
 
 
@@ -55,6 +55,18 @@ def handle_proxy(request, url, referer):
         return Response(status_code=502, headers=CORS_HEADERS)
 
     content_type = r.headers.get("content-type", "")
+    is_head = request.method == "HEAD"
+
+    if is_head:
+        return Response(
+            status_code=r.status_code,
+            media_type=content_type,
+            headers=_response_headers({
+                "Content-Range": r.headers.get("Content-Range", ""),
+                "Accept-Ranges": r.headers.get("Accept-Ranges", "bytes"),
+                "Content-Length": r.headers.get("Content-Length", ""),
+            })
+        )
 
     # 🎥 Video/audio fragments
     if (
@@ -79,7 +91,7 @@ def handle_proxy(request, url, referer):
             media_type=content_type,
             headers=_response_headers({
                 "Content-Range": r.headers.get("Content-Range", ""),
-                "Accept-Ranges": "bytes",
+                "Accept-Ranges": r.headers.get("Accept-Ranges", "bytes"),
                 "Content-Length": r.headers.get("Content-Length", ""),
             })
         )

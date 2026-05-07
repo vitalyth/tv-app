@@ -18,6 +18,8 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
 
 const CAST_SDK_URL = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
 const CAST_LOAD_TIMEOUT_MS = 10000
+const CAST_LOAD_RETRY_COUNT = 3
+const CAST_LOAD_RETRY_DELAY_MS = 1500
 
 interface VideoPlayerProps {
     channel: Channel | null
@@ -302,6 +304,36 @@ function waitForCastMediaSession(session: any, timeoutMs = CAST_LOAD_TIMEOUT_MS)
     })
 }
 
+function wait(ms: number) {
+    return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+}
+
+function isCastCancelError(error: any) {
+    return error?.code === "cancel" || error === "cancel"
+}
+
+async function loadCastMediaWithRetries(session: any, request: any) {
+    let lastError: any = null
+
+    for (let attempt = 1; attempt <= CAST_LOAD_RETRY_COUNT; attempt += 1) {
+        try {
+            await session.loadMedia(request)
+            return
+        } catch (error) {
+            if (isCastCancelError(error)) throw error
+
+            lastError = error
+            console.warn(`Cast load attempt ${attempt} failed:`, error)
+
+            if (attempt < CAST_LOAD_RETRY_COUNT) {
+                await wait(CAST_LOAD_RETRY_DELAY_MS)
+            }
+        }
+    }
+
+    throw lastError
+}
+
 export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlayerProps) {
     const videoRef = useRef<HTMLDivElement>(null)
     const playerRef = useRef<any>(null)
@@ -360,13 +392,31 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         };
     }, [channel]);
 
-    const resumeLocalPlayback = useCallback(() => {
+    const resumeLocalPlayback = useCallback((reloadFromLive = false) => {
         const player = playerRef.current;
         if (!player || player.isDisposed?.()) return;
 
-        const playPromise = player.play?.();
-        playPromise?.catch?.(() => {
-            console.log("Autoplay blocked");
+        const play = () => {
+            const playPromise = player.play?.();
+            playPromise?.catch?.(() => {
+                console.log("Autoplay blocked");
+            });
+        };
+
+        if (!reloadFromLive) {
+            play();
+            return;
+        }
+
+        const currentSource = player.currentSource?.();
+        if (currentSource?.src) {
+            player.src(currentSource);
+            player.load?.();
+        }
+
+        player.ready(() => {
+            player.liveTracker?.seekToLiveEdge?.();
+            play();
         });
     }, []);
 
@@ -384,7 +434,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         if (!session) {
             setIsCasting(false);
             setIsCastConnecting(false);
-            if (resumeLocal) resumeLocalPlayback();
+            if (resumeLocal) resumeLocalPlayback(true);
             return;
         }
 
@@ -396,7 +446,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         } finally {
             setIsCastConnecting(false);
             setIsCasting(false);
-            if (resumeLocal) resumeLocalPlayback();
+            if (resumeLocal) resumeLocalPlayback(true);
         }
     }, [resumeLocalPlayback]);
 
@@ -417,7 +467,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             }
 
             if (!isDisconnectingForCloseRef.current) {
-                resumeLocalPlayback();
+                resumeLocalPlayback(true);
             }
         };
 
@@ -528,12 +578,16 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             const request = new chromeCast.media.LoadRequest(mediaInfo);
             request.autoplay = true;
 
-            await session.loadMedia(request);
-            await waitForCastMediaSession(session);
+            await loadCastMediaWithRetries(session, request);
+            try {
+                await waitForCastMediaSession(session);
+            } catch (error) {
+                console.warn("Cast media session did not become ready in time:", error);
+            }
             pauseLocalPlayback();
             setIsCasting(true);
         } catch (error: any) {
-            if (error?.code === "cancel" || error === "cancel") return;
+            if (isCastCancelError(error)) return;
             console.error("Failed to cast stream:", error);
             await disconnectCast(false);
             setCastError("לא הצלחנו להעביר לטלוויזיה");
