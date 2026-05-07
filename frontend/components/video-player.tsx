@@ -385,8 +385,13 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         const castFramework = window.cast?.framework;
         const chromeCast = window.chrome?.cast;
 
-        if (!castFramework || !chromeCast || !isCastAvailable) {
-            setCastError("אפשרות ההעברה לטלוויזיה לא זמינה בדפדפן הזה");
+        if (!window.isSecureContext) {
+            setCastError("Cast דורש HTTPS בסביבת production");
+            return;
+        }
+
+        if (!castFramework || !chromeCast) {
+            setCastError("Cast לא זמין בדפדפן הזה. נסה Chrome באנדרואיד או בדסקטופ");
             return;
         }
 
@@ -408,6 +413,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             const castContext = castFramework.CastContext.getInstance();
             const session = castContext.getCurrentSession() || await castContext.requestSession();
             const mediaInfo = new chromeCast.media.MediaInfo(sourceUrl, contentType);
+            mediaInfo.streamType = chromeCast.media.StreamType.LIVE;
             mediaInfo.metadata = new chromeCast.media.GenericMediaMetadata();
             mediaInfo.metadata.title = channel.name;
             mediaInfo.metadata.subtitle = currentProgram?.name || "";
@@ -608,9 +614,9 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                             event.stopPropagation();
                             castToTv();
                         }}
-                        disabled={!isCastAvailable || !streamUrl}
+                        disabled={!streamUrl}
                         className={`text-white hover:bg-white/20 disabled:opacity-40 ${isCasting ? "bg-white/20 text-primary" : ""}`}
-                        title={isCastAvailable ? "העבר לטלוויזיה" : "Cast לא זמין בדפדפן הזה"}
+                        title={streamUrl ? (isCastAvailable ? "העבר לטלוויזיה" : "נסה להעביר לטלוויזיה") : "טוען שידור"}
                         aria-label="העבר לטלוויזיה"
                     >
                         <Cast className="w-5 h-5" />

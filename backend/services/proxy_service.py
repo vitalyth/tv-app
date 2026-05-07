@@ -6,11 +6,31 @@ import re
 
 session = create_session()
 
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "Range, Origin, Accept, Content-Type, User-Agent, Referer",
+    "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range",
+}
+
 
 def _request_base_proxy(request):
     root_path = request.scope.get("root_path", "")
 
     return root_path or ""
+
+
+def cors_preflight():
+    return Response(status_code=204, headers=CORS_HEADERS)
+
+
+def _response_headers(extra=None):
+    headers = dict(CORS_HEADERS)
+
+    if extra:
+        headers.update({key: value for key, value in extra.items() if value})
+
+    return headers
 
 
 def handle_proxy(request, url, referer):
@@ -32,7 +52,7 @@ def handle_proxy(request, url, referer):
         r = session.get(url, headers=headers, stream=True, timeout=10)
     except requests.exceptions.RequestException as e:
         print("Proxy request failed:", e)
-        return Response(status_code=502)
+        return Response(status_code=502, headers=CORS_HEADERS)
 
     content_type = r.headers.get("content-type", "")
 
@@ -57,18 +77,18 @@ def handle_proxy(request, url, referer):
             generate(),
             status_code=r.status_code,
             media_type=content_type,
-            headers={
+            headers=_response_headers({
                 "Content-Range": r.headers.get("Content-Range", ""),
                 "Accept-Ranges": "bytes",
-                "Access-Control-Allow-Origin": "*"
-            }
+                "Content-Length": r.headers.get("Content-Length", ""),
+            })
         )
 
     # text (m3u8 or other)
     try:
         text = r.text
     except Exception:
-        return Response(status_code=500)
+        return Response(status_code=500, headers=CORS_HEADERS)
 
     is_mpd = (
         "dash+xml" in content_type
@@ -80,7 +100,7 @@ def handle_proxy(request, url, referer):
         return Response(
             content=r.content,
             media_type="application/dash+xml",
-            headers={"Access-Control-Allow-Origin": "*"}
+            headers=_response_headers()
         )
 
     is_m3u8 = (
@@ -94,7 +114,7 @@ def handle_proxy(request, url, referer):
         return Response(
             content=r.content,
             media_type=content_type,
-            headers={"Access-Control-Allow-Origin": "*"}
+            headers=_response_headers()
         )
 
     # rewrite to m3u8
@@ -130,5 +150,5 @@ def handle_proxy(request, url, referer):
     return Response(
         content="\n".join(new_lines),
         media_type="application/vnd.apple.mpegurl",
-        headers={"Access-Control-Allow-Origin": "*"}
+        headers=_response_headers()
     )

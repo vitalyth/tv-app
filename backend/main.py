@@ -3,7 +3,7 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from services.channel_service import get_live_channels
 from services.stream_service import get_stream
-from services.proxy_service import handle_proxy
+from services.proxy_service import cors_preflight, handle_proxy
 from services.epg_service_ext import get_epg, EPGService
 from services.playlist_service import generate_playlist
 import os
@@ -90,6 +90,14 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
 @app.get("/proxy")
 def proxy(request: Request, url: str, referer: str = None):
     return handle_proxy(request, url, referer)
+
+@app.head("/proxy")
+def proxy_head(request: Request, url: str, referer: str = None):
+    return handle_proxy(request, url, referer)
+
+@app.options("/proxy")
+def proxy_options():
+    return cors_preflight()
 
 @app.get("/epg.xml")
 def epg_xml():
