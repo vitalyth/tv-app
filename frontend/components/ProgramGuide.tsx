@@ -32,6 +32,7 @@ const SECS_PER_HOUR = 3600;
 const PX_PER_SEC = CELL_W / SECS_PER_HOUR;
 const HOURS_BACK = 1;
 const HOURS_FORWARD = 12;
+const DEFAULT_CHANNEL_W = 130;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,19 @@ function getSourceLabel(channel: Channel, sourceIndex: number): string {
     }
 
     return sourceIndex === 0 ? "ראשי" : `מקור ${sourceIndex + 1}`;
+}
+
+function getGuideChannelWidth(): number {
+    if (typeof window === "undefined") {
+        return DEFAULT_CHANNEL_W;
+    }
+
+    const rawValue = getComputedStyle(document.documentElement)
+        .getPropertyValue("--guide-channel-width")
+        .trim();
+    const parsed = Number.parseFloat(rawValue);
+
+    return Number.isFinite(parsed) ? parsed : DEFAULT_CHANNEL_W;
 }
 
 // ─── Program Cell ─────────────────────────────────────────────────────────────
@@ -193,10 +207,6 @@ function ProgramGuide({
 }: ProgramGuideProps) {
     // const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
     const mainRef = useRef<HTMLDivElement>(null);
-    const headRef = useRef<HTMLDivElement>(null);
-    const sideRef = useRef<HTMLDivElement>(null);
-    const scrollSyncFrame = useRef<number | null>(null);
-    const scrollSyncSource = useRef<"main" | "head" | "side" | null>(null);
 
     const isDragging = useRef(false);
     const didDrag = useRef(false);
@@ -243,8 +253,6 @@ function ProgramGuide({
 
         mainRef.current.scrollLeft = scrollLeftStart.current - dx;
         mainRef.current.scrollTop = scrollTopStart.current - dy;
-
-        syncScroll("main");
     };
 
     const onMouseUp = () => {
@@ -263,10 +271,6 @@ function ProgramGuide({
         window.addEventListener("mouseup", onMouseUp);
 
         return () => {
-            if (scrollSyncFrame.current !== null) {
-                cancelAnimationFrame(scrollSyncFrame.current);
-            }
-
             window.removeEventListener("mousemove", onMouseMove);
             window.removeEventListener("mouseup", onMouseUp);
         };
@@ -274,54 +278,11 @@ function ProgramGuide({
 
     const nowSec = useNowSec();
 
-    const syncScroll = useCallback((source: "main" | "head" | "side") => {
-        scrollSyncSource.current = source;
-
-        if (scrollSyncFrame.current !== null) {
-            return;
-        }
-
-        scrollSyncFrame.current = requestAnimationFrame(() => {
-            scrollSyncFrame.current = null;
-
-            if (!mainRef.current) return;
-
-            const activeSource = scrollSyncSource.current;
-            scrollSyncSource.current = null;
-
-            if (activeSource === "head" && headRef.current) {
-                mainRef.current.scrollLeft = headRef.current.scrollLeft;
-            }
-
-            if (activeSource === "side" && sideRef.current) {
-                mainRef.current.scrollTop = sideRef.current.scrollTop;
-            }
-
-            if (headRef.current && headRef.current.scrollLeft !== mainRef.current.scrollLeft) {
-                headRef.current.scrollLeft = mainRef.current.scrollLeft;
-            }
-
-            if (sideRef.current && sideRef.current.scrollTop !== mainRef.current.scrollTop) {
-                sideRef.current.scrollTop = mainRef.current.scrollTop;
-            }
-        });
-    }, []);
-
-    const onMainScroll = useCallback(() => {
-        syncScroll("main");
-    }, [syncScroll]);
-    const onHeadScroll = useCallback(() => {
-        syncScroll("head");
-    }, [syncScroll]);
-    const onSideScroll = useCallback(() => {
-        syncScroll("side");
-    }, [syncScroll]);
-
     const visibleChannels = useMemo(() => uniqueChannelsByIndex(channels), [channels]);
     const channelsByIndex = useMemo(() => groupChannelsByIndex(sourceChannels), [sourceChannels]);
 
     // All timestamps in unix seconds
-    const { guideStart, guideEnd, totalGridW, totalGridH, hourLabels, nowRight } = useMemo(() => {
+    const { guideStart, guideEnd, totalGridW, totalGridH, totalContentH, hourLabels, nowRight } = useMemo(() => {
         // const nowSec = Math.floor(Date.now() / 1000);
 
         // Snap guideStart to the beginning of the hour that is HOURS_BACK ago
@@ -351,7 +312,15 @@ function ProgramGuide({
         // nowRight: px from right edge of grid to now line
         const nowRight = Math.round((end - nowSec) * PX_PER_SEC);
 
-        return { guideStart: start, guideEnd: end, totalGridW: w, totalGridH: h, hourLabels: labels, nowRight };
+        return {
+            guideStart: start,
+            guideEnd: end,
+            totalGridW: w,
+            totalGridH: h,
+            totalContentH: HEAD_H + h,
+            hourLabels: labels,
+            nowRight,
+        };
     }, [visibleChannels.length, nowSec]);
 
     // Auto-scroll: position "now" at ~30% from the right on load
@@ -362,10 +331,12 @@ function ProgramGuide({
             if (node && !didScrollRef.current) {
                 requestAnimationFrame(() => {
                     const visibleW = node.clientWidth;
-                    // scrollLeft so that nowRight pixels from right = 30% of viewport from right
-                    const target = totalGridW - visibleW - nowRight + visibleW * 0.3;
-                    node.scrollLeft = Math.max(0, Math.min(target, totalGridW - visibleW));
-                    if (headRef.current) headRef.current.scrollLeft = node.scrollLeft;
+                    const channelW = getGuideChannelWidth();
+                    const visibleProgramW = Math.max(0, visibleW - channelW);
+                    const nowX = totalGridW - nowRight;
+                    const target = nowX - visibleProgramW * 0.7;
+                    const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
+                    node.scrollLeft = Math.max(0, Math.min(target, maxScrollLeft));
                     didScrollRef.current = true;
                 });
             }
@@ -376,25 +347,75 @@ function ProgramGuide({
     const scrollToNow = useCallback(() => {
         if (!mainRef.current) return;
         const visibleW = mainRef.current.clientWidth;
-        const target = totalGridW - visibleW - nowRight + visibleW * 0.3;
-        const clamped = Math.max(0, Math.min(target, totalGridW - visibleW));
+        const channelW = getGuideChannelWidth();
+        const visibleProgramW = Math.max(0, visibleW - channelW);
+        const nowX = totalGridW - nowRight;
+        const target = nowX - visibleProgramW * 0.7;
+        const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
+        const clamped = Math.max(0, Math.min(target, maxScrollLeft));
         mainRef.current.scrollTo({ left: clamped, behavior: "smooth" });
-        if (headRef.current) headRef.current.scrollLeft = clamped;
     }, [nowRight, totalGridW]);
 
     return (
         <div className="h-full w-full bg-zinc-950 flex flex-col font-sans overflow-hidden">
-            <div className="flex flex-1 min-h-0">
-
-                {/* ── Channel column (right) ── */}
+            <div
+                ref={mainCallbackRef}
+                onMouseDown={onMouseDown}
+                className="flex-1 overflow-scroll cursor-grab active:cursor-grabbing"
+                style={{ scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}
+            >
                 <div
-                    className="shrink-0 flex flex-col border-r border-zinc-800 z-10 bg-zinc-900"
-                    style={{ width: CHAN_W }}
+                    className="relative"
+                    style={{
+                        width: `calc(${CHAN_W} + ${totalGridW}px)`,
+                        height: totalContentH,
+                    }}
                 >
-                    {/* Corner */}
+                    {/* Header */}
                     <div
-                        className="shrink-0 flex items-center justify-between px-2 border-b border-zinc-700"
-                        style={{ height: HEAD_H }}
+                        className="sticky top-0 z-[60] bg-zinc-900"
+                        style={{
+                            width: `calc(${CHAN_W} + ${totalGridW}px)`,
+                            height: HEAD_H,
+                        }}
+                    >
+                        <div
+                            className="absolute top-0 z-20 border-b border-zinc-700 bg-zinc-900"
+                            style={{ left: CHAN_W, width: totalGridW, height: HEAD_H }}
+                        >
+                            {hourLabels.map(({ ts, label }) => {
+                                const left = (ts - guideStart) * PX_PER_SEC;
+
+                                return (
+                                    <div
+                                        key={ts}
+                                        className="absolute top-0 flex items-center pr-2 px-2 text-xs font-bold text-zinc-300 tracking-wider border-r border-zinc-800"
+                                        style={{ left, width: CELL_W, height: HEAD_H }}
+                                    >
+                                        {label}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <div
+                            className="absolute bottom-0 z-30 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-md shadow-red-950 pointer-events-none"
+                            style={{
+                                right: `${nowRight}px`,
+                                transform: "translate(50%, 50%)",
+                            }}
+                        >
+                            <span>{formatTime(nowSec)}</span>
+                        </div>
+                    </div>
+
+                    <div
+                        className="sticky left-0 top-0 z-[90] flex items-center justify-between border-b border-r border-zinc-700 bg-zinc-900 px-2"
+                        style={{
+                            width: CHAN_W,
+                            height: HEAD_H,
+                            marginTop: -HEAD_H,
+                        }}
                     >
                         <button
                             onClick={scrollToNow}
@@ -407,217 +428,177 @@ function ProgramGuide({
                         <span className="guide-channel-heading text-xs text-zinc-500 font-bold">ערוץ</span>
                     </div>
 
-                    {/* Channel list */}
+                    {/* Channel column */}
                     <div
-                        ref={sideRef}
-                        onScroll={onSideScroll}
-                        className="flex-1 overflow-y-scroll overflow-x-hidden"
-                        style={{ scrollbarWidth: "none" }}
+                        className="sticky left-0 z-[70] border-r border-zinc-800 bg-zinc-900"
+                        style={{ width: CHAN_W, height: totalGridH }}
                     >
-                        <div style={{ height: totalGridH }}>
-                            {visibleChannels.map((ch) => {
-                                const isPlayingChannel =
-                                    ch.id === playingChannelId ||
-                                    ch.index === playingChannelIndex;
-                                const sourceOptions = channelsByIndex.get(ch.index) ?? [ch];
-                                const hasSourceOptions = sourceOptions.length > 1;
-                                const activeSource = sourceOptions.find((source) => source.id === playingChannelId);
+                        {visibleChannels.map((ch) => {
+                            const isPlayingChannel =
+                                ch.id === playingChannelId ||
+                                ch.index === playingChannelIndex;
+                            const sourceOptions = channelsByIndex.get(ch.index) ?? [ch];
+                            const hasSourceOptions = sourceOptions.length > 1;
+                            const activeSource = sourceOptions.find((source) => source.id === playingChannelId);
 
-                                return (
-                                    <div
-                                        key={ch.id}
-                                        className={`
-                                            guide-channel-cell relative flex items-center gap-2 px-3 border-b border-zinc-800/70
-                                            transition-colors cursor-pointer
-                                            ${isPlayingChannel
-                                                ? "bg-emerald-950/80 shadow-[inset_-3px_0_0_rgb(52_211_153)] hover:bg-emerald-900/70"
-                                                : "hover:bg-zinc-800"
-                                            }
-                                        `}
-                                        style={{ height: CELL_H }}
-                                        onClick={() => onChannelClick?.(ch)}
-                                        aria-current={isPlayingChannel ? "true" : undefined}
-                                    >
-                                        <div className="guide-channel-logo w-8 h-8 shrink-0 rounded bg-zinc-800 overflow-hidden flex items-center justify-center">
-                                            <img
-                                                src={`${logoBasePath}${ch.logo}`}
-                                                alt={ch.name}
-                                                className="w-full h-full object-contain"
-                                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                                            />
+                            return (
+                                <div
+                                    key={ch.id}
+                                    className={`
+                                        guide-channel-cell relative flex items-center gap-2 px-3 border-b border-zinc-800/70
+                                        transition-colors cursor-pointer
+                                        ${isPlayingChannel
+                                            ? "bg-emerald-950/80 shadow-[inset_-3px_0_0_rgb(52_211_153)] hover:bg-emerald-900/70"
+                                            : "hover:bg-zinc-800"
+                                        }
+                                    `}
+                                    style={{ height: CELL_H }}
+                                    onClick={() => onChannelClick?.(ch)}
+                                    aria-current={isPlayingChannel ? "true" : undefined}
+                                >
+                                    <div className="guide-channel-logo w-8 h-8 shrink-0 rounded bg-zinc-800 overflow-hidden flex items-center justify-center">
+                                        <img
+                                            src={`${logoBasePath}${ch.logo}`}
+                                            alt={ch.name}
+                                            className="w-full h-full object-contain"
+                                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                        />
+                                    </div>
+                                    <div className="guide-channel-text overflow-hidden">
+                                        <div className="flex min-w-0 items-center gap-1.5">
+                                            {isPlayingChannel && (
+                                                <Play className="h-3 w-3 shrink-0 fill-emerald-300 text-emerald-300" aria-hidden="true" />
+                                            )}
+                                            <p className="text-xs font-semibold text-zinc-100 truncate leading-tight">{ch.name}</p>
                                         </div>
-                                        <div className="guide-channel-text overflow-hidden">
-                                            <div className="flex min-w-0 items-center gap-1.5">
-                                                {isPlayingChannel && (
-                                                    <Play className="h-3 w-3 shrink-0 fill-emerald-300 text-emerald-300" aria-hidden="true" />
-                                                )}
-                                                <p className="text-xs font-semibold text-zinc-100 truncate leading-tight">{ch.name}</p>
-                                            </div>
-                                            <p className={isPlayingChannel ? "text-[10px] text-emerald-300" : "text-[10px] text-zinc-500"}>
-                                                {isPlayingChannel
-                                                    ? activeSource
-                                                        ? getSourceLabel(activeSource, sourceOptions.indexOf(activeSource))
-                                                        : "מנגן עכשיו"
-                                                    : ch.index}
-                                            </p>
-                                        </div>
-                                        {hasSourceOptions && (
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        className="guide-source-button ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-700/70 hover:text-white"
-                                                        aria-label="בחר מקור"
-                                                        title="בחר מקור"
-                                                        onPointerDown={(event) => event.stopPropagation()}
-                                                        onClick={(event) => event.stopPropagation()}
-                                                    >
-                                                        <ListVideo className="h-4 w-4" aria-hidden="true" />
-                                                    </button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent
-                                                    align="end"
-                                                    side="left"
-                                                    className="min-w-44 border-zinc-700 bg-zinc-900 text-zinc-100"
+                                        <p className={isPlayingChannel ? "text-[10px] text-emerald-300" : "text-[10px] text-zinc-500"}>
+                                            {isPlayingChannel
+                                                ? activeSource
+                                                    ? getSourceLabel(activeSource, sourceOptions.indexOf(activeSource))
+                                                    : "מנגן עכשיו"
+                                                : ch.index}
+                                        </p>
+                                    </div>
+                                    {hasSourceOptions && (
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    className="guide-source-button ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-700/70 hover:text-white"
+                                                    aria-label="בחר מקור"
+                                                    title="בחר מקור"
+                                                    onPointerDown={(event) => event.stopPropagation()}
+                                                    onClick={(event) => event.stopPropagation()}
                                                 >
-                                                    {sourceOptions.map((source, sourceIndex) => {
-                                                        const isActiveSource = source.id === playingChannelId;
+                                                    <ListVideo className="h-4 w-4" aria-hidden="true" />
+                                                </button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent
+                                                align="end"
+                                                side="left"
+                                                className="z-[120] min-w-44 border-zinc-700 bg-zinc-900 text-zinc-100"
+                                            >
+                                                {sourceOptions.map((source) => {
+                                                    const isActiveSource = source.id === playingChannelId;
 
-                                                        return (
-                                                            <DropdownMenuItem
-                                                                key={source.id}
-                                                                className="cursor-pointer justify-between text-right focus:bg-zinc-800 focus:text-white"
-                                                                onClick={(event) => {
-                                                                    event.stopPropagation();
-                                                                    onChannelClick?.(source);
-                                                                }}
-                                                            >
-                                                                <span className="truncate">{source.name}</span>
-                                                                {isActiveSource && (
-                                                                    <Play className="h-3.5 w-3.5 fill-emerald-300 text-emerald-300" aria-hidden="true" />
-                                                                )}
-                                                            </DropdownMenuItem>
-                                                        );
-                                                    })}
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-
-                {/* ── Time grid (left, RTL) ── */}
-                <div className="flex flex-1 flex-col min-w-0">
-
-                    {/* Header */}
-                    <div
-                        ref={headRef}
-                        onScroll={onHeadScroll}
-                        className="shrink-0 overflow-x-scroll overflow-y-hidden border-b border-zinc-700 bg-zinc-900"
-                        style={{ height: HEAD_H, scrollbarWidth: "none" }}
-                    >
-                        <div style={{ width: totalGridW, height: HEAD_H, position: "relative" }}>
-                            {hourLabels.map(({ ts, label }) => {
-                                // const right = (guideEnd - ts) * PX_PER_SEC;
-                                const left = (ts - guideStart) * PX_PER_SEC;
-                                return (
-                                    <div
-                                        key={ts}
-                                        className="absolute top-0 flex items-center pr-2 px-2 text-xs font-bold text-zinc-300 tracking-wider border-r border-zinc-800"
-                                        style={{ left, width: CELL_W, height: HEAD_H }}
-                                    >
-                                        {label}
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                                    return (
+                                                        <DropdownMenuItem
+                                                            key={source.id}
+                                                            className="cursor-pointer justify-between text-right focus:bg-zinc-800 focus:text-white"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                onChannelClick?.(source);
+                                                            }}
+                                                        >
+                                                            <span className="truncate">{source.name}</span>
+                                                            {isActiveSource && (
+                                                                <Play className="h-3.5 w-3.5 fill-emerald-300 text-emerald-300" aria-hidden="true" />
+                                                            )}
+                                                        </DropdownMenuItem>
+                                                    );
+                                                })}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
 
                     {/* Grid */}
                     <div
-                        ref={mainCallbackRef}
-                        onScroll={onMainScroll}
-                        onMouseDown={onMouseDown}
-                        className="flex-1 overflow-scroll cursor-grab active:cursor-grabbing"
-                        style={{ scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}
+                        className="absolute"
+                        style={{
+                            top: HEAD_H,
+                            left: CHAN_W,
+                            width: totalGridW,
+                            height: totalGridH,
+                        }}
                     >
-                        <div style={{ width: totalGridW, height: totalGridH, position: "relative" }}>
-
-                            {/* Hour lines */}
-                            {hourLabels.map(({ ts }) => (
-                                <div
-                                    key={ts}
-                                    className="absolute top-0 bottom-0 border-r border-zinc-800/40"
-                                    style={{ right: (guideEnd - ts) * PX_PER_SEC }}
-                                />
-                            ))}
-
-                            {/* Row dividers */}
-                            {visibleChannels.map((_, ri) => (
-                                <div
-                                    key={ri}
-                                    className="absolute left-0 right-0 border-b border-zinc-800/50"
-                                    style={{ top: ri * CELL_H, height: CELL_H }}
-                                />
-                            ))}
-
-                            {/* Now line */}
+                        {hourLabels.map(({ ts }) => (
                             <div
-                                className="absolute top-0 bottom-0 w-0.5 bg-red-500/80 z-20 pointer-events-none"
-                                style={{ right: `${nowRight}px` }}
-                            >
-                                <div className="absolute -top-1 -left-2 z-50 translate-x-1/2 w-2.5 h-2.5 rounded-full bg-red-500 shadow-md shadow-red-900" />
-                            </div>
+                                key={ts}
+                                className="absolute top-0 bottom-0 border-r border-zinc-800/40"
+                                style={{ right: (guideEnd - ts) * PX_PER_SEC }}
+                            />
+                        ))}
 
-                            {/* Programs */}
-                            {visibleChannels.map((ch, ri) => {
-                                const isPlayingChannel =
-                                    ch.id === playingChannelId ||
-                                    ch.index === playingChannelIndex;
+                        {visibleChannels.map((_, ri) => (
+                            <div
+                                key={ri}
+                                className="absolute left-0 right-0 border-b border-zinc-800/50"
+                                style={{ top: ri * CELL_H, height: CELL_H }}
+                            />
+                        ))}
 
-                                return (
-                                    <div
-                                        key={ch.id}
-                                        className="absolute left-0 right-0"
-                                        style={{ top: ri * CELL_H, height: CELL_H }}
-                                    >
-                                        {isPlayingChannel && (
-                                            <div
-                                                className="absolute inset-x-0 top-0 border-y border-emerald-400/20 bg-emerald-950/30 pointer-events-none"
-                                                style={{ height: CELL_H }}
-                                                aria-hidden="true"
+                        <div
+                            className="absolute top-0 bottom-0 z-10 w-0.5 bg-red-500/80 pointer-events-none"
+                            style={{ right: `${nowRight}px` }}
+                        />
+
+                        {visibleChannels.map((ch, ri) => {
+                            const isPlayingChannel =
+                                ch.id === playingChannelId ||
+                                ch.index === playingChannelIndex;
+
+                            return (
+                                <div
+                                    key={ch.id}
+                                    className="absolute left-0 right-0"
+                                    style={{ top: ri * CELL_H, height: CELL_H }}
+                                >
+                                    {isPlayingChannel && (
+                                        <div
+                                            className="absolute inset-x-0 top-0 border-y border-emerald-400/20 bg-emerald-950/30 pointer-events-none"
+                                            style={{ height: CELL_H }}
+                                            aria-hidden="true"
+                                        />
+                                    )}
+                                    {ch.programs.length === 0 ? (
+                                        <div
+                                            className="absolute top-1.5 inset-x-2 rounded-lg border border-zinc-800/40 bg-zinc-900/50 flex items-center pr-3"
+                                            style={{ height: CELL_H - 12 }}
+                                        >
+                                            <span className="text-xs text-zinc-600">אין מידע</span>
+                                        </div>
+                                    ) : (
+                                        ch.programs.map((prog, pi) => (
+                                            <ProgramCell
+                                                key={pi}
+                                                program={prog}
+                                                channel={ch}
+                                                guideStart={guideStart}
+                                                guideEnd={guideEnd}
+                                                nowSec={nowSec}
+                                                isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
+                                                onClick={onProgramClick}
+                                                didDrag={didDrag}
                                             />
-                                        )}
-                                        {ch.programs.length === 0 ? (
-                                            <div
-                                                className="absolute top-1.5 inset-x-2 rounded-lg border border-zinc-800/40 bg-zinc-900/50 flex items-center pr-3"
-                                                style={{ height: CELL_H - 12 }}
-                                            >
-                                                <span className="text-xs text-zinc-600">אין מידע</span>
-                                            </div>
-                                        ) : (
-                                            ch.programs.map((prog, pi) => (
-                                                <ProgramCell
-                                                    key={pi}
-                                                    program={prog}
-                                                    channel={ch}
-                                                    guideStart={guideStart}
-                                                    guideEnd={guideEnd}
-                                                    nowSec={nowSec}
-                                                    isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
-                                                    onClick={onProgramClick}
-                                                    didDrag={didDrag}
-                                                />
-                                            ))
-                                        )}
-                                    </div>
-                                );
-                            })}
-
-                        </div>
+                                        ))
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>

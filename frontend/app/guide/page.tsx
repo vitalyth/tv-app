@@ -90,7 +90,7 @@ export default function GuidePage() {
         top: 0,
         left: 0,
         transform: "none",
-        zIndex: 50,
+        zIndex: 110,
         transition: isDragging ? "none" : "box-shadow 0.2s",
         boxShadow: isDragging
             ? "0 24px 64px rgba(0,0,0,0.7)"
@@ -279,7 +279,7 @@ export default function GuidePage() {
                     left: 50%;
                     margin-bottom: 7px;
                     transform: translate(-50%);
-                    z-index: 50;
+                    z-index: 110;
                     border-radius: 10px;
                     overflow: hidden;
                 }
@@ -322,7 +322,7 @@ export default function GuidePage() {
                     top: 50%;
                     left: 50%;
                     transform: translate(-50%, -50%);
-                    z-index: 50;
+                    z-index: 110;
                     border-radius: 0;
                     overflow: hidden;
                 }
@@ -340,7 +340,7 @@ export default function GuidePage() {
                         bottom: auto;
                         margin: 0;
                         transform: translate(-50%, -50%);
-                        z-index: 50;
+                        z-index: 110;
                         border-radius: 0;
                         overflow: hidden;
                     }
@@ -363,7 +363,7 @@ export default function GuidePage() {
                         bottom: auto;
                         margin-bottom: 7px;
                         transform: translate(-50%);
-                        z-index: 50;
+                        z-index: 110;
                         border-radius: 10px;
                         overflow: hidden;
                     }
