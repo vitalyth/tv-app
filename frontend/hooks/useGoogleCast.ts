@@ -1,0 +1,282 @@
+"use client"
+
+import { useCallback, useEffect, useRef, useState } from "react"
+import { api } from "@/lib/api"
+import { type Channel } from "@/lib/channels-data"
+
+const CAST_SDK_SRC = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
+const DEFAULT_RECEIVER_APP_ID = "CC1AD845"
+
+type CastSessionState = "disconnected" | "connecting" | "connected"
+
+interface UseGoogleCastOptions {
+    channel: Channel | null
+    streamUrl: string | null
+    onCastStarted?: () => void
+    onCastEnded?: () => void
+}
+
+interface CastLoadOptions {
+    channel: Channel
+    streamUrl: string
+}
+
+const getCast = () => {
+    if (typeof window === "undefined") return null
+    return window.cast || null
+}
+
+const getChromeCast = () => {
+    if (typeof window === "undefined") return null
+    return window.chrome?.cast || null
+}
+
+const resolveAbsoluteUrl = (url: string) => {
+    if (typeof window === "undefined") return url
+    return new URL(url, window.location.origin).toString()
+}
+
+const buildCastStreamUrl = (streamUrl: string, referer = "") => {
+    return resolveAbsoluteUrl(
+        api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}`)
+    )
+}
+
+const hasDvrWindow = (media?: chrome.cast.media.Media | null) => {
+    const duration = media?.media?.duration
+    return typeof duration === "number" && Number.isFinite(duration) && duration > 0
+}
+
+const ensureCastSenderScript = () => {
+    if (typeof window === "undefined") return Promise.resolve(false)
+
+    if (getCast()?.framework && getChromeCast()) {
+        return Promise.resolve(true)
+    }
+
+    return new Promise<boolean>((resolve) => {
+        const existing = document.querySelector<HTMLScriptElement>(`script[src="${CAST_SDK_SRC}"]`)
+
+        const previousCallback = window.__onGCastApiAvailable
+        window.__onGCastApiAvailable = (isAvailable: boolean) => {
+            previousCallback?.(isAvailable)
+            resolve(isAvailable)
+        }
+
+        if (existing) return
+
+        const script = document.createElement("script")
+        script.src = CAST_SDK_SRC
+        script.async = true
+        script.onerror = () => resolve(false)
+        document.head.appendChild(script)
+    })
+}
+
+export function useGoogleCast({
+    channel,
+    streamUrl,
+    onCastStarted,
+    onCastEnded,
+}: UseGoogleCastOptions) {
+    const [isAvailable, setIsAvailable] = useState(false)
+    const [sessionState, setSessionState] = useState<CastSessionState>("disconnected")
+    const [hasDvr, setHasDvr] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const lastLoadKeyRef = useRef<string | null>(null)
+    const remotePlayerRef = useRef<cast.framework.RemotePlayer | null>(null)
+    const remoteControllerRef = useRef<cast.framework.RemotePlayerController | null>(null)
+    const mediaStatusUnsubscribeRef = useRef<(() => void) | null>(null)
+
+    const clearMediaStatusListener = useCallback(() => {
+        mediaStatusUnsubscribeRef.current?.()
+        mediaStatusUnsubscribeRef.current = null
+    }, [])
+
+    const loadLiveMedia = useCallback(async ({ channel, streamUrl }: CastLoadOptions) => {
+        const castApi = getCast()
+        const chromeCast = getChromeCast()
+        const session = castApi?.framework.CastContext.getInstance().getCurrentSession()
+
+        if (!castApi || !chromeCast || !session) return false
+
+        const mediaInfo = new chromeCast.media.MediaInfo(
+            buildCastStreamUrl(streamUrl, channel.linkDetails?.referer),
+            channel.linkDetails?.manifest_type === "mpd"
+                ? "application/dash+xml"
+                : "application/x-mpegURL"
+        )
+
+        mediaInfo.streamType = chromeCast.media.StreamType.LIVE
+        mediaInfo.metadata = new chromeCast.media.TvShowMediaMetadata()
+        mediaInfo.metadata.title = channel.name
+        mediaInfo.metadata.images = [{ url: resolveAbsoluteUrl(`/ch/${channel.logo}`) }]
+
+        const request = new chromeCast.media.LoadRequest(mediaInfo)
+        request.autoplay = true
+
+        try {
+            clearMediaStatusListener()
+            await session.loadMedia(request)
+            lastLoadKeyRef.current = `${channel.id}:${streamUrl}`
+
+            const media = session.getMediaSession()
+            setHasDvr(hasDvrWindow(media))
+
+            const statusHandler = () => {
+                const currentMedia = session.getMediaSession()
+                setHasDvr(hasDvrWindow(currentMedia))
+            }
+
+            media?.addUpdateListener(statusHandler)
+            mediaStatusUnsubscribeRef.current = () => media?.removeUpdateListener(statusHandler)
+            setError(null)
+            return true
+        } catch (err) {
+            console.error("Failed to load Cast media:", err)
+            setError("cast-load-failed")
+            return false
+        }
+    }, [clearMediaStatusListener])
+
+    const requestCastSession = useCallback(async () => {
+        const castApi = getCast()
+        if (!castApi?.framework || !channel || !streamUrl) return
+
+        setError(null)
+        setSessionState("connecting")
+
+        try {
+            await castApi.framework.CastContext.getInstance().requestSession()
+            await loadLiveMedia({ channel, streamUrl })
+        } catch (err) {
+            console.warn("Cast session request failed:", err)
+            setError("cast-session-failed")
+            setSessionState("disconnected")
+        }
+    }, [channel, loadLiveMedia, streamUrl])
+
+    const stopCasting = useCallback(async () => {
+        const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
+
+        try {
+            await session?.endSession(true)
+        } catch (err) {
+            console.warn("Failed to stop Cast session:", err)
+            setError("cast-stop-failed")
+        }
+    }, [])
+
+    const setVolume = useCallback(async (volume: number, muted: boolean) => {
+        const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
+        if (!session) return
+
+        try {
+            await session.setReceiverMuted(muted)
+            await session.setReceiverVolumeLevel(Math.min(1, Math.max(0, volume)))
+        } catch (err) {
+            console.warn("Failed to update Cast volume:", err)
+        }
+    }, [])
+
+    useEffect(() => {
+        let isMounted = true
+        let sessionStateListener: ((event: cast.framework.SessionStateEventData) => void) | null = null
+        let castStateListener: ((event: cast.framework.CastStateEventData) => void) | null = null
+
+        ensureCastSenderScript().then((ready) => {
+            if (!isMounted || !ready) return
+
+            const castApi = getCast()
+            const chromeCast = getChromeCast()
+            if (!castApi?.framework || !chromeCast) return
+
+            const context = castApi.framework.CastContext.getInstance()
+            context.setOptions({
+                receiverApplicationId: DEFAULT_RECEIVER_APP_ID,
+                autoJoinPolicy: chromeCast.AutoJoinPolicy.ORIGIN_SCOPED,
+                resumeSavedSession: false,
+            })
+
+            const updateCastAvailability = () => {
+                const castState = context.getCastState()
+                setIsAvailable(
+                    castState === castApi.framework.CastState.NOT_CONNECTED ||
+                    castState === castApi.framework.CastState.CONNECTING ||
+                    castState === castApi.framework.CastState.CONNECTED
+                )
+            }
+
+            castStateListener = () => updateCastAvailability()
+            sessionStateListener = (event) => {
+                if (
+                    event.sessionState === castApi.framework.SessionState.SESSION_STARTED ||
+                    event.sessionState === castApi.framework.SessionState.SESSION_RESUMED
+                ) {
+                    setSessionState("connected")
+                    onCastStarted?.()
+                    return
+                }
+
+                if (event.sessionState === castApi.framework.SessionState.SESSION_STARTING) {
+                    setSessionState("connecting")
+                    return
+                }
+
+                if (
+                    event.sessionState === castApi.framework.SessionState.SESSION_ENDED ||
+                    event.sessionState === castApi.framework.SessionState.SESSION_START_FAILED
+                ) {
+                    setSessionState("disconnected")
+                    setHasDvr(false)
+                    lastLoadKeyRef.current = null
+                    clearMediaStatusListener()
+                    onCastEnded?.()
+                }
+            }
+
+            context.addEventListener(castApi.framework.CastContextEventType.CAST_STATE_CHANGED, castStateListener)
+            context.addEventListener(castApi.framework.CastContextEventType.SESSION_STATE_CHANGED, sessionStateListener)
+            remotePlayerRef.current = new castApi.framework.RemotePlayer()
+            remoteControllerRef.current = new castApi.framework.RemotePlayerController(remotePlayerRef.current)
+            updateCastAvailability()
+        })
+
+        return () => {
+            isMounted = false
+            const castApi = getCast()
+            const context = castApi?.framework?.CastContext.getInstance()
+
+            if (context && castApi?.framework) {
+                if (castStateListener) {
+                    context.removeEventListener(castApi.framework.CastContextEventType.CAST_STATE_CHANGED, castStateListener)
+                }
+                if (sessionStateListener) {
+                    context.removeEventListener(castApi.framework.CastContextEventType.SESSION_STATE_CHANGED, sessionStateListener)
+                }
+            }
+
+            clearMediaStatusListener()
+        }
+    }, [clearMediaStatusListener, onCastEnded, onCastStarted])
+
+    useEffect(() => {
+        if (sessionState !== "connected" || !channel || !streamUrl) return
+
+        const loadKey = `${channel.id}:${streamUrl}`
+        if (lastLoadKeyRef.current === loadKey) return
+
+        loadLiveMedia({ channel, streamUrl })
+    }, [channel, loadLiveMedia, sessionState, streamUrl])
+
+    return {
+        error,
+        hasDvr,
+        isAvailable,
+        isCasting: sessionState === "connected",
+        isConnecting: sessionState === "connecting",
+        requestCastSession,
+        setVolume,
+        stopCasting,
+    }
+}

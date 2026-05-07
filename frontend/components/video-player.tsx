@@ -1,7 +1,7 @@
 "use client"
 
-import { useRef, useEffect, useState } from "react"
-import { X, Radio, AlertCircle } from "lucide-react"
+import { useCallback, useRef, useEffect, useState } from "react"
+import { Cast, X, Radio, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import videojs from "video.js"
 import "videojs-contrib-dash"
@@ -10,6 +10,7 @@ import { channelService } from "@/lib/services/channel-service";
 import { api } from "@/lib/api";
 import ProgramDisplay from "@/components/program-display"
 import { useCurrentProgram } from "@/hooks/useCurrentProgram";
+import { useGoogleCast } from "@/hooks/useGoogleCast";
 import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
@@ -260,6 +261,9 @@ const addQualitySelector = (player: any) => {
 export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlayerProps) {
     const videoRef = useRef<HTMLDivElement>(null)
     const playerRef = useRef<any>(null)
+    const suppressCastVolumeSyncRef = useRef(false)
+    const isCastingRef = useRef(false)
+    const setCastVolumeRef = useRef<(volume: number, muted: boolean) => Promise<void> | void>(() => undefined)
     const [hasError, setHasError] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const [streamUrl, setStreamUrl] = useState<string | null>(null);
@@ -281,6 +285,50 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             setShowOverlay(false)
         }, 3000)
     }
+
+    const handleCastStarted = useCallback(() => {
+        const player = playerRef.current
+        if (!player || player.isDisposed?.()) return
+
+        suppressCastVolumeSyncRef.current = true
+        player.pause()
+        player.muted(true)
+        window.setTimeout(() => {
+            suppressCastVolumeSyncRef.current = false
+        }, 0)
+    }, [])
+
+    const handleCastEnded = useCallback(() => {
+        const player = playerRef.current
+        if (!player || player.isDisposed?.()) return
+
+        suppressCastVolumeSyncRef.current = true
+        player.muted(false)
+        player.liveTracker?.seekToLiveEdge?.()
+        player.play()?.catch?.(() => undefined)
+        window.setTimeout(() => {
+            suppressCastVolumeSyncRef.current = false
+        }, 0)
+    }, [])
+
+    const {
+        isAvailable: isCastAvailable,
+        isCasting,
+        isConnecting: isCastConnecting,
+        requestCastSession,
+        setVolume: setCastVolume,
+        stopCasting,
+    } = useGoogleCast({
+        channel,
+        streamUrl,
+        onCastStarted: handleCastStarted,
+        onCastEnded: handleCastEnded,
+    })
+
+    useEffect(() => {
+        isCastingRef.current = isCasting
+        setCastVolumeRef.current = setCastVolume
+    }, [isCasting, setCastVolume])
 
     useEffect(() => {
         if (!channel) return;
@@ -402,6 +450,11 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             setIsLoading(true)
         })
 
+        player.on("volumechange", () => {
+            if (!isCastingRef.current || suppressCastVolumeSyncRef.current) return
+            setCastVolumeRef.current(player.volume() ?? 1, player.muted() ?? false)
+        })
+
         playerRef.current = player
 
         return () => {
@@ -411,6 +464,18 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             }
         }
     }, [streamUrl])
+
+    useEffect(() => {
+        const player = playerRef.current
+        if (!player || player.isDisposed?.() || !isCasting) return
+
+        suppressCastVolumeSyncRef.current = true
+        player.pause()
+        player.muted(true)
+        window.setTimeout(() => {
+            suppressCastVolumeSyncRef.current = false
+        }, 0)
+    }, [isCasting])
 
     useEffect(() => {
         return () => {
@@ -487,6 +552,18 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {isCastAvailable && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={isCasting ? stopCasting : requestCastSession}
+                            disabled={isCastConnecting || !streamUrl}
+                            className={`text-white hover:bg-white/20 ${isCasting ? "text-primary" : ""}`}
+                            title={isCasting ? "Stop casting" : "Cast"}
+                        >
+                            <Cast className="w-5 h-5" />
+                        </Button>
+                    )}
                     {/* Close button */}
                     <Button
                         variant="ghost"
