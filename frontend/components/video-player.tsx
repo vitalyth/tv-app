@@ -20,6 +20,9 @@ const CAST_SDK_URL = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loa
 const CAST_LOAD_TIMEOUT_MS = 10000
 const CAST_LOAD_RETRY_COUNT = 3
 const CAST_LOAD_RETRY_DELAY_MS = 1500
+const CAST_PROXY_WARMUP_TIMEOUT_MS = 4000
+const CAST_PLAY_RETRY_COUNT = 3
+const CAST_PLAY_RETRY_DELAY_MS = 1000
 
 interface VideoPlayerProps {
     channel: Channel | null
@@ -312,11 +315,34 @@ function isCastCancelError(error: any) {
     return error?.code === "cancel" || error === "cancel"
 }
 
-async function loadCastMediaWithRetries(session: any, request: any) {
+function getCastMediaSession(session: any) {
+    return session?.getMediaSession?.() || null
+}
+
+async function warmUpCastSource(sourceUrl: string) {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), CAST_PROXY_WARMUP_TIMEOUT_MS)
+
+    try {
+        const response = await fetch(sourceUrl, {
+            cache: "no-store",
+            signal: controller.signal,
+        })
+
+        if (!response.ok) {
+            throw new Error(`Cast proxy warmup failed with ${response.status}`)
+        }
+    } finally {
+        window.clearTimeout(timeoutId)
+    }
+}
+
+async function loadCastMediaWithRetries(session: any, request: any, sourceUrl: string) {
     let lastError: any = null
 
     for (let attempt = 1; attempt <= CAST_LOAD_RETRY_COUNT; attempt += 1) {
         try {
+            await warmUpCastSource(sourceUrl)
             await session.loadMedia(request)
             return
         } catch (error) {
@@ -332,6 +358,34 @@ async function loadCastMediaWithRetries(session: any, request: any) {
     }
 
     throw lastError
+}
+
+async function playCastMediaWithRetries(session: any) {
+    for (let attempt = 1; attempt <= CAST_PLAY_RETRY_COUNT; attempt += 1) {
+        const mediaSession = getCastMediaSession(session)
+
+        if (!mediaSession) {
+            if (attempt < CAST_PLAY_RETRY_COUNT) {
+                await wait(CAST_PLAY_RETRY_DELAY_MS)
+                continue
+            }
+
+            return
+        }
+
+        try {
+            await new Promise<void>((resolve, reject) => {
+                mediaSession.play(null, resolve, reject)
+            })
+            return
+        } catch (error) {
+            console.warn(`Cast play attempt ${attempt} failed:`, error)
+
+            if (attempt < CAST_PLAY_RETRY_COUNT) {
+                await wait(CAST_PLAY_RETRY_DELAY_MS)
+            }
+        }
+    }
 }
 
 export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlayerProps) {
@@ -458,15 +512,15 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
 
         const updateSessionState = () => {
             const session = castContext?.getCurrentSession?.();
-            const connected = Boolean(session);
+            const hasMedia = Boolean(getCastMediaSession(session));
 
-            setIsCasting(connected);
-            if (connected) {
+            setIsCasting(hasMedia);
+            if (hasMedia) {
                 pauseLocalPlayback();
                 return;
             }
 
-            if (!isDisconnectingForCloseRef.current) {
+            if (!session && !isDisconnectingForCloseRef.current) {
                 resumeLocalPlayback(true);
             }
         };
@@ -546,7 +600,8 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             setCastError(null);
             setIsCastConnecting(true);
 
-            if (isCasting || castContextRef.current?.getCurrentSession?.()) {
+            const currentSession = castContextRef.current?.getCurrentSession?.();
+            if (isCasting || getCastMediaSession(currentSession)) {
                 await disconnectCast(true);
                 return;
             }
@@ -578,18 +633,19 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             const request = new chromeCast.media.LoadRequest(mediaInfo);
             request.autoplay = true;
 
-            await loadCastMediaWithRetries(session, request);
+            await loadCastMediaWithRetries(session, request, sourceUrl);
             try {
                 await waitForCastMediaSession(session);
             } catch (error) {
                 console.warn("Cast media session did not become ready in time:", error);
             }
+            await playCastMediaWithRetries(session);
             pauseLocalPlayback();
             setIsCasting(true);
         } catch (error: any) {
             if (isCastCancelError(error)) return;
             console.error("Failed to cast stream:", error);
-            await disconnectCast(false);
+            setIsCasting(false);
             setCastError("לא הצלחנו להעביר לטלוויזיה");
         } finally {
             setIsCastConnecting(false);
