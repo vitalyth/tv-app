@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState } from "react"
-import { X, Radio, AlertCircle } from "lucide-react"
+import { Cast, X, Radio, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import videojs from "video.js"
 import "videojs-contrib-dash"
@@ -15,6 +15,8 @@ import "@/styles/video-player.css";
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
     require("videojs-contrib-quality-levels")
 }
+
+const CAST_SDK_URL = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
 
 interface VideoPlayerProps {
     channel: Channel | null
@@ -264,6 +266,9 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
     const [isLoading, setIsLoading] = useState(true)
     const [streamUrl, setStreamUrl] = useState<string | null>(null);
     const [showOverlay, setShowOverlay] = useState(true);
+    const [isCastAvailable, setIsCastAvailable] = useState(false);
+    const [isCasting, setIsCasting] = useState(false);
+    const [castError, setCastError] = useState<string | null>(null);
     const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isHoveringRef = useRef(false);
     const currentProgram = useCurrentProgram(channel?.programs);
@@ -309,6 +314,118 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         };
     }, [channel]);
 
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+
+        let castContext: any = null;
+        let removeSessionListener: (() => void) | null = null;
+
+        const updateSessionState = () => {
+            const session = castContext?.getCurrentSession?.();
+            setIsCasting(Boolean(session));
+        };
+
+        const initializeCast = () => {
+            const castFramework = window.cast?.framework;
+
+            if (!castFramework || !window.chrome?.cast) {
+                setIsCastAvailable(false);
+                return;
+            }
+
+            castContext = castFramework.CastContext.getInstance();
+            castContext.setOptions({
+                receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+                autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+            });
+
+            setIsCastAvailable(true);
+            updateSessionState();
+
+            const eventType = castFramework.CastContextEventType.SESSION_STATE_CHANGED;
+            castContext.addEventListener(eventType, updateSessionState);
+            removeSessionListener = () => {
+                castContext?.removeEventListener?.(eventType, updateSessionState);
+            };
+        };
+
+        const castApiCallback = (isAvailable: boolean) => {
+            if (isAvailable) {
+                initializeCast();
+                return;
+            }
+
+            setIsCastAvailable(false);
+        };
+
+        if (window.cast?.framework && window.chrome?.cast) {
+            initializeCast();
+        } else {
+            window.__onGCastApiAvailable = castApiCallback;
+
+            if (!document.querySelector(`script[src="${CAST_SDK_URL}"]`)) {
+                const script = document.createElement("script");
+                script.src = CAST_SDK_URL;
+                script.async = true;
+                document.head.appendChild(script);
+            }
+        }
+
+        return () => {
+            removeSessionListener?.();
+            if (window.__onGCastApiAvailable === castApiCallback) {
+                window.__onGCastApiAvailable = undefined;
+            }
+        };
+    }, []);
+
+    const castToTv = async () => {
+        if (!channel || !streamUrl || typeof window === "undefined") return;
+
+        const castFramework = window.cast?.framework;
+        const chromeCast = window.chrome?.cast;
+
+        if (!castFramework || !chromeCast || !isCastAvailable) {
+            setCastError("אפשרות ההעברה לטלוויזיה לא זמינה בדפדפן הזה");
+            return;
+        }
+
+        try {
+            setCastError(null);
+
+            const referer = channel.linkDetails?.referer || "";
+            const manifestType = channel.linkDetails?.manifest_type;
+            const isDash =
+                manifestType === "mpd" ||
+                streamUrl.includes("/livedash/") ||
+                streamUrl.endsWith(".mpd");
+            const contentType = isDash
+                ? "application/dash+xml"
+                : "application/x-mpegURL";
+            const sourcePath = api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}`);
+            const sourceUrl = new URL(sourcePath, window.location.origin).toString();
+
+            const castContext = castFramework.CastContext.getInstance();
+            const session = castContext.getCurrentSession() || await castContext.requestSession();
+            const mediaInfo = new chromeCast.media.MediaInfo(sourceUrl, contentType);
+            mediaInfo.metadata = new chromeCast.media.GenericMediaMetadata();
+            mediaInfo.metadata.title = channel.name;
+            mediaInfo.metadata.subtitle = currentProgram?.name || "";
+            mediaInfo.metadata.images = [
+                new chromeCast.Image(new URL(`/ch/${channel.logo}`, window.location.origin).toString()),
+            ];
+
+            const request = new chromeCast.media.LoadRequest(mediaInfo);
+            request.autoplay = true;
+
+            await session.loadMedia(request);
+            setIsCasting(true);
+        } catch (error: any) {
+            if (error?.code === "cancel" || error === "cancel") return;
+            console.error("Failed to cast stream:", error);
+            setCastError("לא הצלחנו להעביר לטלוויזיה");
+        }
+    };
 
     useEffect(() => {
         if (!streamUrl) return;
@@ -484,6 +601,20 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            castToTv();
+                        }}
+                        disabled={!isCastAvailable || !streamUrl}
+                        className={`text-white hover:bg-white/20 disabled:opacity-40 ${isCasting ? "bg-white/20 text-primary" : ""}`}
+                        title={isCastAvailable ? "העבר לטלוויזיה" : "Cast לא זמין בדפדפן הזה"}
+                        aria-label="העבר לטלוויזיה"
+                    >
+                        <Cast className="w-5 h-5" />
+                    </Button>
                     {/* Close button */}
                     <Button
                         variant="ghost"
@@ -495,6 +626,12 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                     </Button>
                 </div>
             </div>
+
+            {castError && showOverlay && (
+                <div className="absolute left-4 top-20 z-20 max-w-[min(22rem,calc(100%-2rem))] rounded-md bg-red-950/90 px-3 py-2 text-sm text-white shadow-lg">
+                    {castError}
+                </div>
+            )}
 
             {/* Video.js container */}
             <div className="relative w-full h-full bg-black">
