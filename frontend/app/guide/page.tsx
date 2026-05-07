@@ -7,7 +7,7 @@ import ProgramGuide from "@/components/ProgramGuide";
 import dynamic from "next/dynamic";
 import { ChannelsFilters } from "@/components/channels-filters";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
-import { Channel } from "@/lib/channels-data";
+import { Channel, Program } from "@/lib/channels-data";
 import { useDraggable } from "@/hooks/useDraggable";
 
 const VideoPlayer = dynamic(
@@ -23,8 +23,8 @@ export default function GuidePage() {
         isMobileLandscape: false,
     });
     const orientationFrameRef = useRef<number | null>(null);
-    const selectedChannelRef = useRef<any>(null);
-    const [selectedChannel, setSelectedChannel] = useState<any>(null);
+    const selectedChannelRef = useRef<Channel | null>(null);
+    const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -35,29 +35,28 @@ export default function GuidePage() {
 
     selectedChannelRef.current = selectedChannel;
 
-    // ── Drag ──────────────────────────────────────────────────────────────────
     const { position, isDragging, dragHandleProps, restorePosition } = useDraggable(
         playerRef,
-        !!selectedChannel && !isFullscreen && !isMobile  // disable drag when fullscreen and mobile (width < 500)
+        !!selectedChannel && !isFullscreen && !isMobile
     );
 
-    // ── Handlers ──────────────────────────────────────────────────────────────
-    const handleProgramClick = useCallback((prog: any, ch: Channel) => {
+    const handleProgramClick = useCallback((_program: Program, ch: Channel) => {
         setSelectedChannel(ch);
         setIsFullscreen(isMobileLandscape);
-        restorePosition();
+        restorePosition(true);
     }, [isMobileLandscape, restorePosition]);
 
     const handleChannelClick = useCallback((ch: Channel) => {
         setSelectedChannel(ch);
         setIsFullscreen(isMobileLandscape);
-        restorePosition();
+        restorePosition(true);
     }, [isMobileLandscape, restorePosition]);
 
     const handleClose = useCallback(() => {
         setSelectedChannel(null);
         setIsFullscreen(false);
-    }, []);
+        restorePosition(true);
+    }, [restorePosition]);
 
     const onResizeFull = useCallback(() => {
         if (isMobileLandscape) {
@@ -80,21 +79,18 @@ export default function GuidePage() {
         refresh();
     }, [refresh]);
 
-    // ── Player position style ─────────────────────────────────────────────────
-    // On mobile (position===null) we fall back to CSS classes.
-    // On desktop, once the user has dragged, position is a {x,y} fixed coordinate.
     const playerStyle: React.CSSProperties =
         position && !isFullscreen && !isMobile
             ? {
-        position: "fixed",
-        top: 0,
-        left: 0,
-        transform: "none",
-        zIndex: 110,
-        transition: isDragging ? "none" : "box-shadow 0.2s",
-        boxShadow: isDragging
-            ? "0 24px 64px rgba(0,0,0,0.7)"
-            : "0 8px 32px rgba(0,0,0,0.5)",
+                position: "fixed",
+                top: 0,
+                left: 0,
+                transform: `translate(${position.x}px, ${position.y}px)`,
+                zIndex: 110,
+                transition: isDragging ? "none" : "box-shadow 0.2s",
+                boxShadow: isDragging
+                    ? "0 24px 64px rgba(0,0,0,0.7)"
+                    : "0 8px 32px rgba(0,0,0,0.5)",
             }
             : {};
 
@@ -126,7 +122,6 @@ export default function GuidePage() {
 
         return () => window.removeEventListener("resize", handleResize);
     }, [isMobile]);
-
 
     useEffect(() => {
         if (isMobile) {
@@ -237,8 +232,7 @@ export default function GuidePage() {
                                         : "player-overlay"
                             }
                         >
-                            {/* ── Drag handle bar ── */}
-                            {!isFullscreen && (
+                            {!isFullscreen && !isMobile && (
                                 <div
                                     {...dragHandleProps}
                                     className="player-drag-handle"
@@ -270,61 +264,57 @@ export default function GuidePage() {
             </main>
 
             <style jsx global>{`
-                /* ── Mobile: centered below filters ── */
+                .player-overlay,
+                .player-dragged,
+                .player-overlay-fullscreen {
+                    aspect-ratio: 16 / 9;
+                    z-index: 110;
+                    overflow: hidden;
+                }
+
+                .player-overlay,
+                .player-dragged {
+                    border-radius: 10px;
+                }
+
                 .player-overlay {
                     position: relative;
                     width: auto;
                     height: 315px;
-                    aspect-ratio: 16 / 9;
                     left: 50%;
                     margin-bottom: 7px;
                     transform: translate(-50%);
-                    z-index: 110;
-                    border-radius: 10px;
-                    overflow: hidden;
                 }
 
-                /* ── Desktop default: bottom-right corner ── */
                 @media (min-width: 500px) {
                     .player-overlay {
                         position: absolute;
                         width: clamp(400px, 40vw, 700px);
                         height: auto;
-                        aspect-ratio: 16 / 9;
-                        bottom: 20px;
-                        right: 20px;
+                        bottom: 0;
+                        right: 0;
                         left: auto;
                         top: auto;
                         margin: 0;
                         transform: none;
-                        border-radius: 10px;
-                        overflow: hidden;
                         box-shadow: 0 8px 32px rgba(0,0,0,0.5);
                     }
                 }
 
-                /* ── After first drag: fixed position (controlled by inline style) ── */
                 .player-dragged {
                     width: clamp(400px, 40vw, 700px);
                     height: auto;
-                    aspect-ratio: 16 / 9;
-                    border-radius: 10px;
-                    overflow: hidden;
                     will-change: transform;
                 }
 
-                /* ── Fullscreen ── */
                 .player-overlay-fullscreen {
                     position: fixed;
                     width: 99vw;
                     height: 99vh;
-                    aspect-ratio: 16 / 9;
                     top: 50%;
                     left: 50%;
                     transform: translate(-50%, -50%);
-                    z-index: 110;
                     border-radius: 0;
-                    overflow: hidden;
                 }
 
                 @media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 499px) {
@@ -333,20 +323,13 @@ export default function GuidePage() {
                         position: fixed;
                         width: 99vw;
                         height: 99vh;
-                        aspect-ratio: 16 / 9;
                         top: 50%;
                         left: 50%;
                         right: auto;
                         bottom: auto;
                         margin: 0;
                         transform: translate(-50%, -50%);
-                        z-index: 110;
                         border-radius: 0;
-                        overflow: hidden;
-                    }
-
-                    .player-drag-handle {
-                        display: none;
                     }
                 }
 
@@ -356,26 +339,16 @@ export default function GuidePage() {
                         position: relative;
                         width: auto;
                         height: 315px;
-                        aspect-ratio: 16 / 9;
                         left: 50%;
                         top: auto;
                         right: auto;
                         bottom: auto;
                         margin-bottom: 7px;
                         transform: translate(-50%);
-                        z-index: 110;
                         border-radius: 10px;
-                        overflow: hidden;
                     }
                 }
 
-                @media (max-width: 500px) {
-                    .player-drag-handle {
-                        display: none;
-                    }
-                }
-
-                /* ── Drag handle ── */
                 .player-drag-handle {
                     position: absolute;
                     top: 0;
