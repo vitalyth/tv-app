@@ -7,12 +7,19 @@ Full-stack streaming application with:
 * 🌐 Nginx (Reverse Proxy – custom image)
 * 🐳 Docker (Deployment)
 
+Current version: `0.1.2`
+
 ---
 
 ## 🚀 Features
 
 * Stream proxy (`/api/proxy`)
 * EPG support (`/api/epg`)
+* Interactive program guide with sticky channel and time headers
+* Current channel/program highlighting and a visible `now` marker
+* Alternate source picker for channels with backup streams
+* Floating desktop player with drag support
+* Mobile-friendly player layout
 * Unified port (8001)
 * No CORS issues
 * Fully Dockerized (3 services)
