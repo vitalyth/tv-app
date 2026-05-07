@@ -12,6 +12,7 @@ type CastSessionState = "disconnected" | "connecting" | "connected"
 interface UseGoogleCastOptions {
     channel: Channel | null
     streamUrl: string | null
+    programName?: string
     onCastStarted?: () => void
     onCastEnded?: () => void
 }
@@ -19,6 +20,7 @@ interface UseGoogleCastOptions {
 interface CastLoadOptions {
     channel: Channel
     streamUrl: string
+    programName?: string
 }
 
 const getCast = () => {
@@ -34,6 +36,16 @@ const getChromeCast = () => {
 const resolveAbsoluteUrl = (url: string) => {
     if (typeof window === "undefined") return url
     return new URL(url, window.location.origin).toString()
+}
+
+const buildCastImageUrl = (logo: string) => {
+    const assetBaseUrl = process.env.NEXT_PUBLIC_CAST_ASSET_BASE_URL
+
+    if (assetBaseUrl) {
+        return new URL(`/ch/${logo}`, assetBaseUrl).toString()
+    }
+
+    return resolveAbsoluteUrl(`/ch/${logo}`)
 }
 
 const buildCastStreamUrl = (streamUrl: string, referer = "") => {
@@ -76,6 +88,7 @@ const ensureCastSenderScript = () => {
 export function useGoogleCast({
     channel,
     streamUrl,
+    programName,
     onCastStarted,
     onCastEnded,
 }: UseGoogleCastOptions) {
@@ -93,7 +106,7 @@ export function useGoogleCast({
         mediaStatusUnsubscribeRef.current = null
     }, [])
 
-    const loadLiveMedia = useCallback(async ({ channel, streamUrl }: CastLoadOptions) => {
+    const loadLiveMedia = useCallback(async ({ channel, streamUrl, programName }: CastLoadOptions) => {
         const castApi = getCast()
         const chromeCast = getChromeCast()
         const session = castApi?.framework.CastContext.getInstance().getCurrentSession()
@@ -108,9 +121,10 @@ export function useGoogleCast({
         )
 
         mediaInfo.streamType = chromeCast.media.StreamType.LIVE
-        mediaInfo.metadata = new chromeCast.media.TvShowMediaMetadata()
+        mediaInfo.metadata = new chromeCast.media.GenericMediaMetadata()
         mediaInfo.metadata.title = channel.name
-        mediaInfo.metadata.images = [{ url: resolveAbsoluteUrl(`/ch/${channel.logo}`) }]
+        mediaInfo.metadata.subtitle = programName
+        mediaInfo.metadata.images = [new chromeCast.Image(buildCastImageUrl(channel.logo))]
 
         const request = new chromeCast.media.LoadRequest(mediaInfo)
         request.autoplay = true
@@ -148,13 +162,13 @@ export function useGoogleCast({
 
         try {
             await castApi.framework.CastContext.getInstance().requestSession()
-            await loadLiveMedia({ channel, streamUrl })
+            await loadLiveMedia({ channel, streamUrl, programName })
         } catch (err) {
             console.warn("Cast session request failed:", err)
             setError("cast-session-failed")
             setSessionState("disconnected")
         }
-    }, [channel, loadLiveMedia, streamUrl])
+    }, [channel, loadLiveMedia, programName, streamUrl])
 
     const stopCasting = useCallback(async () => {
         const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
@@ -266,8 +280,8 @@ export function useGoogleCast({
         const loadKey = `${channel.id}:${streamUrl}`
         if (lastLoadKeyRef.current === loadKey) return
 
-        loadLiveMedia({ channel, streamUrl })
-    }, [channel, loadLiveMedia, sessionState, streamUrl])
+        loadLiveMedia({ channel, streamUrl, programName })
+    }, [channel, loadLiveMedia, programName, sessionState, streamUrl])
 
     return {
         error,

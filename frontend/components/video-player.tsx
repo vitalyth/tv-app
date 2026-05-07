@@ -286,17 +286,21 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         }, 3000)
     }
 
-    const handleCastStarted = useCallback(() => {
-        const player = playerRef.current
+    const pauseLocalPlayerForCasting = useCallback((player: any) => {
         if (!player || player.isDisposed?.()) return
 
         suppressCastVolumeSyncRef.current = true
         player.pause()
         player.muted(true)
+        setIsLoading(false)
         window.setTimeout(() => {
             suppressCastVolumeSyncRef.current = false
         }, 0)
     }, [])
+
+    const handleCastStarted = useCallback(() => {
+        pauseLocalPlayerForCasting(playerRef.current)
+    }, [pauseLocalPlayerForCasting])
 
     const handleCastEnded = useCallback(() => {
         const player = playerRef.current
@@ -321,6 +325,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
     } = useGoogleCast({
         channel,
         streamUrl,
+        programName: currentProgram?.name,
         onCastStarted: handleCastStarted,
         onCastEnded: handleCastEnded,
     })
@@ -387,12 +392,14 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             typeof navigator !== "undefined" &&
             /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
+        const keepLocalPaused = isCastingRef.current
+
         const player = videojs(videoElement, {
-            autoplay: true,
+            autoplay: !keepLocalPaused,
             controls: true,
             responsive: true,
             //fluid: true,
-            //muted: false,
+            muted: keepLocalPaused,
             playsinline: true,
             liveui: true,
             //playbackRates: [0.5, 1, 1.5, 2],
@@ -417,6 +424,11 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         player.ready(() => {
             //player.muted(true);
 
+            if (isCastingRef.current) {
+                pauseLocalPlayerForCasting(player)
+                return
+            }
+
             const playPromise = player.play();
             if (playPromise !== undefined) {
                 playPromise.catch(() => {
@@ -436,6 +448,11 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         })
 
         player.on("playing", () => {
+            if (isCastingRef.current) {
+                pauseLocalPlayerForCasting(player)
+                return
+            }
+
             setIsLoading(false);
             setHasError(false);
             showControls();
@@ -469,13 +486,8 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
         const player = playerRef.current
         if (!player || player.isDisposed?.() || !isCasting) return
 
-        suppressCastVolumeSyncRef.current = true
-        player.pause()
-        player.muted(true)
-        window.setTimeout(() => {
-            suppressCastVolumeSyncRef.current = false
-        }, 0)
-    }, [isCasting])
+        pauseLocalPlayerForCasting(player)
+    }, [isCasting, pauseLocalPlayerForCasting])
 
     useEffect(() => {
         return () => {
@@ -486,7 +498,12 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
     }, [])
 
     const handleClose = () => {
-        onClose();
+        if (!isCastingRef.current) {
+            onClose();
+            return
+        }
+
+        stopCasting().finally(onClose)
     }
 
     if (!channel) {
@@ -610,7 +627,7 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                         </div>
                         <Button
                             variant="outline"
-                            onClick={onClose}
+                            onClick={handleClose}
                             className="mt-4"
                         >
                             חזרה לרשימת הערוצים

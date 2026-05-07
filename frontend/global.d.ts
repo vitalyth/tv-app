@@ -77,6 +77,11 @@ declare global {
       ORIGIN_SCOPED = "origin_scoped",
     }
 
+    class Image {
+      constructor(url: string)
+      url: string
+    }
+
     namespace media {
       enum StreamType {
         LIVE = "LIVE",
@@ -85,13 +90,14 @@ declare global {
       class MediaInfo {
         constructor(contentId: string, contentType: string)
         streamType: StreamType
-        metadata?: TvShowMediaMetadata
+        metadata?: GenericMediaMetadata
         duration?: number
       }
 
-      class TvShowMediaMetadata {
+      class GenericMediaMetadata {
         title?: string
-        images?: Array<{ url: string }>
+        subtitle?: string
+        images?: Image[]
       }
 
       class LoadRequest {
