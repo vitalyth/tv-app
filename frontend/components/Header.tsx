@@ -1,6 +1,7 @@
 import { Tv, X, Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import TopNav from "./TopNav";
+import { APP_VERSION } from "@/lib/version";
 
 type Props = {
     title?: string;
@@ -29,7 +30,9 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
                     </div>
                     <div>
                         <h1 className="text-xl font-bold text-foreground">ערוצי טלוויזיה</h1>
-                        <p className="text-xs text-muted-foreground">{title}</p>
+                        <p className="text-xs text-muted-foreground">
+                            {title} · v{APP_VERSION}
+                        </p>
                     </div>
                 </div>
 
