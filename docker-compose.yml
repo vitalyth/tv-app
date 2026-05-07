@@ -25,6 +25,17 @@ services:
     networks:
       - tv-network
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - nginx
+    networks:
+      - tv-network
+
 networks:
   tv-network:
     driver: bridge
