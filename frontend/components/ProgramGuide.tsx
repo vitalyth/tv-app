@@ -552,7 +552,7 @@ function ProgramGuide({
                         ))}
 
                         <div
-                            className="absolute top-0 bottom-0 z-10 w-0.5 bg-red-500/80 pointer-events-none"
+                            className="absolute top-0 bottom-0 z-30 w-0.5 bg-red-500/80 pointer-events-none"
                             style={{ right: `${nowRight}px` }}
                         />
 
