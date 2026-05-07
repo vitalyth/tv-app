@@ -40,17 +40,18 @@ export default function GuidePage() {
         !!selectedChannel && !isFullscreen && !isMobile
     );
 
-    const handleProgramClick = useCallback((_program: Program, ch: Channel) => {
+    const playChannel = useCallback((ch: Channel) => {
         setSelectedChannel(ch);
         setIsFullscreen(isMobileLandscape);
-        restorePosition(true);
-    }, [isMobileLandscape, restorePosition]);
+    }, [isMobileLandscape]);
+
+    const handleProgramClick = useCallback((_program: Program, ch: Channel) => {
+        playChannel(ch);
+    }, [playChannel]);
 
     const handleChannelClick = useCallback((ch: Channel) => {
-        setSelectedChannel(ch);
-        setIsFullscreen(isMobileLandscape);
-        restorePosition(true);
-    }, [isMobileLandscape, restorePosition]);
+        playChannel(ch);
+    }, [playChannel]);
 
     const handleClose = useCallback(() => {
         setSelectedChannel(null);
