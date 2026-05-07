@@ -11,6 +11,18 @@ export const metadata: Metadata = {
   title: 'ערוצי טלוויזיה - צפייה בשידור חי',
   description: 'צפו בערוצי טלוויזיה ישראליים בשידור חי',
   generator: 'v0.app',
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+      'max-video-preview': 0,
+      'max-image-preview': 'none',
+      'max-snippet': 0,
+    },
+  },
   icons: {
     icon: [
       {
