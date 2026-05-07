@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useRef, useEffect, useState } from "react"
-import { Cast, X, Radio, AlertCircle } from "lucide-react"
+import { useRef, useEffect, useState } from "react"
+import { X, Radio, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import videojs from "video.js"
 import "videojs-contrib-dash"
@@ -15,14 +15,6 @@ import "@/styles/video-player.css";
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
     require("videojs-contrib-quality-levels")
 }
-
-const CAST_SDK_URL = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
-const CAST_LOAD_TIMEOUT_MS = 10000
-const CAST_LOAD_RETRY_COUNT = 3
-const CAST_LOAD_RETRY_DELAY_MS = 1500
-const CAST_PROXY_WARMUP_TIMEOUT_MS = 4000
-const CAST_PLAY_RETRY_COUNT = 3
-const CAST_PLAY_RETRY_DELAY_MS = 1000
 
 interface VideoPlayerProps {
     channel: Channel | null
@@ -265,142 +257,13 @@ const addQualitySelector = (player: any) => {
     levels.on("change", update)
 }
 
-function waitForCastMediaSession(session: any, timeoutMs = CAST_LOAD_TIMEOUT_MS) {
-    return new Promise<void>((resolve, reject) => {
-        if (session?.getMediaSession?.()) {
-            resolve()
-            return
-        }
-
-        let didFinish = false
-        let removeListener: (() => void) | null = null
-
-        const finish = (error?: Error) => {
-            if (didFinish) return
-            didFinish = true
-            window.clearTimeout(timeoutId)
-            removeListener?.()
-
-            if (error) {
-                reject(error)
-                return
-            }
-
-            resolve()
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            finish(new Error("Timed out waiting for cast media session"))
-        }, timeoutMs)
-
-        const castFramework = window.cast?.framework
-        const eventType = castFramework?.SessionEventType?.MEDIA_SESSION
-
-        if (!eventType || !session?.addEventListener) {
-            finish(new Error("Cast media session listener is unavailable"))
-            return
-        }
-
-        const onMediaSession = () => finish()
-        session.addEventListener(eventType, onMediaSession)
-        removeListener = () => session.removeEventListener?.(eventType, onMediaSession)
-    })
-}
-
-function wait(ms: number) {
-    return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
-}
-
-function isCastCancelError(error: any) {
-    return error?.code === "cancel" || error === "cancel"
-}
-
-function getCastMediaSession(session: any) {
-    return session?.getMediaSession?.() || null
-}
-
-async function warmUpCastSource(sourceUrl: string) {
-    const controller = new AbortController()
-    const timeoutId = window.setTimeout(() => controller.abort(), CAST_PROXY_WARMUP_TIMEOUT_MS)
-
-    try {
-        const response = await fetch(sourceUrl, {
-            cache: "no-store",
-            signal: controller.signal,
-        })
-
-        if (!response.ok) {
-            throw new Error(`Cast proxy warmup failed with ${response.status}`)
-        }
-    } finally {
-        window.clearTimeout(timeoutId)
-    }
-}
-
-async function loadCastMediaWithRetries(session: any, request: any, sourceUrl: string) {
-    let lastError: any = null
-
-    for (let attempt = 1; attempt <= CAST_LOAD_RETRY_COUNT; attempt += 1) {
-        try {
-            await warmUpCastSource(sourceUrl)
-            await session.loadMedia(request)
-            return
-        } catch (error) {
-            if (isCastCancelError(error)) throw error
-
-            lastError = error
-            console.warn(`Cast load attempt ${attempt} failed:`, error)
-
-            if (attempt < CAST_LOAD_RETRY_COUNT) {
-                await wait(CAST_LOAD_RETRY_DELAY_MS)
-            }
-        }
-    }
-
-    throw lastError
-}
-
-async function playCastMediaWithRetries(session: any) {
-    for (let attempt = 1; attempt <= CAST_PLAY_RETRY_COUNT; attempt += 1) {
-        const mediaSession = getCastMediaSession(session)
-
-        if (!mediaSession) {
-            if (attempt < CAST_PLAY_RETRY_COUNT) {
-                await wait(CAST_PLAY_RETRY_DELAY_MS)
-                continue
-            }
-
-            return
-        }
-
-        try {
-            await new Promise<void>((resolve, reject) => {
-                mediaSession.play(null, resolve, reject)
-            })
-            return
-        } catch (error) {
-            console.warn(`Cast play attempt ${attempt} failed:`, error)
-
-            if (attempt < CAST_PLAY_RETRY_COUNT) {
-                await wait(CAST_PLAY_RETRY_DELAY_MS)
-            }
-        }
-    }
-}
-
 export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlayerProps) {
     const videoRef = useRef<HTMLDivElement>(null)
     const playerRef = useRef<any>(null)
-    const castContextRef = useRef<any>(null)
-    const isDisconnectingForCloseRef = useRef(false)
     const [hasError, setHasError] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const [streamUrl, setStreamUrl] = useState<string | null>(null);
     const [showOverlay, setShowOverlay] = useState(true);
-    const [isCastAvailable, setIsCastAvailable] = useState(false);
-    const [isCasting, setIsCasting] = useState(false);
-    const [isCastConnecting, setIsCastConnecting] = useState(false);
-    const [castError, setCastError] = useState<string | null>(null);
     const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isHoveringRef = useRef(false);
     const currentProgram = useCurrentProgram(channel?.programs);
@@ -445,212 +308,6 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             isMounted = false;
         };
     }, [channel]);
-
-    const resumeLocalPlayback = useCallback((reloadFromLive = false) => {
-        const player = playerRef.current;
-        if (!player || player.isDisposed?.()) return;
-
-        const play = () => {
-            const playPromise = player.play?.();
-            playPromise?.catch?.(() => {
-                console.log("Autoplay blocked");
-            });
-        };
-
-        if (!reloadFromLive) {
-            play();
-            return;
-        }
-
-        const currentSource = player.currentSource?.();
-        if (currentSource?.src) {
-            player.src(currentSource);
-            player.load?.();
-        }
-
-        player.ready(() => {
-            player.liveTracker?.seekToLiveEdge?.();
-            play();
-        });
-    }, []);
-
-    const pauseLocalPlayback = useCallback(() => {
-        const player = playerRef.current;
-        if (!player || player.isDisposed?.()) return;
-
-        player.pause?.();
-    }, []);
-
-    const disconnectCast = useCallback(async (resumeLocal = true) => {
-        const castContext = castContextRef.current;
-        const session = castContext?.getCurrentSession?.();
-
-        if (!session) {
-            setIsCasting(false);
-            setIsCastConnecting(false);
-            if (resumeLocal) resumeLocalPlayback(true);
-            return;
-        }
-
-        try {
-            setIsCastConnecting(true);
-            await castContext.endCurrentSession(true);
-        } catch (error) {
-            console.warn("Failed to disconnect cast session:", error);
-        } finally {
-            setIsCastConnecting(false);
-            setIsCasting(false);
-            if (resumeLocal) resumeLocalPlayback(true);
-        }
-    }, [resumeLocalPlayback]);
-
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-
-        let castContext: any = null;
-        let removeSessionListener: (() => void) | null = null;
-
-        const updateSessionState = () => {
-            const session = castContext?.getCurrentSession?.();
-            const hasMedia = Boolean(getCastMediaSession(session));
-
-            setIsCasting(hasMedia);
-            if (hasMedia) {
-                pauseLocalPlayback();
-                return;
-            }
-
-            if (!session && !isDisconnectingForCloseRef.current) {
-                resumeLocalPlayback(true);
-            }
-        };
-
-        const initializeCast = () => {
-            const castFramework = window.cast?.framework;
-
-            if (!castFramework || !window.chrome?.cast) {
-                setIsCastAvailable(false);
-                return;
-            }
-
-            castContext = castFramework.CastContext.getInstance();
-            castContextRef.current = castContext;
-            castContext.setOptions({
-                receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-                autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
-            });
-
-            setIsCastAvailable(true);
-            updateSessionState();
-
-            const eventType = castFramework.CastContextEventType.SESSION_STATE_CHANGED;
-            castContext.addEventListener(eventType, updateSessionState);
-            removeSessionListener = () => {
-                castContext?.removeEventListener?.(eventType, updateSessionState);
-            };
-        };
-
-        const castApiCallback = (isAvailable: boolean) => {
-            if (isAvailable) {
-                initializeCast();
-                return;
-            }
-
-            setIsCastAvailable(false);
-        };
-
-        if (window.cast?.framework && window.chrome?.cast) {
-            initializeCast();
-        } else {
-            window.__onGCastApiAvailable = castApiCallback;
-
-            if (!document.querySelector(`script[src="${CAST_SDK_URL}"]`)) {
-                const script = document.createElement("script");
-                script.src = CAST_SDK_URL;
-                script.async = true;
-                document.head.appendChild(script);
-            }
-        }
-
-        return () => {
-            removeSessionListener?.();
-            if (window.__onGCastApiAvailable === castApiCallback) {
-                window.__onGCastApiAvailable = undefined;
-            }
-        };
-    }, [pauseLocalPlayback, resumeLocalPlayback]);
-
-    const castToTv = async () => {
-        if (!channel || !streamUrl || typeof window === "undefined") return;
-
-        const castFramework = window.cast?.framework;
-        const chromeCast = window.chrome?.cast;
-
-        if (!window.isSecureContext) {
-            setCastError("Cast דורש HTTPS בסביבת production");
-            return;
-        }
-
-        if (!castFramework || !chromeCast) {
-            setCastError("Cast לא זמין בדפדפן הזה. נסה Chrome באנדרואיד או בדסקטופ");
-            return;
-        }
-
-        try {
-            setCastError(null);
-            setIsCastConnecting(true);
-
-            const currentSession = castContextRef.current?.getCurrentSession?.();
-            if (isCasting || getCastMediaSession(currentSession)) {
-                await disconnectCast(true);
-                return;
-            }
-
-            const referer = channel.linkDetails?.referer || "";
-            const manifestType = channel.linkDetails?.manifest_type;
-            const isDash =
-                manifestType === "mpd" ||
-                streamUrl.includes("/livedash/") ||
-                streamUrl.endsWith(".mpd");
-            const contentType = isDash
-                ? "application/dash+xml"
-                : "application/x-mpegURL";
-            const sourcePath = api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}`);
-            const sourceUrl = new URL(sourcePath, window.location.origin).toString();
-
-            const castContext = castFramework.CastContext.getInstance();
-            castContextRef.current = castContext;
-            const session = castContext.getCurrentSession() || await castContext.requestSession();
-            const mediaInfo = new chromeCast.media.MediaInfo(sourceUrl, contentType);
-            mediaInfo.streamType = chromeCast.media.StreamType.LIVE;
-            mediaInfo.metadata = new chromeCast.media.GenericMediaMetadata();
-            mediaInfo.metadata.title = channel.name;
-            mediaInfo.metadata.subtitle = currentProgram?.name || "";
-            mediaInfo.metadata.images = [
-                new chromeCast.Image(new URL(`/ch/${channel.logo}`, window.location.origin).toString()),
-            ];
-
-            const request = new chromeCast.media.LoadRequest(mediaInfo);
-            request.autoplay = true;
-
-            await loadCastMediaWithRetries(session, request, sourceUrl);
-            try {
-                await waitForCastMediaSession(session);
-            } catch (error) {
-                console.warn("Cast media session did not become ready in time:", error);
-            }
-            await playCastMediaWithRetries(session);
-            pauseLocalPlayback();
-            setIsCasting(true);
-        } catch (error: any) {
-            if (isCastCancelError(error)) return;
-            console.error("Failed to cast stream:", error);
-            setIsCasting(false);
-            setCastError("לא הצלחנו להעביר לטלוויזיה");
-        } finally {
-            setIsCastConnecting(false);
-        }
-    };
 
     useEffect(() => {
         if (!streamUrl) return;
@@ -760,15 +417,11 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
             if (hideTimeoutRef.current) {
                 clearTimeout(hideTimeoutRef.current)
             }
-
-            isDisconnectingForCloseRef.current = true;
-            disconnectCast(false);
         }
-    }, [disconnectCast])
+    }, [])
 
     const handleClose = () => {
-        isDisconnectingForCloseRef.current = true;
-        disconnectCast(false).finally(onClose);
+        onClose();
     }
 
     if (!channel) {
@@ -834,24 +487,6 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            castToTv();
-                        }}
-                        disabled={!streamUrl || isCastConnecting || !isCastAvailable}
-                        aria-pressed={isCasting}
-                        className={`relative text-white hover:bg-white/20 disabled:opacity-40 ${isCasting ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}`}
-                        title={streamUrl ? (isCasting ? "נתק מהטלוויזיה" : isCastAvailable ? "העבר לטלוויזיה" : "טוען Cast") : "טוען שידור"}
-                        aria-label="העבר לטלוויזיה"
-                    >
-                        <Cast className="w-5 h-5" />
-                        {isCasting && (
-                            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-emerald-300 ring-1 ring-black/40" aria-hidden="true" />
-                        )}
-                    </Button>
                     {/* Close button */}
                     <Button
                         variant="ghost"
@@ -863,12 +498,6 @@ export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlay
                     </Button>
                 </div>
             </div>
-
-            {castError && showOverlay && (
-                <div className="absolute left-4 top-20 z-20 max-w-[min(22rem,calc(100%-2rem))] rounded-md bg-red-950/90 px-3 py-2 text-sm text-white shadow-lg">
-                    {castError}
-                </div>
-            )}
 
             {/* Video.js container */}
             <div className="relative w-full h-full bg-black">
