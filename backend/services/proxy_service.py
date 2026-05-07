@@ -9,10 +9,8 @@ session = create_session()
 
 def _request_base_proxy(request):
     root_path = request.scope.get("root_path", "")
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("host", "localhost")
 
-    return f"{proto}://{host}{root_path}"
+    return root_path or ""
 
 
 def handle_proxy(request, url, referer):
