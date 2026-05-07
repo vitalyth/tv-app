@@ -59,6 +59,21 @@ export default function GuidePage() {
         restorePosition(true);
     }, [restorePosition]);
 
+    useEffect(() => {
+        if (!selectedChannel) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                handleClose();
+            }
+        };
+
+        document.addEventListener("keydown", handleKeyDown, true);
+
+        return () => document.removeEventListener("keydown", handleKeyDown, true);
+    }, [selectedChannel, handleClose]);
+
     const onResizeFull = useCallback(() => {
         if (isMobileLandscape) {
             setIsFullscreen(true);
