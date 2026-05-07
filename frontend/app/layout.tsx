@@ -24,14 +24,19 @@ export const metadata: Metadata = {
     },
   },
   icons: {
+    shortcut: '/favicon.ico',
     icon: [
       {
-        url: '/tv_icon.png',
-        media: '(prefers-color-scheme: dark)',
+        url: '/favicon.ico',
+        sizes: '32x32',
       },
       {
         url: '/icon.svg',
         type: 'image/svg+xml',
+      },
+      {
+        url: '/tv_icon.png',
+        media: '(prefers-color-scheme: dark)',
       },
     ]
   },
