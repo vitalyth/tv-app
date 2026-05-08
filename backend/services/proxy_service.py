@@ -1,3 +1,5 @@
+from collections import OrderedDict
+from time import time
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from utils.http import create_session
 from fastapi.responses import Response, StreamingResponse
@@ -7,6 +9,14 @@ import json
 import html
 
 session = create_session()
+CAST_LIVE_SEGMENT_LIMIT = 10
+MANIFEST_CACHE_TTL_SECONDS = 1.5
+SEGMENT_CACHE_TTL_SECONDS = 120
+SEGMENT_CACHE_MAX_ITEM_BYTES = 8 * 1024 * 1024
+SEGMENT_CACHE_MAX_TOTAL_BYTES = 0
+manifest_cache = OrderedDict()
+segment_cache = OrderedDict()
+segment_cache_size = 0
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -88,6 +98,10 @@ def _url_path(url):
     return urlparse(url).path.lower()
 
 
+def _is_manifest_url(url):
+    return _url_path(url).endswith((".m3u8", ".mpd", ".livx"))
+
+
 def _is_segment_url(url):
     return _url_path(url).endswith((".ts", ".m4s", ".mp4", ".m4a", ".aac", ".vtt"))
 
@@ -121,12 +135,92 @@ def _proxied_url(base_proxy, full_url, referer, cast):
     return f"{base_proxy}/proxy?{urlencode(params)}"
 
 
+def _cache_key(url, referer):
+    return (url, referer or "")
+
+
+def _get_manifest_cache(key):
+    entry = manifest_cache.get(key)
+
+    if not entry:
+        return None
+
+    expires_at = entry[0]
+
+    if expires_at <= time():
+        manifest_cache.pop(key, None)
+        return None
+
+    manifest_cache.move_to_end(key)
+    return entry[1:]
+
+
+def _get_segment_cache(key):
+    global segment_cache_size
+
+    entry = segment_cache.get(key)
+
+    if not entry:
+        return None
+
+    expires_at = entry[0]
+
+    if expires_at <= time():
+        expired_entry = segment_cache.pop(key, None)
+
+        if expired_entry:
+            segment_cache_size -= len(expired_entry[1])
+
+        return None
+
+    segment_cache.move_to_end(key)
+    return entry[1:]
+
+
+def _set_manifest_cache(key, text, content_type):
+    manifest_cache[key] = (time() + MANIFEST_CACHE_TTL_SECONDS, text, content_type)
+    manifest_cache.move_to_end(key)
+
+    while len(manifest_cache) > 128:
+        manifest_cache.popitem(last=False)
+
+
+def _set_segment_cache(key, content, content_type, headers):
+    global segment_cache_size
+
+    if SEGMENT_CACHE_MAX_TOTAL_BYTES <= 0:
+        return
+
+    if len(content) > SEGMENT_CACHE_MAX_ITEM_BYTES:
+        return
+
+    previous = segment_cache.pop(key, None)
+
+    if previous:
+        segment_cache_size -= len(previous[1])
+
+    segment_cache[key] = (time() + SEGMENT_CACHE_TTL_SECONDS, content, content_type, headers)
+    segment_cache.move_to_end(key)
+    segment_cache_size += len(content)
+
+    while segment_cache_size > SEGMENT_CACHE_MAX_TOTAL_BYTES and segment_cache:
+        _, expired_entry = segment_cache.popitem(last=False)
+        segment_cache_size -= len(expired_entry[1])
+
+
 def _response_metadata_headers(upstream):
     return {
         "Content-Range": upstream.headers.get("Content-Range", ""),
         "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes"),
         "Content-Length": upstream.headers.get("Content-Length", ""),
     }
+
+
+def _safe_content_length(headers):
+    try:
+        return int(headers.get("Content-Length", ""))
+    except (TypeError, ValueError):
+        return None
 
 
 def _stream_response(upstream, content_type):
@@ -197,6 +291,90 @@ def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
     return "\n".join(rewritten_lines)
 
 
+def _trim_hls_live_media_playlist(text, segment_limit=CAST_LIVE_SEGMENT_LIMIT):
+    lines = text.splitlines()
+
+    if "#EXT-X-ENDLIST" in text or "#EXT-X-STREAM-INF" in text:
+        return text
+
+    has_segments = any(line.strip().startswith("#EXTINF") for line in lines)
+
+    if not has_segments:
+        return text
+
+    header_lines = []
+    segments = []
+    pending_tags = []
+    current_sequence = None
+    before_first_segment = True
+    expect_segment_uri = False
+    segment_preface_tags = (
+        "#EXT-X-PROGRAM-DATE-TIME",
+        "#EXT-X-DISCONTINUITY",
+        "#EXT-X-BYTERANGE",
+    )
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("#EXT-X-MEDIA-SEQUENCE:"):
+            try:
+                current_sequence = int(stripped.split(":", 1)[1])
+            except ValueError:
+                current_sequence = None
+
+            header_lines.append(line)
+            continue
+
+        if stripped.startswith("#EXTINF"):
+            before_first_segment = False
+            pending_tags.append(line)
+            expect_segment_uri = True
+            continue
+
+        if stripped.startswith(segment_preface_tags):
+            before_first_segment = False
+            pending_tags.append(line)
+            continue
+
+        if expect_segment_uri and stripped and not stripped.startswith("#"):
+            pending_tags.append(line)
+            segments.append(pending_tags)
+            pending_tags = []
+            expect_segment_uri = False
+            continue
+
+        if before_first_segment:
+            header_lines.append(line)
+        else:
+            pending_tags.append(line)
+
+    if len(segments) <= segment_limit:
+        return text
+
+    dropped_segments = len(segments) - segment_limit
+    trimmed_segments = segments[-segment_limit:]
+    output_lines = []
+    sequence_written = False
+
+    for line in header_lines:
+        stripped = line.strip()
+
+        if stripped.startswith("#EXT-X-MEDIA-SEQUENCE:") and current_sequence is not None:
+            output_lines.append(f"#EXT-X-MEDIA-SEQUENCE:{current_sequence + dropped_segments}")
+            sequence_written = True
+        else:
+            output_lines.append(line)
+
+    if current_sequence is not None and not sequence_written:
+        output_lines.append(f"#EXT-X-MEDIA-SEQUENCE:{current_sequence + dropped_segments}")
+
+    for segment in trimmed_segments:
+        output_lines.extend(segment)
+
+    return "\n".join(output_lines)
+
+
 def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
@@ -218,8 +396,75 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
     return text
 
 
+def _manifest_response(request, url, referer, cast, text, content_type):
+    is_mpd = (
+        "dash+xml" in content_type
+        or _url_path(url).endswith((".mpd", ".livx"))
+        or "<MPD" in text[:500]
+    )
+
+    if is_mpd:
+        content = text.encode("utf-8")
+
+        if cast:
+            content = _rewrite_mpd_for_cast(
+                text,
+                url,
+                referer,
+                _request_public_base_proxy(request),
+            ).encode("utf-8")
+
+        return Response(
+            content=content,
+            media_type="application/dash+xml",
+            headers=_response_headers()
+        )
+
+    is_m3u8 = (
+        "mpegurl" in content_type
+        or _url_path(url).endswith(".m3u8")
+        or "#EXTM3U" in text
+    )
+
+    if not is_m3u8:
+        return None
+
+    base_proxy = _request_public_base_proxy(request) if cast else _request_base_proxy(request)
+    source_text = _trim_hls_live_media_playlist(text) if cast else text
+    content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
+
+    return Response(
+        content=content,
+        media_type="application/vnd.apple.mpegurl",
+        headers=_response_headers()
+    )
+
+
 def handle_proxy(request, url, referer, cast=False):
     origin = _origin_for_url(url)
+    cache_key = _cache_key(url, referer)
+    can_use_cache = request.method == "GET" and "range" not in request.headers
+
+    if can_use_cache and _is_segment_url(url):
+        cached_segment = _get_segment_cache(cache_key)
+
+        if cached_segment:
+            content, content_type, headers = cached_segment
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers=_response_headers(headers)
+            )
+
+    if can_use_cache and _is_manifest_url(url):
+        cached_manifest = _get_manifest_cache(cache_key)
+
+        if cached_manifest:
+            text, content_type = cached_manifest
+            cached_response = _manifest_response(request, url, referer, cast, text, content_type)
+
+            if cached_response:
+                return cached_response
 
     headers = {
         "User-Agent": request.headers.get("user-agent", "Mozilla/5.0"),
@@ -250,6 +495,25 @@ def handle_proxy(request, url, referer, cast=False):
         )
 
     if "video" in content_type or "audio" in content_type or _is_segment_url(url):
+        content_length = _safe_content_length(r.headers)
+        can_cache_segment = (
+            can_use_cache
+            and r.status_code == 200
+            and content_length is not None
+            and content_length <= SEGMENT_CACHE_MAX_ITEM_BYTES
+        )
+
+        if can_cache_segment:
+            content = r.content
+            response_headers = _response_metadata_headers(r)
+            r.close()
+            _set_segment_cache(cache_key, content, content_type, response_headers)
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers=_response_headers(response_headers)
+            )
+
         return _stream_response(r, content_type)
 
     # text (m3u8 or other)
@@ -258,48 +522,24 @@ def handle_proxy(request, url, referer, cast=False):
     except Exception:
         return Response(status_code=500, headers=CORS_HEADERS)
 
-    is_mpd = (
-        "dash+xml" in content_type
-        or _url_path(url).endswith((".mpd", ".livx"))
-        or "<MPD" in text[:500]
-    )
+    manifest_response = _manifest_response(request, url, referer, cast, text, content_type)
 
-    if is_mpd:
-        content = r.content
+    if manifest_response:
+        if can_use_cache and r.status_code == 200 and _is_manifest_url(url):
+            _set_manifest_cache(cache_key, text, content_type)
 
-        if cast:
-            content = _rewrite_mpd_for_cast(
-                text,
-                url,
-                referer,
-                _request_public_base_proxy(request),
-            ).encode("utf-8")
+        r.close()
+        return manifest_response
 
-        return Response(
-            content=content,
-            media_type="application/dash+xml",
-            headers=_response_headers()
-        )
-
-    is_m3u8 = (
-        "mpegurl" in content_type
-        or _url_path(url).endswith(".m3u8")
-        or "#EXTM3U" in text
-    )
-
-    # If not M3U8 → return as is
-    if not is_m3u8:
+    if not _is_manifest_url(url):
         return Response(
             content=r.content,
             media_type=content_type,
             headers=_response_headers()
         )
 
-    base_proxy = _request_public_base_proxy(request) if cast else _request_base_proxy(request)
-    content = _rewrite_hls_manifest(text, url, referer, base_proxy, cast)
-
     return Response(
-        content=content,
-        media_type="application/vnd.apple.mpegurl",
+        content=r.content,
+        media_type=content_type,
         headers=_response_headers()
     )

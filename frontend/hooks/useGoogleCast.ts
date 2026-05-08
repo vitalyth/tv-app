@@ -6,6 +6,7 @@ import { type Channel } from "@/lib/channels-data"
 
 const CAST_SDK_SRC = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
 const DEFAULT_RECEIVER_APP_ID = "CC1AD845"
+const HLS_MEDIA_PLAYLIST_PATH = /\/chunklist(?:_[^/]*)?\.m3u8$/
 
 type CastSessionState = "disconnected" | "connecting" | "connected"
 
@@ -52,11 +53,8 @@ const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
 
-        if (
-            parsedUrl.hostname === "fastly.live.brightcove.com" &&
-            /\/chunklist(?:_[^/]*)?\.m3u8$/.test(parsedUrl.pathname)
-        ) {
-            parsedUrl.pathname = parsedUrl.pathname.replace(/\/chunklist(?:_[^/]*)?\.m3u8$/, "/playlist-hls.m3u8")
+        if (HLS_MEDIA_PLAYLIST_PATH.test(parsedUrl.pathname)) {
+            parsedUrl.pathname = parsedUrl.pathname.replace(HLS_MEDIA_PLAYLIST_PATH, "/playlist-hls.m3u8")
             return parsedUrl.toString()
         }
     } catch {
