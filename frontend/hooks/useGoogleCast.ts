@@ -48,9 +48,29 @@ const buildCastImageUrl = (logo: string) => {
     return resolveAbsoluteUrl(`/ch/${logo}`)
 }
 
+const getCastSourceUrl = (streamUrl: string) => {
+    try {
+        const parsedUrl = new URL(streamUrl)
+
+        if (
+            parsedUrl.hostname === "fastly.live.brightcove.com" &&
+            /\/chunklist(?:_[^/]*)?\.m3u8$/.test(parsedUrl.pathname)
+        ) {
+            parsedUrl.pathname = parsedUrl.pathname.replace(/\/chunklist(?:_[^/]*)?\.m3u8$/, "/playlist-hls.m3u8")
+            return parsedUrl.toString()
+        }
+    } catch {
+        return streamUrl
+    }
+
+    return streamUrl
+}
+
 const buildCastStreamUrl = (streamUrl: string, referer = "") => {
+    const castSourceUrl = getCastSourceUrl(streamUrl)
+
     return resolveAbsoluteUrl(
-        api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
+        api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
 }
 
