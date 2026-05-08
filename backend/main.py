@@ -88,12 +88,12 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
     return handle_proxy(request, url, referer)
 
 @app.get("/proxy")
-def proxy(request: Request, url: str, referer: str = None, cast: bool = False):
-    return handle_proxy(request, url, referer, cast=cast)
+def proxy(request: Request, url: str, referer: str = None):
+    return handle_proxy(request, url, referer)
 
 @app.head("/proxy")
-def proxy_head(request: Request, url: str, referer: str = None, cast: bool = False):
-    return handle_proxy(request, url, referer, cast=cast)
+def proxy_head(request: Request, url: str, referer: str = None):
+    return handle_proxy(request, url, referer)
 
 @app.options("/proxy")
 def proxy_options():
