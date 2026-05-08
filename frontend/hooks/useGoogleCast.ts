@@ -49,21 +49,8 @@ const buildCastImageUrl = (logo: string) => {
 }
 
 const buildCastStreamUrl = (streamUrl: string, referer = "") => {
-    let useCastMaster = false
-
-    try {
-        const parsedUrl = new URL(streamUrl)
-        useCastMaster =
-            parsedUrl.hostname === "fastly.live.brightcove.com" &&
-            /\/chunklist(?:_[^/]*)?\.m3u8$/.test(parsedUrl.pathname)
-    } catch {
-        useCastMaster = false
-    }
-
-    const castMasterParam = useCastMaster ? "&cast_master=1" : ""
-
     return resolveAbsoluteUrl(
-        api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&cast=1${castMasterParam}`)
+        api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
 }
 

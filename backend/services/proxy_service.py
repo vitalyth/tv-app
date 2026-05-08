@@ -4,7 +4,6 @@ from fastapi.responses import Response, StreamingResponse
 import requests
 import re
 import json
-import html
 
 session = create_session()
 
@@ -105,10 +104,7 @@ def _brightcove_cast_master_url(url):
     if not re.search(r"/chunklist(?:_[^/]*)?\.m3u8$", parsed.path):
         return url
 
-    return parsed._replace(
-        path=parsed.path.rsplit("/", 1)[0] + "/playlist-hls.m3u8",
-        params="",
-    ).geturl()
+    return url.rsplit("/", 1)[0] + "/playlist-hls.m3u8"
 
 
 def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
@@ -119,10 +115,10 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
 
     def rewrite_template_url(match):
         attr = match.group(1)
-        uri = html.unescape(match.group(2))
+        uri = match.group(2)
         full_url = urljoin(segment_base, uri)
         proxied = _proxied_url(base_proxy, full_url, referer or source_origin + "/", True)
-        return f'{attr}="{html.escape(proxied, quote=True)}"'
+        return f'{attr}="{proxied}"'
 
     text = re.sub(r'\b(media|initialization)="([^"]+)"', rewrite_template_url, text)
 
@@ -132,8 +128,8 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
     return text
 
 
-def handle_proxy(request, url, referer, cast=False, cast_master=False):
-    if cast and cast_master:
+def handle_proxy(request, url, referer, cast=False):
+    if cast:
         url = _brightcove_cast_master_url(url)
 
     parsed = urlparse(url)
