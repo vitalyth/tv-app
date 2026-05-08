@@ -3,6 +3,7 @@ from utils.http import create_session
 from fastapi.responses import Response, StreamingResponse
 import requests
 import re
+import json
 
 session = create_session()
 
@@ -25,8 +26,20 @@ def _request_base_proxy(request):
 
 def _request_public_base_proxy(request):
     root_path = _request_base_proxy(request)
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    proto = request.headers.get("x-forwarded-proto")
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+
+    if not proto:
+        try:
+            proto = json.loads(request.headers.get("cf-visitor", "{}")).get("scheme")
+        except json.JSONDecodeError:
+            proto = None
+
+    if not proto:
+        proto = request.url.scheme
+
+    if proto == "http" and host and not host.startswith(("localhost", "127.0.0.1", "0.0.0.0")):
+        proto = "https"
 
     return f"{proto}://{host}{root_path}"
 
@@ -80,6 +93,27 @@ def _proxied_url(base_proxy, full_url, referer, cast):
         params["cast"] = "1"
 
     return f"{base_proxy}/proxy?{urlencode(params)}"
+
+
+def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
+    source_origin = f"{urlparse(source_url).scheme}://{urlparse(source_url).netloc}"
+    manifest_base = source_url.rsplit("/", 1)[0] + "/"
+    base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text)
+    segment_base = base_url_match.group(1) if base_url_match else manifest_base
+
+    def rewrite_template_url(match):
+        attr = match.group(1)
+        uri = match.group(2)
+        full_url = urljoin(segment_base, uri)
+        proxied = _proxied_url(base_proxy, full_url, referer or source_origin + "/", True)
+        return f'{attr}="{proxied}"'
+
+    text = re.sub(r'\b(media|initialization)="([^"]+)"', rewrite_template_url, text)
+
+    if base_url_match:
+        text = re.sub(r"<BaseURL>[^<]+</BaseURL>", "", text, count=1)
+
+    return text
 
 
 def handle_proxy(request, url, referer, cast=False):
@@ -158,8 +192,18 @@ def handle_proxy(request, url, referer, cast=False):
     )
 
     if is_mpd:
+        content = r.content
+
+        if cast:
+            content = _rewrite_mpd_for_cast(
+                text,
+                url,
+                referer,
+                _request_public_base_proxy(request),
+            ).encode("utf-8")
+
         return Response(
-            content=r.content,
+            content=content,
             media_type="application/dash+xml",
             headers=_response_headers()
         )
