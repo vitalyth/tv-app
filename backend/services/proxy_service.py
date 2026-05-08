@@ -95,6 +95,18 @@ def _proxied_url(base_proxy, full_url, referer, cast):
     return f"{base_proxy}/proxy?{urlencode(params)}"
 
 
+def _brightcove_cast_master_url(url):
+    parsed = urlparse(url)
+
+    if parsed.netloc != "fastly.live.brightcove.com":
+        return url
+
+    if not re.search(r"/chunklist(?:_[^/]*)?\.m3u8$", parsed.path):
+        return url
+
+    return url.rsplit("/", 1)[0] + "/playlist-hls.m3u8"
+
+
 def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
     source_origin = f"{urlparse(source_url).scheme}://{urlparse(source_url).netloc}"
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
@@ -117,6 +129,9 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
 
 
 def handle_proxy(request, url, referer, cast=False):
+    if cast:
+        url = _brightcove_cast_master_url(url)
+
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
 
