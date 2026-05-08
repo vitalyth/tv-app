@@ -7,6 +7,7 @@ import { type Channel } from "@/lib/channels-data"
 const CAST_SDK_SRC = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
 const DEFAULT_RECEIVER_APP_ID = "CC1AD845"
 const HLS_MEDIA_PLAYLIST_PATH = /\/chunklist(?:_[^/]*)?\.m3u8$/
+const DIRECT_CAST_HOSTS = ["cdn-redge.media"]
 
 type CastSessionState = "disconnected" | "connecting" | "connected"
 
@@ -66,6 +67,10 @@ const getCastSourceUrl = (streamUrl: string) => {
 
 const buildCastStreamUrl = (streamUrl: string, referer = "") => {
     const castSourceUrl = getCastSourceUrl(streamUrl)
+
+    if (DIRECT_CAST_HOSTS.some((host) => castSourceUrl.includes(host))) {
+        return castSourceUrl
+    }
 
     return resolveAbsoluteUrl(
         api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
