@@ -15,9 +15,20 @@ CORS_HEADERS = {
 
 
 def _request_base_proxy(request):
-    root_path = request.scope.get("root_path", "")
+    root_path = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "")
+
+    if not root_path and request.url.path.endswith("/proxy"):
+        root_path = request.url.path[:-len("/proxy")]
 
     return root_path or ""
+
+
+def _request_public_base_proxy(request):
+    root_path = _request_base_proxy(request)
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+
+    return f"{proto}://{host}{root_path}"
 
 
 def cors_preflight():
@@ -33,7 +44,45 @@ def _response_headers(extra=None):
     return headers
 
 
-def handle_proxy(request, url, referer):
+def _content_type_for_url(url, content_type):
+    clean_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+
+    if clean_content_type and clean_content_type not in {
+        "application/octet-stream",
+        "binary/octet-stream",
+    }:
+        return content_type
+
+    path = urlparse(url).path.lower()
+
+    if path.endswith((".mp4", ".m4s")):
+        return "video/mp4"
+
+    if path.endswith(".m4a"):
+        return "audio/mp4"
+
+    if path.endswith(".ts"):
+        return "video/mp2t"
+
+    if path.endswith(".m3u8"):
+        return "application/vnd.apple.mpegurl"
+
+    return content_type or "application/octet-stream"
+
+
+def _proxied_url(base_proxy, full_url, referer, cast):
+    params = {
+        "url": full_url,
+        "referer": referer,
+    }
+
+    if cast:
+        params["cast"] = "1"
+
+    return f"{base_proxy}/proxy?{urlencode(params)}"
+
+
+def handle_proxy(request, url, referer, cast=False):
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
 
@@ -54,7 +103,7 @@ def handle_proxy(request, url, referer):
         print("Proxy request failed:", e)
         return Response(status_code=502, headers=CORS_HEADERS)
 
-    content_type = r.headers.get("content-type", "")
+    content_type = _content_type_for_url(url, r.headers.get("content-type", ""))
     is_head = request.method == "HEAD"
 
     if is_head:
@@ -131,7 +180,7 @@ def handle_proxy(request, url, referer):
 
     # rewrite to m3u8
     base_url = url.rsplit("/", 1)[0] + "/"
-    base_proxy = _request_base_proxy(request)
+    base_proxy = _request_public_base_proxy(request) if cast else _request_base_proxy(request)
 
     new_lines = []
 
@@ -146,7 +195,7 @@ def handle_proxy(request, url, referer):
             def replace_uri(match):
                 uri = match.group(1)
                 full_url = urljoin(base_url, uri)
-                proxied = f"{base_proxy}/proxy?{urlencode({'url': full_url, 'referer': referer or origin + '/'})}"
+                proxied = _proxied_url(base_proxy, full_url, referer or origin + "/", cast)
                 return f'URI="{proxied}"'
 
             line = re.sub(r'URI="([^"]+)"', replace_uri, line)
@@ -155,7 +204,7 @@ def handle_proxy(request, url, referer):
 
         full_url = urljoin(base_url, line)
 
-        proxied = f"{base_proxy}/proxy?{urlencode({'url': full_url, 'referer': referer or origin + '/'})}"
+        proxied = _proxied_url(base_proxy, full_url, referer or origin + "/", cast)
 
         new_lines.append(proxied)
 

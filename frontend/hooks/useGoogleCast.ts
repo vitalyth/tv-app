@@ -50,7 +50,7 @@ const buildCastImageUrl = (logo: string) => {
 
 const buildCastStreamUrl = (streamUrl: string, referer = "") => {
     return resolveAbsoluteUrl(
-        api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}`)
+        api(`/proxy?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
 }
 
