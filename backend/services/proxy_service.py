@@ -58,6 +58,15 @@ def _response_headers(extra=None):
     return headers
 
 
+def _manifest_headers(extra=None):
+    return _response_headers({
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        **(extra or {}),
+    })
+
+
 def _content_type_for_url(url, content_type):
     clean_content_type = (content_type or "").split(";", 1)[0].strip().lower()
 
@@ -197,6 +206,45 @@ def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
     return "\n".join(rewritten_lines)
 
 
+def _is_live_hls_media_playlist(text):
+    return (
+        "#EXTINF" in text
+        and "#EXT-X-STREAM-INF" not in text
+        and "#EXT-X-ENDLIST" not in text
+    )
+
+
+def _prepare_hls_for_cast(text):
+    if not _is_live_hls_media_playlist(text):
+        return text
+
+    lines = text.splitlines()
+    has_version = any(line.strip().startswith("#EXT-X-VERSION:") for line in lines)
+    has_start = any(line.strip().startswith("#EXT-X-START:") for line in lines)
+
+    if has_version and has_start:
+        return text
+
+    output = []
+    inserted = False
+
+    for line in lines:
+        output.append(line)
+
+        if inserted or line.strip() != "#EXTM3U":
+            continue
+
+        if not has_version:
+            output.append("#EXT-X-VERSION:3")
+
+        if not has_start:
+            output.append("#EXT-X-START:TIME-OFFSET=-12,PRECISE=NO")
+
+        inserted = True
+
+    return "\n".join(output)
+
+
 def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
@@ -298,10 +346,11 @@ def handle_proxy(request, url, referer, cast=False):
         )
 
     base_proxy = _request_public_base_proxy(request) if cast else _request_base_proxy(request)
-    content = _rewrite_hls_manifest(text, url, referer, base_proxy, cast)
+    source_text = _prepare_hls_for_cast(text) if cast else text
+    content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
         content=content,
         media_type="application/vnd.apple.mpegurl",
-        headers=_response_headers()
+        headers=_manifest_headers()
     )
