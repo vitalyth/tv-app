@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from utils.http import create_session
 from fastapi.responses import Response, StreamingResponse
@@ -5,8 +6,12 @@ import requests
 import re
 import html
 import json
+import time
 
 session = create_session()
+CAST_HLS_WINDOW_TARGET_SECONDS = 90
+CAST_HLS_PLAYLIST_CACHE_TTL_SECONDS = 180
+cast_hls_playlist_windows = OrderedDict()
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -214,7 +219,123 @@ def _is_live_hls_media_playlist(text):
     )
 
 
-def _prepare_hls_for_cast(text):
+def _hls_target_duration(text):
+    match = re.search(r"^#EXT-X-TARGETDURATION:(\d+)", text, flags=re.MULTILINE)
+
+    if not match:
+        return None
+
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _hls_media_sequence(text):
+    match = re.search(r"^#EXT-X-MEDIA-SEQUENCE:(\d+)", text, flags=re.MULTILINE)
+
+    if not match:
+        return None
+
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _parse_hls_media_playlist(text):
+    header_lines = []
+    segments = []
+    pending_lines = []
+    before_first_segment = True
+    expect_segment_uri = False
+
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        if stripped.startswith("#EXTINF"):
+            before_first_segment = False
+            pending_lines.append(line)
+            expect_segment_uri = True
+            continue
+
+        if expect_segment_uri and stripped and not stripped.startswith("#"):
+            pending_lines.append(line)
+            segments.append((stripped, pending_lines))
+            pending_lines = []
+            expect_segment_uri = False
+            continue
+
+        if before_first_segment:
+            header_lines.append(line)
+        else:
+            pending_lines.append(line)
+
+    return header_lines, segments
+
+
+def _merge_hls_live_window(text, source_url):
+    if not _is_live_hls_media_playlist(text):
+        return text
+
+    now = time.time()
+
+    for key in list(cast_hls_playlist_windows.keys()):
+        if now - cast_hls_playlist_windows[key]["updated_at"] > CAST_HLS_PLAYLIST_CACHE_TTL_SECONDS:
+            cast_hls_playlist_windows.pop(key, None)
+
+    header_lines, segments = _parse_hls_media_playlist(text)
+
+    if not segments:
+        return text
+
+    entry = cast_hls_playlist_windows.get(source_url)
+
+    if not entry:
+        entry = {"segments": OrderedDict(), "updated_at": now}
+        cast_hls_playlist_windows[source_url] = entry
+
+    for segment_uri, segment_lines in segments:
+        entry["segments"][segment_uri] = segment_lines
+
+    target_duration = _hls_target_duration(text) or 4
+    max_segments = max(
+        len(segments),
+        CAST_HLS_WINDOW_TARGET_SECONDS // max(target_duration, 1),
+    )
+
+    while len(entry["segments"]) > max_segments:
+        entry["segments"].popitem(last=False)
+
+    entry["updated_at"] = now
+    cast_hls_playlist_windows.move_to_end(source_url)
+
+    while len(cast_hls_playlist_windows) > 64:
+        cast_hls_playlist_windows.popitem(last=False)
+
+    merged_segments = list(entry["segments"].values())
+    current_sequence = _hls_media_sequence(text)
+
+    if current_sequence is not None:
+        merged_sequence = max(0, current_sequence - (len(merged_segments) - len(segments)))
+        header_lines = [
+            f"#EXT-X-MEDIA-SEQUENCE:{merged_sequence}"
+            if line.strip().startswith("#EXT-X-MEDIA-SEQUENCE:")
+            else line
+            for line in header_lines
+        ]
+
+    output_lines = header_lines[:]
+
+    for segment_lines in merged_segments:
+        output_lines.extend(segment_lines)
+
+    return "\n".join(output_lines)
+
+
+def _prepare_hls_for_cast(text, source_url):
+    text = _merge_hls_live_window(text, source_url)
+
     if not _is_live_hls_media_playlist(text):
         return text
 
@@ -346,7 +467,7 @@ def handle_proxy(request, url, referer, cast=False):
         )
 
     base_proxy = _request_public_base_proxy(request) if cast else _request_base_proxy(request)
-    source_text = _prepare_hls_for_cast(text) if cast else text
+    source_text = _prepare_hls_for_cast(text, url) if cast else text
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
