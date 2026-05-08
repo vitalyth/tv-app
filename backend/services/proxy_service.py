@@ -7,6 +7,7 @@ import html
 import json
 
 session = create_session()
+CAST_HLS_MAX_BANDWIDTH = 800000
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -206,6 +207,67 @@ def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
     return "\n".join(rewritten_lines)
 
 
+def _bandwidth_from_stream_inf(line):
+    match = re.search(r"\bBANDWIDTH=(\d+)", line)
+
+    if not match:
+        return None
+
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _select_cast_hls_variant(text):
+    if "#EXT-X-STREAM-INF" not in text:
+        return text
+
+    lines = text.splitlines()
+    header_lines = []
+    variants = []
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+
+        if not stripped.startswith("#EXT-X-STREAM-INF"):
+            header_lines.append(line)
+            index += 1
+            continue
+
+        variant_lines = [line]
+        bandwidth = _bandwidth_from_stream_inf(stripped)
+        index += 1
+
+        while index < len(lines):
+            variant_lines.append(lines[index])
+
+            if lines[index].strip() and not lines[index].strip().startswith("#"):
+                index += 1
+                break
+
+            index += 1
+
+        variants.append((bandwidth, variant_lines))
+
+    if not variants:
+        return text
+
+    variants_with_bandwidth = [variant for variant in variants if variant[0] is not None]
+    eligible_variants = [
+        variant for variant in variants_with_bandwidth
+        if variant[0] <= CAST_HLS_MAX_BANDWIDTH
+    ]
+    selected = max(
+        eligible_variants or variants_with_bandwidth or variants,
+        key=lambda variant: variant[0] or 0,
+    )
+
+    return "\n".join(header_lines + selected[1])
+
+
 def _is_live_hls_media_playlist(text):
     return (
         "#EXTINF" in text
@@ -215,6 +277,8 @@ def _is_live_hls_media_playlist(text):
 
 
 def _prepare_hls_for_cast(text):
+    text = _select_cast_hls_variant(text)
+
     if not _is_live_hls_media_playlist(text):
         return text
 
