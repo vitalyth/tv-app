@@ -91,6 +91,7 @@ declare global {
         constructor(contentId: string, contentType: string)
         streamType: StreamType
         metadata?: GenericMediaMetadata
+        customData?: Record<string, unknown>
         duration?: number
       }
 
@@ -98,12 +99,14 @@ declare global {
         title?: string
         subtitle?: string
         images?: Image[]
+        releaseDate?: string
       }
 
       class LoadRequest {
         constructor(mediaInfo: MediaInfo)
         autoplay?: boolean
         currentTime?: number
+        customData?: Record<string, unknown>
       }
 
       class Media {

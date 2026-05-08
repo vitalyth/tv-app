@@ -120,14 +120,27 @@ export function useGoogleCast({
                 : "application/x-mpegURL"
         )
 
+        const imageUrl = buildCastImageUrl(channel.logo)
+
         mediaInfo.streamType = chromeCast.media.StreamType.LIVE
+        mediaInfo.customData = {
+            posterUrl: imageUrl,
+            thumb: imageUrl,
+            thumbnail: imageUrl,
+            imageUrl,
+        }
         mediaInfo.metadata = new chromeCast.media.GenericMediaMetadata()
         mediaInfo.metadata.title = channel.name
         mediaInfo.metadata.subtitle = programName
-        mediaInfo.metadata.images = [new chromeCast.Image(buildCastImageUrl(channel.logo))]
+        mediaInfo.metadata.images = [
+            new chromeCast.Image(imageUrl),
+            { url: imageUrl },
+        ] as chrome.cast.Image[]
+        mediaInfo.metadata.releaseDate = new Date().toISOString()
 
         const request = new chromeCast.media.LoadRequest(mediaInfo)
         request.autoplay = true
+        request.customData = mediaInfo.customData
 
         try {
             clearMediaStatusListener()
