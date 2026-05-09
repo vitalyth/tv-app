@@ -16,17 +16,14 @@ CORS_HEADERS = {
 }
 
 
-def _request_base_proxy(request):
+def _request_public_base_proxy(request):
     root_path = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "")
 
     if not root_path and request.url.path.endswith("/proxy"):
         root_path = request.url.path[:-len("/proxy")]
 
-    return root_path or ""
+    root_path = root_path or ""
 
-
-def _request_public_base_proxy(request):
-    root_path = _request_base_proxy(request)
     proto = request.headers.get("x-forwarded-proto")
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
 
@@ -138,20 +135,8 @@ def _response_metadata_headers(upstream):
     }
 
 
-def _stream_response(upstream, content_type, cast=False):
-    if cast:
-        content = upstream.content
-        headers = _response_metadata_headers(upstream)
-        headers["Content-Length"] = str(len(content))
-        upstream.close()
-
-        return Response(
-            content=content,
-            status_code=upstream.status_code,
-            media_type=content_type,
-            headers=_response_headers(headers)
-        )
-
+def _stream_response(upstream, content_type):
+    """Always stream — works for both regular playback and cast."""
     def generate():
         try:
             for chunk in upstream.iter_content(chunk_size=1024 * 64):
@@ -228,6 +213,11 @@ def _is_live_hls_media_playlist(text):
 
 
 def _prepare_hls_media_playlist(text):
+    """
+    Upgrade VERSION to 6 and add EXT-X-START for live playlists.
+    VERSION 6 fixes playback issues with high PTS timestamps and 50fps streams.
+    Does NOT add DISCONTINUITY — that's only for real stream breaks.
+    """
     if not _is_live_hls_media_playlist(text):
         return text
 
@@ -240,13 +230,9 @@ def _prepare_hls_media_playlist(text):
     for line in lines:
         stripped = line.strip()
 
+        # Drop existing VERSION — we'll inject VERSION:6 after #EXTM3U
         if stripped.startswith("#EXT-X-VERSION:"):
             continue
-
-        if stripped.startswith("#EXTINF"):
-            previous_tag = next((item.strip() for item in reversed(output) if item.strip()), "")
-            if previous_tag != "#EXT-X-DISCONTINUITY":
-                output.append("#EXT-X-DISCONTINUITY")
 
         output.append(line)
 
@@ -297,7 +283,6 @@ def handle_proxy(request, url, referer, cast=False):
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
-    # 🔥 request with retry + timeout
     try:
         r = session.get(url, headers=headers, stream=True, timeout=10)
     except requests.exceptions.RequestException as e:
@@ -316,11 +301,11 @@ def handle_proxy(request, url, referer, cast=False):
             headers=_response_headers(_response_metadata_headers(r))
         )
 
-    # 🎥 Video/audio fragments
+    # Video/audio segments — always stream
     if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(url):
-        return _stream_response(r, content_type, cast=cast)
+        return _stream_response(r, content_type)
 
-    # text (m3u8 or other)
+    # Text content (m3u8, mpd, etc.)
     try:
         text = r.text
     except Exception:
@@ -333,15 +318,8 @@ def handle_proxy(request, url, referer, cast=False):
     )
 
     if is_mpd:
-        content = r.content
-
-        if cast:
-            content = _rewrite_mpd_for_cast(
-                text,
-                url,
-                referer,
-                _request_public_base_proxy(request),
-            ).encode("utf-8")
+        base_proxy = _request_public_base_proxy(request)
+        content = _rewrite_mpd_for_cast(text, url, referer, base_proxy).encode("utf-8") if cast else r.content
 
         return Response(
             content=content,
@@ -355,7 +333,6 @@ def handle_proxy(request, url, referer, cast=False):
         or "#EXTM3U" in text
     )
 
-    # If not M3U8 → return as is
     if not is_m3u8:
         return Response(
             content=r.content,
@@ -363,7 +340,8 @@ def handle_proxy(request, url, referer, cast=False):
             headers=_response_headers()
         )
 
-    base_proxy = _request_public_base_proxy(request) if cast else _request_base_proxy(request)
+    # Always use public base so URLs are absolute — required for cast and external players
+    base_proxy = _request_public_base_proxy(request)
     source_text = _prepare_hls_media_playlist(text)
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
