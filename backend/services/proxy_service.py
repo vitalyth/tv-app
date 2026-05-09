@@ -138,7 +138,20 @@ def _response_metadata_headers(upstream):
     }
 
 
-def _stream_response(upstream, content_type):
+def _stream_response(upstream, content_type, cast=False):
+    if cast:
+        content = upstream.content
+        headers = _response_metadata_headers(upstream)
+        headers["Content-Length"] = str(len(content))
+        upstream.close()
+
+        return Response(
+            content=content,
+            status_code=upstream.status_code,
+            media_type=content_type,
+            headers=_response_headers(headers)
+        )
+
     def generate():
         try:
             for chunk in upstream.iter_content(chunk_size=1024 * 64):
@@ -300,7 +313,7 @@ def handle_proxy(request, url, referer, cast=False):
 
     # 🎥 Video/audio fragments
     if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(url):
-        return _stream_response(r, content_type)
+        return _stream_response(r, content_type, cast=cast)
 
     # text (m3u8 or other)
     try:
