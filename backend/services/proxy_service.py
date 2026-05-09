@@ -227,7 +227,7 @@ def _is_live_hls_media_playlist(text):
     )
 
 
-def _prepare_hls_media_playlist(text):
+def _prepare_hls_for_cast(text):
     if not _is_live_hls_media_playlist(text):
         return text
 
@@ -364,7 +364,7 @@ def handle_proxy(request, url, referer, cast=False):
         )
 
     base_proxy = _request_public_base_proxy(request) if cast else _request_base_proxy(request)
-    source_text = _prepare_hls_media_playlist(text)
+    source_text = _prepare_hls_for_cast(text) if cast else text
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
