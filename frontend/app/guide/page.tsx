@@ -261,18 +261,19 @@ export default function GuidePage() {
                             <VideoPlayer
                                 className="h-full w-full"
                                 channel={selectedChannel}
+                                sourceChannels={channels}
                                 onClose={handleClose}
                                 onResize={onResizeFull}
+                                onChannelChange={playChannel}
                             />
                         </div>
                     )}
 
                     <ProgramGuide
                         channels={filteredChannels}
-                        sourceChannels={channels}
                         logoBasePath="/ch/"
                         playingChannelId={selectedChannel?.id}
-                        playingChannelIndex={selectedChannel?.index}
+                        playingChannelTvgId={selectedChannel?.tvgID}
                         onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
                     />
