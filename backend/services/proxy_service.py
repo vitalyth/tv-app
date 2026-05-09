@@ -226,9 +226,9 @@ def _is_live_hls_media_playlist(text):
 
 def _prepare_hls_media_playlist(text):
     """
-    Upgrade VERSION to 6 and add EXT-X-START for live playlists.
-    VERSION 6 fixes playback issues with high PTS timestamps and 50fps streams.
-    Does NOT add DISCONTINUITY — that's only for real stream breaks.
+    Upgrade VERSION to 6, add EXT-X-START, and add DISCONTINUITY before each
+    segment to force PTS reset. Required for streams with very high PTS values
+    (Redge Media livx streams) to prevent video freeze while audio continues.
     """
     if not _is_live_hls_media_playlist(text):
         return text
@@ -245,6 +245,12 @@ def _prepare_hls_media_playlist(text):
         # Drop existing VERSION — we'll inject VERSION:6 after #EXTM3U
         if stripped.startswith("#EXT-X-VERSION:"):
             continue
+
+        # Add DISCONTINUITY before each segment to reset PTS
+        if stripped.startswith("#EXTINF"):
+            previous = next((l.strip() for l in reversed(output) if l.strip()), "")
+            if previous != "#EXT-X-DISCONTINUITY":
+                output.append("#EXT-X-DISCONTINUITY")
 
         output.append(line)
 
