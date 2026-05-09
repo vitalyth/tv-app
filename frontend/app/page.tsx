@@ -165,9 +165,7 @@ export default function TVChannelsPage() {
             <div className="w-full max-w-6xl">
               <VideoPlayer
                 channel={selectedChannel}
-                sourceChannels={channels}
                 onClose={handleClose}
-                onChannelChange={handleSelectChannel}
               />
             </div>
           </div>

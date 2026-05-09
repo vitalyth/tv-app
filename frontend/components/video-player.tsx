@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useEffect, useMemo, useState } from "react"
+import { useCallback, useRef, useEffect, useState } from "react"
 import { Cast, X, Radio, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import videojs from "video.js"
@@ -19,35 +19,10 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
 
 interface VideoPlayerProps {
     channel: Channel | null
-    sourceChannels?: Channel[]
     onClose: () => void,
     onResize?: () => void,
-    onChannelChange?: (channel: Channel) => void,
     className?: string,
 }
-
-type PlayerMenuPosition = {
-    left: number
-    bottom: number
-}
-
-const getChannelSourceKey = (channel: Channel) => {
-    return channel.tvgID || channel.id || channel.channelID || String(channel.index)
-}
-
-const getSourceOptions = (channel: Channel | null, sourceChannels: Channel[] = []) => {
-    if (!channel) return []
-
-    const sourceKey = getChannelSourceKey(channel)
-    const sources = sourceChannels.filter((source) => getChannelSourceKey(source) === sourceKey)
-
-    return sources.length ? sources : [channel]
-}
-
-const getSourceLabel = (channel: Channel): string => channel.name
-
-const PLAYER_MENU_WIDTH = 176
-const PLAYER_MENU_EDGE_GAP = 2
 
 const resizetoFill = (player: any, onResize: () => void) => {
     const Button = videojs.getComponent("Button") as any
@@ -92,6 +67,7 @@ const addQualitySelector = (player: any) => {
     class QualityButton extends Button {
         menu: HTMLDivElement
         handleDocumentPointerDown: (e: Event) => void
+        handleMouseLeave: () => void
 
         constructor(player: any, options: any) {
             super(player, options)
@@ -99,13 +75,16 @@ const addQualitySelector = (player: any) => {
             this.controlText("Quality")
             this.addClass("vjs-quality-button")
 
+            // Create menu container
             this.menu = document.createElement("div")
             this.menu.className = "vjs-quality-menu hidden"
             this.el().appendChild(this.menu)
 
             this.handleDocumentPointerDown = this.onDocumentPointerDown.bind(this)
+            this.handleMouseLeave = this.hideMenu.bind(this)
 
             document.addEventListener("pointerdown", this.handleDocumentPointerDown)
+            this.el().addEventListener("mouseleave", this.handleMouseLeave)
 
             this.updateMenu()
         }
@@ -118,6 +97,7 @@ const addQualitySelector = (player: any) => {
             this.menu.classList.add("hidden")
         }
 
+        // Toggle menu visibility
         handleClick(event?: Event) {
             event?.stopPropagation()
 
@@ -129,8 +109,10 @@ const addQualitySelector = (player: any) => {
             this.hideMenu()
         }
 
+        // Close menu when clicking/touching outside
         onDocumentPointerDown(e: Event) {
             const target = e.target as Node
+
             const clickedInsideMenu = this.menu.contains(target)
             const clickedButton = this.el().contains(target)
 
@@ -139,19 +121,22 @@ const addQualitySelector = (player: any) => {
             }
         }
 
+        // Cleanup listeners
         dispose() {
             document.removeEventListener("pointerdown", this.handleDocumentPointerDown)
+            this.el().removeEventListener("mouseleave", this.handleMouseLeave)
             super.dispose()
         }
 
+        // Check if Auto mode (all levels enabled)
         isAuto(levels: any) {
             for (let i = 0; i < levels.length; i++) {
                 if (!levels[i].enabled) return false
             }
-
             return true
         }
 
+        // Get actual playing quality using selectedIndex
         getCurrentHeight(levels: any): number | null {
             const index = levels.selectedIndex
             if (index === -1) return null
@@ -159,6 +144,7 @@ const addQualitySelector = (player: any) => {
             return levels[index]?.height || null
         }
 
+        // Convert resolution to category label
         getQualityLabel(height: number | null) {
             if (!height) return "SD"
             if (height >= 2160) return "4K"
@@ -167,6 +153,7 @@ const addQualitySelector = (player: any) => {
             return "SD"
         }
 
+        // Remove duplicates and sort by height descending
         getUniqueLevels(levels: any) {
             const map = new Map<number, any>()
 
@@ -180,6 +167,7 @@ const addQualitySelector = (player: any) => {
             return Array.from(map.values()).sort((a, b) => b.height - a.height)
         }
 
+        // Create a menu item
         createItem(label: string, isActive: boolean, onClick: () => void) {
             const item = document.createElement("div")
             item.innerText = label
@@ -197,6 +185,7 @@ const addQualitySelector = (player: any) => {
             return item
         }
 
+        // Main render function
         updateMenu() {
             const levels = player.qualityLevels()
             if (!levels || !levels.length) return
@@ -205,11 +194,14 @@ const addQualitySelector = (player: any) => {
 
             const autoMode = this.isAuto(levels)
             const currentHeight = this.getCurrentHeight(levels)
+
+            // Update button label (SD / HD / 4K)
             const qualityLabel = this.getQualityLabel(currentHeight)
 
             this.el().setAttribute("data-quality", qualityLabel)
             this.el().classList.toggle("is-hd", qualityLabel === "HD")
 
+            // Auto option with current resolution indication
             const autoLabel = currentHeight
                 ? `Auto (${currentHeight}p)`
                 : "Auto"
@@ -222,6 +214,7 @@ const addQualitySelector = (player: any) => {
                 })
             )
 
+            // Manual options
             const selectedHeight = autoMode ? null : currentHeight
 
             this.getUniqueLevels(levels).forEach(level => {
@@ -265,89 +258,21 @@ const addQualitySelector = (player: any) => {
     levels.on("change", update)
 }
 
-const addSourceSelector = (
-    player: any,
-    sourceOptions: Channel[],
-    activeChannelId: string | null | undefined,
-    onSelectSource?: (channel: Channel) => void,
-    onToggleSourceMenu?: (buttonEl: HTMLElement) => void
-) => {
-    if (sourceOptions.length <= 1 || !onSelectSource || !onToggleSourceMenu) return
-
-    const Button = videojs.getComponent("Button") as any
-
-    if (!videojs.getComponent("SourceButton")) {
-        class SourceButton extends Button {
-            constructor(player: any, options: any) {
-                super(player, options)
-
-                this.controlText("Source")
-                this.addClass("vjs-source-button")
-                this.addClass("vjs-icon-chapters")
-                this.el().setAttribute("data-source-trigger", "true")
-            }
-
-            handleClick(event?: Event) {
-                event?.preventDefault()
-                event?.stopPropagation()
-                this.options_.onToggleSourceMenu(this.el())
-            }
-        }
-
-        videojs.registerComponent("SourceButton", SourceButton as any)
-    }
-
-    const qualityButton = player.controlBar.getChild("QualityButton")
-    const qualityButtonIndex = qualityButton
-        ? player.controlBar.children().indexOf(qualityButton)
-        : 1
-
-    player.controlBar.addChild(
-        "SourceButton",
-        {
-            sourceOptions,
-            activeChannelId,
-            onSelectSource,
-            onToggleSourceMenu,
-        },
-        qualityButtonIndex + 1
-    )
-}
-
-export function VideoPlayer({
-    channel,
-    sourceChannels,
-    onClose,
-    onResize,
-    onChannelChange,
-    className
-}: VideoPlayerProps) {
-    const playerRootRef = useRef<HTMLDivElement>(null)
+export function VideoPlayer({ channel, onClose, onResize, className }: VideoPlayerProps) {
     const videoRef = useRef<HTMLDivElement>(null)
     const playerRef = useRef<any>(null)
     const suppressCastVolumeSyncRef = useRef(false)
     const isCastingRef = useRef(false)
     const setCastVolumeRef = useRef<(volume: number, muted: boolean) => Promise<void> | void>(() => undefined)
-    const onChannelChangeRef = useRef<((channel: Channel) => void) | undefined>(onChannelChange)
     const [hasError, setHasError] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const [streamUrl, setStreamUrl] = useState<string | null>(null);
     const [showOverlay, setShowOverlay] = useState(true);
-    const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
-    const [sourceMenuPosition, setSourceMenuPosition] = useState<PlayerMenuPosition | null>(null);
     const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isHoveringRef = useRef(false);
     const currentProgram = useCurrentProgram(channel?.programs);
-    const sourceOptions = useMemo(
-        () => getSourceOptions(channel, sourceChannels),
-        [channel, sourceChannels]
-    );
 
-    useEffect(() => {
-        onChannelChangeRef.current = onChannelChange
-    }, [onChannelChange])
-
-    const showControls = useCallback(() => {
+    function showControls() {
         setShowOverlay(true)
 
         if (hideTimeoutRef.current) {
@@ -359,41 +284,7 @@ export function VideoPlayer({
         hideTimeoutRef.current = setTimeout(() => {
             setShowOverlay(false)
         }, 3000)
-    }, [])
-
-    const getMenuPosition = useCallback((buttonEl: HTMLElement): PlayerMenuPosition | null => {
-        const rootEl = playerRootRef.current
-        if (!rootEl) return null
-
-        const rootRect = rootEl.getBoundingClientRect()
-        const buttonRect = buttonEl.getBoundingClientRect()
-        const menuHalfWidth = PLAYER_MENU_WIDTH / 2
-        const buttonCenter = buttonRect.left - rootRect.left + buttonRect.width / 2
-
-        return {
-            left: Math.max(
-                menuHalfWidth + PLAYER_MENU_EDGE_GAP,
-                Math.min(buttonCenter, rootRect.width - menuHalfWidth - PLAYER_MENU_EDGE_GAP)
-            ),
-            bottom: rootRect.bottom - buttonRect.top + 8,
-        }
-    }, [])
-
-    const toggleSourceMenu = useCallback((buttonEl: HTMLElement) => {
-        const position = getMenuPosition(buttonEl)
-        if (!position) return
-
-        setSourceMenuPosition(position)
-        setIsSourceMenuOpen((current) => !current)
-        showControls()
-    }, [getMenuPosition, showControls])
-
-    const closePlayerMenus = useCallback(() => {
-        setIsSourceMenuOpen(false)
-
-        const qualityButton = playerRef.current?.controlBar?.getChild?.("QualityButton") as any
-        qualityButton?.hideMenu?.()
-    }, [])
+    }
 
     const pauseLocalPlayerForCasting = useCallback((player: any) => {
         if (!player || player.isDisposed?.()) return
@@ -550,13 +441,6 @@ export function VideoPlayer({
             try {
                 if (!player || player.isDisposed?.()) return
                 addQualitySelector(player);
-                addSourceSelector(
-                    player,
-                    sourceOptions,
-                    channel.id,
-                    (source) => onChannelChangeRef.current?.(source),
-                    toggleSourceMenu
-                );
                 onResize && resizetoFill(player, onResize);
             } catch (e) {
                 console.warn("Failed to add custom controls:", e);
@@ -596,7 +480,7 @@ export function VideoPlayer({
                 playerRef.current = null
             }
         }
-    }, [streamUrl, sourceOptions, channel, onResize, pauseLocalPlayerForCasting, toggleSourceMenu])
+    }, [streamUrl])
 
     useEffect(() => {
         const player = playerRef.current
@@ -612,33 +496,6 @@ export function VideoPlayer({
             }
         }
     }, [])
-
-    useEffect(() => {
-        if (sourceOptions.length <= 1) {
-            setIsSourceMenuOpen(false)
-        }
-    }, [sourceOptions.length])
-
-    useEffect(() => {
-        if (!isSourceMenuOpen) return
-
-        const handlePointerDown = (event: PointerEvent) => {
-            const target = event.target as HTMLElement | null
-
-            if (
-                target?.closest("[data-source-trigger]") ||
-                target?.closest("[data-player-source-menu]")
-            ) {
-                return
-            }
-
-            setIsSourceMenuOpen(false)
-        }
-
-        document.addEventListener("pointerdown", handlePointerDown)
-
-        return () => document.removeEventListener("pointerdown", handlePointerDown)
-    }, [isSourceMenuOpen])
 
     const handleClose = () => {
         if (!isCastingRef.current) {
@@ -662,15 +519,13 @@ export function VideoPlayer({
 
     return (
         <div
-            ref={playerRootRef}
-            className={`relative rounded-xl overflow-hidden bg-black ${showOverlay ? "player-controls-visible" : "player-controls-hidden"} ${className || ""}`}
+            className={`relative rounded-xl overflow-hidden bg-black ${className || ""}`}
             onMouseEnter={() => {
                 isHoveringRef.current = true
                 showControls()
             }}
             onMouseLeave={() => {
                 isHoveringRef.current = false
-                closePlayerMenus()
                 showControls() // countdown start
             }}
             onTouchStart={() => {
@@ -745,70 +600,6 @@ export function VideoPlayer({
                 </div>
             </div>
 
-            {showOverlay && isSourceMenuOpen && sourceMenuPosition && sourceOptions.length > 1 && (
-                <div
-                    data-player-source-menu
-                    dir="rtl"
-                    className="player-control-menu absolute z-30 overflow-hidden rounded-xl border border-white/15 bg-zinc-950/95 text-white shadow-2xl shadow-black/70 ring-1 ring-black/40 backdrop-blur-xl transition-opacity duration-300"
-                    style={{
-                        left: sourceMenuPosition.left,
-                        bottom: sourceMenuPosition.bottom,
-                        width: PLAYER_MENU_WIDTH,
-                        transform: "translateX(-50%)",
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => event.stopPropagation()}
-                >
-                    <div className="bg-white/[0.03] px-2 py-1">
-                        <p className="text-[10px] font-semibold leading-4 text-zinc-400">בחר מקור</p>
-                        <p className="truncate text-[10px] font-medium leading-4 text-zinc-100">{channel.name}</p>
-                    </div>
-                    <div className="max-h-36 overflow-y-auto p-0.5">
-                        {sourceOptions.map((source) => {
-                            const isActive = source.id === channel.id
-
-                            return (
-                                <button
-                                    key={source.id}
-                                    type="button"
-                                    className={`
-                                        flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-right transition-colors
-                                        ${isActive
-                                            ? "bg-white text-zinc-950 shadow-sm"
-                                            : "text-zinc-100 hover:bg-white/10"
-                                        }
-                                    `}
-                                    onClick={() => {
-                                        setIsSourceMenuOpen(false)
-
-                                        if (!isActive) {
-                                            onChannelChangeRef.current?.(source)
-                                        }
-                                    }}
-                                >
-                                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded ${isActive ? "bg-zinc-200" : "bg-zinc-800"}`}>
-                                        <img
-                                            src={`/ch/${source.logo}`}
-                                            alt=""
-                                            className="h-full w-full object-contain"
-                                            onError={(event) => {
-                                                (event.target as HTMLImageElement).style.display = "none"
-                                            }}
-                                        />
-                                    </span>
-                                    <span className="min-w-0 flex-1 truncate text-[10px] font-medium leading-5">
-                                        {getSourceLabel(source)}
-                                    </span>
-                                    {isActive && (
-                                        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]" aria-hidden="true" />
-                                    )}
-                                </button>
-                            )
-                        })}
-                    </div>
-                </div>
-            )}
-
             {/* Loading state */}
             {isLoading && !hasError && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
@@ -850,7 +641,7 @@ export function VideoPlayer({
                 .vjs-resize-button:before {
                     content: "▣";
                     font-size: 1.8em;
-                    line-height: 34px;
+                    line-height: 1.8;
                     cursor: pointer;
                     font-weight: 600;
                 }
@@ -869,7 +660,7 @@ export function VideoPlayer({
                     content: attr(data-quality);
                     /* SD / HD / 4K */
                     font-size: 1.4em;
-                    line-height: 34px;
+                    line-height: 1.8;
                     font-weight: 700;
                     cursor: pointer;
                 }
@@ -882,46 +673,28 @@ export function VideoPlayer({
                     color: #e53935;
                 }
 
-                .vjs-source-button {
-                    position: relative;
-                }
-
-                .vjs-source-button:before {
-                    font-size: 1.8em;
-                    line-height: 34px;
-                    cursor: pointer;
-                }
-
                 .vjs-quality-menu {
                     position: absolute;
-                    bottom: calc(100% + 8px);
+                    bottom: 100%;
                     left: 50%;
                     transform: translateX(-50%);
-                    overflow: hidden;
-                    border: 1px solid rgba(255, 255, 255, 0.15);
-                    border-radius: 10px;
-                    background: rgba(9, 9, 11, 0.95);
+                    background: rgba(56, 54, 54, 0.75);
                     color: #fff;
-                    padding: 2px;
-                    min-width: 78px;
-                    font-size: 10px;
+                    padding: 6px 0;
+                    min-width: 80px;
+                    font-size: 11px;
                     z-index: 999;
-                    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.7);
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
                     text-align: center;
-                    backdrop-filter: blur(14px);
-                    -webkit-backdrop-filter: blur(14px);
                 }
 
                 .vjs-quality-menu div {
-                    border-radius: 6px;
-                    padding: 3px 7px;
-                    line-height: 1.2;
+                    padding: 6px 12px;
                     cursor: pointer;
-                    transition: background-color 0.16s ease, color 0.16s ease;
                 }
 
                 .vjs-quality-menu div:hover {
-                    background: rgba(255, 255, 255, 0.1);
+                    background: rgba(255, 255, 255, 0.08);
                 }
 
                 .vjs-quality-menu .active {
@@ -933,7 +706,6 @@ export function VideoPlayer({
                     color: #272727;
                     background-color: #bbbbbbd6;
                 }
-
         `}  </style>
         </div>
     )
