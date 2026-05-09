@@ -135,8 +135,20 @@ def _response_metadata_headers(upstream):
     }
 
 
-def _stream_response(upstream, content_type):
-    """Always stream — works for both regular playback and cast."""
+def _stream_response(upstream, content_type, cast=False):
+    # Chromecast requires known Content-Length for smooth playback
+    if cast:
+        content = upstream.content
+        headers = _response_metadata_headers(upstream)
+        headers["Content-Length"] = str(len(content))
+        upstream.close()
+        return Response(
+            content=content,
+            status_code=upstream.status_code,
+            media_type=content_type,
+            headers=_response_headers(headers)
+        )
+
     def generate():
         try:
             for chunk in upstream.iter_content(chunk_size=1024 * 64):
@@ -301,9 +313,9 @@ def handle_proxy(request, url, referer, cast=False):
             headers=_response_headers(_response_metadata_headers(r))
         )
 
-    # Video/audio segments — always stream
+    # Video/audio segments
     if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(url):
-        return _stream_response(r, content_type)
+        return _stream_response(r, content_type, cast=cast)
 
     # Text content (m3u8, mpd, etc.)
     try:
