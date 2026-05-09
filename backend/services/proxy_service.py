@@ -226,15 +226,17 @@ def _is_live_hls_media_playlist(text):
 
 def _prepare_hls_media_playlist(text):
     """
-    Upgrade VERSION to 6, add EXT-X-START, and add DISCONTINUITY before each
-    segment to force PTS reset. Required for streams with very high PTS values
-    (Redge Media livx streams) to prevent video freeze while audio continues.
+    Upgrade VERSION to 6, add EXT-X-START, and add a single
+    EXT-X-DISCONTINUITY-SEQUENCE to reset PTS globally without breaking ABR.
+    Also strips any existing EXT-X-DISCONTINUITY tags from the source stream.
+    Required for Redge Media livx streams with very high PTS timestamps.
     """
     if not _is_live_hls_media_playlist(text):
         return text
 
     lines = text.splitlines()
     has_start = any(line.strip().startswith("#EXT-X-START:") for line in lines)
+    has_disc_seq = any(line.strip().startswith("#EXT-X-DISCONTINUITY-SEQUENCE:") for line in lines)
 
     output = []
     inserted = False
@@ -246,11 +248,9 @@ def _prepare_hls_media_playlist(text):
         if stripped.startswith("#EXT-X-VERSION:"):
             continue
 
-        # Add DISCONTINUITY before each segment to reset PTS
-        if stripped.startswith("#EXTINF"):
-            previous = next((l.strip() for l in reversed(output) if l.strip()), "")
-            if previous != "#EXT-X-DISCONTINUITY":
-                output.append("#EXT-X-DISCONTINUITY")
+        # Strip existing DISCONTINUITY tags — they break ABR
+        if stripped == "#EXT-X-DISCONTINUITY":
+            continue
 
         output.append(line)
 
@@ -261,6 +261,10 @@ def _prepare_hls_media_playlist(text):
 
         if not has_start:
             output.append("#EXT-X-START:TIME-OFFSET=-12,PRECISE=NO")
+
+        # Single global PTS reset — does not affect ABR decisions
+        if not has_disc_seq:
+            output.append("#EXT-X-DISCONTINUITY-SEQUENCE:1")
 
         inserted = True
 
