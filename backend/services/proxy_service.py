@@ -232,23 +232,28 @@ def _prepare_hls_for_cast(text):
         return text
 
     lines = text.splitlines()
-    has_version = any(line.strip().startswith("#EXT-X-VERSION:") for line in lines)
     has_start = any(line.strip().startswith("#EXT-X-START:") for line in lines)
-
-    if has_version and has_start:
-        return text
 
     output = []
     inserted = False
 
     for line in lines:
-        output.append(line)
+        stripped = line.strip()
 
-        if inserted or line.strip() != "#EXTM3U":
+        if stripped.startswith("#EXT-X-VERSION:"):
             continue
 
-        if not has_version:
-            output.append("#EXT-X-VERSION:3")
+        if stripped.startswith("#EXTINF"):
+            previous_tag = next((item.strip() for item in reversed(output) if item.strip()), "")
+            if previous_tag != "#EXT-X-DISCONTINUITY":
+                output.append("#EXT-X-DISCONTINUITY")
+
+        output.append(line)
+
+        if inserted or stripped != "#EXTM3U":
+            continue
+
+        output.append("#EXT-X-VERSION:6")
 
         if not has_start:
             output.append("#EXT-X-START:TIME-OFFSET=-12,PRECISE=NO")
