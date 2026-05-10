@@ -204,13 +204,23 @@ export function useGoogleCast({
     const stopCasting = useCallback(async () => {
         const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
 
+        // Optimistic UI update:
+        // Do not wait for the Cast SDK session-ended event.
+        // This immediately returns the local UI from the Cast screen back to the player.
+        setSessionState("disconnected")
+        setHasDvr(false)
+        lastLoadKeyRef.current = null
+        clearMediaStatusListener()
+        onCastEnded?.()
+
         try {
             await session?.endSession(true)
         } catch (err) {
             console.warn("Failed to stop Cast session:", err)
+            setSessionState("connected")
             setError("cast-stop-failed")
         }
-    }, [])
+    }, [clearMediaStatusListener, onCastEnded])
 
     const setVolume = useCallback(async (volume: number, muted: boolean) => {
         const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()

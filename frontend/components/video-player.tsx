@@ -514,25 +514,83 @@ export function VideoPlayer({
       </div>
 
       <div className="relative w-full h-full bg-black" onClick={toggleControls} dir="ltr">
-        <div data-vjs-player className="absolute inset-0">
+        <div
+          data-vjs-player
+          className={`absolute inset-0 ${isCasting ? "opacity-0 pointer-events-none" : ""}`}
+        >
           <div ref={videoRef} className="video-js-container w-full h-full" />
         </div>
 
-        <CustomPlayerControls
-          player={playerInstance}
-          show={showOverlay}
-          isExpanded={isExpanded && !isFullscreen}
-          isFullscreen={isFullscreen}
-          isCasting={isCasting}
-          isCastAvailable={isCastAvailable}
-          isCastConnecting={isCastConnecting}
-          onToggleExpanded={toggleExpanded}
-          onToggleFullscreen={toggleFullscreen}
-          onInteraction={keepControlsVisible}
-        />
+        {isCasting && !isCastConnecting ? (
+          <div
+            className="absolute inset-0 z-40 flex items-center justify-center overflow-hidden bg-black px-5 text-white"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="absolute inset-0 bg-black" />
+            <div className="absolute left-1/2 top-0 h-56 w-56 -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
+            <div className="absolute bottom-0 left-0 h-48 w-48 rounded-full bg-red-500/10 blur-3xl" />
+
+            <div className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/90 p-5 text-center shadow-2xl backdrop-blur-md sm:p-6">
+              <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-3xl border border-white/10 bg-black/40 p-3 shadow-inner sm:h-28 sm:w-28">
+                <img
+                  src={`/ch/${channel.logo}`}
+                  alt={channel.name}
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
+
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-primary">
+                <Cast className="h-3.5 w-3.5" />
+                <span>מחובר ל-Cast</span>
+              </div>
+
+              <h3 className="mb-1 truncate text-xl font-semibold">
+                {channel.name}
+              </h3>
+
+              <div className="mx-auto mb-5 flex max-w-full items-center justify-center gap-1.5 text-xs text-white/75">
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                </span>
+                <span className="truncate">
+                  <ProgramDisplay program={currentProgram || channel.programs?.[0]} />
+                </span>
+              </div>
+
+              <div className="mb-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-relaxed text-white/70">
+                הוידאו מנוגן בטלויזיה. אפשר להחליף ערוץ מהאפליקציה או להתנתק ולחזור לניגון מקומי.
+              </div>
+
+              <Button
+                variant="outline"
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  stopCasting()
+                }}
+                disabled={isCastConnecting}
+                className="h-10 w-full rounded-xl border-white/15 bg-white text-black hover:bg-white/90 disabled:opacity-60"
+              >
+                התנתק וחזור לפלייר
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <CustomPlayerControls
+            player={playerInstance}
+            show={showOverlay}
+            isExpanded={isExpanded && !isFullscreen}
+            isFullscreen={isFullscreen}
+            isCasting={isCasting}
+            onToggleExpanded={toggleExpanded}
+            onToggleFullscreen={toggleFullscreen}
+            onInteraction={keepControlsVisible}
+          />
+        )}
       </div>
 
-      {isLoading && !hasError && (
+      {isLoading && !hasError && !isCasting && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
           <div className="text-center space-y-4">
             <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto animate-pulse overflow-hidden">
@@ -543,7 +601,7 @@ export function VideoPlayer({
         </div>
       )}
 
-      {hasError && (
+      {hasError && !isCasting && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-20">
           <div className="text-center space-y-4 p-6">
             <div className="w-20 h-20 rounded-full bg-destructive/20 flex items-center justify-center mx-auto">
