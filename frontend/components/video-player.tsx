@@ -523,58 +523,54 @@ export function VideoPlayer({
 
         {isCasting && !isCastConnecting ? (
           <div
-            className="absolute inset-0 z-40 flex items-center justify-center overflow-hidden bg-black px-5 text-white"
+            className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/90 px-4 text-white"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="absolute inset-0 bg-black" />
-            <div className="absolute left-1/2 top-0 h-56 w-56 -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
-            <div className="absolute bottom-0 left-0 h-48 w-48 rounded-full bg-red-500/10 blur-3xl" />
-
-            <div className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-white/10 bg-zinc-950/90 p-5 text-center shadow-2xl backdrop-blur-md sm:p-6">
-              <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-3xl border border-white/10 bg-black/40 p-3 shadow-inner sm:h-28 sm:w-28">
-                <img
-                  src={`/ch/${channel.logo}`}
-                  alt={channel.name}
-                  className="max-h-full max-w-full object-contain"
-                />
-              </div>
-
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-primary">
-                <Cast className="h-3.5 w-3.5" />
-                <span>מחובר ל-Cast</span>
-              </div>
-
-              <h3 className="mb-1 truncate text-xl font-semibold">
-                {channel.name}
-              </h3>
-
-              <div className="mx-auto mb-5 flex max-w-full items-center justify-center gap-1.5 text-xs text-white/75">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-                </span>
-                <span className="truncate">
-                  <ProgramDisplay program={currentProgram || channel.programs?.[0]} />
-                </span>
-              </div>
-
-              <div className="mb-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-relaxed text-white/70">
-                הוידאו מנוגן בטלויזיה. אפשר להחליף ערוץ מהאפליקציה או להתנתק ולחזור לניגון מקומי.
-              </div>
-
-              <Button
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  stopCasting()
-                }}
-                disabled={isCastConnecting}
-                className="h-10 w-full rounded-xl border-white/15 bg-white text-black hover:bg-white/90 disabled:opacity-60"
-              >
-                התנתק וחזור לפלייר
-              </Button>
+            {/* Channel logo */}
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white/10 p-2.5 sm:h-20 sm:w-20">
+              <img
+                src={`/ch/${channel.logo}`}
+                alt={channel.name}
+                className="max-h-full max-w-full object-contain"
+              />
             </div>
+
+            {/* Cast icon + label */}
+            <div className="flex items-center gap-1.5 text-xs text-white/60">
+              <Cast className="h-3.5 w-3.5" />
+              <span>מנוגן בטלויזיה</span>
+            </div>
+
+            {/* Channel name */}
+            <p className="max-w-[200px] truncate text-center text-base font-semibold sm:text-lg">
+              {channel.name}
+            </p>
+
+            {/* Program */}
+            <div className="flex items-center gap-1.5 text-xs text-white/60">
+              <span className="relative flex h-1.5 w-1.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
+              </span>
+              <span className="truncate max-w-[180px]">
+                <ProgramDisplay program={currentProgram || channel.programs?.[0]} />
+              </span>
+            </div>
+
+            {/* Stop casting button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                stopCasting()
+              }}
+              disabled={isCastConnecting}
+              className="mt-1 rounded-full border-white/20 bg-white/10 text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              עצור שידור
+            </Button>
           </div>
         ) : (
           <CustomPlayerControls
