@@ -379,9 +379,10 @@ export default function GuidePage() {
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    z-index: 50;
+                    z-index: 9999;
                     border-radius: 10px 10px 0 0;
                     opacity: 0;
+                    pointer-events: auto;
                     transition: opacity 0.2s;
                 }
 

@@ -18,6 +18,8 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
   require("videojs-contrib-quality-levels")
 }
 
+const OVERLAY_HIDE_DELAY = 3000 // ms
+
 interface VideoPlayerProps {
   channel: Channel | null
   onClose: () => void
@@ -34,6 +36,7 @@ export function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<any>(null)
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const suppressCastVolumeSyncRef = useRef(false)
   const isCastingRef = useRef(false)
@@ -51,23 +54,62 @@ export function VideoPlayer({
 
   const currentProgram = useCurrentProgram(channel?.programs)
 
-  function showControls() {
+  // Clear any pending hide timer
+  const clearOverlayTimer = useCallback(() => {
+    if (overlayTimerRef.current) {
+      clearTimeout(overlayTimerRef.current)
+      overlayTimerRef.current = null
+    }
+  }, [])
+
+  // Show overlay and start auto-hide timer
+  const showControls = useCallback(() => {
     setShowOverlay(true)
-  }
+    clearOverlayTimer()
 
-  function hideControls() {
+    overlayTimerRef.current = setTimeout(() => {
+      setShowOverlay(false)
+    }, OVERLAY_HIDE_DELAY)
+  }, [clearOverlayTimer])
+
+  // Hide overlay immediately and cancel timer
+  const hideControls = useCallback(() => {
+    clearOverlayTimer()
     setShowOverlay(false)
-  }
+  }, [clearOverlayTimer])
 
-  function toggleControls() {
-    setShowOverlay((value) => !value)
-  }
+  // Keep overlay visible while user is interacting (hover/touch)
+  const keepControlsVisible = useCallback(() => {
+    clearOverlayTimer()
+    setShowOverlay(true)
+  }, [clearOverlayTimer])
+
+  // Toggle overlay and restart timer if showing
+  const toggleControls = useCallback(() => {
+    setShowOverlay((prev) => {
+      if (prev) {
+        clearOverlayTimer()
+        return false
+      }
+      // Show and start timer
+      clearOverlayTimer()
+      overlayTimerRef.current = setTimeout(() => {
+        setShowOverlay(false)
+      }, OVERLAY_HIDE_DELAY)
+      return true
+    })
+  }, [clearOverlayTimer])
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => clearOverlayTimer()
+  }, [clearOverlayTimer])
 
   const resetViewMode = useCallback(() => {
     setIsExpanded(false)
     setIsFullscreen(document.fullscreenElement === containerRef.current)
-    setShowOverlay(true)
-  }, [])
+    showControls()
+  }, [showControls])
 
   const toggleExpanded = useCallback(() => {
     if (document.fullscreenElement) return
@@ -78,7 +120,7 @@ export function VideoPlayer({
     if (onResize) {
       onResize()
     }
-  }, [onResize])
+  }, [onResize, showControls])
 
   const toggleFullscreen = useCallback(async () => {
     const container = containerRef.current
@@ -96,7 +138,7 @@ export function VideoPlayer({
     } catch (error) {
       console.warn("Fullscreen failed:", error)
     }
-  }, [])
+  }, [showControls])
 
   const pauseLocalPlayerForCasting = useCallback((player: any) => {
     if (!player || player.isDisposed?.()) return
@@ -180,7 +222,7 @@ export function VideoPlayer({
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange)
     }
-  }, [])
+  }, [showControls])
 
   useEffect(() => {
     if (!channel) return
@@ -192,7 +234,7 @@ export function VideoPlayer({
     setStreamUrl(null)
     setPlayerInstance(null)
     setIsExpanded(false)
-    setShowOverlay(true)
+    showControls()
 
     channelService
       .getLiveChannel(channel)
@@ -221,7 +263,7 @@ export function VideoPlayer({
     setHasError(false)
     setIsLoading(true)
     setIsExpanded(false)
-    setShowOverlay(true)
+    showControls()
 
     if (playerRef.current) {
       playerRef.current.dispose()
@@ -342,7 +384,7 @@ export function VideoPlayer({
         setPlayerInstance(null)
       }
     }
-  }, [streamUrl, channel, pauseLocalPlayerForCasting, resetViewMode])
+  }, [streamUrl, channel, pauseLocalPlayerForCasting, resetViewMode, showControls])
 
   useEffect(() => {
     const player = playerRef.current
@@ -357,6 +399,7 @@ export function VideoPlayer({
     }
 
     setIsExpanded(false)
+    clearOverlayTimer()
 
     if (!isCastingRef.current) {
       onClose()
@@ -386,12 +429,14 @@ export function VideoPlayer({
         ${isExpanded && !isFullscreen ? "fixed inset-0 z-[9999] rounded-none" : "rounded-xl"}
         ${className || ""}
       `}
-      onMouseEnter={showControls}
+      onMouseMove={showControls}
       onMouseLeave={hideControls}
       onTouchStart={showControls}
     >
+      {/* Top overlay — channel info + close */}
       <div
         onClick={(event) => event.stopPropagation()}
+        onMouseEnter={keepControlsVisible}
         className={`
           absolute top-0 left-0 right-0 z-50 p-3 sm:p-4
           bg-linear-to-b from-black/80 to-transparent
@@ -466,9 +511,9 @@ export function VideoPlayer({
           isCasting={isCasting}
           isCastAvailable={isCastAvailable}
           isCastConnecting={isCastConnecting}
-          onCast={isCasting ? stopCasting : requestCastSession}
           onToggleExpanded={toggleExpanded}
           onToggleFullscreen={toggleFullscreen}
+          onInteraction={keepControlsVisible}
         />
       </div>
 
