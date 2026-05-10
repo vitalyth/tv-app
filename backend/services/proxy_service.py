@@ -261,7 +261,7 @@ def _prepare_hls_media_playlist(text, cast=False):
         output.append("#EXT-X-VERSION:6")
 
         if not has_start:
-            output.append("#EXT-X-START:TIME-OFFSET=-12,PRECISE=NO")
+            output.append("#EXT-X-START:TIME-OFFSET=-30,PRECISE=NO")
 
         inserted = True
 
