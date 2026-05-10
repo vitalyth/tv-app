@@ -37,6 +37,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<any>(null)
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const restoreExpandedAfterFullscreenRef = useRef(false)
 
   const suppressCastVolumeSyncRef = useRef(false)
   const isCastingRef = useRef(false)
@@ -130,6 +131,10 @@ export function VideoPlayer({
       if (document.fullscreenElement) {
         await document.exitFullscreen()
       } else {
+        // Remember whether we were browser-expanded before entering real fullscreen.
+        // This fixes the Expand icon/state after exiting fullscreen.
+        restoreExpandedAfterFullscreenRef.current = isExpanded
+
         setIsExpanded(false)
         await container.requestFullscreen()
       }
@@ -138,7 +143,7 @@ export function VideoPlayer({
     } catch (error) {
       console.warn("Fullscreen failed:", error)
     }
-  }, [showControls])
+  }, [isExpanded, showControls])
 
   const pauseLocalPlayerForCasting = useCallback((player: any) => {
     if (!player || player.isDisposed?.()) return
@@ -211,16 +216,24 @@ export function VideoPlayer({
       setIsFullscreen(fullscreenActive)
 
       if (fullscreenActive) {
+        // While real fullscreen is active, browser-expanded mode should be visually disabled.
         setIsExpanded(false)
+      } else {
+        // If the user entered fullscreen while already in browser-expanded mode,
+        // restore browser-expanded mode when leaving fullscreen.
+        setIsExpanded(restoreExpandedAfterFullscreenRef.current)
+        restoreExpandedAfterFullscreenRef.current = false
       }
 
       showControls()
     }
 
     document.addEventListener("fullscreenchange", handleFullscreenChange)
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange as EventListener)
 
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange)
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange as EventListener)
     }
   }, [showControls])
 
@@ -233,6 +246,7 @@ export function VideoPlayer({
     setHasError(false)
     setStreamUrl(null)
     setPlayerInstance(null)
+    restoreExpandedAfterFullscreenRef.current = false
     setIsExpanded(false)
     showControls()
 
@@ -398,6 +412,7 @@ export function VideoPlayer({
       document.exitFullscreen().catch(() => undefined)
     }
 
+    restoreExpandedAfterFullscreenRef.current = false
     setIsExpanded(false)
     clearOverlayTimer()
 

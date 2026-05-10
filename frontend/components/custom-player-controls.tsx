@@ -8,8 +8,6 @@ import {
   VolumeX,
   Maximize,
   Minimize,
-  Expand,
-  Shrink,
   Cast,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -66,6 +64,8 @@ export default function CustomPlayerControls({
   const [isAtLiveEdge, setIsAtLiveEdge] = useState(true)
   const [showSeekTooltip, setShowSeekTooltip] = useState(false)
   const [seekActive, setSeekActive] = useState(false)
+  const [seekHoverPercent, setSeekHoverPercent] = useState<number | null>(null)
+  const [seekHoverTime, setSeekHoverTime] = useState<number | null>(null)
 
   const clearCloseMenusTimer = () => {
     if (closeMenusTimerRef.current) {
@@ -179,6 +179,24 @@ export default function CustomPlayerControls({
     )
   }
 
+  const getTimeFromPointerEvent = (event: React.PointerEvent<HTMLInputElement> | React.MouseEvent<HTMLInputElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width)
+    const percent = rect.width > 0 ? x / rect.width : 0
+    const time = seekStart + percent * Math.max(0, seekEnd - seekStart)
+
+    setSeekHoverPercent(percent * 100)
+    setSeekHoverTime(time)
+  }
+
+  const getSeekTooltipText = (time: number) => {
+    if (isLiveStream) {
+      return `-${formatTime(Math.max(0, seekEnd - time))}`
+    }
+
+    return formatTime(time)
+  }
+
   const getDisplayStartTime = () => {
     if (isLiveStream) {
       return `-${formatTime(Math.max(0, seekEnd - seekStart))}`
@@ -190,6 +208,14 @@ export default function CustomPlayerControls({
   const getDisplayEndTime = () => {
     if (isLiveStream) return ""
     return formatTime(duration)
+  }
+
+  const getTimeDisplayText = () => {
+    if (isLiveStream) {
+      return `-${formatTime(Math.max(0, seekEnd - currentTime))} / -${formatTime(Math.max(0, seekEnd - seekStart))}`
+    }
+
+    return `${formatTime(currentTime)} / ${formatTime(duration)}`
   }
 
   const updateProgress = () => {
@@ -382,6 +408,14 @@ export default function CustomPlayerControls({
     setQualityOpen(false)
   }
 
+  const BrowserExpandIcon = ({ active }: { active: boolean }) => (
+    <span
+      className={`block h-2.5 w-4 rounded-[2px] border border-current ${
+        active ? "bg-current" : "bg-transparent"
+      }`}
+    />
+  )
+
   // When casting, show as playing since remote device is playing
   const showAsPlaying = isCasting ? true : isPlaying
 
@@ -391,7 +425,7 @@ export default function CustomPlayerControls({
       onMouseEnter={onInteraction}
       onMouseMove={onInteraction}
       className={`
-        absolute bottom-0 left-0 right-0 z-50
+        absolute bottom-0 left-0 right-0 z-[9999]
         bg-linear-to-t from-black/95 via-black/65 to-transparent
         px-2.5 sm:px-4 pt-7 sm:pt-10 pb-2 sm:pb-3
         transition-all duration-300
@@ -403,33 +437,29 @@ export default function CustomPlayerControls({
     >
       {seekEnd > seekStart && (
         <div
-          className="relative z-50 mb-[1px] flex h-7 w-full min-w-0 items-center gap-4 sm:h-8 sm:gap-5"
+          className="relative z-[9999] mb-0 flex h-6 w-full min-w-0 items-center gap-2 sm:h-7 sm:gap-3"
           dir="ltr"
         >
-            <span className="w-12 shrink-0 text-[11px] text-white/85 tabular-nums sm:w-14 sm:text-xs">
-              {getDisplayStartTime()}
-            </span>
-
             <div className="relative flex h-full min-w-0 flex-1 items-center">
               {(() => {
                 const clampedTime = Math.min(Math.max(currentTime, seekStart), seekEnd)
                 const progress = getSeekPercent(clampedTime)
                 const loadedProgress = Math.max(progress, getSeekPercent(bufferedEnd))
-                const tooltipText = isLiveStream
-                  ? `-${formatTime(Math.max(0, seekEnd - currentTime))}`
-                  : formatTime(currentTime)
+                const tooltipPercent = seekHoverPercent ?? progress
+                const tooltipTime = seekHoverTime ?? clampedTime
+                const tooltipText = getSeekTooltipText(tooltipTime)
 
                 return (
                   <>
                     {showSeekTooltip && (
                       <div
                         className="
-                          pointer-events-none absolute -top-5 z-50
+                          pointer-events-none absolute -top-5 z-[9999]
                           rounded bg-black/85 px-1.5 py-0.5
                           text-[10px] leading-none text-white shadow-md
                         "
                         style={{
-                          left: `${progress}%`,
+                          left: `${tooltipPercent}%`,
                           transform: "translateX(-50%)",
                         }}
                       >
@@ -472,13 +502,17 @@ export default function CustomPlayerControls({
                       step={0.1}
                       value={clampedTime}
                       onChange={(event) => seekTo(Number(event.target.value))}
-                      onMouseEnter={() => {
+                      onMouseEnter={(event) => {
+                        getTimeFromPointerEvent(event)
                         setShowSeekTooltip(true)
                         setSeekActive(true)
                       }}
+                      onMouseMove={getTimeFromPointerEvent}
                       onMouseLeave={() => {
                         setShowSeekTooltip(false)
                         setSeekActive(false)
+                        setSeekHoverPercent(null)
+                        setSeekHoverTime(null)
                       }}
                       onFocus={() => {
                         setShowSeekTooltip(true)
@@ -490,16 +524,20 @@ export default function CustomPlayerControls({
                       }}
                       onPointerDown={(event) => {
                         event.stopPropagation()
+                        getTimeFromPointerEvent(event)
                         setShowSeekTooltip(true)
                         setSeekActive(true)
                       }}
+                      onPointerMove={getTimeFromPointerEvent}
                       onPointerUp={() => {
                         setShowSeekTooltip(false)
                         setSeekActive(false)
+                        setSeekHoverPercent(null)
+                        setSeekHoverTime(null)
                       }}
                       onClick={(event) => event.stopPropagation()}
                       className="
-                        relative z-50 h-8 w-full min-w-16 cursor-pointer
+                        relative z-[9999] h-8 w-full min-w-16 cursor-pointer
                         appearance-none bg-transparent opacity-0 sm:h-9
                       "
                       title="Seek"
@@ -509,34 +547,9 @@ export default function CustomPlayerControls({
               })()}
             </div>
 
-            <div className="flex w-[54px] shrink-0 justify-end sm:w-[62px]">
-              {isLiveStream ? (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    goLive()
-                  }}
-                  className={`h-6 rounded-md px-2 text-[10px] font-semibold leading-none transition-colors sm:h-7 sm:text-[10px] ${
-                    isAtLiveEdge
-                      ? "bg-red-500 text-white hover:bg-red-600"
-                      : "bg-white/15 text-white/85 hover:bg-white/25 hover:text-white"
-                  }`}
-                  title="Go live"
-                >
-                  LIVE
-                </button>
-              ) : (
-                <span className="flex h-7 items-center justify-end text-[10px] text-white/75 tabular-nums sm:h-8 sm:text-xs">
-                  {getDisplayEndTime()}
-                </span>
-              )}
-            </div>
+
           </div>
       )}
-
-      <div className="mb-[2px] h-px w-full bg-white/20" />
 
       <div className="flex items-center gap-1 sm:gap-3 text-white">
         <div className="flex items-center gap-1 sm:gap-3 min-w-0 shrink-0">
@@ -555,7 +568,7 @@ export default function CustomPlayerControls({
           </Button>
 
           <div
-            className="relative z-50 flex items-center gap-1.5 sm:gap-2"
+            className="relative z-[9999] flex items-center gap-1.5 sm:gap-2"
             onMouseEnter={() => {
               keepMenusOpen()
               setVolumeOpen(true)
@@ -567,11 +580,15 @@ export default function CustomPlayerControls({
               ref={volumeButtonRef}
               variant="ghost"
               size="icon"
-              onClick={(event) => {
+              onPointerDown={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
                 setVolumeOpen((value) => !value)
                 setQualityOpen(false)
+              }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
               }}
               className="text-white hover:bg-white/20 h-8 w-8 sm:h-9 sm:w-9 shrink-0"
               title="Volume"
@@ -592,7 +609,7 @@ export default function CustomPlayerControls({
                   bg-black/55 px-2 backdrop-blur-md
                   border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.45)]
                   sm:static sm:ml-0 sm:translate-y-0 sm:bg-transparent sm:px-0 sm:border-0 sm:shadow-none sm:backdrop-blur-0
-                  z-50
+                  z-[9999]
                 "
                 onMouseEnter={keepMenusOpen}
                 onMouseLeave={closeMenusWithDelay}
@@ -610,32 +627,40 @@ export default function CustomPlayerControls({
                   className="h-1 w-20 cursor-pointer accent-red-500 sm:w-24 md:w-28"
                   title="Volume"
                 />
-
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    toggleMute()
-                  }}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white hover:bg-white/20 sm:hidden"
-                  title={muted ? "Unmute" : "Mute"}
-                >
-                  {muted || volume === 0 ? (
-                    <VolumeX className="w-4 h-4" />
-                  ) : (
-                    <Volume2 className="w-4 h-4" />
-                  )}
-                </button>
               </div>
             )}
           </div>
 
+          {seekEnd > seekStart && (
+            <span className="hidden min-[420px]:inline-flex shrink-0 items-center text-[10px] text-white/80 tabular-nums sm:text-xs">
+              {getTimeDisplayText()}
+            </span>
+          )}
+
         </div>
 
         <div className="ml-auto flex items-center gap-0.5 sm:gap-2 shrink-0">
+          {isLiveStream && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                goLive()
+              }}
+              className={`h-8 px-1 text-[10px] font-semibold leading-none transition-colors sm:h-9 sm:px-1.5 ${
+                isAtLiveEdge
+                  ? "text-red-500 hover:text-red-400"
+                  : "text-white/85 hover:text-white"
+              }`}
+              title="Go live"
+            >
+              LIVE
+            </button>
+          )}
+
           <div
-            className="relative z-50"
+            className="relative z-[9999]"
             onMouseEnter={() => {
               keepMenusOpen()
               setQualityOpen(true)
@@ -646,15 +671,19 @@ export default function CustomPlayerControls({
             <button
               ref={qualityButtonRef}
               type="button"
-              onClick={(event) => {
+              onPointerDown={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
                 setQualityOpen((value) => !value)
                 setVolumeOpen(false)
               }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
               className={`
-                h-8 sm:h-9 min-w-8 sm:min-w-9 px-1 sm:px-1.5 rounded-md
-                text-[0.8rem] sm:text-[0.95rem] leading-none font-semibold
+                h-8 sm:h-9 min-w-7 sm:min-w-8 px-1 rounded-md
+                text-[0.7rem] sm:text-[0.8rem] leading-none font-semibold
                 hover:bg-white/20 transition-colors
                 ${qualityLabel === "HD" || qualityLabel === "FHD" ? "text-red-500" : "text-white"}
               `}
@@ -667,16 +696,16 @@ export default function CustomPlayerControls({
               <div
                 ref={qualityMenuRef}
                 className="
-                  absolute bottom-full left-1/2 -translate-x-1/2 mb-2
-                  min-w-28 py-1 sm:min-w-24
+                  absolute bottom-full left-1/2 -translate-x-1/2 mb-1
+                  min-w-16 py-0.5 sm:min-w-18
                   bg-[rgba(56,54,54,0.85)]
                   backdrop-blur-md
-                  text-white text-[11px] text-center
+                  text-white text-[9px] text-center
                   shadow-[0_8px_24px_rgba(0,0,0,0.55)]
                   border border-white/10
                   rounded-md
                   overflow-hidden
-                  z-50
+                  z-[9999]
                 "
                 onMouseEnter={keepMenusOpen}
                 onMouseLeave={closeMenusWithDelay}
@@ -690,7 +719,7 @@ export default function CustomPlayerControls({
                     setAutoQuality()
                   }}
                   className={`
-                    px-3 py-2 sm:py-1.5 cursor-pointer hover:bg-white/10
+                    px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
                     ${autoMode ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]" : ""}
                   `}
                 >
@@ -706,7 +735,7 @@ export default function CustomPlayerControls({
                       setManualQuality(level.height)
                     }}
                     className={`
-                      px-3 py-2 sm:py-1.5 cursor-pointer hover:bg-white/10
+                      px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
                       ${level.height === selectedHeight
                         ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]"
                         : ""
@@ -735,26 +764,24 @@ export default function CustomPlayerControls({
           )}
 
           {onToggleExpanded && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onToggleExpanded}
-              disabled={isFullscreen || !player || player.isDisposed?.()}
-              className="text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none h-8 w-8 sm:h-9 sm:w-9 shrink-0"
-              title={
-                isFullscreen
-                  ? "Exit fullscreen first"
-                  : isExpanded
-                    ? "Exit browser expanded mode"
-                    : "Expand in browser"
-              }
-            >
-              {isExpanded && !isFullscreen ? (
-                <Shrink className="w-4 h-4 sm:w-5 sm:h-5" />
-              ) : (
-                <Expand className="w-4 h-4 sm:w-5 sm:h-5" />
-              )}
-            </Button>
+            <div className="hidden lg:block">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggleExpanded}
+                disabled={isFullscreen || !player || player.isDisposed?.()}
+                className="text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none h-8 w-8 sm:h-9 sm:w-9 shrink-0"
+                title={
+                  isFullscreen
+                    ? "Exit fullscreen first"
+                    : isExpanded
+                      ? "Exit browser expanded mode"
+                      : "Expand in browser"
+                }
+              >
+                <BrowserExpandIcon active={isExpanded && !isFullscreen} />
+              </Button>
+            </div>
           )}
 
           {onToggleFullscreen && (
