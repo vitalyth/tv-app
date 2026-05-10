@@ -5,6 +5,8 @@ import requests
 import re
 import html
 import json
+import threading
+import time
 
 session = create_session()
 
@@ -14,6 +16,62 @@ CORS_HEADERS = {
     "Access-Control-Allow-Headers": "Range, Origin, Accept, Content-Type, User-Agent, Referer",
     "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range, Content-Type",
 }
+
+# Pre-fetch cache for live playlists — eliminates stutter on every refresh
+_playlist_prefetch = {}  # {url: {text, last_fetch}}
+_playlist_locks = {}     # {url: threading.Lock()}
+_playlist_locks_lock = threading.Lock()
+
+def _get_playlist_lock(url):
+    with _playlist_locks_lock:
+        if url not in _playlist_locks:
+            _playlist_locks[url] = threading.Lock()
+        return _playlist_locks[url]
+
+def _background_fetch(url, headers):
+    """Fetch playlist in background and update cache silently."""
+    lock = _get_playlist_lock(url)
+    if not lock.acquire(blocking=False):
+        return  # another thread is already fetching
+    try:
+        r = session.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            _playlist_prefetch[url] = {
+                'text': r.text,
+                'last_fetch': time.time(),
+            }
+    except Exception as e:
+        print(f"Background playlist fetch failed: {e}")
+    finally:
+        lock.release()
+
+def _get_or_prefetch_playlist(url, headers):
+    """
+    Return cached playlist immediately, refresh in background.
+    First request is synchronous; subsequent ones return instantly from cache.
+    """
+    entry = _playlist_prefetch.get(url)
+    now = time.time()
+
+    if entry is None:
+        # First time — fetch synchronously
+        r = session.get(url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return None, r.status_code
+        text = r.text
+        _playlist_prefetch[url] = {'text': text, 'last_fetch': now}
+        return text, 200
+
+    # Return cached version immediately
+    # Trigger background refresh if cache is older than 1.5s
+    if now - entry['last_fetch'] > 1.5:
+        threading.Thread(
+            target=_background_fetch,
+            args=(url, dict(headers)),
+            daemon=True
+        ).start()
+
+    return entry['text'], 200
 
 
 def _request_public_base_proxy(request):
@@ -302,6 +360,33 @@ def handle_proxy(request, url, referer, cast=False):
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
+    is_head = request.method == "HEAD"
+
+    # Check if this looks like a live m3u8 playlist (not a segment)
+    is_likely_playlist = _url_path(url).endswith(".m3u8") or (
+        not _is_segment_url(url) and "playlist" in url.lower()
+    )
+
+    # For playlist requests: use pre-fetch cache to avoid stutter on refresh
+    if is_likely_playlist and not is_head:
+        text, status = _get_or_prefetch_playlist(url, headers)
+
+        if text is None:
+            return Response(status_code=status, headers=CORS_HEADERS)
+
+        is_m3u8 = "#EXTM3U" in text
+
+        if is_m3u8:
+            base_proxy = _request_public_base_proxy(request)
+            source_text = _prepare_hls_media_playlist(text, cast=cast)
+            content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
+            return Response(
+                content=content,
+                media_type="application/vnd.apple.mpegurl",
+                headers=_manifest_headers()
+            )
+
+    # Regular proxying for segments and non-playlist requests
     try:
         r = session.get(url, headers=headers, stream=True, timeout=10)
     except requests.exceptions.RequestException as e:
@@ -310,7 +395,6 @@ def handle_proxy(request, url, referer, cast=False):
 
     content_type = _content_type_for_url(url, r.headers.get("content-type", ""))
     clean_content_type = content_type.lower()
-    is_head = request.method == "HEAD"
 
     if is_head:
         r.close()
@@ -339,7 +423,6 @@ def handle_proxy(request, url, referer, cast=False):
     if is_mpd:
         base_proxy = _request_public_base_proxy(request)
         content = _rewrite_mpd_for_cast(text, url, referer, base_proxy).encode("utf-8") if cast else r.content
-
         return Response(
             content=content,
             media_type="application/dash+xml",
