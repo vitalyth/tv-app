@@ -16,6 +16,24 @@ CORS_HEADERS = {
 }
 
 
+def _is_public_host(host: str) -> bool:
+    """Returns True only for public domain names on standard ports."""
+    parts = host.split(":")
+    hostname = parts[0]
+    port = int(parts[1]) if len(parts) > 1 else None
+
+    # Any IP address (v4)
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", hostname):
+        return False
+    # Plain hostnames without dots or localhost
+    if "." not in hostname or hostname == "localhost":
+        return False
+    # Non-standard port — don't force https
+    if port and port not in (80, 443):
+        return False
+    return True
+
+
 def _request_public_base_proxy(request):
     root_path = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "")
 
@@ -36,7 +54,7 @@ def _request_public_base_proxy(request):
     if not proto:
         proto = request.url.scheme
 
-    if proto == "http" and host and not host.startswith(("localhost", "127.0.0.1", "0.0.0.0")):
+    if proto == "http" and host and _is_public_host(host):
         proto = "https"
 
     return f"{proto}://{host}{root_path}"
