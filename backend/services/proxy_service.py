@@ -24,10 +24,13 @@ def _request_public_base_proxy(request):
 
     root_path = root_path or ""
 
-    proto = (
-        request.headers.get("x-forwarded-proto")
-        or request.url.scheme
-    )
+    proto = request.headers.get("x-forwarded-proto")
+    if not proto:
+        try:
+            proto = json.loads(request.headers.get("cf-visitor", "{}") or "{}").get("scheme")
+        except (json.JSONDecodeError, AttributeError):
+            proto = None
+    proto = proto or request.url.scheme
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
 
     return f"{proto}://{host}{root_path}"
