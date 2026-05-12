@@ -5,6 +5,8 @@ import {
   Play,
   Pause,
   Volume2,
+  Volume1,
+  Volume,
   VolumeX,
   Maximize,
   Minimize,
@@ -14,6 +16,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { type Channel, type Program } from "@/lib/channels-data";
 import ProgramDisplay from "@/components/program-display";
+
+const PLAYER_VOLUME_STORAGE_KEY = "tv-player-volume-state";
 
 type TopControlsVisibility = {
   showChannelInfo?: boolean;
@@ -79,6 +83,7 @@ export default function CustomPlayerControls({
   const volumeMenuRef = useRef<HTMLDivElement>(null);
   const volumeButtonRef = useRef<HTMLButtonElement>(null);
   const closeMenusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didRestoreVolumeRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -120,6 +125,46 @@ export default function CustomPlayerControls({
 
   const keepMenusOpen = () => {
     clearCloseMenusTimer();
+  };
+
+  const saveVolumeState = (nextVolume: number, nextMuted: boolean) => {
+    if (isMobileDevice || typeof window === "undefined") return;
+
+    try {
+      localStorage.setItem(
+        PLAYER_VOLUME_STORAGE_KEY,
+        JSON.stringify({
+          volume: Math.min(1, Math.max(0, nextVolume)),
+          muted: nextMuted,
+        }),
+      );
+    } catch {
+      // Ignore localStorage write errors.
+    }
+  };
+
+  const restoreVolumeState = () => {
+    if (isMobileDevice || !player || player.isDisposed?.() || typeof window === "undefined") return;
+
+    try {
+      const saved = localStorage.getItem(PLAYER_VOLUME_STORAGE_KEY);
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved) as {
+        volume?: unknown;
+        muted?: unknown;
+      };
+
+      if (typeof parsed.volume === "number" && Number.isFinite(parsed.volume)) {
+        player.volume(Math.min(1, Math.max(0, parsed.volume)));
+      }
+
+      if (typeof parsed.muted === "boolean") {
+        player.muted(parsed.muted);
+      }
+    } catch {
+      // Ignore invalid localStorage values.
+    }
   };
 
   useEffect(() => {
@@ -324,6 +369,17 @@ export default function CustomPlayerControls({
   };
 
   useEffect(() => {
+    didRestoreVolumeRef.current = false;
+  }, [player, isMobileDevice]);
+
+  useEffect(() => {
+    if (!player || player.isDisposed?.() || isMobileDevice || didRestoreVolumeRef.current) return;
+
+    didRestoreVolumeRef.current = true;
+    restoreVolumeState();
+  }, [player, isMobileDevice]);
+
+  useEffect(() => {
     if (!player || player.isDisposed?.()) return;
 
     const updateQuality = () => {
@@ -342,9 +398,13 @@ export default function CustomPlayerControls({
     };
 
     const updateState = () => {
+      const nextMuted = player.muted();
+      const nextVolume = player.volume() ?? 1;
+
       setIsPlaying(!player.paused());
-      setMuted(player.muted());
-      setVolume(player.volume() ?? 1);
+      setMuted(nextMuted);
+      setVolume(nextVolume);
+      saveVolumeState(nextVolume, nextMuted);
       updateQuality();
       updateProgress();
     };
@@ -397,21 +457,47 @@ export default function CustomPlayerControls({
 
   const toggleMute = () => {
     if (!player || player.isDisposed?.()) return;
-    player.muted(!player.muted());
+
+    const nextMuted = !player.muted();
+    const nextVolume = player.volume() ?? volume;
+
+    player.muted(nextMuted);
+    saveVolumeState(nextVolume, nextMuted);
+  };
+
+  const VolumeIcon = () => {
+    if (muted || volume === 0) {
+      return <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />;
+    }
+
+    if (volume <= 0.25) {
+      return <Volume className="w-4 h-4 sm:w-5 sm:h-5" />;
+    }
+
+    if (volume <= 0.65) {
+      return <Volume1 className="w-4 h-4 sm:w-5 sm:h-5" />;
+    }
+
+    return <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />;
   };
 
   const changeVolume = (value: number) => {
     if (!player || player.isDisposed?.()) return;
 
-    player.volume(value);
+    const nextVolume = Math.min(1, Math.max(0, value));
+    const nextMuted = nextVolume === 0 ? true : false;
 
-    if (value > 0 && player.muted()) {
+    player.volume(nextVolume);
+
+    if (nextVolume > 0 && player.muted()) {
       player.muted(false);
     }
 
-    if (value === 0) {
+    if (nextVolume === 0) {
       player.muted(true);
     }
+
+    saveVolumeState(nextVolume, nextMuted);
   };
 
   const goLive = () => {
@@ -458,9 +544,8 @@ export default function CustomPlayerControls({
 
   const BrowserExpandIcon = ({ active }: { active: boolean }) => (
     <span
-      className={`block h-2.5 w-4 rounded-[2px] border border-current ${
-        active ? "bg-current" : "bg-transparent"
-      }`}
+      className={`block h-2.5 w-4 rounded-[2px] border border-current ${active ? "bg-current" : "bg-transparent"
+        }`}
     />
   );
 
@@ -497,89 +582,88 @@ export default function CustomPlayerControls({
       {(topOptions.showChannelInfo ||
         topOptions.showCast ||
         topOptions.showClose) && (
-        <div
-          onClick={(event) => event.stopPropagation()}
-          onMouseEnter={onInteraction}
-          onMouseMove={onInteraction}
-          className={`
+          <div
+            onClick={(event) => event.stopPropagation()}
+            onMouseEnter={onInteraction}
+            onMouseMove={onInteraction}
+            className={`
             absolute top-0 left-0 right-0 z-[9999]
             bg-linear-to-b from-black/85 via-black/45 to-transparent
             px-3 sm:px-4 pt-3 sm:pt-4 pb-8 sm:pb-10
             transition-opacity duration-300
             ${show ? "opacity-100" : "opacity-0 pointer-events-none"}
           `}
-        >
-          <div className="flex items-center justify-between gap-2 text-white">
+          >
+            <div className="flex items-center justify-between gap-2 text-white">
 
-            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-              {topOptions.showClose && onClose && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onClose}
-                  className="h-9 w-9 text-white hover:bg-white/20"
-                  title="Close"
+              <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+                {topOptions.showClose && onClose && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onClose}
+                    className="h-9 w-9 text-white hover:bg-white/20"
+                    title="Close"
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                )}
+
+                {topOptions.showCast && onCast && (isCastAvailable || isCasting) && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onCast}
+                    disabled={isCastConnecting || !canCast}
+                    className={`h-9 w-9 text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none ${isCasting ? "text-primary" : ""
+                      }`}
+                    title={
+                      !canCast
+                        ? "Cast is not ready"
+                        : isCasting
+                          ? "Stop casting"
+                          : "Cast"
+                    }
+                  >
+                    <Cast className="h-5 w-5" />
+                  </Button>
+                )}
+              </div>
+
+              {topOptions.showChannelInfo && channel ? (
+                <div
+                  className="flex min-w-0 items-center gap-2 sm:gap-3"
+                  dir="rtl"
                 >
-                  <X className="h-5 w-5" />
-                </Button>
-              )}
-              
-              {topOptions.showCast && onCast && (isCastAvailable || isCasting) && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onCast}
-                  disabled={isCastConnecting || !canCast}
-                  className={`h-9 w-9 text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none ${
-                    isCasting ? "text-primary" : ""
-                  }`}
-                  title={
-                    !canCast
-                      ? "Cast is not ready"
-                      : isCasting
-                        ? "Stop casting"
-                        : "Cast"
-                  }
-                >
-                  <Cast className="h-5 w-5" />
-                </Button>
-              )}
-            </div>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/20 sm:h-10 sm:w-10">
+                    <img src={`/ch/${channel.logo}`} alt={channel.name} />
+                  </div>
 
-            {topOptions.showChannelInfo && channel ? (
-              <div
-                className="flex min-w-0 items-center gap-2 sm:gap-3"
-                dir="rtl"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/20 sm:h-10 sm:w-10">
-                  <img src={`/ch/${channel.logo}`} alt={channel.name} />
-                </div>
+                  <div className="min-w-0 text-right">
+                    <h3 className="truncate text-sm font-semibold text-white sm:text-base">
+                      {channel.name}
+                    </h3>
 
-                <div className="min-w-0 text-right">
-                  <h3 className="truncate text-sm font-semibold text-white sm:text-base">
-                    {channel.name}
-                  </h3>
+                    <div className="flex min-w-0 items-center gap-1.5 text-xs text-white/90">
+                      <span className="relative flex h-2 w-2 shrink-0">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                      </span>
 
-                  <div className="flex min-w-0 items-center gap-1.5 text-xs text-white/90">
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-                    </span>
-
-                    <span className="truncate">
-                      <ProgramDisplay
-                        program={currentProgram || channel.programs?.[0]}
-                      />
-                    </span>
+                      <span className="truncate">
+                        <ProgramDisplay
+                          program={currentProgram || channel.programs?.[0]}
+                        />
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div />
-            )}
+              ) : (
+                <div />
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       <div
         onClick={(event) => event.stopPropagation()}
@@ -590,11 +674,10 @@ export default function CustomPlayerControls({
         bg-linear-to-t from-black/95 via-black/65 to-transparent
         px-2.5 sm:px-4 pt-7 sm:pt-10 pb-2 sm:pb-3
         transition-all duration-300
-        ${
-          show
+        ${show
             ? "opacity-100 translate-y-0"
             : "opacity-0 translate-y-4 pointer-events-none"
-        }
+          }
       `}
       >
         {bottomOptions.showSeek && seekEnd > seekStart && (
@@ -636,29 +719,25 @@ export default function CustomPlayerControls({
                     )}
 
                     <div
-                      className={`pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 rounded-full bg-white/20 transition-all ${
-                        seekActive ? "h-[4px]" : "h-[2px]"
-                      }`}
+                      className={`pointer-events-none absolute left-0 right-0 top-1/2 -translate-y-1/2 rounded-full bg-white/20 transition-all ${seekActive ? "h-[4px]" : "h-[2px]"
+                        }`}
                     />
 
                     <div
-                      className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-white/45 transition-all ${
-                        seekActive ? "h-[4px]" : "h-[2px]"
-                      }`}
+                      className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-white/45 transition-all ${seekActive ? "h-[4px]" : "h-[2px]"
+                        }`}
                       style={{ width: `${loadedProgress}%` }}
                     />
 
                     <div
-                      className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-red-500 transition-all ${
-                        seekActive ? "h-[4px]" : "h-[2px]"
-                      }`}
+                      className={`pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-red-500 transition-all ${seekActive ? "h-[4px]" : "h-[2px]"
+                        }`}
                       style={{ width: `${progress}%` }}
                     />
 
                     <div
-                      className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-white bg-red-500 shadow transition-all ${
-                        seekActive ? "h-3 w-3 border-2" : "h-1.5 w-1.5 border"
-                      }`}
+                      className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-white bg-red-500 shadow transition-all ${seekActive ? "h-3 w-3 border-2" : "h-1.5 w-1.5 border"
+                        }`}
                       style={{ left: `${progress}%` }}
                     />
 
@@ -750,23 +829,18 @@ export default function CustomPlayerControls({
                   variant="ghost"
                   size="icon"
                   onPointerDown={(event) => {
-                    event.preventDefault();
                     event.stopPropagation();
-                    setVolumeOpen((value) => !value);
-                    setQualityOpen(false);
                   }}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
+                    toggleMute();
+                    setQualityOpen(false);
                   }}
                   className="text-white hover:bg-white/20 h-8 w-8 sm:h-9 sm:w-9 shrink-0"
                   title="Volume"
                 >
-                  {muted || volume === 0 ? (
-                    <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />
-                  ) : (
-                    <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                  )}
+                  {VolumeIcon()}
                 </Button>
 
                 {volumeOpen && (
@@ -819,11 +893,10 @@ export default function CustomPlayerControls({
                   event.stopPropagation();
                   goLive();
                 }}
-                className={`h-8 px-1 text-[10px] font-semibold leading-none transition-colors sm:h-9 sm:px-1.5 ${
-                  isAtLiveEdge
+                className={`h-8 px-1 text-[10px] font-semibold leading-none transition-colors sm:h-9 sm:px-1.5 ${isAtLiveEdge
                     ? "text-red-500 hover:text-red-400"
                     : "text-white/85 hover:text-white"
-                }`}
+                  }`}
                 title="Go live"
               >
                 LIVE
@@ -908,11 +981,10 @@ export default function CustomPlayerControls({
                         }}
                         className={`
                       px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
-                      ${
-                        level.height === selectedHeight
-                          ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]"
-                          : ""
-                      }
+                      ${level.height === selectedHeight
+                            ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]"
+                            : ""
+                          }
                     `}
                       >
                         {level.height}p
@@ -929,9 +1001,8 @@ export default function CustomPlayerControls({
                 size="icon"
                 onClick={onCast}
                 disabled={isCastConnecting || !canCast}
-                className={`text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none h-8 w-8 sm:h-9 sm:w-9 shrink-0 ${
-                  isCasting ? "text-primary" : ""
-                }`}
+                className={`text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none h-8 w-8 sm:h-9 sm:w-9 shrink-0 ${isCasting ? "text-primary" : ""
+                  }`}
                 title={
                   !canCast
                     ? "Cast is not ready"
