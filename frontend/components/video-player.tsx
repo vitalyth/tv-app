@@ -573,6 +573,7 @@ export function VideoPlayer({
             isFullscreen={isFullscreen}
             isCasting={isCasting}
             isCastAvailable={isCastAvailable}
+            canCast={!!streamUrl}
             isCastConnecting={isCastConnecting}
             isMobileDevice={isMobileDevice}
             onCast={isCasting ? stopCasting : requestCastSession}

@@ -42,6 +42,7 @@ interface CustomPlayerControlsProps {
   isFullscreen: boolean;
   isCasting?: boolean;
   isCastAvailable?: boolean;
+  canCast?: boolean;
   isCastConnecting?: boolean;
   isMobileDevice?: boolean;
   onCast?: () => void;
@@ -62,6 +63,7 @@ export default function CustomPlayerControls({
   isFullscreen,
   isCasting,
   isCastAvailable,
+  canCast = true,
   isCastConnecting,
   isMobileDevice = false,
   onCast,
@@ -522,18 +524,18 @@ export default function CustomPlayerControls({
                 </Button>
               )}
               
-              {topOptions.showCast && onCast && (
+              {topOptions.showCast && onCast && (isCastAvailable || isCasting) && (
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={onCast}
-                  disabled={isCastConnecting || !isCastAvailable}
+                  disabled={isCastConnecting || !canCast}
                   className={`h-9 w-9 text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none ${
                     isCasting ? "text-primary" : ""
                   }`}
                   title={
-                    !isCastAvailable
-                      ? "Cast is not available"
+                    !canCast
+                      ? "Cast is not ready"
                       : isCasting
                         ? "Stop casting"
                         : "Cast"
@@ -921,18 +923,18 @@ export default function CustomPlayerControls({
               </div>
             )}
 
-            {bottomOptions.showCast && onCast && (
+            {bottomOptions.showCast && onCast && (isCastAvailable || isCasting) && (
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={onCast}
-                disabled={isCastConnecting || !isCastAvailable}
+                disabled={isCastConnecting || !canCast}
                 className={`text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none h-8 w-8 sm:h-9 sm:w-9 shrink-0 ${
                   isCasting ? "text-primary" : ""
                 }`}
                 title={
-                  !isCastAvailable
-                    ? "Cast is not available"
+                  !canCast
+                    ? "Cast is not ready"
                     : isCasting
                       ? "Stop casting"
                       : "Cast"
