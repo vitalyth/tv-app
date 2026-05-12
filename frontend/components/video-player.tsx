@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useEffect, useState } from "react";
-import { Cast, X, Radio, AlertCircle } from "lucide-react";
+import { Cast, Radio, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import videojs from "video.js";
 import "videojs-contrib-dash";
@@ -498,71 +498,6 @@ export function VideoPlayer({
       onMouseLeave={isMobileDevice ? undefined : hideControls}
       onTouchStart={showControls}
     >
-      {/* Top overlay — channel info + close */}
-      <div
-        onClick={(event) => event.stopPropagation()}
-        onMouseEnter={keepControlsVisible}
-        className={`
-          absolute top-0 left-0 right-0 z-50 p-3 sm:p-4
-          bg-linear-to-b from-black/80 to-transparent
-          flex items-center justify-between gap-2
-          transition-opacity duration-300
-          ${showOverlay ? "opacity-100" : "opacity-0 pointer-events-none"}
-        `}
-      >
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-primary/20 flex items-center justify-center overflow-hidden shrink-0">
-            <img src={`/ch/${channel.logo}`} alt={channel.name} />
-          </div>
-
-          <div className="min-w-0">
-            <h3 className="font-semibold text-white truncate text-sm sm:text-base">
-              {channel.name}
-            </h3>
-
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
-              </span>
-
-              <span className="text-xs text-white/90 truncate">
-                <ProgramDisplay
-                  program={currentProgram || channel.programs?.[0]}
-                />
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {isCastAvailable && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={isCasting ? stopCasting : requestCastSession}
-              disabled={isCastConnecting || !streamUrl}
-              className={`text-white hover:bg-white/20 h-9 w-9 ${
-                isCasting ? "text-primary" : ""
-              }`}
-              title={isCasting ? "Stop casting" : "Cast"}
-            >
-              <Cast className="w-5 h-5" />
-            </Button>
-          )}
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleClose}
-            className="text-white hover:bg-white/20 h-9 w-9"
-            title="Close"
-          >
-            <X className="w-5 h-5" />
-          </Button>
-        </div>
-      </div>
-
       <div
         className="relative w-full h-full bg-black"
         onClick={toggleControls}
@@ -631,14 +566,36 @@ export function VideoPlayer({
         ) : (
           <CustomPlayerControls
             player={playerInstance}
+            channel={channel}
+            currentProgram={currentProgram}
             show={showOverlay}
             isExpanded={isExpanded && !isFullscreen}
             isFullscreen={isFullscreen}
             isCasting={isCasting}
+            isCastAvailable={isCastAvailable}
+            isCastConnecting={isCastConnecting}
             isMobileDevice={isMobileDevice}
+            onCast={isCasting ? stopCasting : requestCastSession}
+            onClose={handleClose}
             onToggleExpanded={toggleExpanded}
             onToggleFullscreen={toggleFullscreen}
             onInteraction={keepControlsVisible}
+            topControls={{
+              showChannelInfo: true,
+              showCast: true,
+              showClose: true,
+            }}
+            bottomControls={{
+              showPlay: true,
+              showSeek: true,
+              showTime: true,
+              showVolume: true,
+              showLive: true,
+              showQuality: true,
+              showCast: false,
+              showExpand: true,
+              showFullscreen: true,
+            }}
           />
         )}
       </div>
