@@ -1,30 +1,31 @@
-"use client"
+"use client";
 
-import { useCallback, useRef, useEffect, useState } from "react"
-import { Cast, X, Radio, AlertCircle } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import videojs from "video.js"
-import "videojs-contrib-dash"
-import { type Channel } from "@/lib/channels-data"
-import { channelService } from "@/lib/services/channel-service"
-import { api } from "@/lib/api"
-import ProgramDisplay from "@/components/program-display"
-import { useCurrentProgram } from "@/hooks/useCurrentProgram"
-import { useGoogleCast } from "@/hooks/useGoogleCast"
-import CustomPlayerControls from "@/components/custom-player-controls"
-import "@/styles/video-player.css"
+import { useCallback, useRef, useEffect, useState } from "react";
+import { Cast, X, Radio, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import videojs from "video.js";
+import "videojs-contrib-dash";
+import { type Channel } from "@/lib/channels-data";
+import { channelService } from "@/lib/services/channel-service";
+import { api } from "@/lib/api";
+import ProgramDisplay from "@/components/program-display";
+import { useCurrentProgram } from "@/hooks/useCurrentProgram";
+import { useGoogleCast } from "@/hooks/useGoogleCast";
+import { useMobileDevice } from "@/hooks/use-mobile-device";
+import CustomPlayerControls from "@/components/custom-player-controls";
+import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
-  require("videojs-contrib-quality-levels")
+  require("videojs-contrib-quality-levels");
 }
 
-const OVERLAY_HIDE_DELAY = 3000 // ms
+const OVERLAY_HIDE_DELAY = 3000; // ms
 
 interface VideoPlayerProps {
-  channel: Channel | null
-  onClose: () => void
-  onResize?: () => void
-  className?: string
+  channel: Channel | null;
+  onClose: () => void;
+  onResize?: () => void;
+  className?: string;
 }
 
 export function VideoPlayer({
@@ -33,161 +34,162 @@ export function VideoPlayer({
   onResize,
   className,
 }: VideoPlayerProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const videoRef = useRef<HTMLDivElement>(null)
-  const playerRef = useRef<any>(null)
-  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const restoreExpandedAfterFullscreenRef = useRef(false)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<any>(null);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restoreExpandedAfterFullscreenRef = useRef(false);
 
-  const suppressCastVolumeSyncRef = useRef(false)
-  const isCastingRef = useRef(false)
+  const suppressCastVolumeSyncRef = useRef(false);
+  const isCastingRef = useRef(false);
   const setCastVolumeRef = useRef<
     (volume: number, muted: boolean) => Promise<void> | void
-  >(() => undefined)
+  >(() => undefined);
 
-  const [playerInstance, setPlayerInstance] = useState<any>(null)
-  const [hasError, setHasError] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
-  const [streamUrl, setStreamUrl] = useState<string | null>(null)
-  const [showOverlay, setShowOverlay] = useState(true)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
+  const [playerInstance, setPlayerInstance] = useState<any>(null);
+  const [hasError, setHasError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-  const currentProgram = useCurrentProgram(channel?.programs)
+  const { isMobileDevice, isPhoneLike, isTouchDevice } = useMobileDevice();
+  const currentProgram = useCurrentProgram(channel?.programs);
 
   // Clear any pending hide timer
   const clearOverlayTimer = useCallback(() => {
     if (overlayTimerRef.current) {
-      clearTimeout(overlayTimerRef.current)
-      overlayTimerRef.current = null
+      clearTimeout(overlayTimerRef.current);
+      overlayTimerRef.current = null;
     }
-  }, [])
+  }, []);
 
   // Show overlay and start auto-hide timer
   const showControls = useCallback(() => {
-    setShowOverlay(true)
-    clearOverlayTimer()
+    setShowOverlay(true);
+    clearOverlayTimer();
 
     overlayTimerRef.current = setTimeout(() => {
-      setShowOverlay(false)
-    }, OVERLAY_HIDE_DELAY)
-  }, [clearOverlayTimer])
+      setShowOverlay(false);
+    }, OVERLAY_HIDE_DELAY);
+  }, [clearOverlayTimer]);
 
   // Hide overlay immediately and cancel timer
   const hideControls = useCallback(() => {
-    clearOverlayTimer()
-    setShowOverlay(false)
-  }, [clearOverlayTimer])
+    clearOverlayTimer();
+    setShowOverlay(false);
+  }, [clearOverlayTimer]);
 
   // Keep overlay visible while user is interacting (hover/touch)
   const keepControlsVisible = useCallback(() => {
-    clearOverlayTimer()
-    setShowOverlay(true)
-  }, [clearOverlayTimer])
+    clearOverlayTimer();
+    setShowOverlay(true);
+  }, [clearOverlayTimer]);
 
   // Toggle overlay and restart timer if showing
   const toggleControls = useCallback(() => {
     setShowOverlay((prev) => {
       if (prev) {
-        clearOverlayTimer()
-        return false
+        clearOverlayTimer();
+        return false;
       }
       // Show and start timer
-      clearOverlayTimer()
+      clearOverlayTimer();
       overlayTimerRef.current = setTimeout(() => {
-        setShowOverlay(false)
-      }, OVERLAY_HIDE_DELAY)
-      return true
-    })
-  }, [clearOverlayTimer])
+        setShowOverlay(false);
+      }, OVERLAY_HIDE_DELAY);
+      return true;
+    });
+  }, [clearOverlayTimer]);
 
   // Cleanup timer on unmount
   useEffect(() => {
-    return () => clearOverlayTimer()
-  }, [clearOverlayTimer])
+    return () => clearOverlayTimer();
+  }, [clearOverlayTimer]);
 
   const resetViewMode = useCallback(() => {
-    setIsExpanded(false)
-    setIsFullscreen(document.fullscreenElement === containerRef.current)
-    showControls()
-  }, [showControls])
+    setIsExpanded(false);
+    setIsFullscreen(document.fullscreenElement === containerRef.current);
+    showControls();
+  }, [showControls]);
 
   const toggleExpanded = useCallback(() => {
-    if (document.fullscreenElement) return
+    if (document.fullscreenElement) return;
 
-    setIsExpanded((value) => !value)
-    showControls()
+    setIsExpanded((value) => !value);
+    showControls();
 
     if (onResize) {
-      onResize()
+      onResize();
     }
-  }, [onResize, showControls])
+  }, [onResize, showControls]);
 
   const toggleFullscreen = useCallback(async () => {
-    const container = containerRef.current
-    if (!container) return
+    const container = containerRef.current;
+    if (!container) return;
 
     try {
       if (document.fullscreenElement) {
-        await document.exitFullscreen()
+        await document.exitFullscreen();
       } else {
         // Remember whether we were browser-expanded before entering real fullscreen.
         // This fixes the Expand icon/state after exiting fullscreen.
-        restoreExpandedAfterFullscreenRef.current = isExpanded
+        restoreExpandedAfterFullscreenRef.current = isExpanded;
 
-        setIsExpanded(false)
-        await container.requestFullscreen()
+        setIsExpanded(false);
+        await container.requestFullscreen();
       }
 
-      showControls()
+      showControls();
     } catch (error) {
-      console.warn("Fullscreen failed:", error)
+      console.warn("Fullscreen failed:", error);
     }
-  }, [isExpanded, showControls])
+  }, [isExpanded, showControls]);
 
   const pauseLocalPlayerForCasting = useCallback((player: any) => {
-    if (!player || player.isDisposed?.()) return
+    if (!player || player.isDisposed?.()) return;
 
-    suppressCastVolumeSyncRef.current = true
-    player.pause()
-    player.muted(true)
-    setIsLoading(false)
+    suppressCastVolumeSyncRef.current = true;
+    player.pause();
+    player.muted(true);
+    setIsLoading(false);
 
     window.setTimeout(() => {
-      suppressCastVolumeSyncRef.current = false
-    }, 0)
-  }, [])
+      suppressCastVolumeSyncRef.current = false;
+    }, 0);
+  }, []);
 
   const handleCastStarted = useCallback(() => {
-    pauseLocalPlayerForCasting(playerRef.current)
-  }, [pauseLocalPlayerForCasting])
+    pauseLocalPlayerForCasting(playerRef.current);
+  }, [pauseLocalPlayerForCasting]);
 
   const handleCastEnded = useCallback(() => {
-    const player = playerRef.current
-    if (!player || player.isDisposed?.()) return
+    const player = playerRef.current;
+    if (!player || player.isDisposed?.()) return;
 
-    suppressCastVolumeSyncRef.current = true
-    player.muted(false)
-    player.liveTracker?.seekToLiveEdge?.()
+    suppressCastVolumeSyncRef.current = true;
+    player.muted(false);
+    player.liveTracker?.seekToLiveEdge?.();
 
     try {
-      const seekable = player.seekable?.()
+      const seekable = player.seekable?.();
       if (seekable && seekable.length > 0) {
-        const liveEdge = seekable.end(seekable.length - 1)
+        const liveEdge = seekable.end(seekable.length - 1);
         if (Number.isFinite(liveEdge)) {
-          player.currentTime(Math.max(0, liveEdge - 0.5))
+          player.currentTime(Math.max(0, liveEdge - 0.5));
         }
       }
     } catch {
       // ignore seek fallback errors
     }
 
-    player.play()?.catch?.(() => undefined)
+    player.play()?.catch?.(() => undefined);
 
     window.setTimeout(() => {
-      suppressCastVolumeSyncRef.current = false
-    }, 0)
-  }, [])
+      suppressCastVolumeSyncRef.current = false;
+    }, 0);
+  }, []);
 
   const {
     isAvailable: isCastAvailable,
@@ -202,110 +204,117 @@ export function VideoPlayer({
     programName: currentProgram?.name,
     onCastStarted: handleCastStarted,
     onCastEnded: handleCastEnded,
-  })
+  });
 
   useEffect(() => {
-    isCastingRef.current = isCasting
-    setCastVolumeRef.current = setCastVolume
-  }, [isCasting, setCastVolume])
+    isCastingRef.current = isCasting;
+    setCastVolumeRef.current = setCastVolume;
+  }, [isCasting, setCastVolume]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const fullscreenActive = document.fullscreenElement === containerRef.current
+      const fullscreenActive =
+        document.fullscreenElement === containerRef.current;
 
-      setIsFullscreen(fullscreenActive)
+      setIsFullscreen(fullscreenActive);
 
       if (fullscreenActive) {
         // While real fullscreen is active, browser-expanded mode should be visually disabled.
-        setIsExpanded(false)
+        setIsExpanded(false);
       } else {
         // If the user entered fullscreen while already in browser-expanded mode,
         // restore browser-expanded mode when leaving fullscreen.
-        setIsExpanded(restoreExpandedAfterFullscreenRef.current)
-        restoreExpandedAfterFullscreenRef.current = false
+        setIsExpanded(restoreExpandedAfterFullscreenRef.current);
+        restoreExpandedAfterFullscreenRef.current = false;
       }
 
-      showControls()
-    }
+      showControls();
+    };
 
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange as EventListener)
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener(
+      "webkitfullscreenchange",
+      handleFullscreenChange as EventListener,
+    );
 
     return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange)
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange as EventListener)
-    }
-  }, [showControls])
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        handleFullscreenChange as EventListener,
+      );
+    };
+  }, [showControls]);
 
   useEffect(() => {
-    if (!channel) return
+    if (!channel) return;
 
-    let isMounted = true
+    let isMounted = true;
 
-    setIsLoading(true)
-    setHasError(false)
-    setStreamUrl(null)
-    setPlayerInstance(null)
-    restoreExpandedAfterFullscreenRef.current = false
-    setIsExpanded(false)
-    showControls()
+    setIsLoading(true);
+    setHasError(false);
+    setStreamUrl(null);
+    setPlayerInstance(null);
+    restoreExpandedAfterFullscreenRef.current = false;
+    setIsExpanded(false);
+    showControls();
 
     channelService
       .getLiveChannel(channel)
       .then((data: { stream: string }) => {
-        if (!isMounted) return
-        setStreamUrl(data.stream)
+        if (!isMounted) return;
+        setStreamUrl(data.stream);
       })
       .catch((err) => {
-        if (!isMounted) return
-        console.error("Failed to load stream:", err)
-        setHasError(true)
+        if (!isMounted) return;
+        console.error("Failed to load stream:", err);
+        setHasError(true);
       })
       .finally(() => {
-        if (isMounted) setIsLoading(false)
-      })
+        if (isMounted) setIsLoading(false);
+      });
 
     return () => {
-      isMounted = false
-    }
-  }, [channel])
+      isMounted = false;
+    };
+  }, [channel]);
 
   useEffect(() => {
-    if (!streamUrl) return
-    if (!channel || !videoRef.current) return
+    if (!streamUrl) return;
+    if (!channel || !videoRef.current) return;
 
-    setHasError(false)
-    setIsLoading(true)
-    setIsExpanded(false)
-    showControls()
+    setHasError(false);
+    setIsLoading(true);
+    setIsExpanded(false);
+    showControls();
 
     if (playerRef.current) {
-      playerRef.current.dispose()
-      playerRef.current = null
-      setPlayerInstance(null)
+      playerRef.current.dispose();
+      playerRef.current = null;
+      setPlayerInstance(null);
 
       if (videoRef.current) {
-        videoRef.current.innerHTML = ""
+        videoRef.current.innerHTML = "";
       }
     }
 
-    const videoElement = document.createElement("video-js")
-    videoElement.classList.add("vjs-big-play-centered")
-    videoRef.current.appendChild(videoElement)
+    const videoElement = document.createElement("video-js");
+    videoElement.classList.add("vjs-big-play-centered");
+    videoRef.current.appendChild(videoElement);
 
-    const referer = channel?.linkDetails?.referer || ""
-    const manifestType = channel?.linkDetails?.manifest_type
+    const referer = channel?.linkDetails?.referer || "";
+    const manifestType = channel?.linkDetails?.manifest_type;
 
     const isDash =
       manifestType === "mpd" ||
       streamUrl.includes("/livedash/") ||
-      streamUrl.endsWith(".mpd")
+      streamUrl.endsWith(".mpd");
 
     const isSafari =
       typeof navigator !== "undefined" &&
-      /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+      /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
-    const keepLocalPaused = isCastingRef.current
+    const keepLocalPaused = isCastingRef.current;
 
     const player = videojs(videoElement, {
       autoplay: !keepLocalPaused,
@@ -326,103 +335,142 @@ export function VideoPlayer({
         {
           src: api(
             `/proxy?url=${encodeURIComponent(
-              streamUrl
-            )}&referer=${encodeURIComponent(referer)}`
+              streamUrl,
+            )}&referer=${encodeURIComponent(referer)}`,
           ),
           type: isDash ? "application/dash+xml" : "application/x-mpegURL",
         },
       ],
-    })
+    });
 
     player.ready(() => {
-      resetViewMode()
+      resetViewMode();
 
       if (isCastingRef.current) {
-        pauseLocalPlayerForCasting(player)
-        return
+        pauseLocalPlayerForCasting(player);
+        return;
       }
 
-      const playPromise = player.play()
+      const playPromise = player.play();
 
       if (playPromise !== undefined) {
         playPromise.catch(() => {
-          console.log("Autoplay blocked")
-        })
+          console.log("Autoplay blocked");
+        });
       }
-    })
+    });
 
     player.on("loadstart", () => {
-      setIsExpanded(false)
-      showControls()
-    })
+      setIsExpanded(false);
+      showControls();
+    });
 
     player.on("loadedmetadata", () => {
-      setIsExpanded(false)
-      showControls()
-    })
+      setIsExpanded(false);
+      showControls();
+    });
 
     player.on("playing", () => {
       if (isCastingRef.current) {
-        pauseLocalPlayerForCasting(player)
-        return
+        pauseLocalPlayerForCasting(player);
+        return;
       }
 
-      setIsLoading(false)
-      setHasError(false)
-      showControls()
-    })
+      setIsLoading(false);
+      setHasError(false);
+      showControls();
+    });
 
     player.on("error", () => {
-      setHasError(true)
-      setIsLoading(false)
-      setIsExpanded(false)
-    })
+      setHasError(true);
+      setIsLoading(false);
+      setIsExpanded(false);
+    });
 
     player.on("waiting", () => {
-      setIsLoading(true)
-    })
+      setIsLoading(true);
+    });
 
     player.on("volumechange", () => {
-      if (!isCastingRef.current || suppressCastVolumeSyncRef.current) return
+      if (!isCastingRef.current || suppressCastVolumeSyncRef.current) return;
 
-      setCastVolumeRef.current(player.volume() ?? 1, player.muted() ?? false)
-    })
+      setCastVolumeRef.current(player.volume() ?? 1, player.muted() ?? false);
+    });
 
-    playerRef.current = player
-    setPlayerInstance(player)
+    playerRef.current = player;
+    setPlayerInstance(player);
 
     return () => {
       if (playerRef.current && !playerRef.current.isDisposed()) {
-        playerRef.current.dispose()
-        playerRef.current = null
-        setPlayerInstance(null)
+        playerRef.current.dispose();
+        playerRef.current = null;
+        setPlayerInstance(null);
       }
-    }
-  }, [streamUrl, channel, pauseLocalPlayerForCasting, resetViewMode, showControls])
+    };
+  }, [
+    streamUrl,
+    channel,
+    pauseLocalPlayerForCasting,
+    resetViewMode,
+    showControls,
+  ]);
 
   useEffect(() => {
-    const player = playerRef.current
-    if (!player || player.isDisposed?.() || !isCasting) return
+    const player = playerRef.current;
+    if (!player || player.isDisposed?.() || !isCasting) return;
 
-    pauseLocalPlayerForCasting(player)
-  }, [isCasting, pauseLocalPlayerForCasting])
+    pauseLocalPlayerForCasting(player);
+  }, [isCasting, pauseLocalPlayerForCasting]);
+
+  useEffect(() => {
+    if (!isPhoneLike || !containerRef.current) return;
+
+    const mediaQuery = window.matchMedia("(orientation: landscape)");
+
+    const syncMobileOrientationFullscreen = () => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const shouldUseFullscreen = mediaQuery.matches;
+      const isThisPlayerFullscreen = document.fullscreenElement === container;
+
+      if (shouldUseFullscreen && !document.fullscreenElement) {
+        container.requestFullscreen?.().catch(() => undefined);
+        return;
+      }
+
+      if (!shouldUseFullscreen && isThisPlayerFullscreen) {
+        document.exitFullscreen?.().catch(() => undefined);
+      }
+    };
+
+    syncMobileOrientationFullscreen();
+    mediaQuery.addEventListener?.("change", syncMobileOrientationFullscreen);
+
+    return () => {
+      mediaQuery.removeEventListener?.(
+        "change",
+        syncMobileOrientationFullscreen,
+      );
+    };
+  }, [isPhoneLike]);
 
   const handleClose = () => {
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => undefined)
+      document.exitFullscreen().catch(() => undefined);
     }
 
-    restoreExpandedAfterFullscreenRef.current = false
-    setIsExpanded(false)
-    clearOverlayTimer()
+    restoreExpandedAfterFullscreenRef.current = false;
+    setIsExpanded(false);
+    clearOverlayTimer();
 
     if (!isCastingRef.current) {
-      onClose()
-      return
+      onClose();
+      return;
     }
 
-    stopCasting().finally(onClose)
-  }
+    stopCasting().finally(onClose);
+  };
 
   if (!channel) {
     return (
@@ -432,20 +480,22 @@ export function VideoPlayer({
           <p className="text-xl text-muted-foreground">בחר ערוץ לצפייה</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div
       ref={containerRef}
       data-player-root
+      data-mobile-device={isMobileDevice ? "true" : "false"}
+      data-touch-device={isTouchDevice ? "true" : "false"}
       className={`
         relative overflow-hidden bg-black
         ${isExpanded && !isFullscreen ? "fixed inset-0 z-[9999] rounded-none" : "rounded-xl"}
         ${className || ""}
       `}
-      onMouseMove={showControls}
-      onMouseLeave={hideControls}
+      onMouseMove={isMobileDevice ? undefined : showControls}
+      onMouseLeave={isMobileDevice ? undefined : hideControls}
       onTouchStart={showControls}
     >
       {/* Top overlay — channel info + close */}
@@ -513,7 +563,11 @@ export function VideoPlayer({
         </div>
       </div>
 
-      <div className="relative w-full h-full bg-black" onClick={toggleControls} dir="ltr">
+      <div
+        className="relative w-full h-full bg-black"
+        onClick={toggleControls}
+        dir="ltr"
+      >
         <div
           data-vjs-player
           className={`absolute inset-0 ${isCasting ? "opacity-0 pointer-events-none" : ""}`}
@@ -553,7 +607,9 @@ export function VideoPlayer({
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
               </span>
               <span className="truncate max-w-[180px]">
-                <ProgramDisplay program={currentProgram || channel.programs?.[0]} />
+                <ProgramDisplay
+                  program={currentProgram || channel.programs?.[0]}
+                />
               </span>
             </div>
 
@@ -562,9 +618,9 @@ export function VideoPlayer({
               variant="outline"
               size="sm"
               onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                stopCasting()
+                event.preventDefault();
+                event.stopPropagation();
+                stopCasting();
               }}
               disabled={isCastConnecting}
               className="mt-1 rounded-full border-white/20 bg-white/10 text-white hover:bg-white/20 disabled:opacity-50"
@@ -579,6 +635,7 @@ export function VideoPlayer({
             isExpanded={isExpanded && !isFullscreen}
             isFullscreen={isFullscreen}
             isCasting={isCasting}
+            isMobileDevice={isMobileDevice}
             onToggleExpanded={toggleExpanded}
             onToggleFullscreen={toggleFullscreen}
             onInteraction={keepControlsVisible}
@@ -653,5 +710,5 @@ export function VideoPlayer({
         }
       `}</style>
     </div>
-  )
+  );
 }

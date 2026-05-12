@@ -20,6 +20,7 @@ interface CustomPlayerControlsProps {
   isCasting?: boolean
   isCastAvailable?: boolean
   isCastConnecting?: boolean
+  isMobileDevice?: boolean
   onCast?: () => void
   onToggleExpanded?: () => void
   onToggleFullscreen?: () => void
@@ -34,6 +35,7 @@ export default function CustomPlayerControls({
   isCasting,
   isCastAvailable,
   isCastConnecting,
+  isMobileDevice = false,
   onCast,
   onToggleExpanded,
   onToggleFullscreen,
@@ -419,6 +421,11 @@ export default function CustomPlayerControls({
   // When casting, show as playing since remote device is playing
   const showAsPlaying = isCasting ? true : isPlaying
 
+  useEffect(() => {
+    if (!isMobileDevice) return
+    setVolumeOpen(false)
+  }, [isMobileDevice])
+
   return (
     <div
       onClick={(event) => event.stopPropagation()}
@@ -567,69 +574,71 @@ export default function CustomPlayerControls({
             )}
           </Button>
 
-          <div
-            className="relative z-[9999] flex items-center gap-1.5 sm:gap-2"
-            onMouseEnter={() => {
-              keepMenusOpen()
-              setVolumeOpen(true)
-              setQualityOpen(false)
-            }}
-            onMouseLeave={closeMenusWithDelay}
-          >
-            <Button
-              ref={volumeButtonRef}
-              variant="ghost"
-              size="icon"
-              onPointerDown={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                setVolumeOpen((value) => !value)
+          {!isMobileDevice && (
+            <div
+              className="relative z-[9999] flex items-center gap-1.5 sm:gap-2"
+              onMouseEnter={() => {
+                keepMenusOpen()
+                setVolumeOpen(true)
                 setQualityOpen(false)
               }}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-              }}
-              className="text-white hover:bg-white/20 h-8 w-8 sm:h-9 sm:w-9 shrink-0"
-              title="Volume"
+              onMouseLeave={closeMenusWithDelay}
             >
-              {muted || volume === 0 ? (
-                <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />
-              ) : (
-                <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
-              )}
-            </Button>
-
-            {volumeOpen && (
-              <div
-                ref={volumeMenuRef}
-                className="
-                  absolute left-full top-1/2 ml-1.5 -translate-y-1/2
-                  flex h-8 items-center gap-2 rounded-md
-                  bg-black/55 px-2 backdrop-blur-md
-                  border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.45)]
-                  sm:static sm:ml-0 sm:translate-y-0 sm:bg-transparent sm:px-0 sm:border-0 sm:shadow-none sm:backdrop-blur-0
-                  z-[9999]
-                "
-                onMouseEnter={keepMenusOpen}
-                onMouseLeave={closeMenusWithDelay}
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
+              <Button
+                ref={volumeButtonRef}
+                variant="ghost"
+                size="icon"
+                onPointerDown={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setVolumeOpen((value) => !value)
+                  setQualityOpen(false)
+                }}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                }}
+                className="text-white hover:bg-white/20 h-8 w-8 sm:h-9 sm:w-9 shrink-0"
+                title="Volume"
               >
-                <input
-                  type="range"
-                  dir="ltr"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={muted ? 0 : volume}
-                  onChange={(event) => changeVolume(Number(event.target.value))}
-                  className="h-1 w-20 cursor-pointer accent-red-500 sm:w-24 md:w-28"
-                  title="Volume"
-                />
-              </div>
-            )}
-          </div>
+                {muted || volume === 0 ? (
+                  <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />
+                ) : (
+                  <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                )}
+              </Button>
+
+              {volumeOpen && (
+                <div
+                  ref={volumeMenuRef}
+                  className="
+                    absolute left-full top-1/2 ml-1.5 -translate-y-1/2
+                    flex h-8 items-center gap-2 rounded-md
+                    bg-black/55 px-2 backdrop-blur-md
+                    border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.45)]
+                    sm:static sm:ml-0 sm:translate-y-0 sm:bg-transparent sm:px-0 sm:border-0 sm:shadow-none sm:backdrop-blur-0
+                    z-[9999]
+                  "
+                  onMouseEnter={keepMenusOpen}
+                  onMouseLeave={closeMenusWithDelay}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <input
+                    type="range"
+                    dir="ltr"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={muted ? 0 : volume}
+                    onChange={(event) => changeVolume(Number(event.target.value))}
+                    className="h-1 w-20 cursor-pointer accent-red-500 sm:w-24 md:w-28"
+                    title="Volume"
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {seekEnd > seekStart && (
             <span className="hidden min-[420px]:inline-flex shrink-0 items-center text-[10px] text-white/80 tabular-nums sm:text-xs">
