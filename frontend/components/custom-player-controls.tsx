@@ -99,6 +99,9 @@ export default function CustomPlayerControls({
   const [duration, setDuration] = useState(0);
   const [seekStart, setSeekStart] = useState(0);
   const [seekEnd, setSeekEnd] = useState(0);
+  const [liveEdgeWallClockSec, setLiveEdgeWallClockSec] = useState<
+    number | null
+  >(null);
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const [isLiveStream, setIsLiveStream] = useState(true);
   const [isAtLiveEdge, setIsAtLiveEdge] = useState(true);
@@ -250,6 +253,26 @@ export default function CustomPlayerControls({
     return `${minutes}:${String(secs).padStart(2, "0")}`;
   };
 
+  const formatClockTime = (unixSeconds: number) => {
+    if (!Number.isFinite(unixSeconds) || unixSeconds <= 0) return "";
+
+    return new Date(unixSeconds * 1000).toLocaleTimeString("he-IL", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  };
+
+  const getLiveClockTime = (time: number) => {
+    if (!isLiveStream || liveEdgeWallClockSec === null || seekEnd <= seekStart) {
+      return null;
+    }
+
+    const secondsBehindLiveEdge = Math.max(0, seekEnd - time);
+    return formatClockTime(liveEdgeWallClockSec - secondsBehindLiveEdge);
+  };
+
   const getSeekPercent = (time: number) => {
     if (seekEnd <= seekStart) return 0;
 
@@ -278,7 +301,10 @@ export default function CustomPlayerControls({
 
   const getSeekTooltipText = (time: number) => {
     if (isLiveStream) {
-      return `-${formatTime(Math.max(0, seekEnd - time))}`;
+      return (
+        getLiveClockTime(time) ??
+        `-${formatTime(Math.max(0, seekEnd - time))}`
+      );
     }
 
     return formatTime(time);
@@ -286,7 +312,10 @@ export default function CustomPlayerControls({
 
   const getDisplayStartTime = () => {
     if (isLiveStream) {
-      return `-${formatTime(Math.max(0, seekEnd - seekStart))}`;
+      return (
+        getLiveClockTime(seekStart) ??
+        `-${formatTime(Math.max(0, seekEnd - seekStart))}`
+      );
     }
 
     return formatTime(0);
@@ -299,6 +328,15 @@ export default function CustomPlayerControls({
 
   const getTimeDisplayText = () => {
     if (isLiveStream) {
+      const startClockTime = getLiveClockTime(seekStart);
+      const currentClockTime = getLiveClockTime(
+        Math.min(Math.max(currentTime, seekStart), seekEnd),
+      );
+
+      if (startClockTime && currentClockTime) {
+        return `${startClockTime} / ${currentClockTime}`;
+      }
+
       return `-${formatTime(Math.max(0, seekEnd - seekStart))} / -${formatTime(Math.max(0, seekEnd - currentTime))}`;
     }
 
@@ -336,12 +374,6 @@ export default function CustomPlayerControls({
 
     const liveMode = liveTrackerLive === true || !hasFiniteDuration;
 
-    setCurrentTime(Number.isFinite(playerCurrentTime) ? playerCurrentTime : 0);
-    setDuration(
-      hasFiniteDuration
-        ? playerDuration
-        : Math.max(0, nextSeekEnd - nextSeekStart),
-    );
     const safeSeekStart = Number.isFinite(nextSeekStart) ? nextSeekStart : 0;
     const safeSeekEnd = Number.isFinite(nextSeekEnd) ? nextSeekEnd : 0;
     const safeCurrentTime = Number.isFinite(playerCurrentTime)
@@ -352,8 +384,19 @@ export default function CustomPlayerControls({
       ? Math.min(Math.max(nextBufferedEnd, safeSeekStart), safeSeekEnd)
       : safeCurrentTime;
 
+    setCurrentTime(safeCurrentTime);
+    setDuration(
+      hasFiniteDuration
+        ? playerDuration
+        : Math.max(0, safeSeekEnd - safeSeekStart),
+    );
     setSeekStart(safeSeekStart);
     setSeekEnd(safeSeekEnd);
+    setLiveEdgeWallClockSec(
+      liveMode && safeSeekEnd > safeSeekStart
+        ? Date.now() / 1000
+        : null,
+    );
     setBufferedEnd(safeBufferedEnd);
     setIsLiveStream(liveMode);
     setIsAtLiveEdge(!liveMode || safeSeekEnd - safeCurrentTime <= 2);
