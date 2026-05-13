@@ -402,12 +402,7 @@ def handle_proxy(request, url, referer, cast=False):
 
     # Always use public base so URLs are absolute — required for cast and external players
     base_proxy = _request_public_base_proxy(request)
-
-    # For cast: strip demuxed audio tracks from master playlist
-    # Chromecast cannot sync separate video+audio proxy streams
-    processed_text = _strip_demuxed_audio_for_cast(text) if cast and "#EXT-X-STREAM-INF" in text else text
-
-    source_text = _prepare_hls_media_playlist(processed_text, cast=cast)
+    source_text = _prepare_hls_media_playlist(text, cast=cast)
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
