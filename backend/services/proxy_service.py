@@ -261,57 +261,6 @@ def _filter_brightcove_cast_master_playlist(text):
     )
 
 
-def _trim_first_hls_segment(text):
-    lines = text.splitlines()
-    drop_start = None
-    drop_end = None
-
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if drop_start is None:
-            if stripped.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
-                drop_start = index
-            continue
-
-        if stripped and not stripped.startswith("#"):
-            drop_end = index
-            break
-
-    if drop_start is None or drop_end is None:
-        return text
-
-    output = []
-
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-
-        if stripped.startswith("#EXT-X-MEDIA-SEQUENCE:"):
-            try:
-                sequence = int(stripped.split(":", 1)[1])
-                output.append(f"#EXT-X-MEDIA-SEQUENCE:{sequence + 1}")
-            except ValueError:
-                output.append(line)
-            continue
-
-        if drop_start <= index <= drop_end:
-            continue
-
-        output.append(line)
-
-    return "\n".join(output)
-
-
-def _align_brightcove_cast_media_playlist(text, source_url):
-    if "audio" not in _url_path(source_url) or not _is_live_hls_media_playlist(text):
-        return text
-
-    lines = text.splitlines()
-    if not _is_fmp4_hls_media_playlist(lines):
-        return text
-
-    return _trim_first_hls_segment(text)
-
-
 def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     rewritten_lines = []
@@ -499,7 +448,6 @@ def handle_proxy(request, url, referer, cast=False):
     source_text = _prepare_hls_media_playlist(text, cast=cast)
     if cast and _is_brightcove_url(url):
         source_text = _filter_brightcove_cast_master_playlist(source_text)
-        source_text = _align_brightcove_cast_media_playlist(source_text, url)
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
