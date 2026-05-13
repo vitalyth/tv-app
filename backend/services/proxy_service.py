@@ -266,7 +266,8 @@ def _prepare_hls_media_playlist(text, cast=False):
 
     lines = text.splitlines()
     has_start = any(line.strip().startswith("#EXT-X-START:") for line in lines)
-    should_reset_pts_for_cast = cast and not _is_fmp4_hls_media_playlist(lines)
+    is_fmp4_playlist = _is_fmp4_hls_media_playlist(lines)
+    should_reset_pts_for_cast = cast and not is_fmp4_playlist
 
     output = []
     inserted = False
@@ -290,7 +291,7 @@ def _prepare_hls_media_playlist(text, cast=False):
 
         output.append("#EXT-X-VERSION:6")
 
-        if not has_start:
+        if not has_start and not is_fmp4_playlist:
             output.append("#EXT-X-START:TIME-OFFSET=-12,PRECISE=NO")
 
         inserted = True
