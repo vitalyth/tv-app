@@ -210,21 +210,8 @@ def _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast):
 def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     rewritten_lines = []
-    lines = text.splitlines()
-    audio_groups_with_default = set()
-    cast_defaulted_audio_groups = set()
 
-    for line in lines:
-        stripped = line.strip()
-        if (
-            stripped.startswith("#EXT-X-MEDIA:")
-            and "TYPE=AUDIO" in stripped
-            and "DEFAULT=YES" in stripped
-        ):
-            group_match = re.search(r'GROUP-ID="([^"]+)"', stripped)
-            audio_groups_with_default.add(group_match.group(1) if group_match else "")
-
-    for line in lines:
+    for line in text.splitlines():
         stripped = line.strip()
 
         if not stripped:
@@ -232,22 +219,6 @@ def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
             continue
 
         if stripped.startswith("#"):
-            group_match = re.search(r'GROUP-ID="([^"]+)"', stripped)
-            audio_group_id = group_match.group(1) if group_match else ""
-
-            if (
-                cast
-                and stripped.startswith("#EXT-X-MEDIA:")
-                and "TYPE=AUDIO" in stripped
-                and "DEFAULT=YES" not in stripped
-                and audio_group_id not in audio_groups_with_default
-                and audio_group_id not in cast_defaulted_audio_groups
-            ):
-                line = re.sub(r"\bDEFAULT=(YES|NO)", "DEFAULT=YES", line)
-                if "DEFAULT=" not in line:
-                    line += ",DEFAULT=YES"
-                cast_defaulted_audio_groups.add(audio_group_id)
-
             def replace_uri(match):
                 uri = match.group(1)
                 proxied = _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast)
