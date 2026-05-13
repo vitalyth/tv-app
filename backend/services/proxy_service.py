@@ -1,14 +1,12 @@
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from utils.http import create_session
 from fastapi.responses import Response, StreamingResponse
-from datetime import datetime
 import requests
 import re
 import html
 import json
 
 session = create_session()
-BRIGHTCOVE_CAST_VIDEO_PLAYLISTS = {}
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -124,12 +122,6 @@ def _is_brightcove_url(url):
     return _hostname_for_url(url).endswith("brightcove.com")
 
 
-def _brightcove_stream_key(url):
-    parsed = urlparse(url)
-    base_path = parsed.path.rsplit("/", 1)[0]
-    return f"{parsed.scheme}://{parsed.netloc}{base_path}"
-
-
 def _is_segment_url(url):
     return _url_path(url).endswith((".ts", ".m4s", ".mp4", ".m4a", ".aac", ".vtt"))
 
@@ -225,7 +217,7 @@ def _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast):
     return _proxied_url(base_proxy, full_url, _default_referer(source_url, referer), cast)
 
 
-def _filter_brightcove_cast_master_playlist(text, source_url):
+def _filter_brightcove_cast_master_playlist(text):
     lines = text.splitlines()
     variants = []
 
@@ -255,10 +247,6 @@ def _filter_brightcove_cast_master_playlist(text, source_url):
 
     preferred_variants = [variant for variant in variants if variant["height"] <= 720]
     selected = max(preferred_variants or variants, key=lambda variant: variant["bandwidth"])
-    BRIGHTCOVE_CAST_VIDEO_PLAYLISTS[_brightcove_stream_key(source_url)] = urljoin(
-        source_url.rsplit("/", 1)[0] + "/",
-        lines[selected["uri_index"]].strip(),
-    )
     selected_indexes = {selected["info_index"], selected["uri_index"]}
     variant_indexes = {
         index
@@ -273,81 +261,47 @@ def _filter_brightcove_cast_master_playlist(text, source_url):
     )
 
 
-def _parse_hls_program_date_time(line):
-    try:
-        value = line.split(":", 1)[1].strip()
-        if value.endswith("Z"):
-            value = value[:-1] + "+00:00"
-        return datetime.fromisoformat(value).timestamp()
-    except (IndexError, ValueError):
-        return None
-
-
-def _first_hls_program_date_time(text):
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
-            return _parse_hls_program_date_time(stripped)
-
-    return None
-
-
-def _trim_hls_segments_before(text, min_program_date_time):
+def _trim_first_hls_segment(text):
     lines = text.splitlines()
-    output = []
-    pending_block = None
-    pending_time = None
-    trimmed_segments = 0
+    drop_start = None
+    drop_end = None
 
-    for line in lines:
+    for index, line in enumerate(lines):
         stripped = line.strip()
-
-        if pending_block is None:
+        if drop_start is None:
             if stripped.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
-                pending_block = [line]
-                pending_time = _parse_hls_program_date_time(stripped)
-                continue
-
-            output.append(line)
+                drop_start = index
             continue
 
-        pending_block.append(line)
+        if stripped and not stripped.startswith("#"):
+            drop_end = index
+            break
 
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        if pending_time is not None and pending_time < min_program_date_time:
-            trimmed_segments += 1
-        else:
-            output.extend(pending_block)
-
-        pending_block = None
-        pending_time = None
-
-    if pending_block is not None:
-        output.extend(pending_block)
-
-    if trimmed_segments <= 0:
+    if drop_start is None or drop_end is None:
         return text
 
-    adjusted = []
-    for line in output:
+    output = []
+
+    for index, line in enumerate(lines):
         stripped = line.strip()
 
         if stripped.startswith("#EXT-X-MEDIA-SEQUENCE:"):
             try:
                 sequence = int(stripped.split(":", 1)[1])
-                adjusted.append(f"#EXT-X-MEDIA-SEQUENCE:{sequence + trimmed_segments}")
+                output.append(f"#EXT-X-MEDIA-SEQUENCE:{sequence + 1}")
             except ValueError:
-                adjusted.append(line)
+                output.append(line)
             continue
 
-        adjusted.append(line)
+        if drop_start <= index <= drop_end:
+            continue
 
-    return "\n".join(adjusted)
+        output.append(line)
+
+    return "\n".join(output)
 
 
-def _align_brightcove_cast_media_playlist(text, source_url, referer):
+def _align_brightcove_cast_media_playlist(text, source_url):
     if "audio" not in _url_path(source_url) or not _is_live_hls_media_playlist(text):
         return text
 
@@ -355,33 +309,7 @@ def _align_brightcove_cast_media_playlist(text, source_url, referer):
     if not _is_fmp4_hls_media_playlist(lines):
         return text
 
-    video_playlist_url = BRIGHTCOVE_CAST_VIDEO_PLAYLISTS.get(_brightcove_stream_key(source_url))
-    if not video_playlist_url:
-        return text
-
-    try:
-        origin = _origin_for_url(video_playlist_url)
-        response = session.get(
-            video_playlist_url,
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "*/*",
-                "Origin": origin,
-                "Referer": referer or origin + "/",
-            },
-            timeout=5,
-        )
-        if response.status_code != 200:
-            return text
-
-        video_start = _first_hls_program_date_time(response.text)
-    except requests.exceptions.RequestException:
-        return text
-
-    if video_start is None:
-        return text
-
-    return _trim_hls_segments_before(text, video_start)
+    return _trim_first_hls_segment(text)
 
 
 def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
@@ -570,8 +498,8 @@ def handle_proxy(request, url, referer, cast=False):
     base_proxy = _request_public_base_proxy(request)
     source_text = _prepare_hls_media_playlist(text, cast=cast)
     if cast and _is_brightcove_url(url):
-        source_text = _filter_brightcove_cast_master_playlist(source_text, url)
-        source_text = _align_brightcove_cast_media_playlist(source_text, url, referer)
+        source_text = _filter_brightcove_cast_master_playlist(source_text)
+        source_text = _align_brightcove_cast_media_playlist(source_text, url)
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
