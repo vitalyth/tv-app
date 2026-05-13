@@ -53,14 +53,6 @@ const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
 
-        if (
-            parsedUrl.hostname.endsWith("brightcove.com") &&
-            parsedUrl.pathname.endsWith("/playlist-hls.m3u8")
-        ) {
-            parsedUrl.pathname = parsedUrl.pathname.replace(/\/playlist-hls\.m3u8$/, "/playlist-dash.mpd")
-            return parsedUrl.toString()
-        }
-
         if (HLS_MEDIA_PLAYLIST_PATH.test(parsedUrl.pathname)) {
             parsedUrl.pathname = parsedUrl.pathname.replace(HLS_MEDIA_PLAYLIST_PATH, "/playlist-hls.m3u8")
             return parsedUrl.toString()
@@ -80,21 +72,9 @@ const isBrightcoveHlsStream = (streamUrl: string) => {
     }
 }
 
-const getCastContentType = (castSourceUrl: string, channel: Channel) => {
-    try {
-        if (new URL(castSourceUrl).pathname.endsWith(".mpd")) {
-            return "application/dash+xml"
-        }
-    } catch {
-        // Fall back to channel metadata below.
-    }
+const buildCastStreamUrl = (streamUrl: string, referer = "") => {
+    const castSourceUrl = getCastSourceUrl(streamUrl)
 
-    return channel.linkDetails?.manifest_type === "mpd"
-        ? "application/dash+xml"
-        : "application/x-mpegURL"
-}
-
-const buildCastStreamUrl = (castSourceUrl: string, referer = "") => {
     return resolveAbsoluteUrl(
         api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
@@ -159,15 +139,14 @@ export function useGoogleCast({
 
         if (!castApi || !chromeCast || !session) return false
 
-        const castSourceUrl = getCastSourceUrl(streamUrl)
-        const castContentType = getCastContentType(castSourceUrl, channel)
-
         const mediaInfo = new chromeCast.media.MediaInfo(
-            buildCastStreamUrl(castSourceUrl, channel.linkDetails?.referer),
-            castContentType
+            buildCastStreamUrl(streamUrl, channel.linkDetails?.referer),
+            channel.linkDetails?.manifest_type === "mpd"
+                ? "application/dash+xml"
+                : "application/x-mpegURL"
         )
 
-        if (castContentType === "application/x-mpegURL" && isBrightcoveHlsStream(streamUrl)) {
+        if (isBrightcoveHlsStream(streamUrl) && channel.linkDetails?.manifest_type !== "mpd") {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
 
