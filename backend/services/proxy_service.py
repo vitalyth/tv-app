@@ -114,14 +114,6 @@ def _url_path(url):
     return urlparse(url).path.lower()
 
 
-def _hostname_for_url(url):
-    return urlparse(url).hostname or ""
-
-
-def _is_brightcove_url(url):
-    return _hostname_for_url(url).endswith("brightcove.com")
-
-
 def _is_segment_url(url):
     return _url_path(url).endswith((".ts", ".m4s", ".mp4", ".m4a", ".aac", ".vtt"))
 
@@ -215,50 +207,6 @@ def _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast):
 
     full_url = urljoin(manifest_base, uri)
     return _proxied_url(base_proxy, full_url, _default_referer(source_url, referer), cast)
-
-
-def _filter_brightcove_cast_master_playlist(text):
-    lines = text.splitlines()
-    variants = []
-
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-
-        if stripped.startswith("#EXT-X-STREAM-INF:") and index + 1 < len(lines):
-            uri_line = lines[index + 1]
-            if uri_line.strip() and not uri_line.strip().startswith("#"):
-                bandwidth_match = re.search(r"\bBANDWIDTH=(\d+)", stripped)
-                resolution_match = re.search(r"\bRESOLUTION=(\d+)x(\d+)", stripped)
-                variants.append({
-                    "info_index": index,
-                    "uri_index": index + 1,
-                    "bandwidth": int(bandwidth_match.group(1)) if bandwidth_match else 0,
-                    "height": int(resolution_match.group(2)) if resolution_match else 0,
-                })
-                index += 2
-                continue
-
-        index += 1
-
-    if not variants:
-        return text
-
-    preferred_variants = [variant for variant in variants if variant["height"] <= 720]
-    selected = max(preferred_variants or variants, key=lambda variant: variant["bandwidth"])
-    selected_indexes = {selected["info_index"], selected["uri_index"]}
-    variant_indexes = {
-        index
-        for variant in variants
-        for index in (variant["info_index"], variant["uri_index"])
-    }
-
-    return "\n".join(
-        line
-        for index, line in enumerate(lines)
-        if index not in variant_indexes or index in selected_indexes
-    )
 
 
 def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
@@ -446,8 +394,6 @@ def handle_proxy(request, url, referer, cast=False):
     # Always use public base so URLs are absolute — required for cast and external players
     base_proxy = _request_public_base_proxy(request)
     source_text = _prepare_hls_media_playlist(text, cast=cast)
-    if cast and _is_brightcove_url(url):
-        source_text = _filter_brightcove_cast_master_playlist(source_text)
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
