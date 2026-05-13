@@ -131,12 +131,15 @@ export function useGoogleCast({
 
         if (!castApi || !chromeCast || !session) return false
 
-        const mediaInfo = new chromeCast.media.MediaInfo(
-            buildCastStreamUrl(streamUrl, channel.linkDetails?.referer),
-            channel.linkDetails?.manifest_type === "mpd"
-                ? "application/dash+xml"
+        const castUrl = buildCastStreamUrl(streamUrl, channel.linkDetails?.referer)
+        const isMpd = channel.linkDetails?.manifest_type === "mpd"
+        const contentType = isMpd
+            ? "application/dash+xml"
+            : castUrl.includes("brightcove")
+                ? "application/vnd.apple.mpegurl"
                 : "application/x-mpegURL"
-        )
+
+        const mediaInfo = new chromeCast.media.MediaInfo(castUrl, contentType)
 
         const imageUrl = buildCastImageUrl(channel.logo)
 
