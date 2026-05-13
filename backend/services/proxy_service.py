@@ -247,6 +247,7 @@ def _prepare_hls_media_playlist(text, cast=False):
     Upgrade VERSION to 6 and add EXT-X-START for all players.
     For cast only: add DISCONTINUITY before each segment to reset PTS —
     required for Redge Media livx streams with very high PTS timestamps.
+    Skip adding DISCONTINUITY if the source stream already has it (e.g. fMP4 streams).
     Regular players handle high PTS fine without DISCONTINUITY.
     """
     if not _is_live_hls_media_playlist(text):
@@ -254,6 +255,7 @@ def _prepare_hls_media_playlist(text, cast=False):
 
     lines = text.splitlines()
     has_start = any(line.strip().startswith("#EXT-X-START:") for line in lines)
+    has_existing_discontinuity = any(line.strip() == "#EXT-X-DISCONTINUITY" for line in lines)
 
     output = []
     inserted = False
@@ -266,7 +268,8 @@ def _prepare_hls_media_playlist(text, cast=False):
             continue
 
         # For cast: add DISCONTINUITY before each segment to reset PTS
-        if cast and stripped.startswith("#EXTINF"):
+        # Only if the source stream doesn't already have DISCONTINUITY tags
+        if cast and not has_existing_discontinuity and stripped.startswith("#EXTINF"):
             previous = next((l.strip() for l in reversed(output) if l.strip()), "")
             if previous != "#EXT-X-DISCONTINUITY":
                 output.append("#EXT-X-DISCONTINUITY")
@@ -286,7 +289,28 @@ def _prepare_hls_media_playlist(text, cast=False):
     return "\n".join(output)
 
 
-def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
+def _strip_demuxed_audio_for_cast(text: str) -> str:
+    """
+    Remove separate audio tracks from HLS master playlist for cast.
+    Chromecast Default Receiver cannot sync demuxed video+audio proxy streams.
+    Also removes AUDIO= attribute from EXT-X-STREAM-INF lines.
+    """
+    lines = text.splitlines()
+    output = []
+
+    for line in lines:
+        stripped = line.strip()
+        # Remove EXT-X-MEDIA audio tracks
+        if stripped.startswith("#EXT-X-MEDIA") and "TYPE=AUDIO" in stripped:
+            continue
+        # Remove AUDIO= from EXT-X-STREAM-INF
+        line = re.sub(r',?AUDIO="[^"]*"', "", line)
+        output.append(line)
+
+    return "\n".join(output)
+
+
+(text, source_url, referer, base_proxy):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
     segment_base = html.unescape(base_url_match.group(1)) if base_url_match else manifest_base
@@ -350,7 +374,7 @@ def handle_proxy(request, url, referer, cast=False):
 
     is_mpd = (
         "dash+xml" in clean_content_type
-        or _url_path(url).endswith((".mpd", ".livx"))
+        or _url_path(url).endswith(".mpd")
         or "<MPD" in text[:500]
     )
 
@@ -378,7 +402,12 @@ def handle_proxy(request, url, referer, cast=False):
 
     # Always use public base so URLs are absolute — required for cast and external players
     base_proxy = _request_public_base_proxy(request)
-    source_text = _prepare_hls_media_playlist(text, cast=cast)
+
+    # For cast: strip demuxed audio tracks from master playlist
+    # Chromecast cannot sync separate video+audio proxy streams
+    processed_text = _strip_demuxed_audio_for_cast(text) if cast and "#EXT-X-STREAM-INF" in text else text
+
+    source_text = _prepare_hls_media_playlist(processed_text, cast=cast)
     content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
 
     return Response(
