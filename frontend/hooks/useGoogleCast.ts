@@ -64,6 +64,14 @@ const getCastSourceUrl = (streamUrl: string) => {
     return streamUrl
 }
 
+const isBrightcoveHlsStream = (streamUrl: string) => {
+    try {
+        return new URL(streamUrl).hostname.endsWith("brightcove.com")
+    } catch {
+        return false
+    }
+}
+
 const buildCastStreamUrl = (streamUrl: string, referer = "") => {
     const castSourceUrl = getCastSourceUrl(streamUrl)
 
@@ -137,6 +145,16 @@ export function useGoogleCast({
                 ? "application/dash+xml"
                 : "application/x-mpegURL"
         )
+
+        if (isBrightcoveHlsStream(streamUrl) && channel.linkDetails?.manifest_type !== "mpd") {
+            const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
+            const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
+
+            if (hlsSegmentFormat && hlsVideoSegmentFormat) {
+                mediaInfo.hlsSegmentFormat = hlsSegmentFormat
+                mediaInfo.hlsVideoSegmentFormat = hlsVideoSegmentFormat
+            }
+        }
 
         const imageUrl = buildCastImageUrl(channel.logo)
 

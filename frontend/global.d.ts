@@ -87,9 +87,19 @@ declare global {
         LIVE = "LIVE",
       }
 
+      enum HlsSegmentFormat {
+        FMP4 = "fmp4",
+      }
+
+      enum HlsVideoSegmentFormat {
+        FMP4 = "fmp4",
+      }
+
       class MediaInfo {
         constructor(contentId: string, contentType: string)
         streamType: StreamType
+        hlsSegmentFormat?: HlsSegmentFormat
+        hlsVideoSegmentFormat?: HlsVideoSegmentFormat
         metadata?: GenericMediaMetadata
         customData?: Record<string, unknown>
         duration?: number
