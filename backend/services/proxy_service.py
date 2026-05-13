@@ -5,6 +5,7 @@ import requests
 import re
 import html
 import json
+import time
 
 session = create_session()
 
@@ -112,6 +113,24 @@ def _content_type_for_url(url, content_type):
 
 def _url_path(url):
     return urlparse(url).path.lower()
+
+
+def _hostname_for_url(url):
+    return urlparse(url).hostname or ""
+
+
+def _is_brightcove_url(url):
+    return _hostname_for_url(url).endswith("brightcove.com")
+
+
+def _is_brightcove_cast_audio_playlist(url, cast):
+    path = _url_path(url)
+    return (
+        cast
+        and _is_brightcove_url(url)
+        and path.endswith(".m3u8")
+        and "audio" in path
+    )
 
 
 def _is_segment_url(url):
@@ -334,6 +353,9 @@ def handle_proxy(request, url, referer, cast=False):
 
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
+
+    if _is_brightcove_cast_audio_playlist(url, cast):
+        time.sleep(2.5)
 
     try:
         r = session.get(url, headers=headers, stream=True, timeout=10)
