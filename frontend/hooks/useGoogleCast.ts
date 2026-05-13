@@ -75,6 +75,10 @@ const isBrightcoveHlsStream = (streamUrl: string) => {
 const buildCastStreamUrl = (streamUrl: string, referer = "") => {
     const castSourceUrl = getCastSourceUrl(streamUrl)
 
+    if (isBrightcoveHlsStream(castSourceUrl)) {
+        return castSourceUrl
+    }
+
     return resolveAbsoluteUrl(
         api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
@@ -177,10 +181,6 @@ export function useGoogleCast({
         const request = new chromeCast.media.LoadRequest(mediaInfo)
         request.autoplay = true
         request.customData = mediaInfo.customData
-
-        if (isBrightcoveHlsStream(streamUrl) && channel.linkDetails?.manifest_type !== "mpd") {
-            request.currentTime = 8
-        }
 
         try {
             clearMediaStatusListener()
