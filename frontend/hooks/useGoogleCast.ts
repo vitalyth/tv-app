@@ -178,6 +178,10 @@ export function useGoogleCast({
         request.autoplay = true
         request.customData = mediaInfo.customData
 
+        if (isBrightcoveHlsStream(streamUrl) && channel.linkDetails?.manifest_type !== "mpd") {
+            request.currentTime = 8
+        }
+
         try {
             clearMediaStatusListener()
             await session.loadMedia(request)
