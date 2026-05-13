@@ -84,14 +84,16 @@ def _manifest_headers(extra=None):
 
 def _content_type_for_url(url, content_type):
     clean_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+    path = urlparse(url).path.lower()
+
+    if path.endswith((".mp4", ".m4s")) and "audio" in path:
+        return "audio/mp4"
 
     if clean_content_type and clean_content_type not in {
         "application/octet-stream",
         "binary/octet-stream",
     }:
         return content_type
-
-    path = urlparse(url).path.lower()
 
     if path.endswith((".mp4", ".m4s")):
         return "video/mp4"
