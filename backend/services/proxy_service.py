@@ -310,7 +310,7 @@ def _strip_demuxed_audio_for_cast(text: str) -> str:
     return "\n".join(output)
 
 
-(text, source_url, referer, base_proxy):
+def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
     segment_base = html.unescape(base_url_match.group(1)) if base_url_match else manifest_base
