@@ -19,6 +19,8 @@ services:
     image: vitalyth/tv-app-nginx:latest
     ports:
       - "8001:80"
+    volumes:
+      - ${NGINX_CACHE_DIR:-/DATA/AppData/tv-app/nginx-cache}:/var/cache/nginx
     depends_on:
       - frontend
       - backend
