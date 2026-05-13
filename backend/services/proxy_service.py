@@ -242,18 +242,31 @@ def _is_live_hls_media_playlist(text):
     )
 
 
+def _is_fmp4_hls_media_playlist(lines):
+    if any(line.strip().startswith("#EXT-X-MAP:") for line in lines):
+        return True
+
+    return any(
+        line.strip().lower().split("?", 1)[0].endswith((".mp4", ".m4s"))
+        for line in lines
+        if line.strip() and not line.strip().startswith("#")
+    )
+
+
 def _prepare_hls_media_playlist(text, cast=False):
     """
     Upgrade VERSION to 6 and add EXT-X-START for all players.
-    For cast only: add DISCONTINUITY before each segment to reset PTS —
-    required for Redge Media livx streams with very high PTS timestamps.
-    Regular players handle high PTS fine without DISCONTINUITY.
+    For cast only: add DISCONTINUITY before MPEG-TS segments to reset PTS —
+    required for Redge Media livx streams with very high PTS timestamps. Do
+    not add it to fMP4/CMAF playlists; it can invalidate the EXT-X-MAP context
+    for Chromecast receivers.
     """
     if not _is_live_hls_media_playlist(text):
         return text
 
     lines = text.splitlines()
     has_start = any(line.strip().startswith("#EXT-X-START:") for line in lines)
+    should_reset_pts_for_cast = cast and not _is_fmp4_hls_media_playlist(lines)
 
     output = []
     inserted = False
@@ -265,8 +278,7 @@ def _prepare_hls_media_playlist(text, cast=False):
         if stripped.startswith("#EXT-X-VERSION:"):
             continue
 
-        # For cast: add DISCONTINUITY before each segment to reset PTS
-        if cast and stripped.startswith("#EXTINF"):
+        if should_reset_pts_for_cast and stripped.startswith("#EXTINF"):
             previous = next((l.strip() for l in reversed(output) if l.strip()), "")
             if previous != "#EXT-X-DISCONTINUITY":
                 output.append("#EXT-X-DISCONTINUITY")
