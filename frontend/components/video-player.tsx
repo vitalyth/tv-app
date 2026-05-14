@@ -492,7 +492,7 @@ export function VideoPlayer({
       data-touch-device={isTouchDevice ? "true" : "false"}
       className={`
         relative overflow-hidden bg-black
-        ${isExpanded && !isFullscreen ? "fixed inset-0 z-[9999] rounded-none" : "rounded-xl"}
+        ${isExpanded && !isFullscreen ? "fixed inset-0 z-[1000] rounded-none" : "rounded-xl"}
         ${className || ""}
       `}
       onMouseMove={isMobileDevice ? undefined : showControls}
@@ -514,7 +514,7 @@ export function VideoPlayer({
         {isCasting && !isCastConnecting ? (
           <div
             dir="rtl"
-            className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/90 px-4 text-white"
+            className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/90 px-4 text-white"
             onClick={(event) => event.stopPropagation()}
           >
             {/* Channel logo */}
@@ -604,7 +604,7 @@ export function VideoPlayer({
       </div>
 
       {isLoading && !hasError && !isCasting && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <div className="text-center space-y-4">
             <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto animate-pulse overflow-hidden">
               <img src={`/ch/${channel.logo}`} alt={channel.name} />
@@ -615,7 +615,7 @@ export function VideoPlayer({
       )}
 
       {hasError && !isCasting && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-20">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90">
           <div className="text-center space-y-4 p-6">
             <div className="w-20 h-20 rounded-full bg-destructive/20 flex items-center justify-center mx-auto">
               <AlertCircle className="w-10 h-10 text-destructive" />
@@ -629,10 +629,6 @@ export function VideoPlayer({
                 הזרם אינו זמין כרגע או שכתובת ה-URL אינה תקינה
               </p>
             </div>
-
-            <Button variant="outline" onClick={handleClose} className="mt-4">
-              חזרה לרשימת הערוצים
-            </Button>
           </div>
         </div>
       )}

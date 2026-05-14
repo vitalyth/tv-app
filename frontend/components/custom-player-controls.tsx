@@ -630,7 +630,7 @@ export default function CustomPlayerControls({
             onMouseEnter={onInteraction}
             onMouseMove={onInteraction}
             className={`
-            absolute top-0 left-0 right-0 z-[9999]
+            absolute top-0 left-0 right-0 z-[60]
             bg-linear-to-b from-black/85 via-black/45 to-transparent
             px-3 sm:px-4 pt-3 sm:pt-4 pb-8 sm:pb-10
             transition-opacity duration-300
@@ -713,7 +713,7 @@ export default function CustomPlayerControls({
         onMouseEnter={onInteraction}
         onMouseMove={onInteraction}
         className={`
-        absolute bottom-0 left-0 right-0 z-[9999]
+        absolute bottom-0 left-0 right-0 z-[60]
         bg-linear-to-t from-black/95 via-black/65 to-transparent
         px-2.5 sm:px-4 pt-7 sm:pt-10 pb-2 sm:pb-3
         transition-all duration-300
@@ -725,7 +725,7 @@ export default function CustomPlayerControls({
       >
         {bottomOptions.showSeek && seekEnd > seekStart && (
           <div
-            className="relative z-[9999] mb-0 flex h-6 w-full min-w-0 items-center gap-2 sm:h-7 sm:gap-3"
+            className="relative z-[70] mb-0 flex h-6 w-full min-w-0 items-center gap-2 sm:h-7 sm:gap-3"
             dir="ltr"
           >
             <div className="relative flex h-full min-w-0 flex-1 items-center">
@@ -748,7 +748,7 @@ export default function CustomPlayerControls({
                     {showSeekTooltip && (
                       <div
                         className="
-                          pointer-events-none absolute -top-5 z-[9999]
+                          pointer-events-none absolute -top-5 z-[80]
                           rounded bg-black/85 px-1.5 py-0.5
                           text-[10px] leading-none text-white shadow-md
                         "
@@ -827,7 +827,7 @@ export default function CustomPlayerControls({
                       }}
                       onClick={(event) => event.stopPropagation()}
                       className="
-                        relative z-[9999] h-8 w-full min-w-16 cursor-pointer
+                        relative z-[70] h-8 w-full min-w-16 cursor-pointer
                         appearance-none bg-transparent opacity-0 sm:h-9
                       "
                       title="Seek"
@@ -859,7 +859,7 @@ export default function CustomPlayerControls({
 
             {bottomOptions.showVolume && !isMobileDevice && (
               <div
-                className="relative z-[9999] flex items-center gap-1.5 sm:gap-2"
+                className="relative z-[70] flex items-center gap-1.5 sm:gap-2"
                 onMouseEnter={() => {
                   keepMenusOpen();
                   setVolumeOpen(true);
@@ -895,7 +895,7 @@ export default function CustomPlayerControls({
                     bg-black/55 px-2 backdrop-blur-md
                     border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.45)]
                     sm:static sm:ml-0 sm:translate-y-0 sm:bg-transparent sm:px-0 sm:border-0 sm:shadow-none sm:backdrop-blur-0
-                    z-[9999]
+                    z-[80]
                   "
                     onMouseEnter={keepMenusOpen}
                     onMouseLeave={closeMenusWithDelay}
@@ -948,7 +948,7 @@ export default function CustomPlayerControls({
 
             {bottomOptions.showQuality && (
               <div
-                className="relative z-[9999]"
+                className="relative z-[70]"
                 onMouseEnter={() => {
                   keepMenusOpen();
                   setQualityOpen(true);
@@ -993,7 +993,7 @@ export default function CustomPlayerControls({
                   border border-white/10
                   rounded-md
                   overflow-hidden
-                  z-[9999]
+                  z-[80]
                 "
                     onMouseEnter={keepMenusOpen}
                     onMouseLeave={closeMenusWithDelay}
