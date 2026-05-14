@@ -53,6 +53,14 @@ const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
 
+        if (
+            parsedUrl.hostname.endsWith("brightcove.com") &&
+            parsedUrl.pathname.endsWith("/playlist-hls.m3u8")
+        ) {
+            parsedUrl.pathname = parsedUrl.pathname.replace(/\/playlist-hls\.m3u8$/, "/playlist-dash.mpd")
+            return parsedUrl.toString()
+        }
+
         if (HLS_MEDIA_PLAYLIST_PATH.test(parsedUrl.pathname)) {
             parsedUrl.pathname = parsedUrl.pathname.replace(HLS_MEDIA_PLAYLIST_PATH, "/playlist-hls.m3u8")
             return parsedUrl.toString()
@@ -64,7 +72,7 @@ const getCastSourceUrl = (streamUrl: string) => {
     return streamUrl
 }
 
-const isBrightcoveHlsStream = (streamUrl: string) => {
+const isBrightcoveStream = (streamUrl: string) => {
     try {
         return new URL(streamUrl).hostname.endsWith("brightcove.com")
     } catch {
@@ -72,10 +80,28 @@ const isBrightcoveHlsStream = (streamUrl: string) => {
     }
 }
 
-const buildCastStreamUrl = (streamUrl: string, referer = "") => {
-    const castSourceUrl = getCastSourceUrl(streamUrl)
+const isDashStream = (streamUrl: string, channel?: Channel) => {
+    if (channel?.linkDetails?.manifest_type === "mpd") {
+        return true
+    }
 
-    if (isBrightcoveHlsStream(castSourceUrl)) {
+    try {
+        const pathname = new URL(streamUrl).pathname
+        return pathname.endsWith(".mpd") || pathname.includes("/livedash/")
+    } catch {
+        return streamUrl.includes("/livedash/") || streamUrl.endsWith(".mpd")
+    }
+}
+
+const getCastContentType = (castSourceUrl: string, channel: Channel) => {
+    return isDashStream(castSourceUrl, channel)
+        ? "application/dash+xml"
+        : "application/x-mpegURL"
+}
+
+const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, referer = "") => {
+    if (castContentType === "application/dash+xml" || isBrightcoveStream(castSourceUrl)) {
+        console.log("Cast stream detected, skipping proxy:", castSourceUrl)
         return castSourceUrl
     }
 
@@ -143,14 +169,15 @@ export function useGoogleCast({
 
         if (!castApi || !chromeCast || !session) return false
 
+        const castSourceUrl = getCastSourceUrl(streamUrl)
+        const castContentType = getCastContentType(castSourceUrl, channel)
+
         const mediaInfo = new chromeCast.media.MediaInfo(
-            buildCastStreamUrl(streamUrl, channel.linkDetails?.referer),
-            channel.linkDetails?.manifest_type === "mpd"
-                ? "application/dash+xml"
-                : "application/x-mpegURL"
+            buildCastStreamUrl(castSourceUrl, castContentType, channel.linkDetails?.referer),
+            castContentType
         )
 
-        if (isBrightcoveHlsStream(streamUrl) && channel.linkDetails?.manifest_type !== "mpd") {
+        if (castContentType === "application/x-mpegURL" && isBrightcoveStream(streamUrl)) {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
 
