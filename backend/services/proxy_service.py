@@ -132,7 +132,7 @@ def _default_referer(url, referer):
     return referer or _origin_for_url(url) + "/"
 
 
-def _proxied_url(base_proxy, full_url, referer, cast):
+def _proxied_url(base_proxy, full_url, referer, cast, preserve_dash_tokens=False):
     if _is_local_proxy_url(full_url):
         return full_url
 
@@ -144,7 +144,8 @@ def _proxied_url(base_proxy, full_url, referer, cast):
     if cast:
         params["cast"] = "1"
 
-    return f"{base_proxy}/proxy?{urlencode(params)}"
+    safe_chars = "$" if preserve_dash_tokens else ""
+    return f"{base_proxy}/proxy?{urlencode(params, safe=safe_chars)}"
 
 
 def _response_metadata_headers(upstream):
@@ -311,7 +312,13 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
         attr = match.group(1)
         uri = html.unescape(match.group(2))
         full_url = urljoin(segment_base, uri)
-        proxied = _proxied_url(base_proxy, full_url, request_referer, True)
+        proxied = _proxied_url(
+            base_proxy,
+            full_url,
+            request_referer,
+            True,
+            preserve_dash_tokens=True,
+        )
         return f'{attr}="{html.escape(proxied, quote=True)}"'
 
     text = re.sub(r'\b(media|initialization)="([^"]+)"', rewrite_template_url, text)

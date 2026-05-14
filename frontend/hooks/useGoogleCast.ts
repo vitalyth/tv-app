@@ -101,11 +101,6 @@ const getCastContentType = (castSourceUrl: string, channel: Channel) => {
 
 const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, referer = "") => {
     console.log("Original stream URL:", castSourceUrl);
-    if (castContentType === "application/dash+xml" || isBrightcoveStream(castSourceUrl)) {
-        console.log("Cast stream detected, skipping proxy:", castSourceUrl)
-        return castSourceUrl
-    }
-
     return resolveAbsoluteUrl(
         api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
