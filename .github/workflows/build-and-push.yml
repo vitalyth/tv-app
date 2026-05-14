@@ -7,9 +7,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -17,18 +14,18 @@ jobs:
     steps:
       # 📥 Checkout
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # 🐳 Login Docker Hub
       - name: 🐳 Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       # 🔧 Buildx
       - name: 🔧 Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # 🧠 Decide tag (main vs version)
       - name: 🧠 Set image tag
@@ -46,7 +43,7 @@ jobs:
       # 🔹 FRONTEND
       # =========================
       - name: 🧱 Build & Push Frontend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./frontend
           push: true
@@ -58,7 +55,7 @@ jobs:
       # 🔹 BACKEND
       # =========================
       - name: 🧱 Build & Push Backend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./backend
           push: true
@@ -70,7 +67,7 @@ jobs:
       # 🔹 NGINX
       # =========================
       - name: 🧱 Build & Push Nginx
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./nginx
           push: true
