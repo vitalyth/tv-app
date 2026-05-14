@@ -7,6 +7,22 @@ import { type Channel } from "@/lib/channels-data"
 const CAST_SDK_SRC = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
 const DEFAULT_RECEIVER_APP_ID = "CC1AD845"
 const HLS_MEDIA_PLAYLIST_PATH = /\/chunklist(?:_[^/]*)?\.m3u8$/
+const CAST_SESSION_STORAGE_KEY = "cast_active_channel_id"
+
+export const saveCastChannelId = (channelId: string) => {
+    if (typeof window === "undefined") return
+    sessionStorage.setItem(CAST_SESSION_STORAGE_KEY, channelId)
+}
+
+export const clearCastChannelId = () => {
+    if (typeof window === "undefined") return
+    sessionStorage.removeItem(CAST_SESSION_STORAGE_KEY)
+}
+
+export const getPersistedCastChannelId = (): string | null => {
+    if (typeof window === "undefined") return null
+    return sessionStorage.getItem(CAST_SESSION_STORAGE_KEY)
+}
 
 type CastSessionState = "disconnected" | "connecting" | "connected"
 
@@ -221,6 +237,8 @@ export function useGoogleCast({
                 return true
             }
 
+            saveCastChannelId(channel.id)
+
             const media = session.getMediaSession()
             setHasDvr(hasDvrWindow(media))
 
@@ -274,6 +292,7 @@ export function useGoogleCast({
         loadSequenceRef.current += 1
         lastLoadKeyRef.current = null
         clearMediaStatusListener()
+        clearCastChannelId()
         onCastEnded?.()
 
         try {
@@ -332,6 +351,7 @@ export function useGoogleCast({
                     event.sessionState === castApi.framework.SessionState.SESSION_RESUMED
                 ) {
                     setSessionState("connected")
+                    if (channel?.id) saveCastChannelId(channel.id)
                     onCastStarted?.()
                     return
                 }
@@ -350,6 +370,7 @@ export function useGoogleCast({
                     loadSequenceRef.current += 1
                     lastLoadKeyRef.current = null
                     clearMediaStatusListener()
+                    clearCastChannelId()
                     onCastEnded?.()
                 }
             }

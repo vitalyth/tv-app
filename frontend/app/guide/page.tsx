@@ -9,6 +9,7 @@ import { ChannelsFilters } from "@/components/channels-filters";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
 import { Channel, Program } from "@/lib/channels-data";
 import { useDraggable } from "@/hooks/useDraggable";
+import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then(m => m.VideoPlayer),
@@ -34,6 +35,22 @@ export default function GuidePage() {
     const [isMobileLandscape, setIsMobileLandscape] = useState(false);
 
     selectedChannelRef.current = selectedChannel;
+
+    // Restore Cast session after page refresh:
+    // When channels finish loading, check if there was an active Cast session
+    // before the refresh. If so, reselect the channel so the Cast SDK can
+    // resume the session automatically (SESSION_RESUMED fires in useGoogleCast).
+    useEffect(() => {
+        if (!channels.length || selectedChannel) return;
+
+        const restoredChannelId = getPersistedCastChannelId();
+        if (!restoredChannelId) return;
+
+        const channel = channels.find((ch) => ch.id === restoredChannelId);
+        if (channel) {
+            setSelectedChannel(channel);
+        }
+    }, [channels, selectedChannel]);
 
     const { position, isDragging, dragHandleProps, restorePosition } = useDraggable(
         playerRef,

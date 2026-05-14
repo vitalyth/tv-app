@@ -43,7 +43,7 @@ jobs:
       # 🔹 FRONTEND
       # =========================
       - name: 🧱 Build & Push Frontend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           push: true
@@ -55,7 +55,7 @@ jobs:
       # 🔹 BACKEND
       # =========================
       - name: 🧱 Build & Push Backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           push: true
@@ -67,7 +67,7 @@ jobs:
       # 🔹 NGINX
       # =========================
       - name: 🧱 Build & Push Nginx
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./nginx
           push: true
