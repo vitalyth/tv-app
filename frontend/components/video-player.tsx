@@ -192,6 +192,7 @@ export function VideoPlayer({
   }, []);
 
   const {
+    deviceName,
     isAvailable: isCastAvailable,
     isCasting,
     isConnecting: isCastConnecting,
@@ -512,6 +513,7 @@ export function VideoPlayer({
 
         {isCasting && !isCastConnecting ? (
           <div
+            dir="rtl"
             className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/90 px-4 text-white"
             onClick={(event) => event.stopPropagation()}
           >
@@ -527,7 +529,7 @@ export function VideoPlayer({
             {/* Cast icon + label */}
             <div className="flex items-center gap-1.5 text-xs text-white/60">
               <Cast className="h-3.5 w-3.5" />
-              <span>מנוגן בטלויזיה</span>
+              <span>מנוגן בטלויזיה{deviceName ? ` · ${deviceName}` : ""}</span>
             </div>
 
             {/* Channel name */}

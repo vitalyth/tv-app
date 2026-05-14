@@ -164,6 +164,7 @@ export function useGoogleCast({
     const [sessionState, setSessionState] = useState<CastSessionState>("disconnected")
     const [hasDvr, setHasDvr] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [deviceName, setDeviceName] = useState<string | null>(null)
     const lastLoadKeyRef = useRef<string | null>(null)
     const loadSequenceRef = useRef(0)
     const remotePlayerRef = useRef<cast.framework.RemotePlayer | null>(null)
@@ -351,6 +352,9 @@ export function useGoogleCast({
                     event.sessionState === castApi.framework.SessionState.SESSION_RESUMED
                 ) {
                     setSessionState("connected")
+                    const session = castApi.framework.CastContext.getInstance().getCurrentSession()
+                    const name = session?.getCastDevice?.()?.friendlyName ?? null
+                    setDeviceName(name)
                     if (channel?.id) saveCastChannelId(channel.id)
                     onCastStarted?.()
                     return
@@ -367,6 +371,7 @@ export function useGoogleCast({
                 ) {
                     setSessionState("disconnected")
                     setHasDvr(false)
+                    setDeviceName(null)
                     loadSequenceRef.current += 1
                     lastLoadKeyRef.current = null
                     clearMediaStatusListener()
@@ -414,6 +419,7 @@ export function useGoogleCast({
     }, [channel, loadLiveMedia, programName, sessionState, streamUrl])
 
     return {
+        deviceName,
         error,
         hasDvr,
         isAvailable,
