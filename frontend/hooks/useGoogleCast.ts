@@ -53,6 +53,14 @@ const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
 
+        if (
+            parsedUrl.hostname.endsWith("brightcove.com") &&
+            parsedUrl.pathname.endsWith("/playlist-hls.m3u8")
+        ) {
+            parsedUrl.pathname = parsedUrl.pathname.replace(/\/playlist-hls\.m3u8$/, "/playlist-dash.mpd")
+            return parsedUrl.toString()
+        }
+
         if (HLS_MEDIA_PLAYLIST_PATH.test(parsedUrl.pathname)) {
             parsedUrl.pathname = parsedUrl.pathname.replace(HLS_MEDIA_PLAYLIST_PATH, "/playlist-hls.m3u8")
             return parsedUrl.toString()
@@ -64,9 +72,35 @@ const getCastSourceUrl = (streamUrl: string) => {
     return streamUrl
 }
 
-const buildCastStreamUrl = (streamUrl: string, referer = "") => {
-    const castSourceUrl = getCastSourceUrl(streamUrl)
+const isBrightcoveStream = (streamUrl: string) => {
+    try {
+        return new URL(streamUrl).hostname.endsWith("brightcove.com")
+    } catch {
+        return false
+    }
+}
 
+const isDashStream = (streamUrl: string, channel?: Channel) => {
+    if (channel?.linkDetails?.manifest_type === "mpd") {
+        return true
+    }
+
+    try {
+        const pathname = new URL(streamUrl).pathname
+        return pathname.endsWith(".mpd") || pathname.includes("/livedash/")
+    } catch {
+        return streamUrl.includes("/livedash/") || streamUrl.endsWith(".mpd")
+    }
+}
+
+const getCastContentType = (castSourceUrl: string, channel: Channel) => {
+    return isDashStream(castSourceUrl, channel)
+        ? "application/dash+xml"
+        : "application/x-mpegURL"
+}
+
+const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, referer = "") => {
+    console.log("Original stream URL:", castSourceUrl);
     return resolveAbsoluteUrl(
         api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
@@ -115,6 +149,7 @@ export function useGoogleCast({
     const [hasDvr, setHasDvr] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const lastLoadKeyRef = useRef<string | null>(null)
+    const loadSequenceRef = useRef(0)
     const remotePlayerRef = useRef<cast.framework.RemotePlayer | null>(null)
     const remoteControllerRef = useRef<cast.framework.RemotePlayerController | null>(null)
     const mediaStatusUnsubscribeRef = useRef<(() => void) | null>(null)
@@ -131,12 +166,30 @@ export function useGoogleCast({
 
         if (!castApi || !chromeCast || !session) return false
 
+        const loadKey = `${channel.id}:${streamUrl}`
+        if (lastLoadKeyRef.current === loadKey) return true
+
+        const loadSequence = loadSequenceRef.current + 1
+        loadSequenceRef.current = loadSequence
+        lastLoadKeyRef.current = loadKey
+
+        const castSourceUrl = getCastSourceUrl(streamUrl)
+        const castContentType = getCastContentType(castSourceUrl, channel)
+
         const mediaInfo = new chromeCast.media.MediaInfo(
-            buildCastStreamUrl(streamUrl, channel.linkDetails?.referer),
-            channel.linkDetails?.manifest_type === "mpd"
-                ? "application/dash+xml"
-                : "application/x-mpegURL"
+            buildCastStreamUrl(castSourceUrl, castContentType, channel.linkDetails?.referer),
+            castContentType
         )
+
+        if (castContentType === "application/x-mpegURL" && isBrightcoveStream(streamUrl)) {
+            const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
+            const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
+
+            if (hlsSegmentFormat && hlsVideoSegmentFormat) {
+                mediaInfo.hlsSegmentFormat = hlsSegmentFormat
+                mediaInfo.hlsVideoSegmentFormat = hlsVideoSegmentFormat
+            }
+        }
 
         const imageUrl = buildCastImageUrl(channel.logo)
 
@@ -163,7 +216,10 @@ export function useGoogleCast({
         try {
             clearMediaStatusListener()
             await session.loadMedia(request)
-            lastLoadKeyRef.current = `${channel.id}:${streamUrl}`
+
+            if (loadSequenceRef.current !== loadSequence) {
+                return true
+            }
 
             const media = session.getMediaSession()
             setHasDvr(hasDvrWindow(media))
@@ -178,8 +234,15 @@ export function useGoogleCast({
             setError(null)
             return true
         } catch (err) {
-            console.error("Failed to load Cast media:", err)
-            setError("cast-load-failed")
+            if (loadSequenceRef.current === loadSequence) {
+                if (lastLoadKeyRef.current === loadKey) {
+                    lastLoadKeyRef.current = null
+                }
+                console.error("Failed to load Cast media:", err)
+                setError("cast-load-failed")
+            } else {
+                console.debug("Ignored stale Cast media load failure:", err)
+            }
             return false
         }
     }, [clearMediaStatusListener])
@@ -193,13 +256,12 @@ export function useGoogleCast({
 
         try {
             await castApi.framework.CastContext.getInstance().requestSession()
-            await loadLiveMedia({ channel, streamUrl, programName })
         } catch (err) {
             console.warn("Cast session request failed:", err)
             setError("cast-session-failed")
             setSessionState("disconnected")
         }
-    }, [channel, loadLiveMedia, programName, streamUrl])
+    }, [channel, streamUrl])
 
     const stopCasting = useCallback(async () => {
         const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
@@ -209,6 +271,7 @@ export function useGoogleCast({
         // This immediately returns the local UI from the Cast screen back to the player.
         setSessionState("disconnected")
         setHasDvr(false)
+        loadSequenceRef.current += 1
         lastLoadKeyRef.current = null
         clearMediaStatusListener()
         onCastEnded?.()
@@ -284,6 +347,7 @@ export function useGoogleCast({
                 ) {
                     setSessionState("disconnected")
                     setHasDvr(false)
+                    loadSequenceRef.current += 1
                     lastLoadKeyRef.current = null
                     clearMediaStatusListener()
                     onCastEnded?.()
@@ -321,7 +385,11 @@ export function useGoogleCast({
         const loadKey = `${channel.id}:${streamUrl}`
         if (lastLoadKeyRef.current === loadKey) return
 
-        loadLiveMedia({ channel, streamUrl, programName })
+        const loadTimer = window.setTimeout(() => {
+            loadLiveMedia({ channel, streamUrl, programName })
+        }, 100)
+
+        return () => window.clearTimeout(loadTimer)
     }, [channel, loadLiveMedia, programName, sessionState, streamUrl])
 
     return {
