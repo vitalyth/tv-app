@@ -9,6 +9,12 @@ class Addon:
         self.settings = {
             "favSortBy": "0",
             "channelNameFormat": 1,
+            "programNameFormat": "0",
+            "makoSortBy": "0",
+            "keshet_res": "auto",
+            "makoUsername": "",
+            "makoPassword": "",
+            "makoShowShortSubtitle": "false",
             "tvShortcut": 'true',
             "useIPTV": 'true',
         }

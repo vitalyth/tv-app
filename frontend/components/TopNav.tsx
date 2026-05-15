@@ -49,6 +49,14 @@ export default function TopNav() {
                     </NavigationMenuLink>
                 </NavigationMenuItem>
 
+                <NavigationMenuItem>
+                    <NavigationMenuLink asChild>
+                        <Link href="/vod" className={linkClass("/vod")}>
+                            VOD
+                        </Link>
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+
                 {/*
                 <NavigationMenuItem>
                     <NavigationMenuLink asChild>

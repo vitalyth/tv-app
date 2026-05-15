@@ -4,9 +4,13 @@ from constants import Color
 
 items = []
 _channel_stream = ContextVar("channel_stream", default=None)
+SORT_METHOD_LABEL = 1
 
-def addDirectoryItem(handle, url, listitem, isFolder):
+def addDirectoryItem(handle, url, listitem, isFolder, totalItems=None):
     items.append({'name': listitem.getLabel(), 'url': url})
+
+def addSortMethod(handle, sortMethod):
+    pass
 
 def endOfDirectory(handle):
     print("END DIRECTORY")
@@ -34,4 +38,3 @@ def getStream():
 
 def clearStream():
     _channel_stream.set(None)
-

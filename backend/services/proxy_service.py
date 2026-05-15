@@ -302,6 +302,18 @@ def _prepare_hls_media_playlist(text, cast=False):
     return "\n".join(output)
 
 
+def _looks_like_html_response(text, content_type):
+    clean_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+    sample = text.lstrip()[:200].lower()
+
+    return (
+        "html" in clean_content_type
+        or sample.startswith("<!doctype html")
+        or sample.startswith("<html")
+        or "<title>access denied</title>" in sample
+    )
+
+
 def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
@@ -390,6 +402,14 @@ def handle_proxy(request, url, referer, cast=False):
         or _url_path(url).endswith(".m3u8")
         or "#EXTM3U" in text
     )
+
+    if is_m3u8 and "#EXTM3U" not in text and _looks_like_html_response(text, content_type):
+        return Response(
+            content=r.content,
+            status_code=r.status_code,
+            media_type=content_type,
+            headers=_response_headers()
+        )
 
     if not is_m3u8:
         return Response(

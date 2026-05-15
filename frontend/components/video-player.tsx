@@ -260,8 +260,12 @@ export function VideoPlayer({
     setIsExpanded(false);
     showControls();
 
-    channelService
-      .getLiveChannel(channel)
+    const streamRequest =
+      channel.type === "vod"
+        ? channelService.getVodStream(channel)
+        : channelService.getLiveChannel(channel);
+
+    streamRequest
       .then((data: { stream: string }) => {
         if (!isMounted) return;
         setStreamUrl(data.stream);

@@ -1,6 +1,23 @@
 import os
+import tempfile
 
 def translatePath(path):
+    normalized = path.rstrip("/")
+
+    if normalized == "special://temp":
+        temp_path = os.path.join(tempfile.gettempdir(), "tv-app-kodi-temp")
+        os.makedirs(temp_path, exist_ok=True)
+        return temp_path
+
+    if normalized.startswith("special://temp/"):
+        temp_path = os.path.join(
+            tempfile.gettempdir(),
+            "tv-app-kodi-temp",
+            normalized.removeprefix("special://temp/"),
+        )
+        os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+        return temp_path
+
     return os.path.abspath(path)
 
 def exists(path):

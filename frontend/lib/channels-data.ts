@@ -29,6 +29,31 @@ export interface Channel {
   type: string
   programs: Program[]
   tvgID?: string
+  url?: string
+  moreData?: string
+}
+
+export interface VodChannel {
+  id: string
+  name: string
+  mode: number
+  logo: string
+  module: string
+  url: string
+  type: "vod"
+}
+
+export interface VodItem {
+  id: string
+  name: string
+  mode: number
+  logo: string
+  module: string
+  url: string
+  moreData: string
+  description: string
+  isFolder: boolean
+  isPlayable: boolean
 }
 
 export const categories = [
