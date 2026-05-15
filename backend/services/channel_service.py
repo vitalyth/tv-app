@@ -264,17 +264,30 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData=""):
 
         infos = infos or {}
         item_module = module or requested_module
+        item_description = clean_kodi_label(
+            infos.get("plot") or infos.get("Plot") or infos.get("description") or ""
+        )
+        item_title = clean_kodi_label(
+            infos.get("title") or infos.get("Title") or item_name
+        )
+        item_image = normalize_vod_image(item_iconimage)
         captured_items.append({
             "id": f"{item_module}:{item_mode}:{item_url}:{moreData}",
             "name": clean_kodi_label(item_name),
             "url": item_url,
             "mode": item_mode,
-            "logo": normalize_vod_image(item_iconimage),
+            "logo": item_image,
             "module": item_module,
             "moreData": moreData,
-            "description": clean_kodi_label(
-                infos.get("plot") or infos.get("Plot") or infos.get("description") or ""
-            ),
+            "description": item_description,
+            "title": item_title,
+            "plot": item_description,
+            "aired": clean_kodi_label(infos.get("aired") or infos.get("Aired") or ""),
+            "season": clean_kodi_label(infos.get("season") or infos.get("Season") or ""),
+            "episode": clean_kodi_label(infos.get("episode") or infos.get("Episode") or ""),
+            "episodeName": item_title,
+            "episodeDescription": item_description,
+            "episodeImage": item_image,
             "isFolder": isFolder,
             "isPlayable": isPlayable,
         })

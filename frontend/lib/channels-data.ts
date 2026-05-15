@@ -34,6 +34,19 @@ export interface Channel {
   playerLogo?: string
   playerTitle?: string
   playerSubtitle?: string
+  vodMeta?: VodPlaybackMeta
+}
+
+export interface VodPlaybackMeta {
+  programName: string
+  seasonName?: string
+  channelName: string
+  episodeName: string
+  episodeDescription?: string
+  programDescription?: string
+  programImage?: string
+  channelImage?: string
+  episodeImage?: string
 }
 
 export interface VodChannel {
@@ -55,6 +68,20 @@ export interface VodItem {
   url: string
   moreData: string
   description: string
+  title?: string
+  plot?: string
+  aired?: string
+  season?: string
+  episode?: string
+  programName?: string
+  seasonName?: string
+  channelName?: string
+  episodeName?: string
+  episodeDescription?: string
+  programDescription?: string
+  programImage?: string
+  channelImage?: string
+  episodeImage?: string
   isFolder: boolean
   isPlayable: boolean
 }

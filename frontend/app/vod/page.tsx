@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
-import { type Channel, type VodChannel, type VodItem } from "@/lib/channels-data";
+import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 import { useFloatingPlayer } from "@/context/floating-player-context";
 
 const VOD_PATH_PARAM = "path";
@@ -21,6 +21,7 @@ type VodNode = {
     url: string;
     logo: string;
     moreData: string;
+    description?: string;
 };
 
 const getImageSrc = (logo: string) => {
@@ -36,6 +37,7 @@ const toVodNode = (channel: VodChannel): VodNode => ({
     url: channel.url,
     logo: channel.logo,
     moreData: "",
+    description: "",
 });
 
 const itemToVodNode = (item: VodItem): VodNode => ({
@@ -45,37 +47,86 @@ const itemToVodNode = (item: VodItem): VodNode => ({
     url: item.url,
     logo: item.logo,
     moreData: item.moreData,
+    description: item.description,
 });
 
-const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
-    const vodSource = stack[0];
-    const programPath = stack.slice(1).map((node) => node.name).filter(Boolean);
-    const programName = programPath[0] || stack.at(-1)?.name || item.name;
-    const contextName = programPath.length > 1
-        ? programPath.slice(1).join(" / ")
-        : "";
-    const episodeName = contextName ? `${contextName} · ${item.name}` : item.name;
+const isVodGroupingNode = (name?: string) => {
+    const normalized = (name || "").trim();
+    return [
+        "כל התוכניות",
+        "כל התכניות",
+        "תוכניות",
+        "תכניות",
+        "סדרות",
+        "פרקים",
+        "VOD",
+    ].includes(normalized);
+};
+
+const isSeasonNode = (name?: string) => {
+    const normalized = (name || "").trim();
+    return /^עונה\b/.test(normalized) || /^Season\b/i.test(normalized);
+};
+
+const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
+    const channelNode = stack[0];
+    const contentNodes = stack.slice(1).filter((node) => !isVodGroupingNode(node.name));
+    const seasonNode = [...contentNodes].reverse().find((node) => isSeasonNode(node.name));
+    const programNode =
+        contentNodes.find((node) => !isSeasonNode(node.name)) ||
+        stack.find((node, index) => index > 0 && !isVodGroupingNode(node.name)) ||
+        stack[1] ||
+        stack[0];
+    const explicitSeason = item.seasonName || item.season || seasonNode?.name;
+    const seasonName = explicitSeason && explicitSeason !== programNode?.name
+        ? explicitSeason
+        : undefined;
 
     return {
-    id: item.id,
-    index: 0,
-    name: item.name,
-    logo: vodSource?.logo || item.logo,
-    category: "vod",
-    channelID: item.url,
-    module: item.module,
-    mode: item.mode,
-    linkDetails: {
-        link: item.url,
-    },
-    type: "vod",
-    programs: [],
-    tvgID: "",
-    url: item.url,
-    moreData: item.moreData,
-    playerLogo: vodSource?.logo || item.logo,
-    playerTitle: programName,
-    playerSubtitle: episodeName,
+        programName: item.programName || programNode?.name || item.name,
+        seasonName,
+        channelName: item.channelName || channelNode?.name || "VOD",
+        episodeName: item.episodeName || item.title || item.name,
+        episodeDescription: item.episodeDescription || item.description || item.plot,
+        programDescription: item.programDescription || programNode?.description,
+        programImage: item.programImage || programNode?.logo || item.logo,
+        channelImage: item.channelImage || channelNode?.logo || item.logo,
+        episodeImage: item.episodeImage || item.logo,
+    };
+};
+
+const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
+    const vodMeta = buildVodMeta(item, stack);
+    const titleParts = [
+        vodMeta.channelName,
+        vodMeta.programName,
+    ].filter(Boolean);
+    const subtitleParts = [
+        vodMeta.seasonName,
+        vodMeta.episodeName,
+    ].filter(Boolean);
+
+    return {
+        id: item.id,
+        index: 0,
+        name: vodMeta.channelName,
+        logo: vodMeta.channelImage || item.logo,
+        category: "vod",
+        channelID: item.url,
+        module: item.module,
+        mode: item.mode,
+        linkDetails: {
+            link: item.url,
+        },
+        type: "vod",
+        programs: [],
+        tvgID: "",
+        url: item.url,
+        moreData: item.moreData,
+        playerLogo: vodMeta.channelImage || item.logo,
+        playerTitle: titleParts.join(" · "),
+        playerSubtitle: subtitleParts.join(" · "),
+        vodMeta,
     };
 };
 
@@ -208,13 +259,11 @@ export default function VodPage() {
         return () => setCloseHandler(null);
     }, [setCloseHandler]);
 
-    const goBack = () => {
+    const goToPathLevel = (levelIndex: number) => {
+        const nextStack = navigationStack.slice(0, levelIndex + 1);
         setSearchQuery("");
-        setNavigationStack((stack) => {
-            const nextStack = stack.slice(0, -1);
-            updateUrl(nextStack);
-            return nextStack;
-        });
+        setNavigationStack(nextStack);
+        updateUrl(nextStack);
     };
 
     const openChannel = (channel: VodChannel) => {
@@ -248,22 +297,36 @@ export default function VodPage() {
             <main className="flex-1 min-h-0 flex flex-col px-4 py-6 max-w-7xl mx-auto w-full overflow-hidden">
                 <div className="mb-6 shrink-0 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-start gap-3">
-                        {currentNode && (
-                            <button
-                                onClick={goBack}
-                                className="mt-1 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
-                                aria-label="חזרה"
-                            >
-                                <ChevronLeft className="h-5 w-5" />
-                            </button>
-                        )}
                         <div>
-                        <h2 className="text-2xl font-bold text-foreground">
-                            {currentNode ? currentNode.name : "ערוצי VOD בעידן פלוס"}
-                        </h2>
+                        <div className="flex flex-wrap items-center gap-1 text-2xl font-bold text-foreground">
+                            {currentNode ? (
+                                navigationStack.map((node, index) => (
+                                    <span key={`${node.module}:${node.mode}:${node.url}:${index}`} className="inline-flex items-center gap-1">
+                                        {index > 0 && (
+                                            <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+                                        )}
+                                        {index === navigationStack.length - 1 ? (
+                                            <span className="rounded bg-secondary px-1 text-primary">
+                                                {node.name}
+                                            </span>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => goToPathLevel(index)}
+                                                className="rounded px-1 text-right text-muted-foreground transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                                            >
+                                                {node.name}
+                                            </button>
+                                        )}
+                                    </span>
+                                ))
+                            ) : (
+                                <h2>ערוצי VOD בעידן פלוס</h2>
+                            )}
+                        </div>
                         <p className="mt-1 text-sm text-muted-foreground">
                             {currentNode
-                                ? "תוכניות, קטגוריות ופריטים מתוך מקור ה-VOD"
+                                ? currentNode.name
                                 : "כל המקורות שהתוסף של IdanPlus מציג תחת VOD"}
                         </p>
                         </div>

@@ -694,8 +694,16 @@ export default function CustomPlayerControls({
                   </div>
 
                   <div className="min-w-0 text-right">
-                    <h3 className="truncate text-sm font-semibold text-white sm:text-base">
-                      {channel.playerTitle || channel.name}
+                    <h3 className="min-w-0 truncate text-sm font-semibold text-white sm:text-base">
+                      {channel.type === "vod" && channel.vodMeta ? (
+                        <>
+                          <span className="text-white/75">{channel.vodMeta.channelName}</span>
+                          <span className="px-1 text-white/45">·</span>
+                          <span>{channel.vodMeta.programName}</span>
+                        </>
+                      ) : (
+                        channel.playerTitle || channel.name
+                      )}
                     </h3>
 
                     <div className="flex min-w-0 items-center gap-1.5 text-xs text-white/90">
@@ -707,7 +715,11 @@ export default function CustomPlayerControls({
                       )}
 
                       <span className="truncate">
-                        {channel.playerSubtitle ? (
+                        {channel.type === "vod" && channel.vodMeta ? (
+                          [channel.vodMeta.seasonName, channel.vodMeta.episodeName]
+                            .filter(Boolean)
+                            .join(" · ")
+                        ) : channel.playerSubtitle ? (
                           channel.playerSubtitle
                         ) : (
                           <ProgramDisplay

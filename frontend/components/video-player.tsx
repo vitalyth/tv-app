@@ -21,6 +21,12 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
 
 const OVERLAY_HIDE_DELAY = 3000; // ms
 
+const getPlayerImageSrc = (logo?: string) => {
+  if (!logo) return "/ch/vod.jpg";
+  if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
+  return `/ch/${logo}`;
+};
+
 interface VideoPlayerProps {
   channel: Channel | null;
   onClose: () => void;
@@ -56,6 +62,18 @@ export function VideoPlayer({
 
   const { isMobileDevice, isPhoneLike, isTouchDevice } = useMobileDevice();
   const currentProgram = useCurrentProgram(channel?.programs);
+  const loadingImage =
+    channel?.type === "vod"
+      ? channel.vodMeta?.programImage || channel.vodMeta?.episodeImage || channel.playerLogo || channel.logo
+      : channel?.logo;
+  const loadingTitle =
+    channel?.type === "vod"
+      ? channel.vodMeta?.episodeName || channel.playerSubtitle || channel.name
+      : channel?.name;
+  const loadingMessage =
+    channel?.type === "vod"
+      ? "טוען את הפרק..."
+      : "טוען את הערוץ...";
 
   // Clear any pending hide timer
   const clearOverlayTimer = useCallback(() => {
@@ -146,6 +164,20 @@ export function VideoPlayer({
       console.warn("Fullscreen failed:", error);
     }
   }, [isExpanded, showControls]);
+
+  const handlePlayerDoubleClick = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (document.fullscreenElement === containerRef.current) return;
+
+    if (isExpanded) {
+      toggleFullscreen();
+      return;
+    }
+
+    toggleExpanded();
+  }, [isExpanded, toggleExpanded, toggleFullscreen]);
 
   const pauseLocalPlayerForCasting = useCallback((player: any) => {
     if (!player || player.isDisposed?.()) return;
@@ -506,6 +538,7 @@ export function VideoPlayer({
       <div
         className="relative w-full h-full bg-black"
         onClick={toggleControls}
+        onDoubleClick={handlePlayerDoubleClick}
         dir="ltr"
       >
         <div
@@ -524,8 +557,8 @@ export function VideoPlayer({
             {/* Channel logo */}
             <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white/10 p-2.5 sm:h-20 sm:w-20">
               <img
-                src={`/ch/${channel.logo}`}
-                alt={channel.name}
+                src={getPlayerImageSrc(channel.playerLogo || channel.logo)}
+                alt={channel.playerTitle || channel.name}
                 className="max-h-full max-w-full object-contain"
               />
             </div>
@@ -538,19 +571,25 @@ export function VideoPlayer({
 
             {/* Channel name */}
             <p className="max-w-[200px] truncate text-center text-base font-semibold sm:text-lg">
-              {channel.name}
+              {channel.playerTitle || channel.name}
             </p>
 
             {/* Program */}
             <div className="flex items-center gap-1.5 text-xs text-white/60">
-              <span className="relative flex h-1.5 w-1.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
-              </span>
+              {channel.type !== "vod" && (
+                <span className="relative flex h-1.5 w-1.5 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
+                </span>
+              )}
               <span className="truncate max-w-[180px]">
-                <ProgramDisplay
-                  program={currentProgram || channel.programs?.[0]}
-                />
+                {channel.playerSubtitle ? (
+                  channel.playerSubtitle
+                ) : (
+                  <ProgramDisplay
+                    program={currentProgram || channel.programs?.[0]}
+                  />
+                )}
               </span>
             </div>
 
@@ -611,9 +650,19 @@ export function VideoPlayer({
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <div className="text-center space-y-4">
             <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto animate-pulse overflow-hidden">
-              <img src={`/ch/${channel.logo}`} alt={channel.name} />
+              <img
+                src={getPlayerImageSrc(loadingImage)}
+                alt={loadingTitle}
+              />
             </div>
-            <p className="text-white">טוען את הערוץ...</p>
+            <div className="space-y-1">
+              <p className="text-white">{loadingMessage}</p>
+              {channel.type === "vod" && loadingTitle && (
+                <p className="max-w-56 truncate text-sm text-white/70">
+                  {loadingTitle}
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}
