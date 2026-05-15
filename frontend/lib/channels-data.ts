@@ -31,6 +31,9 @@ export interface Channel {
   tvgID?: string
   url?: string
   moreData?: string
+  playerLogo?: string
+  playerTitle?: string
+  playerSubtitle?: string
 }
 
 export interface VodChannel {

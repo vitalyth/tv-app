@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import '@/styles/globals.css'
 import 'video.js/dist/video-js.css'
+import SiteShell from '@/components/site-shell'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
@@ -50,7 +51,7 @@ export default function RootLayout({
   return (
     <html lang="he" dir="rtl">
       <body suppressHydrationWarning className="font-sans antialiased">
-        {children}
+        <SiteShell>{children}</SiteShell>
         {process.env.NEXT_PUBLIC_VERCEL === "1" && <Analytics />}
       </body>
     </html>

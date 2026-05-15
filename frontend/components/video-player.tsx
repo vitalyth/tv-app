@@ -597,7 +597,7 @@ export function VideoPlayer({
               showSeek: true,
               showTime: true,
               showVolume: true,
-              showLive: true,
+              showLive: channel.type !== "vod",
               showQuality: true,
               showCast: false,
               showExpand: true,
