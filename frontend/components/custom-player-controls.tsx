@@ -19,6 +19,12 @@ import ProgramDisplay from "@/components/program-display";
 
 const PLAYER_VOLUME_STORAGE_KEY = "tv-player-volume-state";
 
+const getPlayerImageSrc = (logo?: string) => {
+  if (!logo) return "/ch/vod.jpg";
+  if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
+  return `/ch/${logo}`;
+};
+
 type TopControlsVisibility = {
   showChannelInfo?: boolean;
   showCast?: boolean;
@@ -652,17 +658,19 @@ export default function CustomPlayerControls({
                   </Button>
                 )}
 
-                {topOptions.showCast && onCast && (isCastAvailable || isCasting) && (
+                {topOptions.showCast && onCast && (canCast || isCastAvailable || isCasting) && (
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={onCast}
-                    disabled={isCastConnecting || !canCast}
+                    disabled={isCastConnecting || !canCast || (!isCastAvailable && !isCasting)}
                     className={`h-9 w-9 text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none ${isCasting ? "text-primary" : ""
                       }`}
                     title={
                       !canCast
                         ? "Cast is not ready"
+                        : !isCastAvailable && !isCasting
+                          ? "Cast device not available"
                         : isCasting
                           ? "Stop casting"
                           : "Cast"
@@ -679,24 +687,45 @@ export default function CustomPlayerControls({
                   dir="rtl"
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/20 sm:h-10 sm:w-10">
-                    <img src={`/ch/${channel.logo}`} alt={channel.name} />
+                    <img
+                      src={getPlayerImageSrc(channel.playerLogo || channel.logo)}
+                      alt={channel.playerTitle || channel.name}
+                    />
                   </div>
 
                   <div className="min-w-0 text-right">
-                    <h3 className="truncate text-sm font-semibold text-white sm:text-base">
-                      {channel.name}
+                    <h3 className="min-w-0 truncate text-sm font-semibold text-white sm:text-base">
+                      {channel.type === "vod" && channel.vodMeta ? (
+                        <>
+                          <span className="text-white/75">{channel.vodMeta.channelName}</span>
+                          <span className="px-1 text-white/45">·</span>
+                          <span>{channel.vodMeta.programName}</span>
+                        </>
+                      ) : (
+                        channel.playerTitle || channel.name
+                      )}
                     </h3>
 
                     <div className="flex min-w-0 items-center gap-1.5 text-xs text-white/90">
-                      <span className="relative flex h-2 w-2 shrink-0">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-                      </span>
+                      {channel.type !== "vod" && (
+                        <span className="relative flex h-2 w-2 shrink-0">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                        </span>
+                      )}
 
                       <span className="truncate">
-                        <ProgramDisplay
-                          program={currentProgram || channel.programs?.[0]}
-                        />
+                        {channel.type === "vod" && channel.vodMeta ? (
+                          [channel.vodMeta.seasonName, channel.vodMeta.episodeName]
+                            .filter(Boolean)
+                            .join(" · ")
+                        ) : channel.playerSubtitle ? (
+                          channel.playerSubtitle
+                        ) : (
+                          <ProgramDisplay
+                            program={currentProgram || channel.programs?.[0]}
+                          />
+                        )}
                       </span>
                     </div>
                   </div>
@@ -1038,17 +1067,19 @@ export default function CustomPlayerControls({
               </div>
             )}
 
-            {bottomOptions.showCast && onCast && (isCastAvailable || isCasting) && (
+            {bottomOptions.showCast && onCast && (canCast || isCastAvailable || isCasting) && (
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={onCast}
-                disabled={isCastConnecting || !canCast}
+                disabled={isCastConnecting || !canCast || (!isCastAvailable && !isCasting)}
                 className={`text-white hover:bg-white/20 disabled:opacity-40 disabled:pointer-events-none h-8 w-8 sm:h-9 sm:w-9 shrink-0 ${isCasting ? "text-primary" : ""
                   }`}
                 title={
                   !canCast
                     ? "Cast is not ready"
+                    : !isCastAvailable && !isCasting
+                      ? "Cast device not available"
                     : isCasting
                       ? "Stop casting"
                       : "Cast"

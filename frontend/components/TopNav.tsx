@@ -43,8 +43,8 @@ export default function TopNav() {
 
                 <NavigationMenuItem>
                     <NavigationMenuLink asChild>
-                        <Link href="/live" className={linkClass("/live")}>
-                            שידורים חיים
+                        <Link href="/vod" className={linkClass("/vod")}>
+                            VOD
                         </Link>
                     </NavigationMenuLink>
                 </NavigationMenuItem>

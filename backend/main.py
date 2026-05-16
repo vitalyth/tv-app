@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from services.channel_service import get_live_channels
-from services.stream_service import get_stream
+from services.channel_service import get_live_channels, get_vod_channels, get_vod_items
+from services.stream_service import get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy
 from services.epg_service_ext import get_epg, EPGService
 from services.playlist_service import generate_playlist
@@ -73,9 +73,28 @@ def get_version():
 def live_channels():
     return get_live_channels()
 
+@app.get('/vod_channels')
+def vod_channels():
+    return get_vod_channels()
+
+@app.get('/vod_items')
+def vod_items(
+    module: str = Query(..., min_length=1, max_length=50, pattern="^[a-zA-Z0-9_-]+$"),
+    mode: int = Query(...),
+    url: str = "",
+    name: str = "",
+    iconimage: str = "",
+    moreData: str = "",
+):
+    return get_vod_items(module, mode, url, name, iconimage, moreData)
+
 @app.post('/live_channel')
 def live_channel(channel: Channel):
     return {"stream": get_stream(channel)}
+
+@app.post('/vod_stream')
+def vod_stream(item: dict):
+    return {"stream": get_vod_stream(item)}
 
 @app.get("/stream")
 def stream(request: Request, channel_id: str = Query(..., min_length=1, max_length=50, regex="^[a-zA-Z0-9_-]+$")):

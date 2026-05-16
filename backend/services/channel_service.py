@@ -1,6 +1,112 @@
+import importlib
+import os
+import re
+
 from plugin_video_idanplus.resources import main as idan_main
 from services.epg_service import get_now_epg
 from models.schemas import Channel
+
+IDANPLUS_VOD_CHANNELS = [
+    {
+        "id": "vod_kan11",
+        "name": "כאן 11",
+        "mode": 0,
+        "logo": "kan.jpg",
+        "module": "kan",
+        "url": "",
+        "type": "vod",
+    },
+    {
+        "id": "vod_keshet12",
+        "name": "קשת 12",
+        "mode": 0,
+        "logo": "mako.png",
+        "module": "keshet",
+        "url": "",
+        "type": "vod",
+    },
+    {
+        "id": "vod_reshet13",
+        "name": "רשת 13",
+        "mode": -1,
+        "logo": "13.jpg",
+        "module": "reshet",
+        "url": "",
+        "type": "vod",
+    },
+    {
+        "id": "vod_14tv",
+        "name": "עכשיו 14",
+        "mode": -1,
+        "logo": "14tv.png",
+        "module": "14tv",
+        "url": "",
+        "type": "vod",
+    },
+    {
+        "id": "vod_kankids23",
+        "name": "כאן חינוכית 23",
+        "mode": 5,
+        "logo": "23tv.jpg",
+        "module": "kan",
+        "url": "https://www.kankids.org.il",
+        "type": "vod",
+    },
+    {
+        "id": "vod_kan_archive",
+        "name": "כאן - ארכיון",
+        "mode": 41,
+        "logo": "kan.jpg",
+        "module": "kan",
+        "url": "https://www.kan.org.il/lobby/archive/",
+        "type": "vod",
+    },
+    {
+        "id": "vod_24",
+        "name": "ערוץ 24 החדש",
+        "mode": 1,
+        "logo": "24telad.png",
+        "module": "keshet",
+        "url": "https://www.mako.co.il/mako-vod-index?filter=provider&vcmId=3377c13070733210VgnVCM2000002a0c10acRCRD",
+        "type": "vod",
+    },
+    {
+        "id": "vod_i24news",
+        "name": "i24news",
+        "mode": -1,
+        "logo": "i24news.png",
+        "module": "i24news",
+        "url": "",
+        "type": "vod",
+    },
+    {
+        "id": "vod_9tv",
+        "name": "ערוץ 9",
+        "mode": 0,
+        "logo": "9tv.png",
+        "module": "9tv",
+        "url": "",
+        "type": "vod",
+    },
+    {
+        "id": "vod_sport5",
+        "name": "ספורט 5",
+        "mode": -1,
+        "logo": "Sport5.png",
+        "module": "sport5",
+        "url": "",
+        "type": "vod",
+    },
+    {
+        "id": "vod_sport1",
+        "name": "ספורט 1",
+        "mode": -1,
+        "logo": "sport1.jpg",
+        "module": "sport1",
+        "url": "",
+        "type": "vod",
+    },
+]
 
 CHANNELS_BY_CATEGORY = {
     "news": [
@@ -109,3 +215,95 @@ def get_live_channels():
         results.append(ch)
 
     return results
+
+def get_vod_channels():
+    return IDANPLUS_VOD_CHANNELS
+
+KODI_TAG_RE = re.compile(r"\[/?(?:B|I|COLOR[^\]]*)\]", re.IGNORECASE)
+
+def clean_kodi_label(value):
+    if value is None:
+        return ""
+    return KODI_TAG_RE.sub("", str(value)).replace("[CR]", "\n").strip()
+
+def normalize_vod_image(iconimage):
+    image = clean_kodi_label(iconimage)
+    if not image:
+        return ""
+    if image.startswith("http://") or image.startswith("https://"):
+        return image
+    basename = os.path.basename(image)
+    return basename or image
+
+def get_vod_items(module, mode, url="", name="", iconimage="", moreData=""):
+    addon_common = importlib.import_module("resources.lib.common")
+    module_script = importlib.import_module(f"resources.lib.{module}")
+    requested_module = module
+    captured_items = []
+    original_add_dir = addon_common.addDir
+
+    def capture_add_dir(
+        item_name,
+        item_url,
+        item_mode,
+        item_iconimage="DefaultFolder.png",
+        infos=None,
+        contextMenu=None,
+        module="",
+        moreData="",
+        totalItems=None,
+        isFolder=True,
+        isPlayable=False,
+        addFav=True,
+        urlParamsData={},
+    ):
+        if item_url == "toggleSortingMethod":
+            return
+        if item_mode == 99 and not isFolder and not isPlayable:
+            return
+
+        infos = infos or {}
+        item_module = module or requested_module
+        item_description = clean_kodi_label(
+            infos.get("plot") or infos.get("Plot") or infos.get("description") or ""
+        )
+        item_title = clean_kodi_label(
+            infos.get("title") or infos.get("Title") or item_name
+        )
+        item_image = normalize_vod_image(item_iconimage)
+        captured_items.append({
+            "id": f"{item_module}:{item_mode}:{item_url}:{moreData}",
+            "name": clean_kodi_label(item_name),
+            "url": item_url,
+            "mode": item_mode,
+            "logo": item_image,
+            "module": item_module,
+            "moreData": moreData,
+            "description": item_description,
+            "title": item_title,
+            "plot": item_description,
+            "aired": clean_kodi_label(infos.get("aired") or infos.get("Aired") or ""),
+            "season": clean_kodi_label(infos.get("season") or infos.get("Season") or ""),
+            "episode": clean_kodi_label(infos.get("episode") or infos.get("Episode") or ""),
+            "episodeName": item_title,
+            "episodeDescription": item_description,
+            "episodeImage": item_image,
+            "isFolder": isFolder,
+            "isPlayable": isPlayable,
+        })
+
+    addon_common.addDir = capture_add_dir
+    try:
+        module_script.Run(
+            clean_kodi_label(name),
+            url or "",
+            int(mode),
+            iconimage or "",
+            moreData or "",
+        )
+    except Exception as ex:
+        print(f"VOD items failed for module={requested_module} mode={mode} url={url}: {ex}")
+    finally:
+        addon_common.addDir = original_add_dir
+
+    return captured_items

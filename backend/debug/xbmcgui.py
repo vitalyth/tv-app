@@ -98,3 +98,10 @@ class ListItem:
 
         #return selected
         """
+
+NOTIFICATION_WARNING = "warning"
+NOTIFICATION_ERROR = "error"
+
+class Dialog:
+    def notification(self, heading, message, icon=None, time=0):
+        print(f"NOTIFICATION: {heading} - {message}")
