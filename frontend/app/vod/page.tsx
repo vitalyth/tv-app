@@ -33,6 +33,7 @@ const saveRecentItem = (item: VodItem, stack: VodNode[]) => {
         const existing = loadRecentItems().filter((r) => r.item.id !== item.id);
         const next: RecentItem[] = [{ item, stack, watchedAt: Date.now() }, ...existing].slice(0, VOD_RECENT_MAX);
         localStorage.setItem(VOD_RECENT_KEY, JSON.stringify(next));
+        window.dispatchEvent(new Event("vod-recently-watched-updated"));
     } catch {}
 };
 

@@ -57,6 +57,33 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     );
 
     const play = useCallback((channel: Channel, options?: PlayOptions) => {
+        // Track recently viewed channel
+        if (typeof window !== "undefined") {
+            try {
+                const RECENTLY_VIEWED_KEY = "recently_viewed_channels";
+                const stored = localStorage.getItem(RECENTLY_VIEWED_KEY);
+                let items: Array<{ id: string; timestamp: number }> = [];
+
+                if (stored) {
+                    items = JSON.parse(stored);
+                }
+
+                // Remove if already exists
+                items = items.filter((item) => item.id !== channel.id);
+
+                // Add to front
+                items.unshift({ id: channel.id, timestamp: Date.now() });
+
+                // Keep only top 10
+                items = items.slice(0, 10);
+
+                localStorage.setItem(RECENTLY_VIEWED_KEY, JSON.stringify(items));
+                window.dispatchEvent(new Event("recently-viewed-updated"));
+            } catch (e) {
+                console.error("Failed to track recently viewed channel:", e);
+            }
+        }
+
         closeHandlerRef.current = options?.onClose ?? null;
         setCurrentChannel(channel);
         setIsFullscreen(options?.fullscreen ?? isMobileLandscape);
