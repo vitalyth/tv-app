@@ -593,15 +593,15 @@ export default function VodPage() {
                                             key={item.id}
                                             onClick={() => openItem(item)}
                                             disabled={!item.isFolder && !item.isPlayable}
-                                            className="group overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary disabled:cursor-default disabled:opacity-70 disabled:hover:border-border disabled:hover:bg-card focus:outline-none focus:ring-2 focus:ring-primary"
+                                            className="group flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary disabled:cursor-default disabled:opacity-70 disabled:hover:border-border disabled:hover:bg-card focus:outline-none focus:ring-2 focus:ring-primary"
                                         >
                                             <div className="relative aspect-video overflow-hidden bg-background">
                                                 <img
                                                     src={getImageSrc(item.logo)}
                                                     alt=""
-                                                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                                    className="h-full w-full object-cover object-[center_20%] transition-transform duration-300 group-hover:scale-105"
                                                 />
-                                                <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
+                                                <div className="absolute inset-0 bg-linear-to-t from-black/55 via-transparent to-transparent" />
 
                                                 <div className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-xs text-white">
                                                     {item.isFolder ? (
