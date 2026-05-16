@@ -35,6 +35,14 @@ export default function TopNav() {
 
                 <NavigationMenuItem>
                     <NavigationMenuLink asChild>
+                        <Link href="/" className={linkClass("/")}>
+                            דף הבית
+                        </Link>
+                    </NavigationMenuLink>
+                </NavigationMenuItem>
+
+                <NavigationMenuItem>
+                    <NavigationMenuLink asChild>
                         <Link href="/guide" className={linkClass("/guide")}>
                             מדריך שידורים
                         </Link>
