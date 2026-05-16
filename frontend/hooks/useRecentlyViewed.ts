@@ -14,29 +14,42 @@ interface RecentlyViewedItem {
 export function useRecentlyViewed(channels: Channel[]) {
   const [recentlyViewed, setRecentlyViewed] = useState<Channel[]>([]);
 
-  // Load from localStorage on mount
-  useEffect(() => {
+  const loadRecentlyViewed = () => {
     if (typeof window === "undefined") return;
 
     const stored = localStorage.getItem(RECENTLY_VIEWED_KEY);
-    if (stored) {
-      try {
-        const items: RecentlyViewedItem[] = JSON.parse(stored);
-        // Filter to only channels that still exist, sort by timestamp desc
-        const validItems = items
-          .filter((item) => channels.find((ch) => ch.id === item.id))
-          .sort((a, b) => b.timestamp - a.timestamp)
-          .slice(0, MAX_RECENTLY_VIEWED);
-
-        const viewed = validItems
-          .map((item) => channels.find((ch) => ch.id === item.id)!)
-          .filter(Boolean);
-
-        setRecentlyViewed(viewed);
-      } catch (e) {
-        console.error("Failed to load recently viewed channels:", e);
-      }
+    if (!stored) {
+      setRecentlyViewed([]);
+      return;
     }
+
+    try {
+      const items: RecentlyViewedItem[] = JSON.parse(stored);
+      const validItems = items
+        .filter((item) => channels.find((ch) => ch.id === item.id))
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, MAX_RECENTLY_VIEWED);
+
+      const viewed = validItems
+        .map((item) => channels.find((ch) => ch.id === item.id)!)
+        .filter(Boolean);
+
+      setRecentlyViewed(viewed);
+    } catch (e) {
+      console.error("Failed to load recently viewed channels:", e);
+      setRecentlyViewed([]);
+    }
+  };
+
+  useEffect(() => {
+    loadRecentlyViewed();
+
+    if (typeof window === "undefined") return;
+
+    window.addEventListener("recently-viewed-updated", loadRecentlyViewed);
+    return () => {
+      window.removeEventListener("recently-viewed-updated", loadRecentlyViewed);
+    };
   }, [channels]);
 
   const addToRecentlyViewed = (channel: Channel) => {

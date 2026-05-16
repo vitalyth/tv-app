@@ -1,17 +1,103 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { useChannelsContext } from "@/context/channels-context";
-import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
+import useSWR from "swr";
+import { channelService } from "@/lib/services/channel-service";
+import { useVodRecentlyWatched } from "@/hooks/useVodRecentlyWatched";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-import Header from "@/components/Header";
 import { ChannelCard } from "@/components/channel-card";
-import { Channel, Program } from "@/lib/channels-data";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "lucide-react";
+import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 
-// Helper component for featured channel card
+interface VodNode {
+  name: string;
+  module: string;
+  mode: number;
+  url: string;
+  logo: string;
+  moreData: string;
+  description?: string;
+}
+
+const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
+  const channelNode = stack[0];
+  const contentNodes = stack.slice(1).filter((node) => node.name && node.name.trim().length > 0);
+  const seasonNode = [...contentNodes].reverse().find((node) => /^(עונה\b|Season\b)/.test(node.name));
+  const programNode =
+    contentNodes.find((node) => !/^(עונה\b|Season\b)/.test(node.name)) ||
+    stack.find((node, index) => index > 0 && node.name && node.name.trim().length > 0) ||
+    stack[1] ||
+    stack[0];
+
+  const explicitSeason = item.seasonName || item.season || seasonNode?.name;
+  const seasonName = explicitSeason && explicitSeason !== programNode?.name ? explicitSeason : undefined;
+
+  return {
+    programName: item.programName || programNode?.name || item.name,
+    seasonName,
+    channelName: item.channelName || channelNode?.name || "VOD",
+    episodeName: item.episodeName || item.title || item.name,
+    episodeDescription: item.episodeDescription || item.description || item.plot,
+    programDescription: item.programDescription || programNode?.description,
+    programImage: item.programImage || programNode?.logo || item.logo,
+    channelImage: item.channelImage || channelNode?.logo || item.logo,
+    episodeImage: item.episodeImage || item.logo,
+  };
+};
+
+const vodItemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
+  const vodMeta = buildVodMeta(item, stack);
+  const titleParts = [vodMeta.channelName, vodMeta.programName].filter(Boolean);
+  const subtitleParts = [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean);
+
+  return {
+    id: item.id,
+    index: 0,
+    name: vodMeta.channelName,
+    logo: vodMeta.channelImage || item.logo,
+    category: "vod",
+    channelID: item.url,
+    module: item.module,
+    mode: item.mode,
+    linkDetails: {
+      link: item.url,
+    },
+    type: "vod",
+    programs: [],
+    tvgID: "",
+    url: item.url,
+    moreData: item.moreData,
+    playerLogo: vodMeta.channelImage || item.logo,
+    playerTitle: titleParts.join(" · "),
+    playerSubtitle: subtitleParts.join(" · "),
+    vodMeta,
+  };
+};
+
+const toVodChannel = (vodChannel: VodChannel): Channel => ({
+  id: vodChannel.id,
+  index: 0,
+  name: vodChannel.name,
+  logo: vodChannel.logo,
+  category: "vod",
+  channelID: vodChannel.url,
+  module: vodChannel.module,
+  mode: vodChannel.mode,
+  linkDetails: {
+    link: vodChannel.url,
+  },
+  type: "vod",
+  programs: [],
+  tvgID: "",
+  url: vodChannel.url,
+  moreData: "",
+  playerLogo: vodChannel.logo,
+  playerTitle: vodChannel.name,
+  playerSubtitle: vodChannel.module,
+});
+
 const FeaturedChannelCard = ({
   channel,
   onPlay,
@@ -19,31 +105,16 @@ const FeaturedChannelCard = ({
   channel: Channel;
   onPlay: () => void;
 }) => {
-  // Get the current program based on system time
-  const getCurrentProgram = (): Program | undefined => {
-    if (!channel.programs || channel.programs.length === 0) {
-      return undefined;
-    }
-
-    const now = Date.now() / 1000;
-    return channel.programs.find(
-      (prog) => prog.start <= now && prog.end >= now
-    );
-  };
-
-  const currentProgram = getCurrentProgram();
+  const subtitle = channel.playerSubtitle || channel.module || "VOD";
 
   return (
     <div
       className="group relative rounded-2xl overflow-hidden bg-gradient-to-br from-primary/20 to-secondary/20 border-2 border-primary/30 hover:border-primary/60 transition-all duration-300 cursor-pointer"
       onClick={onPlay}
     >
-      {/* Background image or gradient */}
       <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80" />
 
-      {/* Content */}
       <div className="relative p-6 h-72 flex flex-col justify-end">
-        {/* Channel logo */}
         <div className="mb-4">
           <div className="w-24 h-24 rounded-xl bg-card/80 border border-border flex items-center justify-center overflow-hidden">
             <img
@@ -54,57 +125,52 @@ const FeaturedChannelCard = ({
           </div>
         </div>
 
-        {/* Channel name */}
-        <h3 className="text-2xl font-bold text-white mb-2">
-          {channel.name}
-        </h3>
+        <h3 className="text-2xl font-bold text-white mb-2">{channel.name}</h3>
+        <p className="text-sm text-primary font-semibold mb-3">{subtitle}</p>
 
-        {/* Current program */}
-        {currentProgram && (
+        {channel.playerTitle && (
           <div className="mb-4 space-y-1">
-            <p className="text-sm text-primary font-semibold">
-              עכשיו משודר
-            </p>
-            <p className="text-lg font-semibold text-white line-clamp-2">
-              {currentProgram.name}
-            </p>
-            {currentProgram.description && (
-              <p className="text-sm text-gray-300 line-clamp-2">
-                {currentProgram.description}
-              </p>
+            <p className="text-sm text-gray-300 line-clamp-2">{channel.playerTitle}</p>
+            {channel.playerSubtitle && (
+              <p className="text-sm text-gray-400 line-clamp-2">{channel.playerSubtitle}</p>
             )}
           </div>
         )}
 
-        {/* Play button */}
         <Button className="w-full gap-2 bg-primary hover:bg-primary/90">
           <span>▶</span>
           <span>צפה עכשיו</span>
         </Button>
       </div>
 
-      {/* Hover overlay */}
       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity" />
     </div>
   );
 };
 
 const LandingPage = () => {
-  const { channels, isLoading } = useChannelsContext();
-  const { recentlyViewed } = useRecentlyViewed(channels);
-  const { play } = useFloatingPlayer();
   const router = useRouter();
-  const [categories, setCategories] = useState<string[]>([]);
-
-  // Extract unique categories
-  useEffect(() => {
-    if (channels.length > 0) {
-      const uniqueCategories = Array.from(
-        new Set(channels.map((ch) => ch.category))
-      ).filter(Boolean);
-      setCategories(uniqueCategories);
+  const { play } = useFloatingPlayer();
+  const { recentItems } = useVodRecentlyWatched();
+  const { data: vodChannels = [], isLoading } = useSWR(
+    "vod-home-channels",
+    () => channelService.getVodChannels(),
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 60000,
     }
+  );
+
+  const channels = useMemo(() => vodChannels.map(toVodChannel), [vodChannels]);
+  const featuredChannels = useMemo(() => channels.slice(0, 3), [channels]);
+  const trendingChannels = useMemo(() => {
+    const shuffled = [...channels].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 6);
   }, [channels]);
+  const recentVodChannels = useMemo(
+    () => recentItems.map(({ item, stack }) => vodItemToChannel(item, stack)),
+    [recentItems]
+  );
 
   const handleChannelClick = useCallback(
     (channel: Channel) => {
@@ -113,37 +179,12 @@ const LandingPage = () => {
     [play]
   );
 
-  const handleSeeAllLive = () => {
-    router.push("/live");
+  const handleSeeAllVod = () => {
+    router.push("/vod");
   };
-
-  const handleSeeAllGuide = () => {
-    router.push("/guide");
-  };
-
-  const handleCategoryClick = (category: string) => {
-    router.push(`/live?category=${encodeURIComponent(category)}`);
-  };
-
-  // Get featured programs (first 3 channels with interesting programs)
-  const featuredChannels = useMemo(
-    () =>
-      channels
-        .filter((ch) => ch.programs && ch.programs.length > 0)
-        .slice(0, 3),
-    [channels]
-  );
-
-  // Get trending (random selection of channels)
-  const trendingChannels = useMemo(() => {
-    const shuffled = [...channels].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, 6);
-  }, [channels]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <Header title="דף הבית" />
-
       <main className="flex-1 w-full">
         {isLoading ? (
           <div className="flex items-center justify-center h-96">
@@ -151,13 +192,29 @@ const LandingPage = () => {
           </div>
         ) : (
           <div className="space-y-12 p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
-            {/* Featured Section */}
+            <section className="rounded-3xl bg-card border border-border p-8 shadow-sm">
+              <div className="space-y-4">
+                <h1 className="text-4xl font-bold">VOD במקום ה-Live</h1>
+                <p className="max-w-3xl text-muted-foreground text-lg leading-8">
+                  העמוד הראשי כעת מציג תוכן VOD ראשי, המלצות וקטעים שממשיכים לצפייה.
+                  השימוש בעמוד Live הוסר מהזרימה הראשית.
+                </p>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <Button size="lg" className="gap-2" onClick={handleSeeAllVod}>
+                    <span>🎬 כל ה-VOD</span>
+                  </Button>
+                </div>
+              </div>
+            </section>
+
             {featuredChannels.length > 0 && (
               <section className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-3xl md:text-4xl font-bold">
-                    🎬 שידורים מעניינים כרגע
-                  </h2>
+                <div className="flex items-center justify-between gap-4 flex-col sm:flex-row">
+                  <h2 className="text-3xl md:text-4xl font-bold">🎬 המלצות VOD</h2>
+                  <Button variant="outline" size="sm" onClick={handleSeeAllVod} className="gap-1">
+                    כל ה-VOD
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -172,25 +229,19 @@ const LandingPage = () => {
               </section>
             )}
 
-            {/* Recently Viewed Section */}
-            {recentlyViewed.length > 0 && (
+            {recentVodChannels.length > 0 && (
               <section className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold">📺 נצפו לאחרונה</h2>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSeeAllLive}
-                    className="gap-1"
-                  >
-                    הצג הכל
+                  <h2 className="text-2xl font-bold">📺 צפו לאחרונה</h2>
+                  <Button variant="outline" size="sm" onClick={handleSeeAllVod} className="gap-1">
+                    כל ה-VOD
                     <ChevronRight className="w-4 h-4" />
                   </Button>
                 </div>
 
                 <div className="overflow-x-auto pb-2">
                   <div className="flex gap-4 min-w-max">
-                    {recentlyViewed.map((channel) => (
+                    {recentVodChannels.map((channel) => (
                       <div
                         key={channel.id}
                         className="flex-shrink-0 w-40"
@@ -208,28 +259,19 @@ const LandingPage = () => {
               </section>
             )}
 
-            {/* Trending Section */}
             {trendingChannels.length > 0 && (
               <section className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold">🔥 מומלץ</h2>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSeeAllGuide}
-                    className="gap-1"
-                  >
-                    מדריך מלא
+                  <h2 className="text-2xl font-bold">🔥 מומלצים ב-VOD</h2>
+                  <Button variant="outline" size="sm" onClick={handleSeeAllVod} className="gap-1">
+                    כל ה-VOD
                     <ChevronRight className="w-4 h-4" />
                   </Button>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                   {trendingChannels.map((channel) => (
-                    <div
-                      key={channel.id}
-                      onClick={() => handleChannelClick(channel)}
-                    >
+                    <div key={channel.id} onClick={() => handleChannelClick(channel)}>
                       <ChannelCard
                         channel={channel}
                         isActive={false}
@@ -241,34 +283,10 @@ const LandingPage = () => {
               </section>
             )}
 
-            {/* Categories Section */}
-            {categories.length > 0 && (
-              <section className="space-y-4">
-                <h2 className="text-2xl font-bold">📂 קטגוריות</h2>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                  {categories.map((category) => (
-                    <button
-                      key={category}
-                      onClick={() => handleCategoryClick(category)}
-                      className="p-4 rounded-xl border-2 border-border bg-card hover:border-primary hover:bg-secondary/50 transition-all duration-200 text-center font-semibold text-foreground hover:text-primary"
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* All Channels Shortcut */}
             <section className="py-8">
-              <Button
-                size="lg"
-                className="w-full gap-2"
-                onClick={handleSeeAllLive}
-              >
+              <Button size="lg" className="w-full gap-2" onClick={handleSeeAllVod}>
                 <span>📺</span>
-                <span>כל הערוצים</span>
+                <span>כל ה-VOD</span>
               </Button>
             </section>
           </div>

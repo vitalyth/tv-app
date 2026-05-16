@@ -78,6 +78,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                 items = items.slice(0, 10);
 
                 localStorage.setItem(RECENTLY_VIEWED_KEY, JSON.stringify(items));
+                window.dispatchEvent(new Event("recently-viewed-updated"));
             } catch (e) {
                 console.error("Failed to track recently viewed channel:", e);
             }

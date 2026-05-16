@@ -36,14 +36,14 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
 
     return (
         <FloatingPlayerProvider>
-            <div className="h-screen flex flex-col bg-background">
+            <div className="min-h-screen flex flex-col bg-background">
                 <Header title={title} />
 
-                <div className="site-content flex-1 min-h-0 flex flex-col">
+                <div className="site-content flex-1 min-h-0 flex flex-col pb-20">
                     {children}
                 </div>
 
-                <footer className="shrink-0 border-t border-border bg-card px-4 py-3 text-center text-xs text-muted-foreground">
+                <footer className="fixed inset-x-0 bottom-0 z-10 border-t border-border bg-card px-4 py-3 text-center text-xs text-muted-foreground">
                     ערוצי טלוויזיה · v{APP_VERSION}
                 </footer>
             </div>
