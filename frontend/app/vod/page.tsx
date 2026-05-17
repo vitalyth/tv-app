@@ -480,7 +480,7 @@ export default function VodPage() {
                                             <img
                                                 src={getImageSrc(buildVodMeta(item, stack).programImage || item.logo)}
                                                 alt=""
-                                                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                                className="absolute inset-0 h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                                             />
                                             <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/35 to-black/5" />
                                             <div className="absolute bottom-0 inset-x-0 p-2">
@@ -599,7 +599,7 @@ export default function VodPage() {
                                                 <img
                                                     src={getImageSrc(item.logo)}
                                                     alt=""
-                                                    className="h-full w-full object-cover object-[center_20%] transition-transform duration-300 group-hover:scale-105"
+                                                    className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                                                 />
                                                 <div className="absolute inset-0 bg-linear-to-t from-black/55 via-transparent to-transparent" />
 
