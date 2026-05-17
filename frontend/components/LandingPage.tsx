@@ -488,7 +488,7 @@ const LandingPage = () => {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
       <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-3 md:px-6 md:py-5 lg:px-8">
-        <section className="mb-5 hidden shrink-0 border-b border-border pb-4 md:block">
+        <section className="mb-5 hidden shrink-0 border-b border-border pb-4 lg:block">
           <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <div className="mb-3 flex items-center gap-3">
