@@ -433,7 +433,7 @@ export default function VodPage() {
                     </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto pb-6">
+                <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
                     {!currentNode && recentItems.length > 0 && (
                         <section className="mb-7">
                             <div className="mb-3 flex items-center justify-between">

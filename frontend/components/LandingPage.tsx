@@ -487,16 +487,16 @@ const LandingPage = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
-      <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-4 py-5 sm:px-6 lg:px-8">
-        <section className="mb-5 shrink-0 border-b border-border pb-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-3 md:px-6 md:py-5 lg:px-8">
+        <section className="mb-5 hidden shrink-0 border-b border-border pb-4 md:block">
+          <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
               <div className="mb-3 flex items-center gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
                   <Tv className="h-6 w-6 text-primary" />
                 </div>
                 <div className="min-w-0">
-                  <h1 className="text-2xl font-bold text-foreground sm:text-3xl">ברוכים הבאים</h1>
+                  <h1 className="text-3xl font-bold text-foreground">ברוכים הבאים</h1>
                   <p className="mt-1 text-sm text-muted-foreground">
                     המשך צפייה, VOD ושידורים חיים במקום אחד.
                   </p>
@@ -518,7 +518,7 @@ const LandingPage = () => {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-2">
               <Button onClick={handleBrowseVod} className="gap-2">
                 <Clapperboard className="h-4 w-4" />
                 VOD
