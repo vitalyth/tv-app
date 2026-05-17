@@ -8,57 +8,42 @@ import {
     NavigationMenuItem,
     NavigationMenuLink,
 } from "@/components/ui/navigation-menu"
+import { cn } from "@/lib/utils"
 
-export default function TopNav() {
+export const NAV_ITEMS = [
+    { href: "/", label: "בית" },
+    { href: "/guide", label: "מדריך שידורים" },
+    { href: "/vod", label: "VOD" },
+]
+
+export const isNavItemActive = (pathname: string, href: string) => {
+    if (href === "/") return pathname === "/"
+    return pathname === href || pathname.startsWith(href + "/")
+}
+
+export const navLinkClass = (pathname: string, href: string) =>
+    cn(
+        "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+        isNavItemActive(pathname, href)
+            ? "bg-red-600 text-white"
+            : "text-gray-400 hover:text-white hover:bg-zinc-800"
+    )
+
+export default function TopNav({ className }: { className?: string }) {
     const pathname = usePathname()
 
-    const base =
-        "px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-    const inactive =
-        "text-gray-400 hover:text-white hover:bg-zinc-800"
-    const active =
-        "bg-red-600 text-white"
-
-    const linkClass = (path: string) => {
-        const isActive =
-            pathname === path || pathname.startsWith(path + "/")
-
-        return `px-4 py-2 rounded-lg text-sm font-medium ${isActive
-                ? "bg-red-600 text-white"
-                : "text-gray-400 hover:text-white"
-            }`
-    }
-
     return (
-        <NavigationMenu>
+        <NavigationMenu className={className}>
             <NavigationMenuList className="flex gap-2">
-
-                <NavigationMenuItem>
-                    <NavigationMenuLink asChild>
-                        <Link href="/guide" className={linkClass("/guide")}>
-                            מדריך שידורים
-                        </Link>
-                    </NavigationMenuLink>
-                </NavigationMenuItem>
-
-                <NavigationMenuItem>
-                    <NavigationMenuLink asChild>
-                        <Link href="/vod" className={linkClass("/vod")}>
-                            VOD
-                        </Link>
-                    </NavigationMenuLink>
-                </NavigationMenuItem>
-
-                {/*
-                <NavigationMenuItem>
-                    <NavigationMenuLink asChild>
-                        <Link href="/movies" className={linkClass("/movies")}>
-                            🎬 סרטים
-                        </Link>
-                    </NavigationMenuLink>
-                </NavigationMenuItem>
-                */}
-
+                {NAV_ITEMS.map((item) => (
+                    <NavigationMenuItem key={item.href}>
+                        <NavigationMenuLink asChild>
+                            <Link href={item.href} className={navLinkClass(pathname, item.href)}>
+                                {item.label}
+                            </Link>
+                        </NavigationMenuLink>
+                    </NavigationMenuItem>
+                ))}
             </NavigationMenuList>
         </NavigationMenu>
     )

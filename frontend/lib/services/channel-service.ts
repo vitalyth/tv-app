@@ -5,8 +5,16 @@ export const channelService = {
     return apiFetch("/live_channels");
   },
 
+  getEpg() {
+    return apiFetch("/epg");
+  },
+
   getVodChannels() {
     return apiFetch("/vod_channels");
+  },
+
+  getVodRecent() {
+    return apiFetch("/vod_recent");
   },
 
   getVodItems(params: {

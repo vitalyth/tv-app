@@ -1,0 +1,677 @@
+"use client";
+
+import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import useSWR from "swr";
+import { channelService } from "@/lib/services/channel-service";
+import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
+import { useFloatingPlayer } from "@/context/floating-player-context";
+import { Channel, Program, VodChannel, VodItem, VodPlaybackMeta } from "@/lib/channels-data";
+import { ChannelCard } from "@/components/channel-card";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight, Clapperboard, Clock3, Play, Radio, RotateCcw, Tv } from "lucide-react";
+
+const VOD_RECENT_KEY = "vod_recently_watched";
+const VOD_RECENT_MAX = 12;
+
+type EpgProgram = {
+  start: number;
+  end: number;
+  title?: string;
+  name?: string;
+  description?: string;
+};
+
+type VodNode = {
+  name: string;
+  module: string;
+  mode: number;
+  url: string;
+  logo: string;
+  moreData: string;
+  description?: string;
+};
+
+interface RecentVodItem {
+  item: VodItem;
+  stack: VodNode[];
+  watchedAt: number;
+}
+
+const loadRecentVodItems = (): RecentVodItem[] => {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const stored = localStorage.getItem(VOD_RECENT_KEY);
+    if (!stored) return [];
+
+    const items = JSON.parse(stored) as RecentVodItem[];
+    return items
+      .sort((a, b) => b.watchedAt - a.watchedAt)
+      .slice(0, VOD_RECENT_MAX);
+  } catch {
+    return [];
+  }
+};
+
+const saveRecentVodItem = (item: VodItem, stack: VodNode[]) => {
+  if (typeof window === "undefined") return;
+
+  try {
+    const stored = loadRecentVodItems().filter((saved) => saved.item.id !== item.id);
+    const next = [{ item, stack, watchedAt: Date.now() }, ...stored].slice(0, VOD_RECENT_MAX);
+    localStorage.setItem(VOD_RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore write errors
+  }
+};
+
+const getVodImageSrc = (logo: string) => {
+  if (!logo) return "/ch/vod.jpg";
+  if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
+  return `/ch/${logo}`;
+};
+
+const isVodGroupingNode = (name?: string) => {
+  const normalized = (name || "").trim();
+  return [
+    "כל התוכניות",
+    "כל התכניות",
+    "תוכניות",
+    "תכניות",
+    "סדרות",
+    "פרקים",
+    "VOD",
+  ].includes(normalized);
+};
+
+const isSeasonNode = (name?: string) => {
+  const normalized = (name || "").trim();
+  return /^עונה\b/.test(normalized) || /^Season\b/i.test(normalized);
+};
+
+const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
+  const channelNode = stack[0];
+  const contentNodes = stack.slice(1).filter((node) => !isVodGroupingNode(node.name));
+  const seasonNode = [...contentNodes].reverse().find((node) => isSeasonNode(node.name));
+  const programNode =
+    contentNodes.find((node) => !isSeasonNode(node.name)) ||
+    stack.find((node, index) => index > 0 && !isVodGroupingNode(node.name)) ||
+    stack[1] ||
+    stack[0];
+  const explicitSeason = item.seasonName || item.season || seasonNode?.name;
+  const seasonName = explicitSeason && explicitSeason !== programNode?.name ? explicitSeason : undefined;
+
+  return {
+    programName: item.programName || programNode?.name || item.name,
+    seasonName,
+    channelName: item.channelName || channelNode?.name || "VOD",
+    episodeName: item.episodeName || item.title || item.name,
+    episodeDescription: item.episodeDescription || item.description || item.plot,
+    programDescription: item.programDescription || programNode?.description,
+    programImage: item.programImage || programNode?.logo || item.logo,
+    channelImage: item.channelImage || channelNode?.logo || item.logo,
+    episodeImage: item.episodeImage || item.logo,
+  };
+};
+
+const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
+  const vodMeta = buildVodMeta(item, stack);
+  const titleParts = [vodMeta.channelName, vodMeta.programName].filter(Boolean);
+  const subtitleParts = [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean);
+
+  return {
+    id: item.id,
+    index: 0,
+    name: vodMeta.channelName,
+    logo: vodMeta.channelImage || item.logo,
+    category: "vod",
+    channelID: item.url,
+    module: item.module,
+    mode: item.mode,
+    linkDetails: {
+      link: item.url,
+    },
+    type: "vod",
+    programs: [],
+    tvgID: "",
+    url: item.url,
+    moreData: item.moreData,
+    playerLogo: vodMeta.channelImage || item.logo,
+    playerTitle: titleParts.join(" · "),
+    playerSubtitle: subtitleParts.join(" · "),
+    vodMeta,
+  };
+};
+
+const fetchLiveChannels = async (): Promise<Channel[]> => {
+  return await channelService.getLiveChannels();
+};
+
+const fetchEpg = async (): Promise<Record<string, EpgProgram[]>> => {
+  return await channelService.getEpg();
+};
+
+const fetchVodChannels = async (): Promise<VodChannel[]> => {
+  return await channelService.getVodChannels();
+};
+
+const fetchVodRecent = async (): Promise<VodItem[]> => {
+  return await channelService.getVodRecent();
+};
+
+const normalizeProgram = (program: Program | EpgProgram): Program => ({
+  start: program.start,
+  end: program.end,
+  name: ("name" in program ? program.name : program.title) || "שידור חי",
+  description: program.description || "",
+});
+
+const carouselCardClass =
+  "w-[78vw] max-w-[20rem] shrink-0 sm:w-[18rem] lg:w-[19rem]";
+
+const carouselCompactCardClass =
+  "w-[72vw] max-w-[17rem] shrink-0 sm:w-[15rem] lg:w-[16rem]";
+
+const carouselScrollTolerance = 12;
+
+const HorizontalCarousel = ({
+  children,
+  itemClassName = carouselCardClass,
+}: {
+  children: ReactNode;
+  itemClassName?: string;
+}) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollBack, setCanScrollBack] = useState(false);
+  const [canScrollForward, setCanScrollForward] = useState(false);
+  const items = Children.toArray(children);
+
+  const updateScrollButtons = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const scrollLeft = container.scrollLeft;
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    const scrollOffset = Math.abs(scrollLeft);
+
+    setCanScrollBack(scrollOffset > carouselScrollTolerance);
+    setCanScrollForward(maxScroll - scrollOffset > carouselScrollTolerance);
+  }, []);
+
+  useEffect(() => {
+    updateScrollButtons();
+    const frame = requestAnimationFrame(updateScrollButtons);
+
+    const container = scrollRef.current;
+    if (!container) {
+      cancelAnimationFrame(frame);
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(updateScrollButtons);
+    resizeObserver.observe(container);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+    };
+  }, [items.length, updateScrollButtons]);
+
+  const scroll = (direction: "forward" | "back") => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const amount = Math.min(container.clientWidth * 0.85, 720);
+    container.scrollBy({
+      left: direction === "forward" ? -amount : amount,
+      behavior: "smooth",
+    });
+  };
+
+  return (
+    <div className="relative">
+      {canScrollBack && (
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-linear-to-l from-background to-transparent sm:w-14" />
+      )}
+      {canScrollForward && (
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-linear-to-r from-background to-transparent sm:w-14" />
+      )}
+
+      {canScrollBack && (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => scroll("back")}
+          className="absolute right-1 top-1/2 z-20 -translate-y-1/2 rounded-full bg-card/95 shadow-lg"
+          aria-label="גלול אחורה"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      )}
+      {canScrollForward && (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => scroll("forward")}
+          className="absolute left-1 top-1/2 z-20 -translate-y-1/2 rounded-full bg-card/95 shadow-lg"
+          aria-label="גלול קדימה"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+      )}
+
+      <div
+        ref={scrollRef}
+        onScroll={updateScrollButtons}
+        className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth pb-2 pl-1 pr-1 scrollbar-hide sm:gap-4"
+      >
+        {items.map((child, index) => (
+          <div key={index} className={`${itemClassName} snap-start [&>*]:w-full`}>
+            {child}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const LandingPage = () => {
+  const router = useRouter();
+  const { play } = useFloatingPlayer();
+  const [recentVodItems, setRecentVodItems] = useState<RecentVodItem[]>([]);
+
+  const {
+    data: liveChannels = [],
+    isLoading: isLiveLoading,
+    error: liveError,
+  } = useSWR("landing-live-channels", fetchLiveChannels, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60000,
+  });
+
+  const {
+    data: epg = {},
+    isLoading: isEpgLoading,
+    error: epgError,
+  } = useSWR("landing-epg", fetchEpg, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60000,
+  });
+
+  const {
+    data: vodChannels = [],
+    isLoading: isVodLoading,
+    error: vodError,
+  } = useSWR("landing-vod-channels", fetchVodChannels, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60000,
+  });
+
+  const {
+    data: vodRecentItems = [],
+    isLoading: isVodRecentLoading,
+    error: vodRecentError,
+  } = useSWR("landing-vod-recent", fetchVodRecent, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60000,
+  });
+
+  const { recentlyViewed, addToRecentlyViewed } = useRecentlyViewed(liveChannels);
+
+  useEffect(() => {
+    setRecentVodItems(loadRecentVodItems());
+  }, []);
+
+  const liveNowChannels = useMemo(() => {
+    const now = Math.floor(Date.now() / 1000);
+    const seen = new Set<string>();
+    const recentlyViewedRank = new Map(
+      recentlyViewed.map((channel, index) => [channel.id, index])
+    );
+
+    return liveChannels
+      .map((channel) => {
+        const programs = (
+          (channel.tvgID ? epg[channel.tvgID] : undefined) ?? channel.programs ?? []
+        ).map(normalizeProgram);
+        const currentProgram = programs.find((prog) => prog.start <= now && now < prog.end);
+
+        return currentProgram ? { ...channel, programs } : null;
+      })
+      .filter((channel): channel is Channel => Boolean(channel))
+      .filter((channel) => {
+        const key = channel.tvgID || channel.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => {
+        const aRank = recentlyViewedRank.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const bRank = recentlyViewedRank.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        return aRank - bRank;
+      })
+      .slice(0, 6);
+  }, [liveChannels, epg, recentlyViewed]);
+
+  const recommendedVodChannels = useMemo(() => vodChannels.slice(0, 20), [vodChannels]);
+  const recentlyAddedVodItems = useMemo(
+    () => vodRecentItems.slice(0, 6),
+    [vodRecentItems]
+  );
+
+  const isLoading = isLiveLoading || isEpgLoading || isVodLoading || isVodRecentLoading;
+  const hasLiveError = Boolean(liveError || epgError);
+  const hasVodError = Boolean(vodError || vodRecentError);
+  const hasAnyContent =
+    recentVodItems.length > 0 ||
+    recentlyViewed.length > 0 ||
+    liveNowChannels.length > 0 ||
+    recommendedVodChannels.length > 0 ||
+    recentlyAddedVodItems.length > 0;
+
+  const handlePlayLiveChannel = useCallback(
+    (channel: Channel) => {
+      addToRecentlyViewed(channel);
+      play(channel);
+    },
+    [addToRecentlyViewed, play]
+  );
+
+  const handlePlayVodItem = useCallback(
+    (item: VodItem, stack: VodNode[]) => {
+      const channel = itemToChannel(item, stack);
+      saveRecentVodItem(item, stack);
+      setRecentVodItems(loadRecentVodItems());
+      play(channel);
+    },
+    [play]
+  );
+
+  const handleBrowseVod = useCallback(() => {
+    router.push("/vod");
+  }, [router]);
+
+  const handleOpenGuide = useCallback(() => {
+    router.push("/guide");
+  }, [router]);
+
+  const SectionHeader = ({
+    title,
+    subtitle,
+    action,
+  }: {
+    title: string;
+    subtitle?: string;
+    action?: ReactNode;
+  }) => (
+    <div className="flex items-end justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold text-foreground sm:text-xl">{title}</h2>
+        {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
+
+  const VodCard = ({ channel, onClick }: { channel: VodChannel; onClick: () => void }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex min-h-28 w-full items-center gap-4 rounded-lg border border-border bg-card p-4 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+    >
+      <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+        <img
+          src={getVodImageSrc(channel.logo)}
+          alt=""
+          className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
+        />
+      </div>
+      <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-semibold text-foreground">{channel.name}</h3>
+          <p className="mt-1 truncate text-xs text-muted-foreground">{channel.module}</p>
+        </div>
+        <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
+      </div>
+    </button>
+  );
+
+  const VodItemCard = ({
+    item,
+    stack,
+    label,
+  }: {
+    item: VodItem;
+    stack: VodNode[];
+    label: string;
+  }) => {
+    const meta = buildVodMeta(item, stack);
+    const title = meta.episodeName || item.name;
+    const subtitle = [meta.channelName, meta.programName !== title ? meta.programName : null, meta.seasonName]
+      .filter(Boolean)
+      .join(" · ");
+
+    return (
+      <button
+        type="button"
+        onClick={() => handlePlayVodItem(item, stack)}
+        className="group flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        <div className="relative aspect-video overflow-hidden bg-background">
+          <img
+            src={getVodImageSrc(meta.episodeImage || meta.programImage || item.logo)}
+            alt=""
+            className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
+          />
+          <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/15 to-transparent" />
+          <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
+            <Play className="h-3.5 w-3.5 fill-current" />
+            {label}
+          </span>
+        </div>
+        <div className="min-w-0 p-4">
+          {subtitle && <p className="line-clamp-1 text-xs text-muted-foreground">{subtitle}</p>}
+          <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">{title}</h3>
+          {meta.episodeDescription && (
+            <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+              {meta.episodeDescription}
+            </p>
+          )}
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
+      <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-4 py-5 sm:px-6 lg:px-8">
+        <section className="mb-5 shrink-0 border-b border-border pb-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
+                  <Tv className="h-6 w-6 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-2xl font-bold text-foreground sm:text-3xl">ברוכים הבאים</h1>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    המשך צפייה, VOD ושידורים חיים במקום אחד.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">
+                  <Clapperboard className="h-3.5 w-3.5" />
+                  {vodChannels.length} מקורות VOD
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">
+                  <Radio className="h-3.5 w-3.5" />
+                  {liveNowChannels.length} שידורים עכשיו
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  {recentVodItems.length + recentlyViewed.length} נצפו לאחרונה
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button onClick={handleBrowseVod} className="gap-2">
+                <Clapperboard className="h-4 w-4" />
+                VOD
+              </Button>
+              <Button variant="outline" onClick={handleOpenGuide} className="gap-2">
+                <Tv className="h-4 w-4" />
+                מדריך שידורים
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
+          {isLoading ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 9 }).map((_, index) => (
+                <div key={index} className="h-40 animate-pulse rounded-lg border border-border bg-card" />
+              ))}
+            </div>
+          ) : (
+          <div className="space-y-8">
+            {recentVodItems.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader
+                  title="המשך צפייה ב-VOD"
+                  subtitle="חזרה מהירה לפרקים ולתוכניות האחרונות"
+                  action={
+                    <Button variant="outline" size="sm" onClick={handleBrowseVod} className="shrink-0 gap-2">
+                      <RotateCcw className="h-4 w-4" />
+                      עוד VOD
+                    </Button>
+                  }
+                />
+
+                <HorizontalCarousel>
+                  {recentVodItems.slice(0, 6).map(({ item, stack }) => (
+                    <VodItemCard key={item.id} item={item} stack={stack} label="המשך" />
+                  ))}
+                </HorizontalCarousel>
+              </section>
+            )}
+
+            {recentlyViewed.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader
+                  title="ערוצי לייב אחרונים"
+                  subtitle="השידורים שחזרת אליהם לאחרונה"
+                />
+                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
+                  {recentlyViewed.slice(0, 6).map((channel) => (
+                    <ChannelCard
+                      key={channel.id}
+                      channel={channel}
+                      isActive={false}
+                      onClick={() => handlePlayLiveChannel(channel)}
+                    />
+                  ))}
+                </HorizontalCarousel>
+              </section>
+            )}
+
+            {liveNowChannels.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader
+                  title="משודר עכשיו"
+                  subtitle="שידורים חיים פעילים כרגע"
+                  action={
+                    <Button variant="outline" size="sm" onClick={handleOpenGuide} className="shrink-0">
+                      כל השידורים
+                    </Button>
+                  }
+                />
+                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
+                  {liveNowChannels.map((channel) => (
+                    <ChannelCard
+                      key={channel.id}
+                      channel={channel}
+                      isActive={false}
+                      onClick={() => handlePlayLiveChannel(channel)}
+                    />
+                  ))}
+                </HorizontalCarousel>
+              </section>
+            )}
+
+            {recommendedVodChannels.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader
+                  title="מקורות VOD"
+                  subtitle="כניסה מהירה לספריות התוכן"
+                />
+                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
+                  {recommendedVodChannels.map((channel) => (
+                    <VodCard
+                      key={channel.id}
+                      channel={channel}
+                      onClick={handleBrowseVod}
+                    />
+                  ))}
+                </HorizontalCarousel>
+              </section>
+            )}
+
+            {recentlyAddedVodItems.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader
+                  title="חדש ב-VOD"
+                  subtitle="תכנים שנוספו לאחרונה"
+                />
+                <HorizontalCarousel>
+                  {recentlyAddedVodItems.map((item) => {
+                    const itemStack: VodNode[] = [
+                      {
+                        name: item.channelName || item.title || item.name,
+                        module: item.module,
+                        mode: item.mode,
+                        url: item.url,
+                        logo: item.logo,
+                        moreData: item.moreData,
+                        description: item.description,
+                      },
+                    ];
+                    return (
+                      <VodItemCard key={item.id} item={item} stack={itemStack} label="נגן" />
+                    );
+                  })}
+                </HorizontalCarousel>
+              </section>
+            )}
+
+            {!hasAnyContent && !hasVodError && !hasLiveError && (
+              <section className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center">
+                <Clapperboard className="mx-auto mb-3 h-9 w-9 text-muted-foreground" />
+                <p className="text-base font-medium text-foreground">אין תוכן להצגה כרגע</p>
+                <p className="mt-1 text-sm text-muted-foreground">נסה להיכנס ל-VOD או למדריך השידורים.</p>
+                <div className="mt-5 flex justify-center gap-2">
+                  <Button onClick={handleBrowseVod}>VOD</Button>
+                  <Button variant="outline" onClick={handleOpenGuide}>מדריך</Button>
+                </div>
+              </section>
+            )}
+
+            {(hasVodError || hasLiveError) && (
+              <section className="rounded-lg border border-border bg-card p-6 text-right text-sm text-destructive">
+                <p>שגיאה בטעינת תוכן. אנא רענן את הדף.</p>
+              </section>
+            )}
+          </div>
+        )}
+      </div>
+      </main>
+    </div>
+  );
+};
+
+export default LandingPage;

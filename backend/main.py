@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from services.channel_service import get_live_channels, get_vod_channels, get_vod_items
+from services.channel_service import get_live_channels, get_vod_channels, get_vod_items, get_vod_recent_items
+from services.epg_service import get_now_epg
 from services.stream_service import get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy
 from services.epg_service_ext import get_epg, EPGService
@@ -88,6 +89,10 @@ def vod_items(
 ):
     return get_vod_items(module, mode, url, name, iconimage, moreData)
 
+@app.get('/vod_recent')
+def vod_recent():
+    return get_vod_recent_items()
+
 @app.post('/live_channel')
 def live_channel(channel: Channel):
     return {"stream": get_stream(channel)}
@@ -117,6 +122,10 @@ def proxy_head(request: Request, url: str, referer: str = None, cast: bool = Fal
 @app.options("/proxy")
 def proxy_options():
     return cors_preflight()
+
+@app.get("/epg")
+def epg():
+    return get_now_epg()
 
 @app.get("/epg.xml")
 def epg_xml():
