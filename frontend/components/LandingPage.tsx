@@ -570,6 +570,24 @@ const LandingPage = () => {
             </div>
           ) : (
           <div className="space-y-8">
+            {recommendedVodChannels.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader
+                  title="VOD"
+                  subtitle="כניסה לתוכן ספריות VOD"
+                />
+                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
+                  {recommendedVodChannels.map((channel) => (
+                    <VodCard
+                      key={channel.id}
+                      channel={channel}
+                      onClick={() => handleOpenVodChannel(channel)}
+                    />
+                  ))}
+                </HorizontalCarousel>
+              </section>
+            )}
+
             {recentVodItems.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
@@ -655,24 +673,6 @@ const LandingPage = () => {
                       channel={channel}
                       isActive={false}
                       onClick={() => handlePlayLiveChannel(channel)}
-                    />
-                  ))}
-                </HorizontalCarousel>
-              </section>
-            )}
-
-            {recommendedVodChannels.length > 0 && (
-              <section className="space-y-4">
-                <SectionHeader
-                  title="מקורות VOD"
-                  subtitle="כניסה מהירה לספריות התוכן"
-                />
-                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
-                  {recommendedVodChannels.map((channel) => (
-                    <VodCard
-                      key={channel.id}
-                      channel={channel}
-                      onClick={() => handleOpenVodChannel(channel)}
                     />
                   ))}
                 </HorizontalCarousel>

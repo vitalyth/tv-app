@@ -383,7 +383,7 @@ export default function VodPage() {
 
                             <div className="min-w-0">
                                 <h1 className="truncate text-2xl font-bold text-foreground">
-                                    {currentNode ? currentNode.name : "ערוצי VOD"}
+                                    {currentNode ? currentNode.name : "VOD"}
                                 </h1>
 
                                 <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
@@ -416,7 +416,7 @@ export default function VodPage() {
                                             ))}
                                         </>
                                     ) : (
-                                        <span>{channels.length || " "} מקורות זמינים</span>
+                                        <span>כניסה לתוכן ספריות VOD</span>
                                     )}
                                 </div>
                             </div>
@@ -435,101 +435,18 @@ export default function VodPage() {
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
-                    {!currentNode && recentItems.length > 0 && (
-                        <section className="mb-7">
-                            <div className="mb-3 flex items-center justify-between">
-                                <h2 className="text-base font-semibold text-foreground">נצפו לאחרונה</h2>
-                                <span className="text-xs text-muted-foreground">{recentItems.length}</span>
+                    {!currentNode && isLoading ? (
+                        <section className="mb-8 space-y-4">
+                            <div>
+                                <h2 className="text-lg font-semibold text-foreground">VOD</h2>
+                                <p className="mt-1 text-sm text-muted-foreground">כניסה לתוכן ספריות VOD</p>
                             </div>
-                            <div className="relative">
-                                {canScrollLeft && (
-                                    <button
-                                        onClick={() => scrollRecent("right")}
-                                        className="absolute right-0 top-1/2 z-10 -mr-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
-                                        aria-label="גלול אחורה"
-                                    >
-                                        <ChevronRight className="h-4 w-4 text-foreground" />
-                                    </button>
-                                )}
-                                {canScrollRight && (
-                                    <button
-                                        onClick={() => scrollRecent("left")}
-                                        className="absolute left-0 top-1/2 z-10 -ml-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
-                                        aria-label="גלול קדימה"
-                                    >
-                                        <ChevronLeft className="h-4 w-4 text-foreground" />
-                                    </button>
-                                )}
-                                <div
-                                    ref={recentScrollRef}
-                                    onScroll={updateScrollButtons}
-                                    className="flex gap-3 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden"
-                                    style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-                                >
-                                    {[...recentItems].map(({ item, stack }) => (
-                                        (() => {
-                                            const progressPercent = getVodProgressPercent(item.id);
-
-                                            return (
-                                                <button
-                                                    key={item.id}
-                                                    onClick={() => {
-                                                        setNavigationStack(stack);
-                                                        updateUrl(stack, item);
-                                                        play(itemToChannel(item, stack), {
-                                                            onClose: () => updateUrl(stack),
-                                                        });
-                                                    }}
-                                                    className="group relative h-28 w-44 shrink-0 overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary"
-                                                >
-                                                    <img
-                                                        src={getImageSrc(buildVodMeta(item, stack).programImage || item.logo)}
-                                                        alt=""
-                                                        className="absolute inset-0 h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
-                                                    />
-                                                    <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/35 to-black/5" />
-                                                    <div className="absolute bottom-0 inset-x-0 p-2">
-                                                        {(() => {
-                                                            const meta = buildVodMeta(item, stack);
-                                                            const programName = meta.programName !== item.name ? meta.programName : null;
-                                                            return (
-                                                                <>
-                                                                    {programName && (
-                                                                        <p className="line-clamp-1 text-right text-[10px] text-white/70">
-                                                                            {programName}
-                                                                        </p>
-                                                                    )}
-                                                                    <p className="line-clamp-1 text-right text-xs font-semibold text-white">
-                                                                        {item.name}
-                                                                    </p>
-                                                                </>
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                    {progressPercent > 0 && (
-                                                        <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden="true">
-                                                            <div className="h-full bg-primary" style={{ width: `${progressPercent}%` }} />
-                                                        </div>
-                                                    )}
-                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                                                        <div className="rounded-full bg-black/65 p-2">
-                                                            <Play className="h-5 w-5 text-white" />
-                                                        </div>
-                                                    </div>
-                                                </button>
-                                            );
-                                        })()
-                                    ))}
-                                </div>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                {Array.from({ length: 8 }).map((_, index) => (
+                                    <div key={index} className="h-28 animate-pulse rounded-lg border border-border bg-card" />
+                                ))}
                             </div>
                         </section>
-                    )}
-                    {!currentNode && isLoading ? (
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                            {Array.from({ length: 8 }).map((_, index) => (
-                                <div key={index} className="h-28 animate-pulse rounded-lg border border-border bg-card" />
-                            ))}
-                        </div>
                     ) : !currentNode && error ? (
                         <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-6 text-center">
                             <p className="text-base font-medium text-red-500">שגיאה בטעינת ערוצי ה-VOD</p>
@@ -540,51 +457,61 @@ export default function VodPage() {
                     ) : (
                         <>
                             {!currentNode ? (
-                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                    {filteredChannels.map((channel) => (
-                                        <button
-                                            key={channel.id}
-                                            onClick={() => openChannel(channel)}
-                                            className="group flex min-h-28 w-full items-center gap-4 rounded-lg border border-border bg-card p-4 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
-                                        >
-                                            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
-                                                <img
-                                                    src={getImageSrc(channel.logo)}
-                                                    alt=""
-                                                    className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
-                                                />
-                                            </div>
+                                <section className="mb-8 space-y-4">
+                                    <div className="flex items-end justify-between gap-4">
+                                        <div className="min-w-0">
+                                            <h2 className="text-lg font-semibold text-foreground">VOD</h2>
+                                            <p className="mt-1 text-sm text-muted-foreground">כניסה לתוכן ספריות VOD</p>
+                                        </div>
+                                        <span className="shrink-0 text-xs text-muted-foreground">{channels.length} ספריות</span>
+                                    </div>
 
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                        <h3 className="truncate text-base font-semibold text-foreground">{channel.name}</h3>
-                                                        <p className="mt-1 text-xs text-muted-foreground">{channel.module}</p>
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                        {filteredChannels.map((channel) => (
+                                            <button
+                                                key={channel.id}
+                                                onClick={() => openChannel(channel)}
+                                                className="group flex min-h-28 w-full items-center gap-4 rounded-lg border border-border bg-card p-4 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                                            >
+                                                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+                                                    <img
+                                                        src={getImageSrc(channel.logo)}
+                                                        alt=""
+                                                        className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
+                                                    />
+                                                </div>
+
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <h3 className="truncate text-base font-semibold text-foreground">{channel.name}</h3>
+                                                            <p className="mt-1 text-xs text-muted-foreground">{channel.module}</p>
+                                                        </div>
+                                                        <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
                                                     </div>
-                                                    <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
-                                                </div>
 
-                                                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                                                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                        <Clapperboard className="h-3.5 w-3.5" />
-                                                        VOD
-                                                    </span>
-                                                    {channel.url ? (
+                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                                                         <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                            <ExternalLink className="h-3.5 w-3.5" />
-                                                            אתר
+                                                            <Clapperboard className="h-3.5 w-3.5" />
+                                                            VOD
                                                         </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                            <Archive className="h-3.5 w-3.5" />
-                                                            פנימי
-                                                        </span>
-                                                    )}
+                                                        {channel.url ? (
+                                                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
+                                                                <ExternalLink className="h-3.5 w-3.5" />
+                                                                אתר
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
+                                                                <Archive className="h-3.5 w-3.5" />
+                                                                פנימי
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </section>
                             ) : isItemsLoading ? (
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                                     {Array.from({ length: 8 }).map((_, index) => (
@@ -666,6 +593,95 @@ export default function VodPage() {
                                 </div>
                             )}
                         </>
+                    )}
+                    {!currentNode && recentItems.length > 0 && (
+                        <section className="space-y-4">
+                            <div className="flex items-end justify-between gap-4">
+                                <div className="min-w-0">
+                                    <h2 className="text-lg font-semibold text-foreground">המשך צפייה ב-VOD</h2>
+                                    <p className="mt-1 text-sm text-muted-foreground">חזרה מהירה לפרקים ולתוכניות האחרונות</p>
+                                </div>
+                                <span className="shrink-0 text-xs text-muted-foreground">{recentItems.length}</span>
+                            </div>
+                            <div className="relative">
+                                {canScrollLeft && (
+                                    <button
+                                        onClick={() => scrollRecent("right")}
+                                        className="absolute right-0 top-1/2 z-10 -mr-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
+                                        aria-label="גלול אחורה"
+                                    >
+                                        <ChevronRight className="h-4 w-4 text-foreground" />
+                                    </button>
+                                )}
+                                {canScrollRight && (
+                                    <button
+                                        onClick={() => scrollRecent("left")}
+                                        className="absolute left-0 top-1/2 z-10 -ml-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
+                                        aria-label="גלול קדימה"
+                                    >
+                                        <ChevronLeft className="h-4 w-4 text-foreground" />
+                                    </button>
+                                )}
+                                <div
+                                    ref={recentScrollRef}
+                                    onScroll={updateScrollButtons}
+                                    className="flex gap-3 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden"
+                                    style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                                >
+                                    {[...recentItems].map(({ item, stack }) => (
+                                        (() => {
+                                            const meta = buildVodMeta(item, stack);
+                                            const progressPercent = getVodProgressPercent(item.id);
+                                            const title = meta.episodeName || item.name;
+                                            const subtitle = [meta.channelName, meta.programName !== title ? meta.programName : null, meta.seasonName]
+                                                .filter(Boolean)
+                                                .join(" · ");
+
+                                            return (
+                                                <button
+                                                    key={item.id}
+                                                    onClick={() => {
+                                                        setNavigationStack(stack);
+                                                        updateUrl(stack, item);
+                                                        play(itemToChannel(item, stack), {
+                                                            onClose: () => updateUrl(stack),
+                                                        });
+                                                    }}
+                                                    className="group flex w-[78vw] max-w-[20rem] shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:w-[18rem] lg:w-[19rem]"
+                                                >
+                                                    <div className="relative aspect-video overflow-hidden bg-background">
+                                                        <img
+                                                            src={getImageSrc(meta.episodeImage || meta.programImage || item.logo)}
+                                                            alt=""
+                                                            className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
+                                                        />
+                                                        <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/15 to-transparent" />
+                                                        <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
+                                                            <Play className="h-3.5 w-3.5 fill-current" />
+                                                            המשך
+                                                        </span>
+                                                        {progressPercent > 0 && (
+                                                            <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden="true">
+                                                                <div className="h-full bg-primary" style={{ width: `${progressPercent}%` }} />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="min-w-0 p-4">
+                                                        {subtitle && <p className="line-clamp-1 text-xs text-muted-foreground">{subtitle}</p>}
+                                                        <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">{title}</h3>
+                                                        {meta.episodeDescription && (
+                                                            <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                                                                {meta.episodeDescription}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </button>
+                                            );
+                                        })()
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
                     )}
                 </div>
             </main>

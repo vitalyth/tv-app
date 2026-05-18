@@ -4,11 +4,13 @@ import os
 import re
 import time
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from config import CACHE_DIR
 from plugin_video_idanplus.resources import main as idan_main
+from resources.lib import cache as addon_cache
 from services.epg_service import get_now_epg
 from models.schemas import Channel
 
@@ -115,6 +117,9 @@ IDANPLUS_VOD_CHANNELS = [
 ]
 
 VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_keshet12", "vod_reshet13", "vod_14tv"]
+VOD_SOURCE_CACHE_TTL_HOURS = 24
+_original_addon_cache_get = addon_cache.get
+_vod_source_lock = threading.RLock()
 
 VOD_RECENT_TTL = 30 * 60
 VOD_RECENT_CACHE_DIR = CACHE_DIR
@@ -250,12 +255,39 @@ def normalize_vod_image(iconimage):
     basename = os.path.basename(image)
     return basename or image
 
-def get_vod_items(module, mode, url="", name="", iconimage="", moreData=""):
+def _bounded_addon_cache_get(function, timeout, *args, **table):
+    effective_timeout = timeout
+    try:
+        if int(timeout) > VOD_SOURCE_CACHE_TTL_HOURS:
+            effective_timeout = VOD_SOURCE_CACHE_TTL_HOURS
+    except Exception:
+        pass
+
+    return _original_addon_cache_get(function, effective_timeout, *args, **table)
+
+
+def _direct_addon_cache_get(function, timeout, *args, **table):
+    return function(*args)
+
+
+addon_cache.get = _bounded_addon_cache_get
+
+
+@contextmanager
+def _vod_source_cache(use_cache: bool):
+    previous_cache_get = addon_cache.get
+    addon_cache.get = _bounded_addon_cache_get if use_cache else _direct_addon_cache_get
+    try:
+        yield
+    finally:
+        addon_cache.get = previous_cache_get
+
+
+def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_cache: bool = True):
     addon_common = importlib.import_module("resources.lib.common")
     module_script = importlib.import_module(f"resources.lib.{module}")
     requested_module = module
     captured_items = []
-    original_add_dir = addon_common.addDir
 
     def capture_add_dir(
         item_name,
@@ -305,21 +337,24 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData=""):
             "episodeImage": item_image,
             "isFolder": isFolder,
             "isPlayable": isPlayable,
+            "sourceOrder": len(captured_items),
         })
 
-    addon_common.addDir = capture_add_dir
-    try:
-        module_script.Run(
-            clean_kodi_label(name),
-            url or "",
-            int(mode),
-            iconimage or "",
-            moreData or "",
-        )
-    except Exception as ex:
-        print(f"VOD items failed for module={requested_module} mode={mode} url={url}: {ex}")
-    finally:
-        addon_common.addDir = original_add_dir
+    with _vod_source_lock, _vod_source_cache(use_cache):
+        original_add_dir = addon_common.addDir
+        addon_common.addDir = capture_add_dir
+        try:
+            module_script.Run(
+                clean_kodi_label(name),
+                url or "",
+                int(mode),
+                iconimage or "",
+                moreData or "",
+            )
+        except Exception as ex:
+            print(f"VOD items failed for module={requested_module} mode={mode} url={url}: {ex}")
+        finally:
+            addon_common.addDir = original_add_dir
 
     return captured_items
 
@@ -327,6 +362,15 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData=""):
 def _parse_aired_timestamp(aired_value: str) -> float:
     if not aired_value:
         return 0.0
+
+    value = aired_value.strip()
+    if value.endswith("Z"):
+        value = f"{value[:-1]}+00:00"
+
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except Exception:
+        pass
 
     common_formats = [
         "%Y-%m-%d %H:%M:%S",
@@ -338,13 +382,16 @@ def _parse_aired_timestamp(aired_value: str) -> float:
 
     for fmt in common_formats:
         try:
-            return datetime.strptime(aired_value.strip(), fmt).timestamp()
+            return datetime.strptime(value, fmt).timestamp()
         except Exception:
             continue
 
     # Fallback: if a number-like string is provided assume unix timestamp
     try:
-        return float(aired_value)
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp = timestamp / 1000
+        return timestamp
     except Exception:
         return 0.0
 
@@ -357,19 +404,51 @@ def _sort_vod_items_by_recent(items: list[dict]) -> list[dict]:
     )
 
 
+def _select_vod_recent_items(items: list[dict], max_items: int, preserve_source_order: bool) -> list[dict]:
+    if not preserve_source_order:
+        return _sort_vod_items_by_recent(items)[:max_items]
+
+    indexed_items = [
+        (item, _parse_aired_timestamp(item.get("aired", "") or ""))
+        for item in items
+    ]
+    if not any(aired_timestamp for _, aired_timestamp in indexed_items):
+        return items[:max_items]
+
+    return [
+        item
+        for item, _ in sorted(
+            indexed_items,
+            key=lambda indexed_item: (
+                0 if indexed_item[1] else 1,
+                -indexed_item[1],
+                indexed_item[0].get("sourceOrder", 0),
+            ),
+        )[:max_items]
+    ]
+
+
 def _sort_vod_recent_cache_items(items: list[dict]) -> list[dict]:
     priority_rank = {
         channel_id: index for index, channel_id in enumerate(VOD_RECENT_PRIORITY_CHANNEL_IDS)
     }
     fallback_rank = len(priority_rank)
+    indexed_items = [
+        (item, _parse_aired_timestamp(item.get("aired", "") or ""))
+        for item in items
+    ]
 
-    return sorted(
-        items,
-        key=lambda item: (
-            priority_rank.get(item.get("vodChannelId"), fallback_rank),
-            -_parse_aired_timestamp(item.get("aired", "") or ""),
-        ),
-    )
+    return [
+        item
+        for item, _ in sorted(
+            indexed_items,
+            key=lambda indexed_item: (
+                priority_rank.get(indexed_item[0].get("vodChannelId"), fallback_rank),
+                -indexed_item[1],
+                indexed_item[0].get("sourceOrder", 0),
+            ),
+        )
+    ]
 
 
 def _attach_vod_channel_metadata(items: list[dict], channel: dict) -> list[dict]:
@@ -381,6 +460,24 @@ def _attach_vod_channel_metadata(items: list[dict], channel: dict) -> list[dict]
         }
         for item in items
     ]
+
+
+def _get_vod_channels_for_recent(preserve_source_order: bool) -> list[dict]:
+    if not preserve_source_order:
+        return IDANPLUS_VOD_CHANNELS
+
+    priority_rank = {
+        channel_id: index for index, channel_id in enumerate(VOD_RECENT_PRIORITY_CHANNEL_IDS)
+    }
+    fallback_rank = len(priority_rank)
+
+    return sorted(
+        IDANPLUS_VOD_CHANNELS,
+        key=lambda channel: (
+            priority_rank.get(channel["id"], fallback_rank),
+            IDANPLUS_VOD_CHANNELS.index(channel),
+        ),
+    )
 
 
 def _ensure_vod_recent_cache_dir() -> None:
@@ -420,6 +517,7 @@ def _collect_playable_vod_items(
     moreData: str = "",
     max_depth: int = 4,
     max_nodes: int = 250,
+    use_cache: bool = True,
 ) -> list[dict]:
     seen_nodes = set()
     seen_items = set()
@@ -451,6 +549,7 @@ def _collect_playable_vod_items(
                 node.get("name", ""),
                 node.get("iconimage", ""),
                 node.get("moreData", ""),
+                use_cache=use_cache,
             )
         except Exception:
             continue
@@ -462,7 +561,11 @@ def _collect_playable_vod_items(
             seen_items.add(item_id)
 
             if item.get("isPlayable") and not item.get("isFolder", False):
-                playable_items.append(item)
+                playable_items.append({
+                    **item,
+                    "sourceDepth": node["depth"],
+                    "sourceOrder": len(playable_items),
+                })
                 continue
 
             if item.get("isFolder", False) and node["depth"] < max_depth:
@@ -480,15 +583,24 @@ def _collect_playable_vod_items(
                 continue
 
             if not item.get("isFolder", True):
-                playable_items.append(item)
+                playable_items.append({
+                    **item,
+                    "sourceDepth": node["depth"],
+                    "sourceOrder": len(playable_items),
+                })
 
     return playable_items
 
 
-def _build_vod_recent_items(max_per_channel: int = 2, total_limit: int = 12) -> list[dict]:
+def _build_vod_recent_items(
+    max_per_channel: int = 2,
+    total_limit: int = 12,
+    use_cache: bool = True,
+    preserve_source_order: bool = False,
+) -> list[dict]:
     recent_items: list[dict] = []
 
-    for channel in IDANPLUS_VOD_CHANNELS:
+    for channel in _get_vod_channels_for_recent(preserve_source_order):
         channel_items = _collect_playable_vod_items(
             channel["module"],
             channel["mode"],
@@ -496,6 +608,7 @@ def _build_vod_recent_items(max_per_channel: int = 2, total_limit: int = 12) -> 
             channel.get("name", ""),
             channel.get("logo", ""),
             channel.get("moreData", ""),
+            use_cache=use_cache,
         )
 
         if not channel_items:
@@ -506,18 +619,36 @@ def _build_vod_recent_items(max_per_channel: int = 2, total_limit: int = 12) -> 
                 channel.get("name", ""),
                 channel.get("logo", ""),
                 channel.get("moreData", ""),
+                use_cache=use_cache,
             )
 
-        sorted_items = _sort_vod_items_by_recent(channel_items)
-        recent_items.extend(_attach_vod_channel_metadata(sorted_items[:max_per_channel], channel))
+        selected_items = _select_vod_recent_items(
+            channel_items,
+            max_per_channel,
+            preserve_source_order,
+        )
+        recent_items.extend(_attach_vod_channel_metadata(selected_items, channel))
+
+    if preserve_source_order:
+        return recent_items[:total_limit]
 
     return _sort_vod_recent_cache_items(recent_items)[:total_limit]
 
 
-def refresh_vod_recent_cache(max_per_channel: int = 2, total_limit: int = 12) -> list[dict]:
+def refresh_vod_recent_cache(
+    max_per_channel: int = 2,
+    total_limit: int = 12,
+    use_cache: bool = False,
+    preserve_source_order: bool = True,
+) -> list[dict]:
     global _vod_recent_cache, _vod_recent_cache_updated
 
-    recent_items = _build_vod_recent_items(max_per_channel=max_per_channel, total_limit=total_limit)
+    recent_items = _build_vod_recent_items(
+        max_per_channel=max_per_channel,
+        total_limit=total_limit,
+        use_cache=use_cache,
+        preserve_source_order=preserve_source_order,
+    )
     _write_vod_recent_cache_file(recent_items)
 
     now = time.time()
