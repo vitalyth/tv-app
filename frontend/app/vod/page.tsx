@@ -6,6 +6,7 @@ import { Archive, ChevronLeft, ChevronRight, Clapperboard, ExternalLink, FolderO
 import { channelService } from "@/lib/services/channel-service";
 import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 import { useFloatingPlayer } from "@/context/floating-player-context";
+import { getVodProgressPercent } from "@/lib/vod-progress";
 
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
@@ -466,47 +467,58 @@ export default function VodPage() {
                                     style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
                                 >
                                     {[...recentItems].map(({ item, stack }) => (
-                                        <button
-                                            key={item.id}
-                                            onClick={() => {
-                                                setNavigationStack(stack);
-                                                updateUrl(stack, item);
-                                                play(itemToChannel(item, stack), {
-                                                    onClose: () => updateUrl(stack),
-                                                });
-                                            }}
-                                            className="group relative h-28 w-44 shrink-0 overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary"
-                                        >
-                                            <img
-                                                src={getImageSrc(buildVodMeta(item, stack).programImage || item.logo)}
-                                                alt=""
-                                                className="absolute inset-0 h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
-                                            />
-                                            <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/35 to-black/5" />
-                                            <div className="absolute bottom-0 inset-x-0 p-2">
-                                                {(() => {
-                                                    const meta = buildVodMeta(item, stack);
-                                                    const programName = meta.programName !== item.name ? meta.programName : null;
-                                                    return (
-                                                        <>
-                                                            {programName && (
-                                                                <p className="line-clamp-1 text-right text-[10px] text-white/70">
-                                                                    {programName}
-                                                                </p>
-                                                            )}
-                                                            <p className="line-clamp-1 text-right text-xs font-semibold text-white">
-                                                                {item.name}
-                                                            </p>
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                                                <div className="rounded-full bg-black/65 p-2">
-                                                    <Play className="h-5 w-5 text-white" />
-                                                </div>
-                                            </div>
-                                        </button>
+                                        (() => {
+                                            const progressPercent = getVodProgressPercent(item.id);
+
+                                            return (
+                                                <button
+                                                    key={item.id}
+                                                    onClick={() => {
+                                                        setNavigationStack(stack);
+                                                        updateUrl(stack, item);
+                                                        play(itemToChannel(item, stack), {
+                                                            onClose: () => updateUrl(stack),
+                                                        });
+                                                    }}
+                                                    className="group relative h-28 w-44 shrink-0 overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                                                >
+                                                    <img
+                                                        src={getImageSrc(buildVodMeta(item, stack).programImage || item.logo)}
+                                                        alt=""
+                                                        className="absolute inset-0 h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
+                                                    />
+                                                    <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/35 to-black/5" />
+                                                    <div className="absolute bottom-0 inset-x-0 p-2">
+                                                        {(() => {
+                                                            const meta = buildVodMeta(item, stack);
+                                                            const programName = meta.programName !== item.name ? meta.programName : null;
+                                                            return (
+                                                                <>
+                                                                    {programName && (
+                                                                        <p className="line-clamp-1 text-right text-[10px] text-white/70">
+                                                                            {programName}
+                                                                        </p>
+                                                                    )}
+                                                                    <p className="line-clamp-1 text-right text-xs font-semibold text-white">
+                                                                        {item.name}
+                                                                    </p>
+                                                                </>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                    {progressPercent > 0 && (
+                                                        <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden="true">
+                                                            <div className="h-full bg-primary" style={{ width: `${progressPercent}%` }} />
+                                                        </div>
+                                                    )}
+                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                                                        <div className="rounded-full bg-black/65 p-2">
+                                                            <Play className="h-5 w-5 text-white" />
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            );
+                                        })()
                                     ))}
                                 </div>
                             </div>

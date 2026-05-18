@@ -9,9 +9,11 @@ import { useFloatingPlayer } from "@/context/floating-player-context";
 import { Channel, Program, VodChannel, VodItem, VodPlaybackMeta } from "@/lib/channels-data";
 import { ChannelCard } from "@/components/channel-card";
 import { Button } from "@/components/ui/button";
+import { getVodProgressPercent } from "@/lib/vod-progress";
 import { ChevronLeft, ChevronRight, Clapperboard, Clock3, Play, Radio, RotateCcw, Tv } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
+const VOD_PATH_PARAM = "path";
 const VOD_RECENT_MAX = 12;
 
 type EpgProgram = {
@@ -394,6 +396,28 @@ const LandingPage = () => {
     router.push("/vod");
   }, [router]);
 
+  const handleOpenVodChannel = useCallback(
+    (channel: VodChannel) => {
+      const path: VodNode[] = [
+        {
+          name: channel.name,
+          module: channel.module,
+          mode: channel.mode,
+          url: channel.url,
+          logo: channel.logo,
+          moreData: "",
+          description: "",
+        },
+      ];
+      const params = new URLSearchParams({
+        [VOD_PATH_PARAM]: JSON.stringify(path),
+      });
+
+      router.push(`/vod?${params.toString()}`);
+    },
+    [router]
+  );
+
   const handleOpenGuide = useCallback(() => {
     router.push("/guide");
   }, [router]);
@@ -453,6 +477,7 @@ const LandingPage = () => {
     const subtitle = [meta.channelName, meta.programName !== title ? meta.programName : null, meta.seasonName]
       .filter(Boolean)
       .join(" · ");
+    const progressPercent = label === "המשך" ? getVodProgressPercent(item.id) : 0;
 
     return (
       <button
@@ -471,6 +496,11 @@ const LandingPage = () => {
             <Play className="h-3.5 w-3.5 fill-current" />
             {label}
           </span>
+          {progressPercent > 0 && (
+            <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden="true">
+              <div className="h-full bg-primary" style={{ width: `${progressPercent}%` }} />
+            </div>
+          )}
         </div>
         <div className="min-w-0 p-4">
           {subtitle && <p className="line-clamp-1 text-xs text-muted-foreground">{subtitle}</p>}
@@ -561,6 +591,33 @@ const LandingPage = () => {
               </section>
             )}
 
+            {recentlyAddedVodItems.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader
+                  title="חדש ב-VOD"
+                  subtitle="תכנים שנוספו לאחרונה"
+                />
+                <HorizontalCarousel>
+                  {recentlyAddedVodItems.map((item) => {
+                    const itemStack: VodNode[] = [
+                      {
+                        name: item.channelName || item.title || item.name,
+                        module: item.module,
+                        mode: item.mode,
+                        url: item.url,
+                        logo: item.logo,
+                        moreData: item.moreData,
+                        description: item.description,
+                      },
+                    ];
+                    return (
+                      <VodItemCard key={item.id} item={item} stack={itemStack} label="נגן" />
+                    );
+                  })}
+                </HorizontalCarousel>
+              </section>
+            )}
+
             {recentlyViewed.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
@@ -615,36 +672,9 @@ const LandingPage = () => {
                     <VodCard
                       key={channel.id}
                       channel={channel}
-                      onClick={handleBrowseVod}
+                      onClick={() => handleOpenVodChannel(channel)}
                     />
                   ))}
-                </HorizontalCarousel>
-              </section>
-            )}
-
-            {recentlyAddedVodItems.length > 0 && (
-              <section className="space-y-4">
-                <SectionHeader
-                  title="חדש ב-VOD"
-                  subtitle="תכנים שנוספו לאחרונה"
-                />
-                <HorizontalCarousel>
-                  {recentlyAddedVodItems.map((item) => {
-                    const itemStack: VodNode[] = [
-                      {
-                        name: item.channelName || item.title || item.name,
-                        module: item.module,
-                        mode: item.mode,
-                        url: item.url,
-                        logo: item.logo,
-                        moreData: item.moreData,
-                        description: item.description,
-                      },
-                    ];
-                    return (
-                      <VodItemCard key={item.id} item={item} stack={itemStack} label="נגן" />
-                    );
-                  })}
                 </HorizontalCarousel>
               </section>
             )}
