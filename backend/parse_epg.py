@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 
 from epg_parsers.common import dedupe_and_sort_programs, write_json
@@ -79,8 +80,9 @@ def main():
 
     channel_id = parse_channel_id(args.url)
     output_channel_id = get_output_channel_id(channel_id, args.filename_mode)
-    output_dir = Path(args.output_dir) if args.output_dir else Path(__file__).parent / "cache" / "epg"
-    combined_output = Path(args.combined_output) if args.combined_output else Path(__file__).parent / "cache" / "epg.json"
+    default_cache_dir = Path(os.getenv("BACKEND_CACHE_DIR", Path(__file__).parent / "cache"))
+    output_dir = Path(args.output_dir) if args.output_dir else default_cache_dir / "epg"
+    combined_output = Path(args.combined_output) if args.combined_output else default_cache_dir / "epg.json"
 
     if args.combine_existing:
         combined_epg = combine_epg_directory(output_dir)

@@ -7,6 +7,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from config import CACHE_DIR
 from plugin_video_idanplus.resources import main as idan_main
 from services.epg_service import get_now_epg
 from models.schemas import Channel
@@ -116,7 +117,7 @@ IDANPLUS_VOD_CHANNELS = [
 VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_keshet12", "vod_reshet13", "vod_14tv"]
 
 VOD_RECENT_TTL = 30 * 60
-VOD_RECENT_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache"
+VOD_RECENT_CACHE_DIR = CACHE_DIR
 VOD_RECENT_CACHE_FILE = VOD_RECENT_CACHE_DIR / "vod_recent.json"
 _vod_recent_cache_lock = threading.Lock()
 _vod_recent_cache: list[dict] | None = None
@@ -532,4 +533,6 @@ def get_vod_recent_items(max_per_channel: int = 2, total_limit: int = 12) -> lis
     if file_items is not None:
         return file_items
 
-    return refresh_vod_recent_cache(max_per_channel=max_per_channel, total_limit=total_limit)
+    # If cache was never generated yet, return an empty list immediately.
+    # The scheduler / refresh_vod_recent.py should populate this file in the background.
+    return []

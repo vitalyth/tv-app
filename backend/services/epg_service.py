@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 from plugin_video_idanplus.resources.lib.epg import GetEPG
+from config import CACHE_DIR
 
 _epg_cache = None
 _last_update = 0
@@ -10,7 +11,7 @@ _fallback_epg_cache = None
 _fallback_epg_mtime = 0
 
 EPG_TTL = 30 * 60 # 30 minutes
-FALLBACK_EPG_FILE = Path(__file__).resolve().parent.parent / "cache" / "epg.json"
+FALLBACK_EPG_FILE = CACHE_DIR / "epg.json"
 
 WINDOW_BACK = 3 * 60 * 60     # 3 hours back
 WINDOW_FORWARD = 12 * 60 * 60 # 12 hours forward
