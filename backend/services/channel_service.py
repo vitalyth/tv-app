@@ -113,6 +113,8 @@ IDANPLUS_VOD_CHANNELS = [
     },
 ]
 
+VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_keshet12", "vod_reshet13", "vod_14tv"]
+
 VOD_RECENT_TTL = 30 * 60
 VOD_RECENT_CACHE_DIR = Path(__file__).resolve().parent.parent / "cache"
 VOD_RECENT_CACHE_FILE = VOD_RECENT_CACHE_DIR / "vod_recent.json"
@@ -354,6 +356,32 @@ def _sort_vod_items_by_recent(items: list[dict]) -> list[dict]:
     )
 
 
+def _sort_vod_recent_cache_items(items: list[dict]) -> list[dict]:
+    priority_rank = {
+        channel_id: index for index, channel_id in enumerate(VOD_RECENT_PRIORITY_CHANNEL_IDS)
+    }
+    fallback_rank = len(priority_rank)
+
+    return sorted(
+        items,
+        key=lambda item: (
+            priority_rank.get(item.get("vodChannelId"), fallback_rank),
+            -_parse_aired_timestamp(item.get("aired", "") or ""),
+        ),
+    )
+
+
+def _attach_vod_channel_metadata(items: list[dict], channel: dict) -> list[dict]:
+    return [
+        {
+            **item,
+            "vodChannelId": channel["id"],
+            "vodChannelName": channel["name"],
+        }
+        for item in items
+    ]
+
+
 def _ensure_vod_recent_cache_dir() -> None:
     VOD_RECENT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -480,9 +508,9 @@ def _build_vod_recent_items(max_per_channel: int = 2, total_limit: int = 12) -> 
             )
 
         sorted_items = _sort_vod_items_by_recent(channel_items)
-        recent_items.extend(sorted_items[:max_per_channel])
+        recent_items.extend(_attach_vod_channel_metadata(sorted_items[:max_per_channel], channel))
 
-    return _sort_vod_items_by_recent(recent_items)[:total_limit]
+    return _sort_vod_recent_cache_items(recent_items)[:total_limit]
 
 
 def refresh_vod_recent_cache(max_per_channel: int = 2, total_limit: int = 12) -> list[dict]:

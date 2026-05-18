@@ -81,15 +81,29 @@ def get_now_epg():
     window_start = now - WINDOW_BACK
     window_end = now + WINDOW_FORWARD
 
-    # use cache if valid
+    # use in-memory cache if valid
     if _epg_cache is not None and (now - _last_update < EPG_TTL):
         epgList = copy.deepcopy(_epg_cache)
     else:
-        print(">>> Refreshing EPG...")
-        #epgList = GetEPG(deltaInSec=0)
-        #epgList = GetEPG(deltaInSec=1 * 60 * 60) # 1 hour
-        epgList = GetEPG() # default 24 hours
-        epgList = _merge_fallback_epg(epgList, now)
+        # Priority 1: local cache/epg.json
+        epgList = _load_fallback_epg()
+
+        if epgList and _has_current_programs(epgList, now):
+            print(">>> Using local EPG cache: cache/epg.json")
+        else:
+            if epgList:
+                print(">>> Local EPG cache has no current programs, refreshing from source...")
+            else:
+                print(">>> Local EPG cache is missing/empty, refreshing from source...")
+
+            # Priority 2: external EPG source
+            #epgList = GetEPG(deltaInSec=0)
+            #epgList = GetEPG(deltaInSec=1 * 60 * 60) # 1 hour
+            epgList = GetEPG() # default 24 hours
+
+            # Keep using cache/epg.json as fallback for missing/stale channels
+            epgList = _merge_fallback_epg(epgList, now)
+
         _epg_cache = epgList
         _last_update = now
         epgList = copy.deepcopy(epgList)

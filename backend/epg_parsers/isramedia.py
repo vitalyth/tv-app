@@ -1,11 +1,10 @@
-import argparse
-import json
 import re
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
-from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import Request, urlopen
+
+from epg_parsers.common import dedupe_and_sort_programs
 
 
 DEFAULT_URL = (
@@ -53,16 +52,9 @@ class IsraMediaEpgParser(HTMLParser):
         if tag == "table":
             self._table_depth += 1
         elif tag == "tr":
-            self._current_row = {
-                "class": attrs_dict.get("class", ""),
-                "cells": [],
-                "time_datetime": None,
-            }
+            self._current_row = {"class": attrs_dict.get("class", ""), "cells": [], "time_datetime": None}
         elif tag in {"td", "th"} and self._current_row is not None:
-            self._current_cell = {
-                "class": attrs_dict.get("class", ""),
-                "text": [],
-            }
+            self._current_cell = {"class": attrs_dict.get("class", ""), "text": []}
         elif tag == "time" and self._current_row is not None:
             self._current_time_datetime = attrs_dict.get("datetime")
 
@@ -76,12 +68,7 @@ class IsraMediaEpgParser(HTMLParser):
 
         if tag in {"td", "th"} and self._current_cell is not None:
             text = " ".join("".join(self._current_cell["text"]).split())
-            self._current_row["cells"].append(
-                {
-                    "class": self._current_cell["class"],
-                    "text": text,
-                }
-            )
+            self._current_row["cells"].append({"class": self._current_cell["class"], "text": text})
             self._current_cell = None
         elif tag == "time" and self._current_row is not None:
             self._current_row["time_datetime"] = self._current_time_datetime
@@ -143,10 +130,7 @@ class IsraMediaChannelOptionsParser(HTMLParser):
         if not url:
             return
 
-        self._current_option = {
-            "url": url,
-            "label": [],
-        }
+        self._current_option = {"url": url, "label": []}
 
     def handle_data(self, data):
         if self._current_option is not None:
@@ -165,18 +149,12 @@ class IsraMediaChannelOptionsParser(HTMLParser):
             return
 
         parsed = urlparse(url)
-        if "isramedia.net" not in parsed.netloc:
+        if parsed.netloc and "isramedia.net" not in parsed.netloc:
             return
         if "לוח-שידורים" not in parsed.path and "%D7%9C%D7%95%D7%97" not in parsed.path:
             return
 
-        self.channels.append(
-            {
-                "id": channel_id,
-                "name": label,
-                "url": url,
-            }
-        )
+        self.channels.append({"id": channel_id, "name": label, "url": url})
 
 
 def fetch_html(url: str) -> str:
@@ -266,13 +244,7 @@ def parse_channel_options(html: str, base_url: str) -> list[dict]:
         if channel_id in seen:
             continue
         seen.add(channel_id)
-        channels.append(
-            {
-                "id": channel_id,
-                "name": channel["name"],
-                "url": absolute_url,
-            }
-        )
+        channels.append({"id": channel_id, "name": channel["name"], "url": absolute_url})
     return channels
 
 
@@ -315,21 +287,6 @@ def parse_epg(html: str) -> list[dict]:
     return programs
 
 
-def dedupe_and_sort_programs(programs: list[dict]) -> list[dict]:
-    deduped = {}
-    for program in programs:
-        key = (program["start"], program["end"], program["name"])
-        deduped[key] = program
-    return sorted(deduped.values(), key=lambda program: (program["start"], program["end"], program["name"]))
-
-
-def write_json(data, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as output_file:
-        json.dump(data, output_file, ensure_ascii=False, indent=2)
-        output_file.write("\n")
-
-
 def build_epg_urls(base_url: str, first_html: str, days: str, available_days: bool) -> list[str]:
     if available_days:
         urls = parse_available_day_urls(first_html, base_url)
@@ -349,98 +306,3 @@ def parse_channel_epg(base_url: str, days: str, available_days: bool, first_html
         programs.extend(day_programs)
 
     return dedupe_and_sort_programs(programs)
-
-
-def combine_epg_directory(output_dir: Path) -> dict:
-    combined_epg = {}
-    for channel_file in sorted(output_dir.glob("*.json")):
-        channel_id = channel_file.stem
-        if channel_id in MAPPED_ISRAMEDIA_IDS and (output_dir / f"{ISRAMEDIA_TVGID_MAP[channel_id]}.json").exists():
-            continue
-
-        with channel_file.open("r", encoding="utf-8") as input_file:
-            programs = json.load(input_file)
-        combined_epg[channel_id] = dedupe_and_sort_programs(programs)
-
-    return combined_epg
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Parse IsraMedia EPG page into JSON.")
-    parser.add_argument("--url", default=DEFAULT_URL, help="IsraMedia EPG page URL")
-    parser.add_argument("--output", help="Output JSON path. Defaults to backend/cache/epg/<channel>.json")
-    parser.add_argument("--output-dir", help="Output directory for --all-channels. Defaults to backend/cache/epg")
-    parser.add_argument(
-        "--combined-output",
-        help="Combined EPG JSON path for --all-channels. Defaults to backend/cache/epg.json",
-    )
-    parser.add_argument(
-        "--filename-mode",
-        choices=["tvgid", "isramedia"],
-        default="tvgid",
-        help="Use your channel tvgID names when available, or keep IsraMedia channel IDs.",
-    )
-    parser.add_argument(
-        "--days",
-        default="0-4",
-        help="Days query values to scan, for example 0-4 or 0,1,2. Ignored when --available-days is used.",
-    )
-    parser.add_argument(
-        "--available-days",
-        action="store_true",
-        help="Scan day links listed on the page instead of the --days range.",
-    )
-    parser.add_argument(
-        "--all-channels",
-        action="store_true",
-        help="Parse every channel listed in the page channel selector and write <channel_id>.json for each.",
-    )
-    parser.add_argument(
-        "--combine-existing",
-        action="store_true",
-        help="Build the combined EPG JSON from files already in --output-dir without fetching pages.",
-    )
-    args = parser.parse_args()
-
-    channel_id = parse_channel_id(args.url)
-    output_channel_id = get_output_channel_id(channel_id, args.filename_mode)
-    output_dir = Path(args.output_dir) if args.output_dir else Path(__file__).parent / "cache" / "epg"
-    combined_output = Path(args.combined_output) if args.combined_output else Path(__file__).parent / "cache" / "epg.json"
-
-    if args.combine_existing:
-        combined_epg = combine_epg_directory(output_dir)
-        write_json(combined_epg, combined_output)
-        print(f"Wrote {len(combined_epg)} channels to {combined_output}")
-        return
-
-    first_html = fetch_html(args.url)
-
-    if args.all_channels:
-        channels = parse_channel_options(first_html, args.url)
-        if not channels:
-            raise SystemExit("No channels found in page selector")
-
-        print(f"Found {len(channels)} channels")
-        combined_epg = {}
-        for channel in channels:
-            output_channel_id = get_output_channel_id(channel["id"], args.filename_mode)
-            print(f"\nParsing channel {channel['id']} -> {output_channel_id}: {channel['name']}")
-            channel_programs = parse_channel_epg(channel["url"], args.days, args.available_days)
-            combined_epg[output_channel_id] = channel_programs
-            output_path = output_dir / f"{output_channel_id}.json"
-            write_json(channel_programs, output_path)
-            print(f"Wrote {len(channel_programs)} programs to {output_path}")
-
-        write_json(combined_epg, combined_output)
-        print(f"\nWrote {len(combined_epg)} channels to {combined_output}")
-        return
-
-    output_path = Path(args.output) if args.output else output_dir / f"{output_channel_id}.json"
-    programs = parse_channel_epg(args.url, args.days, args.available_days, first_html=first_html)
-    write_json(programs, output_path)
-
-    print(f"Wrote {len(programs)} programs to {output_path}")
-
-
-if __name__ == "__main__":
-    main()
