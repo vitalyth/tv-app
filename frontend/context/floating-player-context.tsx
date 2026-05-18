@@ -13,6 +13,7 @@ import {
     type ReactNode,
 } from "react";
 import { type Channel } from "@/lib/channels-data";
+import { addRecentlyViewedChannel } from "@/hooks/useRecentlyViewed";
 import { useDraggable } from "@/hooks/useDraggable";
 
 const VideoPlayer = dynamic(
@@ -57,6 +58,10 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     );
 
     const play = useCallback((channel: Channel, options?: PlayOptions) => {
+        if (channel.type !== "vod") {
+            addRecentlyViewedChannel(channel.id);
+        }
+
         closeHandlerRef.current = options?.onClose ?? null;
         setCurrentChannel(channel);
         setIsFullscreen(options?.fullscreen ?? isMobileLandscape);

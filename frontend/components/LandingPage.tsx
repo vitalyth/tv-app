@@ -621,7 +621,7 @@ const LandingPage = () => {
             {recentlyViewed.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
-                  title="ערוצי לייב אחרונים"
+                  title="Live נצפו לאחרונה"
                   subtitle="השידורים שחזרת אליהם לאחרונה"
                 />
                 <HorizontalCarousel itemClassName={carouselCompactCardClass}>
