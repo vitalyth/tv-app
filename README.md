@@ -22,7 +22,8 @@ Current version: `0.1.2`
 * Mobile-friendly player layout
 * Unified port (8001)
 * No CORS issues
-* Fully Dockerized (3 services)
+* Fully Dockerized
+* Automatic EPG and VOD recent refresh jobs
 * Works locally and in production (CasaOS)
 
 ---
@@ -96,7 +97,13 @@ docker compose -f docker-compose.dev.yml up --build
 ```
 
 Open:
-http://localhost
+http://localhost:8001
+
+Watch scheduler logs:
+
+```bash
+docker compose -f docker-compose.dev.yml logs -f backend-scheduler
+```
 
 ---
 
@@ -121,6 +128,51 @@ http://localhost:8001
 http://localhost:8001/api/epg
 http://localhost:8001/api/proxy
 http://localhost:8001/api/docs
+
+---
+
+## 🔁 Automatic Refresh Jobs
+
+The app includes a dedicated `backend-scheduler` service that uses the same backend image.
+
+It runs immediately when the container starts, then continues automatically:
+
+* EPG/channel programs: once per day
+* Recent VOD cache: twice per day
+
+Default commands:
+
+```bash
+python parse_epg.py --all-channels
+python refresh_vod_recent.py
+```
+
+Default intervals:
+
+```env
+EPG_INTERVAL_SECONDS=86400
+VOD_RECENT_INTERVAL_SECONDS=43200
+```
+
+The backend and scheduler share the same runtime cache volume:
+
+```yaml
+${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+```
+
+This means the scheduler writes `epg.json`, `epg/*.json`, and `vod_recent.json`, and the API reads the updated files from the same location.
+
+To view scheduler logs:
+
+```bash
+docker compose logs -f backend-scheduler
+```
+
+To run only the scheduler locally:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build backend-scheduler
+```
 
 ---
 
@@ -168,6 +220,8 @@ docker push YOUR_DOCKERHUB/tv-app-nginx
 ## ⚙️ Docker Compose Notes
 
 * Nginx is built from `./nginx` (custom image)
+* `backend-scheduler` refreshes cache files automatically
+* Backend cache is stored outside git and should be mounted as a persistent volume
 * Services communicate using Docker network:
 
   * `http://frontend:3000`
@@ -182,6 +236,21 @@ docker push YOUR_DOCKERHUB/tv-app-nginx
 ```yaml
 environment:
   - ROOT_PATH=/api
+```
+
+### Scheduler (docker-compose)
+
+```yaml
+environment:
+  - EPG_INTERVAL_SECONDS=86400
+  - VOD_RECENT_INTERVAL_SECONDS=43200
+```
+
+### Shared cache volume
+
+```yaml
+volumes:
+  - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
 ```
 
 ---
@@ -291,6 +360,37 @@ http://YOUR_SERVER_IP:8001
 
 ---
 
+### 🔹 Scheduler on CasaOS
+
+The `backend-scheduler` service starts automatically with Docker Compose.
+
+It runs the refresh jobs once after install/startup, then:
+
+* EPG once every 24 hours
+* VOD recent once every 12 hours
+
+Recommended CasaOS persistent paths:
+
+```env
+BACKEND_CACHE_DIR=/DATA/AppData/tv-app/backend-cache
+NGINX_CACHE_DIR=/DATA/AppData/tv-app/nginx-cache
+```
+
+Optional custom intervals:
+
+```env
+EPG_INTERVAL_SECONDS=86400
+VOD_RECENT_INTERVAL_SECONDS=43200
+```
+
+Check logs:
+
+```bash
+docker compose logs -f backend-scheduler
+```
+
+---
+
 ## ⚠️ Troubleshooting
 
 ### ❗ Port not working
@@ -341,6 +441,7 @@ docker compose up -d
 
 * Backend uses `ROOT_PATH=/api`
 * Nginx is a custom Docker image (not mounted config)
+* `backend/cache/` is runtime data and is ignored by git
 * All traffic goes through nginx
 * No direct backend exposure
 * Works locally and in production

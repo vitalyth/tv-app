@@ -320,6 +320,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                     .player-overlay,
                     .player-overlay-fullscreen {
                         position: fixed;
+                        z-index: 350;
                         width: 99vw;
                         height: 99vh;
                         top: 50%;

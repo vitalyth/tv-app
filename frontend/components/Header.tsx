@@ -25,7 +25,7 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
     const pathname = usePathname();
 
     return (
-        <header className="site-header shrink-0 bg-card border-b border-border px-4 py-3">
+        <header className="site-header relative z-[300] shrink-0 bg-card border-b border-border px-4 py-3">
             <div className="flex items-center justify-between">
                 {/* Back button + Logo */}
                 <div className="flex min-w-0 items-center gap-3">
@@ -72,7 +72,12 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
                                 <Menu className="w-5 h-5" />
                             </Button>
                         </SheetTrigger>
-                        <SheetContent side="right" className="w-72 max-w-[85vw] border-border bg-card p-0" dir="rtl">
+                        <SheetContent
+                            side="right"
+                            overlayClassName="z-[390]"
+                            className="z-[400] w-72 max-w-[85vw] border-border bg-card p-0"
+                            dir="rtl"
+                        >
                             <SheetHeader className="border-b border-border p-4 text-right">
                                 <SheetTitle>ניווט</SheetTitle>
                             </SheetHeader>

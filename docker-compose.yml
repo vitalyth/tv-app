@@ -12,6 +12,22 @@ services:
     image: vitalyth/tv-app-backend:latest
     environment:
       - ROOT_PATH=/api
+    volumes:
+      - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+    networks:
+      - tv-network
+
+  backend-scheduler:
+    image: vitalyth/tv-app-backend:latest
+    command: ["python", "run_scheduler.py"]
+    environment:
+      - EPG_INTERVAL_SECONDS=${EPG_INTERVAL_SECONDS:-86400}
+      - VOD_RECENT_INTERVAL_SECONDS=${VOD_RECENT_INTERVAL_SECONDS:-43200}
+    volumes:
+      - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+    restart: unless-stopped
+    depends_on:
+      - backend
     networks:
       - tv-network
 
