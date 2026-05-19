@@ -10,6 +10,8 @@ from epg_parsers.tv10 import parse_tv10_epg
 from epg_parsers.knesset import parse_knesset_epg
 from epg_parsers.walla33 import parse_walla33_epg
 from epg_parsers.kabbalah import parse_kabbalah_epg
+from epg_parsers.hidabroot import parse_hidabroot_epg
+from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
     ISRAMEDIA_TVGID_MAP,
@@ -143,6 +145,12 @@ def main():
 
         elif args.channel == "66":
             programs = parse_kabbalah_epg()
+
+        elif args.channel == "97":
+            programs = parse_hidabroot_epg()
+
+        elif args.channel == "100fm":
+            programs = parse_100fm_epg()
 
         elif args.channel == "99":
             programs = parse_knesset_epg()
@@ -279,6 +287,42 @@ def main():
             output_path = output_dir / "66.json"
             write_json(kabbalah_programs, output_path)
             print(f"Wrote {len(kabbalah_programs)} programs to {output_path}")
+
+        print("\nParsing Hidabroot from Walla TV Guide")
+        try:
+            hidabroot_programs = parse_hidabroot_epg()
+        except Exception as ex:
+            failed_channels.append("97")
+            print(f"Failed parsing Hidabroot: {ex}")
+            traceback.print_exc()
+            hidabroot_programs = read_existing_channel_programs(output_dir, "97")
+            if not hidabroot_programs:
+                hidabroot_programs = []
+
+        hidabroot_programs = merge_with_existing_channel(output_dir, "97", hidabroot_programs)
+        combined_epg["97"] = hidabroot_programs
+        if hidabroot_programs:
+            output_path = output_dir / "97.json"
+            write_json(hidabroot_programs, output_path)
+            print(f"Wrote {len(hidabroot_programs)} programs to {output_path}")
+
+        print("\nParsing 100FM from official schedule")
+        try:
+            radio100fm_programs = parse_100fm_epg()
+        except Exception as ex:
+            failed_channels.append("100fm")
+            print(f"Failed parsing 100FM: {ex}")
+            traceback.print_exc()
+            radio100fm_programs = read_existing_channel_programs(output_dir, "100fm")
+            if not radio100fm_programs:
+                radio100fm_programs = []
+
+        radio100fm_programs = merge_with_existing_channel(output_dir, "100fm", radio100fm_programs)
+        combined_epg["100fm"] = radio100fm_programs
+        if radio100fm_programs:
+            output_path = output_dir / "100fm.json"
+            write_json(radio100fm_programs, output_path)
+            print(f"Wrote {len(radio100fm_programs)} programs to {output_path}")
 
         if not args.skip_i24:
             print("\nParsing i24news from official schedule API")
