@@ -9,6 +9,7 @@ from epg_parsers.i24 import parse_i24_epg
 from epg_parsers.tv10 import parse_tv10_epg
 from epg_parsers.knesset import parse_knesset_epg
 from epg_parsers.walla33 import parse_walla33_epg
+from epg_parsers.kabbalah import parse_kabbalah_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
     ISRAMEDIA_TVGID_MAP,
@@ -99,6 +100,10 @@ def main():
         action="store_true",
         help="Fetch only the official i24 Hebrew schedule and write i24news.json plus the combined EPG.",
     )
+    parser.add_argument(
+        "--channel",
+        help="Parse only one specific channel id, for example: 33, 10, 66, 99, i24news, 11.",
+    )
     args = parser.parse_args()
 
     channel_id = parse_channel_id(args.url)
@@ -124,6 +129,52 @@ def main():
         write_json(combined_epg, combined_output)
 
         print(f"Wrote {len(i24_programs)} programs to {output_path}")
+        print(f"Wrote {len(combined_epg)} channels to {combined_output}")
+        return
+
+    if args.channel:
+        output_path = output_dir / f"{args.channel}.json"
+
+        if args.channel == "10":
+            programs = parse_tv10_epg()
+
+        elif args.channel == "33":
+            programs = parse_walla33_epg()
+
+        elif args.channel == "66":
+            programs = parse_kabbalah_epg()
+
+        elif args.channel == "99":
+            programs = parse_knesset_epg()
+
+        elif args.channel == "i24news":
+            programs = parse_i24_epg()
+
+        else:
+            first_html = fetch_html(args.url)
+            channels = parse_channel_options(first_html, args.url)
+            channel = next(
+                (
+                    item
+                    for item in channels
+                    if get_output_channel_id(item["id"], args.filename_mode) == args.channel
+                    or item["id"] == args.channel
+                ),
+                None,
+            )
+
+            if not channel:
+                raise SystemExit(f"Channel not found: {args.channel}")
+
+            programs = parse_channel_epg(channel["url"], args.days, args.available_days)
+
+        programs = merge_with_existing_channel(output_dir, args.channel, programs)
+        write_json(programs, output_path)
+        print(f"Wrote {len(programs)} programs to {output_path}")
+
+        combined_epg = combine_epg_directory(output_dir)
+        combined_epg[args.channel] = dedupe_and_sort_programs(programs)
+        write_json(combined_epg, combined_output)
         print(f"Wrote {len(combined_epg)} channels to {combined_output}")
         return
 
@@ -210,6 +261,24 @@ def main():
             output_path = output_dir / "33.json"
             write_json(walla33_programs, output_path)
             print(f"Wrote {len(walla33_programs)} programs to {output_path}")
+
+        print("\nParsing Kabbalah from Walla TV Guide")
+        try:
+            kabbalah_programs = parse_kabbalah_epg()
+        except Exception as ex:
+            failed_channels.append("66")
+            print(f"Failed parsing Kabbalah: {ex}")
+            traceback.print_exc()
+            kabbalah_programs = read_existing_channel_programs(output_dir, "66")
+            if not kabbalah_programs:
+                kabbalah_programs = []
+
+        kabbalah_programs = merge_with_existing_channel(output_dir, "66", kabbalah_programs)
+        combined_epg["66"] = kabbalah_programs
+        if kabbalah_programs:
+            output_path = output_dir / "66.json"
+            write_json(kabbalah_programs, output_path)
+            print(f"Wrote {len(kabbalah_programs)} programs to {output_path}")
 
         if not args.skip_i24:
             print("\nParsing i24news from official schedule API")
