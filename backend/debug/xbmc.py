@@ -1,6 +1,7 @@
 from constants import Color
 import zipfile
 import re
+import time
 
 LOGDEBUG = 0
 LOGINFO = 1
@@ -12,14 +13,20 @@ LOGFATAL = 4
 def log(msg, level=LOGINFO):
     print("LOG:", msg)
 
+
 def getInfoLabel(label):
     if label == "System.BuildVersion":
         return "20.0"
     return ""
 
+
+def sleep(milliseconds):
+    time.sleep(milliseconds / 1000)
+
+
 def executebuiltin(cmd, *args):
     print(f"{Color.YELLOW}[XBMC BUILTIN] {cmd}{Color.RESET}")
-    
+
     if cmd.startswith("Extract("):
         match = re.match(r'Extract\((.*?),\s*(.*?)\)', cmd)
         if not match:
@@ -32,7 +39,7 @@ def executebuiltin(cmd, *args):
         try:
             print(f"Extracting {zip_path} -> {dest_path}")
 
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(dest_path)
 
             print("✅ Extraction completed")

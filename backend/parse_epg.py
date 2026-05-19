@@ -4,8 +4,11 @@ import os
 import traceback
 from pathlib import Path
 
-from epg_parsers.common import dedupe_and_sort_programs, write_json
+from epg_parsers.common import dedupe_and_sort_programs, merge_existing_with_new_programs, write_json
 from epg_parsers.i24 import parse_i24_epg
+from epg_parsers.tv10 import parse_tv10_epg
+from epg_parsers.knesset import parse_knesset_epg
+from epg_parsers.walla33 import parse_walla33_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
     ISRAMEDIA_TVGID_MAP,
@@ -44,6 +47,11 @@ def read_existing_channel_programs(output_dir: Path, channel_id: str) -> list[di
         return dedupe_and_sort_programs(programs)
 
     return []
+
+
+def merge_with_existing_channel(output_dir: Path, channel_id: str, new_programs: list[dict]) -> list[dict]:
+    existing_programs = read_existing_channel_programs(output_dir, channel_id)
+    return merge_existing_with_new_programs(existing_programs, new_programs)
 
 
 def main():
@@ -107,6 +115,7 @@ def main():
 
     if args.i24_only:
         i24_programs = parse_i24_epg()
+        i24_programs = merge_with_existing_channel(output_dir, "i24news", i24_programs)
         output_path = output_dir / "i24news.json"
         write_json(i24_programs, output_path)
 
@@ -142,10 +151,65 @@ def main():
                     continue
                 print(f"Using existing cached programs for {output_channel_id}")
 
+            channel_programs = merge_with_existing_channel(output_dir, output_channel_id, channel_programs)
             combined_epg[output_channel_id] = channel_programs
             output_path = output_dir / f"{output_channel_id}.json"
             write_json(channel_programs, output_path)
             print(f"Wrote {len(channel_programs)} programs to {output_path}")
+
+        print("\nParsing TV10 from official API")
+        try:
+            tv10_programs = parse_tv10_epg()
+        except Exception as ex:
+            failed_channels.append("10")
+            print(f"Failed parsing TV10: {ex}")
+            traceback.print_exc()
+            tv10_programs = read_existing_channel_programs(output_dir, "10")
+            if not tv10_programs:
+                tv10_programs = []
+
+        tv10_programs = merge_with_existing_channel(output_dir, "10", tv10_programs)
+        combined_epg["10"] = tv10_programs
+        if tv10_programs:
+            output_path = output_dir / "10.json"
+            write_json(tv10_programs, output_path)
+            print(f"Wrote {len(tv10_programs)} programs to {output_path}")
+
+        print("\nParsing Knesset from official site")
+        try:
+            knesset_programs = parse_knesset_epg()
+        except Exception as ex:
+            failed_channels.append("99")
+            print(f"Failed parsing Knesset: {ex}")
+            traceback.print_exc()
+            knesset_programs = read_existing_channel_programs(output_dir, "99")
+            if not knesset_programs:
+                knesset_programs = []
+
+        knesset_programs = merge_with_existing_channel(output_dir, "99", knesset_programs)
+        combined_epg["99"] = knesset_programs
+        if knesset_programs:
+            output_path = output_dir / "99.json"
+            write_json(knesset_programs, output_path)
+            print(f"Wrote {len(knesset_programs)} programs to {output_path}")
+
+        print("\nParsing Walla 33 from TV Guide")
+        try:
+            walla33_programs = parse_walla33_epg()
+        except Exception as ex:
+            failed_channels.append("33")
+            print(f"Failed parsing Walla 33: {ex}")
+            traceback.print_exc()
+            walla33_programs = read_existing_channel_programs(output_dir, "33")
+            if not walla33_programs:
+                walla33_programs = []
+
+        walla33_programs = merge_with_existing_channel(output_dir, "33", walla33_programs)
+        combined_epg["33"] = walla33_programs
+        if walla33_programs:
+            output_path = output_dir / "33.json"
+            write_json(walla33_programs, output_path)
+            print(f"Wrote {len(walla33_programs)} programs to {output_path}")
 
         if not args.skip_i24:
             print("\nParsing i24news from official schedule API")
@@ -159,6 +223,7 @@ def main():
                 if not i24_programs:
                     i24_programs = []
 
+            i24_programs = merge_with_existing_channel(output_dir, "i24news", i24_programs)
             combined_epg["i24news"] = i24_programs
             if i24_programs:
                 output_path = output_dir / "i24news.json"
@@ -173,6 +238,7 @@ def main():
 
     output_path = Path(args.output) if args.output else output_dir / f"{output_channel_id}.json"
     programs = parse_channel_epg(args.url, args.days, args.available_days, first_html=first_html)
+    programs = merge_with_existing_channel(output_dir, output_channel_id, programs)
     write_json(programs, output_path)
 
     print(f"Wrote {len(programs)} programs to {output_path}")

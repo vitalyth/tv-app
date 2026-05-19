@@ -8,6 +8,7 @@ from epg_parsers.common import dedupe_and_sort_programs, fill_short_gaps
 
 I24_SCHEDULES_URL = "https://api.i24news.tv/v2/he/schedules"
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+APP_TZ = ZoneInfo("America/New_York")
 
 
 def fetch_json(url: str):
@@ -38,7 +39,7 @@ def program_description(show: dict) -> str:
 
 def parse_i24_epg(url: str = I24_SCHEDULES_URL, today: datetime | None = None) -> list[dict]:
     schedules = fetch_json(url)
-    today = today or datetime.now(ISRAEL_TZ)
+    today = today or datetime.now(APP_TZ)
     week_start = today.date() - timedelta(days=(today.weekday() + 1) % 7)
 
     programs = []
