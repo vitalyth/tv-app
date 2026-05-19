@@ -74,8 +74,8 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
                         </SheetTrigger>
                         <SheetContent
                             side="right"
-                            overlayClassName="z-[390]"
-                            className="z-[400] w-72 max-w-[85vw] border-border bg-card p-0"
+                            overlayClassName="z-[9998] md:z-[390]"
+                            className="z-[9999] md:z-[400] w-72 max-w-[85vw] border-border bg-card p-0"
                             dir="rtl"
                         >
                             <SheetHeader className="border-b border-border p-4 text-right">
