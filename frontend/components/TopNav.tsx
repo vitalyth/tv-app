@@ -9,11 +9,12 @@ import {
     NavigationMenuLink,
 } from "@/components/ui/navigation-menu"
 import { cn } from "@/lib/utils"
+import { Clapperboard, Home, Tv, type LucideIcon } from "lucide-react"
 
-export const NAV_ITEMS = [
-    { href: "/", label: "בית" },
-    { href: "/guide", label: "מדריך שידורים" },
-    { href: "/vod", label: "VOD" },
+export const NAV_ITEMS: Array<{ href: string; label: string; icon: LucideIcon }> = [
+    { href: "/", label: "בית", icon: Home },
+    { href: "/guide", label: "מדריך שידורים", icon: Tv },
+    { href: "/vod", label: "VOD", icon: Clapperboard },
 ]
 
 export const isNavItemActive = (pathname: string, href: string) => {
@@ -23,7 +24,7 @@ export const isNavItemActive = (pathname: string, href: string) => {
 
 export const navLinkClass = (pathname: string, href: string) =>
     cn(
-        "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+        "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
         isNavItemActive(pathname, href)
             ? "bg-red-600 text-white"
             : "text-gray-400 hover:text-white hover:bg-zinc-800"
@@ -39,6 +40,7 @@ export default function TopNav({ className }: { className?: string }) {
                     <NavigationMenuItem key={item.href}>
                         <NavigationMenuLink asChild>
                             <Link href={item.href} className={navLinkClass(pathname, item.href)}>
+                                <item.icon className="h-4 w-4" aria-hidden="true" />
                                 {item.label}
                             </Link>
                         </NavigationMenuLink>

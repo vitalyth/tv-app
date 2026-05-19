@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import re
+import requests
 import time
 import threading
 from contextlib import contextmanager
@@ -118,6 +119,7 @@ IDANPLUS_VOD_CHANNELS = [
 
 VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_keshet12", "vod_reshet13", "vod_14tv"]
 VOD_SOURCE_CACHE_TTL_HOURS = 24
+VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_reshet13", "vod_14tv"}
 _original_addon_cache_get = addon_cache.get
 _vod_source_lock = threading.RLock()
 
@@ -255,6 +257,109 @@ def normalize_vod_image(iconimage):
     basename = os.path.basename(image)
     return basename or image
 
+
+def _http_get_json(url: str, headers: dict | None = None, timeout: int = 20) -> dict | list | None:
+    try:
+        response = requests.get(url, headers=headers or {}, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except Exception as ex:
+        print(f"Direct VOD JSON fetch failed for url={url}: {ex}")
+        return None
+
+
+def _http_get_text(url: str, headers: dict | None = None, timeout: int = 20) -> str:
+    try:
+        response = requests.get(url, headers=headers or {}, timeout=timeout)
+        response.raise_for_status()
+        return response.text
+    except Exception as ex:
+        print(f"Direct VOD text fetch failed for url={url}: {ex}")
+        return ""
+
+
+def _first_image(images) -> str:
+    if isinstance(images, list) and images:
+        first = images[0]
+        if isinstance(first, dict):
+            return first.get("url") or ""
+        if isinstance(first, str):
+            return first
+    return ""
+
+
+def _timestamp_to_date(timestamp: int | float | str | None) -> str:
+    if timestamp in (None, ""):
+        return ""
+    try:
+        value = float(timestamp)
+        if value > 10_000_000_000:
+            value = value / 1000
+        return datetime.fromtimestamp(value).strftime("%d/%m/%Y")
+    except Exception:
+        return ""
+
+
+def _make_vod_recent_item(
+    *,
+    module: str,
+    mode: int,
+    url: str,
+    name: str,
+    logo: str,
+    more_data: str = "",
+    description: str = "",
+    aired: str = "",
+    program_name: str = "",
+    program_image: str = "",
+    channel_name: str = "",
+    channel_image: str = "",
+    source_timestamp: float = 0,
+) -> dict:
+    item_id = f"{module}:{mode}:{url}:{more_data}"
+    return {
+        "id": item_id,
+        "name": clean_kodi_label(name),
+        "url": url,
+        "mode": mode,
+        "logo": normalize_vod_image(logo),
+        "module": module,
+        "moreData": more_data,
+        "description": clean_kodi_label(description),
+        "title": clean_kodi_label(name),
+        "plot": clean_kodi_label(description),
+        "aired": aired,
+        "season": "",
+        "episode": "",
+        "programName": clean_kodi_label(program_name),
+        "programImage": normalize_vod_image(program_image),
+        "channelName": clean_kodi_label(channel_name),
+        "channelImage": normalize_vod_image(channel_image),
+        "episodeName": clean_kodi_label(name),
+        "episodeDescription": clean_kodi_label(description),
+        "episodeImage": normalize_vod_image(logo),
+        "isFolder": False,
+        "isPlayable": True,
+        "sourceTimestamp": source_timestamp,
+    }
+
+
+def _extract_next_data(html: str) -> dict | None:
+    match = re.search(
+        r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    if not match:
+        match = re.search(r'"application/json">(.*?)</script>', html, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(1))
+    except Exception:
+        return None
+
 def _bounded_addon_cache_get(function, timeout, *args, **table):
     effective_timeout = timeout
     try:
@@ -281,6 +386,36 @@ def _vod_source_cache(use_cache: bool):
         yield
     finally:
         addon_cache.get = previous_cache_get
+
+
+def _safe_kan_open_url(original_open_url):
+    def safe_open_url(url, *args, **kwargs):
+        response_method = kwargs.get("responseMethod")
+        if response_method is None and len(args) > 5:
+            response_method = args[5]
+        response_method = response_method or "text"
+
+        result = original_open_url(url, *args, **kwargs)
+        if result is not None:
+            return result
+
+        if response_method != "json" or "mobapi.kan.org.il/api/mobile/subClass" not in str(url):
+            return result
+
+        try:
+            cf_result = original_open_url.__globals__["GetCF"](
+                url,
+                original_open_url.__globals__.get("userAgent"),
+                responseMethod="json",
+            )
+            if isinstance(cf_result, dict):
+                return cf_result
+        except Exception as ex:
+            print(f"KAN VOD fallback failed for url={url}: {ex}")
+
+        return {"entry": []}
+
+    return safe_open_url
 
 
 def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_cache: bool = True):
@@ -342,7 +477,10 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_
 
     with _vod_source_lock, _vod_source_cache(use_cache):
         original_add_dir = addon_common.addDir
+        original_open_url = addon_common.OpenURL
         addon_common.addDir = capture_add_dir
+        if requested_module == "kan":
+            addon_common.OpenURL = _safe_kan_open_url(original_open_url)
         try:
             module_script.Run(
                 clean_kodi_label(name),
@@ -355,6 +493,7 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_
             print(f"VOD items failed for module={requested_module} mode={mode} url={url}: {ex}")
         finally:
             addon_common.addDir = original_add_dir
+            addon_common.OpenURL = original_open_url
 
     return captured_items
 
@@ -399,7 +538,7 @@ def _parse_aired_timestamp(aired_value: str) -> float:
 def _sort_vod_items_by_recent(items: list[dict]) -> list[dict]:
     return sorted(
         items,
-        key=lambda item: _parse_aired_timestamp(item.get("aired", "") or ""),
+        key=_vod_recent_timestamp,
         reverse=True,
     )
 
@@ -409,7 +548,7 @@ def _select_vod_recent_items(items: list[dict], max_items: int, preserve_source_
         return _sort_vod_items_by_recent(items)[:max_items]
 
     indexed_items = [
-        (item, _parse_aired_timestamp(item.get("aired", "") or ""))
+        (item, _vod_recent_timestamp(item))
         for item in items
     ]
     if not any(aired_timestamp for _, aired_timestamp in indexed_items):
@@ -434,7 +573,7 @@ def _sort_vod_recent_cache_items(items: list[dict]) -> list[dict]:
     }
     fallback_rank = len(priority_rank)
     indexed_items = [
-        (item, _parse_aired_timestamp(item.get("aired", "") or ""))
+        (item, _vod_recent_timestamp(item))
         for item in items
     ]
 
@@ -449,6 +588,229 @@ def _sort_vod_recent_cache_items(items: list[dict]) -> list[dict]:
             ),
         )
     ]
+
+
+def _vod_recent_timestamp(item: dict) -> float:
+    source_timestamp = item.get("sourceTimestamp")
+    if source_timestamp:
+        try:
+            return float(source_timestamp)
+        except Exception:
+            pass
+    return _parse_aired_timestamp(item.get("aired", "") or "")
+
+
+def _sort_direct_recent_items(items: list[dict]) -> list[dict]:
+    return sorted(
+        items,
+        key=lambda item: (
+            -_vod_recent_timestamp(item),
+            item.get("sourceOrder", 0),
+        ),
+    )
+
+
+def _get_reshet_build_id() -> str:
+    html = _http_get_text(
+        "https://13tv.co.il/allshows/screen/1170108/",
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    next_data = _extract_next_data(html)
+    build_id = (next_data or {}).get("buildId") or ""
+    if build_id:
+        return build_id
+
+    match = re.search(r"/_next/static/([^/]+)/_buildManifest\.js", html)
+    return match.group(1) if match else ""
+
+
+def _fetch_reshet_recent_items(limit: int = 8) -> list[dict]:
+    build_id = _get_reshet_build_id()
+    if not build_id:
+        return []
+
+    allshows_url = (
+        "https://13tv.co.il/_next/data/"
+        f"{build_id}/he/allshows/screen/1170108.json?all=screen&all=1170108"
+    )
+    data = _http_get_json(allshows_url, headers={"User-Agent": "Mozilla/5.0"})
+    children = (
+        (data or {})
+        .get("pageProps", {})
+        .get("leafs", [{}])[0]
+        .get("child", [])
+    )
+    if not isinstance(children, list):
+        return []
+
+    candidates = []
+    for source_order, serie in enumerate(children):
+        metas = serie.get("metas") or {}
+        series_id = metas.get("SeriesID")
+        if not series_id:
+            continue
+        candidates.append(
+            {
+                "series_id": str(series_id),
+                "name": serie.get("name", ""),
+                "description": serie.get("description", ""),
+                "image": _first_image(serie.get("images")),
+                "source_order": source_order,
+                "series_timestamp": float(serie.get("createDate") or 0),
+            }
+        )
+
+    # Cover the editorial source order and newer series, then let episode dates decide.
+    by_source_order = sorted(candidates, key=lambda item: item["source_order"])[:35]
+    by_new_series = sorted(candidates, key=lambda item: item["series_timestamp"], reverse=True)[:20]
+    selected_series = {item["series_id"]: item for item in [*by_source_order, *by_new_series]}.values()
+
+    recent_items: list[dict] = []
+    for serie in selected_series:
+        series_url = (
+            "https://13tv.co.il/_next/data/"
+            f"{build_id}/he/allshows/series/{serie['series_id']}.json"
+            f"?all=series&all={serie['series_id']}"
+        )
+        series_data = _http_get_json(series_url, headers={"User-Agent": "Mozilla/5.0"})
+        program = (series_data or {}).get("pageProps", {}).get("program", {})
+        seasons = program.get("seasonsList") or []
+        if not isinstance(seasons, list):
+            continue
+
+        season_positions = [
+            str(season.get("position"))
+            for season in seasons
+            if season.get("position") is not None
+        ]
+        for season_position in season_positions[:3]:
+            season_url = (
+                "https://13tv.co.il/_next/data/"
+                f"{build_id}/he/allshows/series/{serie['series_id']}/season/{season_position}.json"
+                f"?all=series&all={serie['series_id']}&all=season&all={season_position}"
+            )
+            season_data = _http_get_json(season_url, headers={"User-Agent": "Mozilla/5.0"})
+            episodes = (
+                (season_data or {})
+                .get("pageProps", {})
+                .get("program", {})
+                .get("episodes", [])
+            )
+            if not isinstance(episodes, list):
+                continue
+
+            for episode in episodes[:8]:
+                created_at = float(episode.get("createDate") or 0)
+                entry_id = episode.get("entryId")
+                if not entry_id:
+                    continue
+                name = episode.get("name") or serie["name"]
+                image = _first_image(episode.get("images")) or serie["image"]
+                recent_items.append(
+                    _make_vod_recent_item(
+                        module="reshet",
+                        mode=3,
+                        url=f"--kaltura--{entry_id}===",
+                        name=name,
+                        logo=image,
+                        more_data="",
+                        description=episode.get("description", ""),
+                        aired=_timestamp_to_date(created_at),
+                        program_name=serie["name"],
+                        program_image=serie["image"],
+                        channel_name="רשת 13",
+                        channel_image="13.jpg",
+                        source_timestamp=created_at,
+                    )
+                )
+
+    unique_items = {}
+    for item in _sort_direct_recent_items(recent_items):
+        unique_items.setdefault(item["id"], item)
+    return list(unique_items.values())[:limit]
+
+
+NOW14_API_HEADERS = {
+    "accept": "*/*",
+    "origin": "https://vod.c14.co.il",
+    "platform": "web",
+    "referer": "https://vod.c14.co.il/",
+    "user-agent": "Mozilla/5.0",
+    "x-device-type": "web",
+    "x-tenant-id": "channel14",
+}
+
+
+def _fetch_now14_recent_items(limit: int = 8) -> list[dict]:
+    data = _http_get_json(
+        "https://insight-api-shared.univtec.com/interface/pages/66d85aaa6e9a9c00237dec06",
+        headers=NOW14_API_HEADERS,
+    )
+    series = ((data or {}).get("sections") or [{}])[0].get("items", [])
+    if not isinstance(series, list):
+        return []
+
+    candidates = sorted(
+        [serie for serie in series if serie.get("id")],
+        key=lambda serie: float(serie.get("dateUpdate") or serie.get("date") or 0),
+        reverse=True,
+    )[:18]
+
+    recent_items: list[dict] = []
+    for serie in candidates:
+        series_id = serie.get("id")
+        program_image = serie.get("image") or serie.get("poster") or ""
+        series_data = _http_get_json(
+            f"https://insight-api-shared.univtec.com/interface/pages/series/{series_id}",
+            headers=NOW14_API_HEADERS,
+        )
+        seasons = (series_data or {}).get("seasons", [])
+        if not isinstance(seasons, list):
+            continue
+
+        for season in seasons[:3]:
+            episodes = season.get("episodes", [])
+            if not isinstance(episodes, list):
+                continue
+
+            for episode in episodes[:10]:
+                video_url = episode.get("videoUrl")
+                if not video_url:
+                    continue
+                timestamp_ms = float(episode.get("date") or 0)
+                timestamp = timestamp_ms / 1000 if timestamp_ms > 10_000_000_000 else timestamp_ms
+                name = episode.get("title") or serie.get("title") or ""
+                image = episode.get("image") or program_image
+                recent_items.append(
+                    _make_vod_recent_item(
+                        module="14tv",
+                        mode=2,
+                        url=video_url,
+                        name=name,
+                        logo=image,
+                        more_data="",
+                        description=episode.get("keywords", "") or serie.get("description", ""),
+                        aired=_timestamp_to_date(timestamp),
+                        program_name=serie.get("title", ""),
+                        program_image=program_image,
+                        channel_name="עכשיו 14",
+                        channel_image="14tv.png",
+                        source_timestamp=timestamp,
+                    )
+                )
+
+    unique_items = {}
+    for item in _sort_direct_recent_items(recent_items):
+        unique_items.setdefault(item["id"], item)
+    return list(unique_items.values())[:limit]
+
+
+def _fetch_direct_vod_recent_items(channel: dict, limit: int) -> list[dict]:
+    if channel["id"] == "vod_reshet13":
+        return _fetch_reshet_recent_items(limit)
+    if channel["id"] == "vod_14tv":
+        return _fetch_now14_recent_items(limit)
+    return []
 
 
 def _attach_vod_channel_metadata(items: list[dict], channel: dict) -> list[dict]:
@@ -597,22 +959,21 @@ def _build_vod_recent_items(
     total_limit: int = 12,
     use_cache: bool = True,
     preserve_source_order: bool = False,
+    allow_internal_fallback: bool = True,
 ) -> list[dict]:
     recent_items: list[dict] = []
 
     for channel in _get_vod_channels_for_recent(preserve_source_order):
-        channel_items = _collect_playable_vod_items(
-            channel["module"],
-            channel["mode"],
-            channel.get("url", ""),
-            channel.get("name", ""),
-            channel.get("logo", ""),
-            channel.get("moreData", ""),
-            use_cache=use_cache,
-        )
+        channel_items: list[dict] = []
+        direct_source_channel = channel["id"] in VOD_RECENT_DIRECT_CHANNEL_IDS
+        if channel["id"] in VOD_RECENT_DIRECT_CHANNEL_IDS:
+            channel_items = _fetch_direct_vod_recent_items(
+                channel,
+                max(max_per_channel * 4, total_limit),
+            )
 
-        if not channel_items:
-            channel_items = get_vod_items(
+        if not channel_items and (allow_internal_fallback or not direct_source_channel):
+            channel_items = _collect_playable_vod_items(
                 channel["module"],
                 channel["mode"],
                 channel.get("url", ""),
@@ -622,6 +983,17 @@ def _build_vod_recent_items(
                 use_cache=use_cache,
             )
 
+            if not channel_items:
+                channel_items = get_vod_items(
+                    channel["module"],
+                    channel["mode"],
+                    channel.get("url", ""),
+                    channel.get("name", ""),
+                    channel.get("logo", ""),
+                    channel.get("moreData", ""),
+                    use_cache=use_cache,
+                )
+
         selected_items = _select_vod_recent_items(
             channel_items,
             max_per_channel,
@@ -630,7 +1002,7 @@ def _build_vod_recent_items(
         recent_items.extend(_attach_vod_channel_metadata(selected_items, channel))
 
     if preserve_source_order:
-        return recent_items[:total_limit]
+        return _sort_vod_recent_cache_items(recent_items)[:total_limit]
 
     return _sort_vod_recent_cache_items(recent_items)[:total_limit]
 
@@ -640,6 +1012,7 @@ def refresh_vod_recent_cache(
     total_limit: int = 12,
     use_cache: bool = False,
     preserve_source_order: bool = True,
+    allow_internal_fallback: bool = False,
 ) -> list[dict]:
     global _vod_recent_cache, _vod_recent_cache_updated
 
@@ -648,6 +1021,7 @@ def refresh_vod_recent_cache(
         total_limit=total_limit,
         use_cache=use_cache,
         preserve_source_order=preserve_source_order,
+        allow_internal_fallback=allow_internal_fallback,
     )
     _write_vod_recent_cache_file(recent_items)
 

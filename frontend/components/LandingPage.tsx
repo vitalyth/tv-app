@@ -10,11 +10,12 @@ import { Channel, Program, VodChannel, VodItem, VodPlaybackMeta } from "@/lib/ch
 import { ChannelCard } from "@/components/channel-card";
 import { Button } from "@/components/ui/button";
 import { getVodProgressPercent } from "@/lib/vod-progress";
-import { ChevronLeft, ChevronRight, Clapperboard, Clock3, Play, Radio, RotateCcw, Tv } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clapperboard, Play, RotateCcw, Tv } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
 const VOD_RECENT_MAX = 12;
+const QUICK_LIVE_CHANNEL_TVG_IDS = ["11", "12", "13", "14", "i24news"];
 
 type EpgProgram = {
   start: number;
@@ -271,7 +272,7 @@ const HorizontalCarousel = ({
         className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth pb-2 pl-1 pr-1 scrollbar-hide sm:gap-4"
       >
         {items.map((child, index) => (
-          <div key={index} className={`${itemClassName} snap-start [&>*]:w-full`}>
+          <div key={index} className={`${itemClassName} snap-start *:w-full`}>
             {child}
           </div>
         ))}
@@ -358,9 +359,23 @@ const LandingPage = () => {
       .slice(0, 6);
   }, [liveChannels, epg, recentlyViewed]);
 
+  const quickLiveChannels = useMemo(() => {
+    const order = new Map(QUICK_LIVE_CHANNEL_TVG_IDS.map((id, index) => [id, index]));
+    const seen = new Set<string>();
+
+    return liveChannels
+      .filter((channel) => channel.tvgID && order.has(channel.tvgID))
+      .filter((channel) => {
+        if (seen.has(channel.tvgID!)) return false;
+        seen.add(channel.tvgID!);
+        return true;
+      })
+      .sort((a, b) => (order.get(a.tvgID!) ?? 0) - (order.get(b.tvgID!) ?? 0));
+  }, [liveChannels]);
+
   const recommendedVodChannels = useMemo(() => vodChannels.slice(0, 20), [vodChannels]);
   const recentlyAddedVodItems = useMemo(
-    () => vodRecentItems.slice(0, 6),
+    () => vodRecentItems.slice(0, 10),
     [vodRecentItems]
   );
 
@@ -518,45 +533,38 @@ const LandingPage = () => {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
       <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-3 md:px-6 md:py-5 lg:px-8">
-        <section className="mb-5 hidden shrink-0 border-b border-border pb-4 lg:block">
-          <div className="flex flex-col gap-3 sm:gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <div className="mb-3 flex items-center gap-3">
+        <section className="mb-3 shrink-0 border-b border-border pb-2">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="hidden min-w-0 lg:block">
+              <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
                   <Tv className="h-6 w-6 text-primary" />
                 </div>
                 <div className="min-w-0">
                   <h1 className="text-3xl font-bold text-foreground">ברוכים הבאים</h1>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     המשך צפייה, VOD ושידורים חיים במקום אחד.
                   </p>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">
-                  <Clapperboard className="h-3.5 w-3.5" />
-                  {vodChannels.length} מקורות VOD
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">
-                  <Radio className="h-3.5 w-3.5" />
-                  {liveNowChannels.length} שידורים עכשיו
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">
-                  <Clock3 className="h-3.5 w-3.5" />
-                  {recentVodItems.length + recentlyViewed.length} נצפו לאחרונה
-                </span>
-              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button onClick={handleBrowseVod} className="gap-2">
-                <Clapperboard className="h-4 w-4" />
-                VOD
-              </Button>
-              <Button variant="outline" onClick={handleOpenGuide} className="gap-2">
-                <Tv className="h-4 w-4" />
-                מדריך שידורים
-              </Button>
+            <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 scrollbar-hide lg:overflow-visible lg:pb-0">
+              {quickLiveChannels.map((channel) => (
+                <button
+                  key={channel.tvgID}
+                  type="button"
+                  aria-label={`פתח ${channel.name}`}
+                  onClick={() => handlePlayLiveChannel(channel)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted transition hover:border-primary/70 hover:bg-primary/10 sm:h-11 sm:w-11 lg:h-14 lg:w-14"
+                >
+                  <img
+                    src={`/ch/${channel.logo}`}
+                    alt={channel.name}
+                    className="h-7 w-7 rounded-full object-contain sm:h-8 sm:w-8 lg:h-10 lg:w-10"
+                  />
+                </button>
+              ))}
             </div>
           </div>
         </section>

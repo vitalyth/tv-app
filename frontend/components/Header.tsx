@@ -85,6 +85,7 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
                                 {NAV_ITEMS.map((item) => (
                                     <SheetClose key={item.href} asChild>
                                         <Link href={item.href} className={navLinkClass(pathname, item.href)}>
+                                            <item.icon className="h-4 w-4" aria-hidden="true" />
                                             {item.label}
                                         </Link>
                                     </SheetClose>

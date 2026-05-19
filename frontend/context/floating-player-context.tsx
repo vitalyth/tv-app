@@ -231,7 +231,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                 top: 0,
                 left: 0,
                 transform: `translate(${position.x}px, ${position.y}px)`,
-                zIndex: 200,
+                zIndex: 900,
                 transition: isDragging ? "none" : "box-shadow 0.2s",
                 boxShadow: isDragging
                     ? "0 24px 64px rgba(0,0,0,0.7)"
@@ -287,7 +287,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                 .player-dragged,
                 .player-overlay-fullscreen {
                     aspect-ratio: 16 / 9;
-                    z-index: 200;
+                    z-index: 900;
                     overflow: hidden;
                 }
 
@@ -325,7 +325,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                     .player-overlay,
                     .player-overlay-fullscreen {
                         position: fixed;
-                        z-index: 350;
+                        z-index: 1000;
                         width: 99vw;
                         height: 99vh;
                         top: 50%;
@@ -372,7 +372,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    z-index: 210;
+                    z-index: 910;
                     border-radius: 10px 10px 0 0;
                     opacity: 0;
                     pointer-events: auto;
