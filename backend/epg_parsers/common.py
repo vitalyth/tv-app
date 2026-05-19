@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 
@@ -27,6 +28,8 @@ def fill_short_gaps(programs: list[dict], max_gap_seconds: int = 2 * 60 * 60) ->
 
 def write_json(data, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as output_file:
+    tmp_path = output_path.with_name(f".{output_path.name}.tmp")
+    with tmp_path.open("w", encoding="utf-8") as output_file:
         json.dump(data, output_file, ensure_ascii=False, indent=2)
         output_file.write("\n")
+    os.replace(tmp_path, output_path)

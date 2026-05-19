@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import CACHE_DIR
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -44,7 +45,19 @@ def run_job(job: ScheduledJob) -> None:
     else:
         print(f"[{finished_at}] {job.name} failed with exit code {result.returncode}", flush=True)
 
+    log_cache_file_status()
     job.next_run = time.time() + job.interval_seconds
+
+
+def log_cache_file_status() -> None:
+    for cache_file in (CACHE_DIR / "epg.json", CACHE_DIR / "vod_recent.json"):
+        if not cache_file.exists():
+            print(f"Cache file missing: {cache_file}", flush=True)
+            continue
+
+        stat = cache_file.stat()
+        updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+        print(f"Cache file {cache_file} updated {updated_at}, {stat.st_size} bytes", flush=True)
 
 
 def main() -> int:
@@ -72,6 +85,7 @@ def main() -> int:
         ),
     ]
 
+    print(f"Scheduler cache directory: {CACHE_DIR}", flush=True)
     print("Scheduler started; running all jobs now.", flush=True)
     for job in jobs:
         if stop_requested:

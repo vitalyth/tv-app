@@ -7,6 +7,7 @@ from config import CACHE_DIR
 
 _epg_cache = None
 _last_update = 0
+_epg_cache_fallback_mtime = 0
 _fallback_epg_cache = None
 _fallback_epg_mtime = 0
 
@@ -75,15 +76,25 @@ def _load_fallback_epg():
     _fallback_epg_mtime = fallback_mtime
     return copy.deepcopy(fallback_epg)
 
+def _get_fallback_epg_mtime():
+    if not FALLBACK_EPG_FILE.exists():
+        return 0
+    return FALLBACK_EPG_FILE.stat().st_mtime
+
 def get_now_epg():
-    global _epg_cache, _last_update
+    global _epg_cache, _last_update, _epg_cache_fallback_mtime
 
     now = int(time.time())
     window_start = now - WINDOW_BACK
     window_end = now + WINDOW_FORWARD
+    fallback_mtime = _get_fallback_epg_mtime()
 
     # use in-memory cache if valid
-    if _epg_cache is not None and (now - _last_update < EPG_TTL):
+    if (
+        _epg_cache is not None
+        and fallback_mtime == _epg_cache_fallback_mtime
+        and now - _last_update < EPG_TTL
+    ):
         epgList = copy.deepcopy(_epg_cache)
     else:
         # Priority 1: local cache/epg.json
@@ -106,6 +117,7 @@ def get_now_epg():
             epgList = _merge_fallback_epg(epgList, now)
 
         _epg_cache = epgList
+        _epg_cache_fallback_mtime = fallback_mtime
         _last_update = now
         epgList = copy.deepcopy(epgList)
 

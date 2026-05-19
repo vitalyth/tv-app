@@ -318,7 +318,8 @@ const LandingPage = () => {
     isLoading: isVodRecentLoading,
     error: vodRecentError,
   } = useSWR("landing-vod-recent", fetchVodRecent, {
-    revalidateOnFocus: false,
+    refreshInterval: 5 * 60 * 1000,
+    revalidateOnFocus: true,
     dedupingInterval: 60000,
   });
 

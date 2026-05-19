@@ -14,7 +14,7 @@ export const channelService = {
   },
 
   getVodRecent() {
-    return apiFetch("/vod_recent");
+    return apiFetch("/vod_recent", { cache: "no-store" });
   },
 
   getVodItems(params: {

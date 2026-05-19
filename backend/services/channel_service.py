@@ -855,19 +855,19 @@ def _read_vod_recent_cache_file() -> list[dict] | None:
             data = json.load(cache_file)
         if isinstance(data, list):
             return data
-    except Exception:
-        pass
+    except Exception as ex:
+        print(f"Failed reading VOD recent cache file {VOD_RECENT_CACHE_FILE}: {ex}", flush=True)
 
     return None
 
 
 def _write_vod_recent_cache_file(items: list[dict]) -> None:
     _ensure_vod_recent_cache_dir()
-    try:
-        with VOD_RECENT_CACHE_FILE.open("w", encoding="utf-8") as cache_file:
-            json.dump(items, cache_file, ensure_ascii=False)
-    except Exception:
-        pass
+    tmp_path = VOD_RECENT_CACHE_FILE.with_name(f".{VOD_RECENT_CACHE_FILE.name}.tmp")
+    with tmp_path.open("w", encoding="utf-8") as cache_file:
+        json.dump(items, cache_file, ensure_ascii=False)
+        cache_file.write("\n")
+    os.replace(tmp_path, VOD_RECENT_CACHE_FILE)
 
 
 def _collect_playable_vod_items(
