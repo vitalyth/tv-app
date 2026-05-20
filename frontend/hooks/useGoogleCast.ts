@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "@/lib/api"
 import { type Channel } from "@/lib/channels-data"
+import { getVodProgress, saveVodProgress, shouldResumeVodProgress } from "@/lib/vod-progress"
 
 const CAST_SDK_SRC = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
 const DEFAULT_RECEIVER_APP_ID = "CC1AD845"
 const HLS_MEDIA_PLAYLIST_PATH = /\/chunklist(?:_[^/]*)?\.m3u8$/
 const CAST_SESSION_STORAGE_KEY = "cast_active_channel_id"
+const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000
 
 export const saveCastChannelId = (channelId: string) => {
     if (typeof window === "undefined") return
@@ -174,6 +176,7 @@ export function useGoogleCast({
     const remotePlayerRef = useRef<cast.framework.RemotePlayer | null>(null)
     const remoteControllerRef = useRef<cast.framework.RemotePlayerController | null>(null)
     const mediaStatusUnsubscribeRef = useRef<(() => void) | null>(null)
+    const lastVodProgressSaveRef = useRef(0)
 
     const clearMediaStatusListener = useCallback(() => {
         mediaStatusUnsubscribeRef.current?.()
@@ -214,7 +217,9 @@ export function useGoogleCast({
 
         const imageUrl = buildCastImageUrl(channel.logo)
 
-        mediaInfo.streamType = chromeCast.media.StreamType.LIVE
+        mediaInfo.streamType = channel.type === "vod"
+            ? chromeCast.media.StreamType.BUFFERED
+            : chromeCast.media.StreamType.LIVE
         mediaInfo.customData = {
             posterUrl: imageUrl,
             thumb: imageUrl,
@@ -234,6 +239,16 @@ export function useGoogleCast({
         request.autoplay = true
         request.customData = mediaInfo.customData
 
+        if (channel.type === "vod") {
+            const savedProgress = getVodProgress(channel.id)
+            const resumeTime = savedProgress?.currentTime ?? 0
+            const duration = savedProgress?.duration ?? 0
+
+            if (shouldResumeVodProgress(resumeTime, duration)) {
+                ;(request as any).currentTime = resumeTime
+            }
+        }
+
         try {
             clearMediaStatusListener()
             await session.loadMedia(request)
@@ -246,14 +261,34 @@ export function useGoogleCast({
 
             const media = session.getMediaSession()
             setHasDvr(hasDvrWindow(media))
+            lastVodProgressSaveRef.current = 0
+
+            const saveCastVodProgress = (force = false) => {
+                if (channel.type !== "vod") return
+
+                const currentMedia = session.getMediaSession()
+                if (!currentMedia) return
+
+                const now = Date.now()
+                if (!force && now - lastVodProgressSaveRef.current < VOD_PROGRESS_SAVE_INTERVAL_MS) return
+
+                const currentTime = currentMedia.getEstimatedTime?.() ?? 0
+                const duration = currentMedia.media?.duration ?? 0
+                saveVodProgress(channel.id, currentTime, duration)
+                lastVodProgressSaveRef.current = now
+            }
 
             const statusHandler = () => {
                 const currentMedia = session.getMediaSession()
                 setHasDvr(hasDvrWindow(currentMedia))
+                saveCastVodProgress()
             }
 
             media?.addUpdateListener(statusHandler)
-            mediaStatusUnsubscribeRef.current = () => media?.removeUpdateListener(statusHandler)
+            mediaStatusUnsubscribeRef.current = () => {
+                saveCastVodProgress(true)
+                media?.removeUpdateListener(statusHandler)
+            }
             setError(null)
             return true
         } catch (err) {

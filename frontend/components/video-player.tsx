@@ -49,6 +49,8 @@ export function VideoPlayer({
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoreExpandedAfterFullscreenRef = useRef(false);
   const lastVodProgressSaveRef = useRef(0);
+  const preCastMutedRef = useRef(false);
+  const preCastVolumeRef = useRef(1);
 
   const suppressCastVolumeSyncRef = useRef(false);
   const isCastingRef = useRef(false);
@@ -187,6 +189,8 @@ export function VideoPlayer({
     if (!player || player.isDisposed?.()) return;
 
     suppressCastVolumeSyncRef.current = true;
+    preCastMutedRef.current = player.muted?.() ?? false;
+    preCastVolumeRef.current = player.volume?.() ?? 1;
     player.pause();
     player.muted(true);
     setIsLoading(false);
@@ -202,22 +206,33 @@ export function VideoPlayer({
 
   const handleCastEnded = useCallback(() => {
     const player = playerRef.current;
-    if (!player || player.isDisposed?.()) return;
+    if (!player || player.isDisposed?.() || !channel) return;
 
-    suppressCastVolumeSyncRef.current = true;
-    player.muted(false);
-    player.liveTracker?.seekToLiveEdge?.();
+    suppressCastVolumeSyncRef.current = true;;
+    player.volume(preCastVolumeRef.current);
+    player.muted(preCastMutedRef.current);
+    
+    if (channel.type === "vod") {
+      const progress = getVodProgress(channel.id);
+      const resumeTime = progress?.currentTime ?? 0;
 
-    try {
-      const seekable = player.seekable?.();
-      if (seekable && seekable.length > 0) {
-        const liveEdge = seekable.end(seekable.length - 1);
-        if (Number.isFinite(liveEdge)) {
-          player.currentTime(Math.max(0, liveEdge - 0.5));
-        }
+      if (resumeTime > 0) {
+        player.currentTime(resumeTime);
       }
-    } catch {
-      // ignore seek fallback errors
+    } else {
+      player.liveTracker?.seekToLiveEdge?.();
+
+      try {
+        const seekable = player.seekable?.();
+        if (seekable && seekable.length > 0) {
+          const liveEdge = seekable.end(seekable.length - 1);
+          if (Number.isFinite(liveEdge)) {
+            player.currentTime(Math.max(0, liveEdge - 0.5));
+          }
+        }
+      } catch {
+        // ignore seek fallback errors
+      }
     }
 
     player.play()?.catch?.(() => undefined);
@@ -225,7 +240,7 @@ export function VideoPlayer({
     window.setTimeout(() => {
       suppressCastVolumeSyncRef.current = false;
     }, 0);
-  }, []);
+  }, [channel]);
 
   const {
     deviceName,
