@@ -1,4 +1,5 @@
 import xbmcplugin
+from services.custom_channel_service import get_custom_channel
 
 def _prepare_keshet_module(module_script):
     uuid_str = str(module_script.uuid.uuid1()).upper()
@@ -28,6 +29,12 @@ def _clean_stream_url(stream):
     )
 
 def get_stream(channel):
+    channel_id = getattr(channel, "channelID", None) or getattr(channel, "id", None)
+
+    custom_channel = get_custom_channel(channel_id)
+    if custom_channel:
+        return custom_channel["streamUrl"]
+    
     xbmcplugin.clearStream()
 
     moduleScript = __import__(

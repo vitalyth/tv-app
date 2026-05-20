@@ -12,6 +12,7 @@ import socket
 from models.schemas import Channel
 from plugin_video_idanplus.resources import main as idan_main
 from plugin_video_idanplus.resources.lib import common, iptv, epg
+from services.custom_channel_service import get_custom_channel
 from config import APP_VERSION
 
 def get_local_addresses(port: int = 8001) -> list[str]:
@@ -102,13 +103,23 @@ def vod_stream(item: dict):
     return {"stream": get_vod_stream(item)}
 
 @app.get("/stream")
-def stream(request: Request, channel_id: str = Query(..., min_length=1, max_length=50, regex="^[a-zA-Z0-9_-]+$")):
+def stream(request: Request, channel_id: str = Query(..., min_length=1, max_length=50, pattern="^[a-zA-Z0-9_-]+$")):
+    custom_channel = get_custom_channel(channel_id)
+
+    if custom_channel:
+        return handle_proxy(
+            request,
+            custom_channel["streamUrl"],
+            (custom_channel.get("linkDetails") or {}).get("referer", "")
+        )
+
     channel_data = common.GetChannel(channel_id)
     channel = Channel.model_validate(channel_data)
     channel.id = channel_id
     channel.channelID = channel_id
     url = get_stream(channel)
     referer = (channel.linkDetails or {}).get("referer", "")
+
     return handle_proxy(request, url, referer)
 
 @app.get("/proxy")
