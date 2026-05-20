@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
-import { Archive, ChevronLeft, ChevronRight, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
+import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
 import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-import { getVodProgressPercent } from "@/lib/vod-progress";
+import { VodRecentCarousel } from "./vod-recent-carousel";
 
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
@@ -172,27 +172,6 @@ export default function VodPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [navigationStack, setNavigationStack] = useState<VodNode[]>([]);
     const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
-    const recentScrollRef = useRef<HTMLDivElement>(null);
-    const [canScrollLeft, setCanScrollLeft] = useState(false);
-    const [canScrollRight, setCanScrollRight] = useState(false);
-
-    const updateScrollButtons = useCallback(() => {
-        const el = recentScrollRef.current;
-        if (!el) return;
-        // dir="ltr", items start from left (newest first on right visually via RTL parent)
-        // scrollLeft=0 means at the start (rightmost in visual RTL)
-        const scrollLeft = el.scrollLeft;
-        const maxScroll = el.scrollWidth - el.clientWidth;
-        // can scroll right (visually left) if we are not at the start (scrollLeft < 0 due to RTL)
-        setCanScrollLeft(scrollLeft < 0);          // can go back (right visually)
-        setCanScrollRight(maxScroll - Math.abs(scrollLeft) > 1); // can go forward (left visually)
-    }, []);
-
-    const scrollRecent = useCallback((dir: "left" | "right") => {
-        const el = recentScrollRef.current;
-        if (!el) return;
-        el.scrollBy({ left: dir === "left" ? -300 : 300, behavior: "smooth" });
-    }, []);
     const { data: channels = [], isLoading, error, mutate } = useSWR(
         "vod-channels",
         fetchVodChannels,
@@ -306,16 +285,7 @@ export default function VodPage() {
 
     useEffect(() => {
         setRecentItems(loadRecentItems());
-        setTimeout(updateScrollButtons, 100);
-    }, [updateScrollButtons]);
-
-    useEffect(() => {
-        const el = recentScrollRef.current;
-        if (!el) return;
-        const ro = new ResizeObserver(updateScrollButtons);
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, [updateScrollButtons]);
+    }, []);
 
     useEffect(() => {
         return () => setCloseHandler(null);
@@ -362,6 +332,14 @@ export default function VodPage() {
             return nextStack;
         });
     };
+
+    const playRecentItem = useCallback((item: VodItem, stack: VodNode[]) => {
+        setNavigationStack(stack);
+        updateUrl(stack, item);
+        play(itemToChannel(item, stack), {
+            onClose: () => updateUrl(stack),
+        });
+    }, [play, updateUrl]);
 
     return (
         <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
@@ -594,94 +572,13 @@ export default function VodPage() {
                             )}
                         </>
                     )}
-                    {!currentNode && recentItems.length > 0 && (
-                        <section className="space-y-4">
-                            <div className="flex items-end justify-between gap-4">
-                                <div className="min-w-0">
-                                    <h2 className="text-lg font-semibold text-foreground">המשך צפייה ב-VOD</h2>
-                                    <p className="mt-1 text-sm text-muted-foreground">חזרה מהירה לפרקים ולתוכניות האחרונות</p>
-                                </div>
-                                <span className="shrink-0 text-xs text-muted-foreground">{recentItems.length}</span>
-                            </div>
-                            <div className="relative">
-                                {canScrollLeft && (
-                                    <button
-                                        onClick={() => scrollRecent("right")}
-                                        className="absolute right-0 top-1/2 z-10 -mr-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
-                                        aria-label="גלול אחורה"
-                                    >
-                                        <ChevronRight className="h-4 w-4 text-foreground" />
-                                    </button>
-                                )}
-                                {canScrollRight && (
-                                    <button
-                                        onClick={() => scrollRecent("left")}
-                                        className="absolute left-0 top-1/2 z-10 -ml-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
-                                        aria-label="גלול קדימה"
-                                    >
-                                        <ChevronLeft className="h-4 w-4 text-foreground" />
-                                    </button>
-                                )}
-                                <div
-                                    ref={recentScrollRef}
-                                    onScroll={updateScrollButtons}
-                                    className="flex gap-3 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden"
-                                    style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-                                >
-                                    {[...recentItems].map(({ item, stack }) => (
-                                        (() => {
-                                            const meta = buildVodMeta(item, stack);
-                                            const progressPercent = getVodProgressPercent(item.id);
-                                            const title = meta.episodeName || item.name;
-                                            const subtitle = [meta.channelName, meta.programName !== title ? meta.programName : null, meta.seasonName]
-                                                .filter(Boolean)
-                                                .join(" · ");
-
-                                            return (
-                                                <button
-                                                    key={item.id}
-                                                    onClick={() => {
-                                                        setNavigationStack(stack);
-                                                        updateUrl(stack, item);
-                                                        play(itemToChannel(item, stack), {
-                                                            onClose: () => updateUrl(stack),
-                                                        });
-                                                    }}
-                                                    className="group flex w-[78vw] max-w-[20rem] shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:w-[18rem] lg:w-[19rem]"
-                                                >
-                                                    <div className="relative aspect-video overflow-hidden bg-background">
-                                                        <img
-                                                            src={getImageSrc(meta.episodeImage || meta.programImage || item.logo)}
-                                                            alt=""
-                                                            className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
-                                                        />
-                                                        <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/15 to-transparent" />
-                                                        <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
-                                                            <Play className="h-3.5 w-3.5 fill-current" />
-                                                            המשך
-                                                        </span>
-                                                        {progressPercent > 0 && (
-                                                            <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden="true">
-                                                                <div className="h-full bg-primary" style={{ width: `${progressPercent}%` }} />
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <div className="min-w-0 p-4">
-                                                        {subtitle && <p className="line-clamp-1 text-xs text-muted-foreground">{subtitle}</p>}
-                                                        <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">{title}</h3>
-                                                        {meta.episodeDescription && (
-                                                            <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                                                                {meta.episodeDescription}
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </button>
-                                            );
-                                        })()
-                                    ))}
-                                </div>
-                            </div>
-                        </section>
+                    {!currentNode && (
+                        <VodRecentCarousel
+                            items={recentItems}
+                            buildMeta={buildVodMeta}
+                            getImageSrc={getImageSrc}
+                            onPlay={playRecentItem}
+                        />
                     )}
                 </div>
             </main>
