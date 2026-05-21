@@ -50,6 +50,7 @@ export function VideoPlayer({
   const playerRef = useRef<any>(null);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoreExpandedAfterFullscreenRef = useRef(false);
+  const handleCloseRef = useRef<() => void>(() => undefined);
   const lastVodProgressSaveRef = useRef(0);
   const preCastMutedRef = useRef(false);
   const preCastVolumeRef = useRef(1);
@@ -69,6 +70,9 @@ export function VideoPlayer({
   const [isExpanded, setIsExpanded] = useState(false);
 
   const { isMobileDevice, isPhoneLike, isTouchDevice } = useMobileDevice();
+  const isRouteTvMode =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/tv");
+  const effectiveTvMode = isTvMode || isRouteTvMode;
   const currentProgram = useCurrentProgram(channel?.programs);
   const loadingImage =
     channel?.type === "vod"
@@ -135,10 +139,10 @@ export function VideoPlayer({
   }, [clearOverlayTimer]);
 
   const resetViewMode = useCallback(() => {
-    setIsExpanded(false);
+    setIsExpanded(effectiveTvMode);
     setIsFullscreen(document.fullscreenElement === containerRef.current);
     showControls();
-  }, [showControls]);
+  }, [effectiveTvMode, showControls]);
 
   const toggleExpanded = useCallback(() => {
     if (document.fullscreenElement) return;
@@ -188,7 +192,7 @@ export function VideoPlayer({
   }, [isExpanded, toggleExpanded, toggleFullscreen]);
 
   useEffect(() => {
-    if (!isTvMode || !channel) return;
+    if (!effectiveTvMode || !channel) return;
 
     const isVisibleControl = (element: HTMLElement) => {
       const rect = element.getBoundingClientRect();
@@ -252,6 +256,18 @@ export function VideoPlayer({
       showControls();
 
       if (
+        event.key === "Escape" ||
+        event.key === "Backspace" ||
+        event.key === "BrowserBack" ||
+        event.key === "GoBack"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleCloseRef.current();
+        return;
+      }
+
+      if (
         event.key !== "ArrowLeft" &&
         event.key !== "ArrowRight" &&
         event.key !== "ArrowUp" &&
@@ -291,23 +307,54 @@ export function VideoPlayer({
     document.addEventListener("keydown", handleTvKeys, true);
 
     return () => document.removeEventListener("keydown", handleTvKeys, true);
-  }, [channel, isTvMode, showControls]);
+  }, [channel, effectiveTvMode, showControls]);
 
   useEffect(() => {
-    if (!isTvMode || !channel || !containerRef.current) return;
+    if (!effectiveTvMode || !channel || !containerRef.current) return;
 
     const container = containerRef.current;
-    const timer = window.setTimeout(() => {
-      if (!document.fullscreenElement) {
-        container.requestFullscreen?.().catch(() => undefined);
+    const enforceExpanded = () => {
+      if (document.fullscreenElement === container) {
+        document.exitFullscreen?.().catch(() => undefined);
       }
 
+      setIsExpanded(true);
       container.focus();
       showControls();
+
+      if (onResize) {
+        onResize();
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      enforceExpanded();
+      window.setTimeout(enforceExpanded, 100);
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [channel, isTvMode, showControls]);
+  }, [channel, effectiveTvMode, onResize, showControls]);
+
+
+  useEffect(() => {
+    if (!effectiveTvMode || !channel) return;
+
+    const handleBackKey = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.key === "Escape" ||
+        event.key === "Backspace" ||
+        event.key === "BrowserBack" ||
+        event.key === "GoBack"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleCloseRef.current();
+      }
+    };
+
+    window.addEventListener("keydown", handleBackKey, true);
+    return () => window.removeEventListener("keydown", handleBackKey, true);
+  }, [channel, effectiveTvMode]);
 
   const pauseLocalPlayerForCasting = useCallback((player: any) => {
     if (!player || player.isDisposed?.()) return;
@@ -364,7 +411,7 @@ export function VideoPlayer({
     window.setTimeout(() => {
       suppressCastVolumeSyncRef.current = false;
     }, 0);
-  }, [channel]);
+  }, [channel, effectiveTvMode, showControls]);
 
   const {
     deviceName,
@@ -398,9 +445,8 @@ export function VideoPlayer({
         // While real fullscreen is active, browser-expanded mode should be visually disabled.
         setIsExpanded(false);
       } else {
-        // If the user entered fullscreen while already in browser-expanded mode,
-        // restore browser-expanded mode when leaving fullscreen.
-        setIsExpanded(restoreExpandedAfterFullscreenRef.current);
+        // In TV mode we always stay in expanded browser mode, never real fullscreen.
+        setIsExpanded(effectiveTvMode || restoreExpandedAfterFullscreenRef.current);
         restoreExpandedAfterFullscreenRef.current = false;
       }
 
@@ -420,7 +466,7 @@ export function VideoPlayer({
         handleFullscreenChange as EventListener,
       );
     };
-  }, [showControls]);
+  }, [effectiveTvMode, showControls]);
 
   useEffect(() => {
     if (!channel) return;
@@ -433,7 +479,7 @@ export function VideoPlayer({
     setPlayerInstance(null);
     restoreExpandedAfterFullscreenRef.current = false;
     lastVodProgressSaveRef.current = 0;
-    setIsExpanded(false);
+    setIsExpanded(effectiveTvMode);
     showControls();
 
     const streamRequest =
@@ -466,7 +512,7 @@ export function VideoPlayer({
 
     setHasError(false);
     setIsLoading(true);
-    setIsExpanded(false);
+    setIsExpanded(effectiveTvMode);
     showControls();
 
     if (playerRef.current) {
@@ -527,6 +573,10 @@ export function VideoPlayer({
     player.ready(() => {
       resetViewMode();
 
+      if (effectiveTvMode) {
+        setIsExpanded(true);
+      }
+
       if (isCastingRef.current) {
         pauseLocalPlayerForCasting(player);
         return;
@@ -542,12 +592,12 @@ export function VideoPlayer({
     });
 
     player.on("loadstart", () => {
-      setIsExpanded(false);
+      setIsExpanded(effectiveTvMode);
       showControls();
     });
 
     player.on("loadedmetadata", () => {
-      setIsExpanded(false);
+      setIsExpanded(effectiveTvMode);
       if (channel.type === "vod") {
         const resumeTime = channel.resumeTime ?? getVodProgress(channel.id)?.currentTime ?? 0;
         const duration = player.duration?.() ?? 0;
@@ -578,7 +628,7 @@ export function VideoPlayer({
     player.on("error", () => {
       setHasError(true);
       setIsLoading(false);
-      setIsExpanded(false);
+      setIsExpanded(effectiveTvMode);
     });
 
     player.on("waiting", () => {
@@ -621,6 +671,7 @@ export function VideoPlayer({
   }, [
     streamUrl,
     channel,
+    effectiveTvMode,
     pauseLocalPlayerForCasting,
     resetViewMode,
     showControls,
@@ -683,6 +734,10 @@ export function VideoPlayer({
     stopCasting().finally(onClose);
   };
 
+  useEffect(() => {
+    handleCloseRef.current = handleClose;
+  });
+
   if (!channel) {
     return (
       <div className="relative aspect-video bg-card rounded-xl overflow-hidden flex items-center justify-center border border-border">
@@ -698,10 +753,10 @@ export function VideoPlayer({
     <div
       ref={containerRef}
       data-player-root
-      data-tv-player={isTvMode ? "true" : "false"}
+      data-tv-player={effectiveTvMode ? "true" : "false"}
       data-mobile-device={isMobileDevice ? "true" : "false"}
       data-touch-device={isTouchDevice ? "true" : "false"}
-      tabIndex={isTvMode ? -1 : undefined}
+      tabIndex={effectiveTvMode ? -1 : undefined}
       className={`
         relative overflow-hidden bg-black
         ${isExpanded && !isFullscreen ? "fixed inset-0 z-[1000] rounded-none" : "rounded-xl"}
@@ -713,7 +768,7 @@ export function VideoPlayer({
     >
       <div
         className="relative w-full h-full bg-black"
-        onClick={isTvMode ? showControls : toggleControls}
+        onClick={effectiveTvMode ? showControls : toggleControls}
         onDoubleClick={handlePlayerDoubleClick}
         dir="ltr"
       >
@@ -797,7 +852,7 @@ export function VideoPlayer({
             canCast={!!streamUrl}
             isCastConnecting={isCastConnecting}
             isMobileDevice={isMobileDevice}
-            isTvMode={isTvMode}
+            isTvMode={effectiveTvMode}
             onCast={isCasting ? stopCasting : requestCastSession}
             onClose={handleClose}
             onToggleExpanded={toggleExpanded}
@@ -816,8 +871,8 @@ export function VideoPlayer({
               showLive: channel.type !== "vod",
               showQuality: true,
               showCast: false,
-              showExpand: !isTvMode,
-              showFullscreen: true,
+              showExpand: !effectiveTvMode,
+              showFullscreen: !effectiveTvMode,
             }}
           />
         )}
@@ -893,10 +948,6 @@ export function VideoPlayer({
         .video-js video {
           width: 100% !important;
           height: 100% !important;
-        }
-
-        [data-tv-player="true"] {
-          border-radius: 0 !important;
         }
 
         [data-tv-player="true"] button {

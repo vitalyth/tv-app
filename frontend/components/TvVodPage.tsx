@@ -44,6 +44,22 @@ const getImageSrc = (logo: string) => {
   return `/ch/${logo}`;
 };
 
+const getDisplayName = (...values: Array<string | undefined | null>) => {
+  return values.find((value) => value && value.trim().length > 0)?.trim() || "";
+};
+
+const getItemFolderName = (item: VodItem, parentName?: string) => {
+  return getDisplayName(parentName, item.channelName, item.programName, "VOD");
+};
+
+const getItemProgramName = (item: VodItem, parentName?: string) => {
+  return getDisplayName(item.programName, parentName, item.channelName, item.title, "תוכנית");
+};
+
+const getItemTitle = (item: VodItem) => {
+  return getDisplayName(item.episodeName, item.title, item.name, item.programName, "ללא שם");
+};
+
 const toVodNode = (channel: VodChannel): VodNode => ({
   name: channel.name,
   module: channel.module,
@@ -328,6 +344,17 @@ export default function TvVodPage() {
     }
   }, []);
 
+  const goBack = useCallback(() => {
+    if (!navigationStack.length) {
+      router.push("/tv");
+      return;
+    }
+
+    const nextStack = navigationStack.slice(0, -1);
+    setNavigationStack(nextStack);
+    updatePath(nextStack);
+  }, [navigationStack, router, updatePath]);
+
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key === "ArrowLeft") {
@@ -350,12 +377,18 @@ export default function TvVodPage() {
         moveFocus("down");
       }
 
+      if (event.key === "Escape" || event.key === "Backspace") {
+        event.preventDefault();
+        goBack();
+        return;
+      }
+
       if ((event.key === "Enter" || event.key === " ") && document.activeElement instanceof HTMLElement) {
         event.preventDefault();
         document.activeElement.click();
       }
     },
-    [moveFocus]
+    [goBack, moveFocus]
   );
 
   const openChannel = useCallback(
@@ -381,21 +414,10 @@ export default function TvVodPage() {
       if (!item.isPlayable) return;
 
       saveRecentItem(item, navigationStack);
-      play(itemToChannel(item, navigationStack), { fullscreen: true });
+      play(itemToChannel(item, navigationStack), { expanded: true });
     },
     [navigationStack, play, updatePath]
   );
-
-  const goBack = useCallback(() => {
-    if (!navigationStack.length) {
-      router.push("/tv");
-      return;
-    }
-
-    const nextStack = navigationStack.slice(0, -1);
-    setNavigationStack(nextStack);
-    updatePath(nextStack);
-  }, [navigationStack, router, updatePath]);
 
   return (
     <div
@@ -416,17 +438,17 @@ export default function TvVodPage() {
         }
       `}</style>
 
-      <main className="flex h-full flex-col px-12 py-9">
-        <header className="tv-panel mb-9 flex shrink-0 items-center justify-between gap-8 rounded-[2rem] px-8 py-7">
-          <div className="flex min-w-0 items-center gap-5">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl bg-primary shadow-lg">
-              <Clapperboard className="h-9 w-9 text-primary-foreground" />
+      <main className="flex h-full flex-col px-7 py-5">
+        <header className="tv-panel mb-5 flex shrink-0 items-center justify-between gap-3 rounded-2xl px-5 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary shadow-lg">
+              <Clapperboard className="h-6 w-6 text-primary-foreground" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-5xl font-bold tracking-tight">{title}</h1>
-              <p className="mt-2 truncate text-xl text-muted-foreground">{description}</p>
+              <h1 className="truncate text-lg font-bold tracking-tight">{title}</h1>
+              <p className="mt-1 truncate text-sm text-muted-foreground">{description}</p>
               {shownNodes.length > 0 && (
-                <div className="mt-3 flex min-w-0 items-center gap-2 text-lg text-muted-foreground">
+                <div className="mt-2 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
                   <span className="shrink-0">VOD</span>
                   {shownNodes.map((node, index) => (
                     <span
@@ -434,7 +456,7 @@ export default function TvVodPage() {
                       className="flex min-w-0 items-center gap-2"
                     >
                       <ChevronLeft className="h-4 w-4 shrink-0" />
-                      <span className="max-w-56 truncate">{node.name}</span>
+                      <span className="max-w-32 truncate">{node.name}</span>
                     </span>
                   ))}
                 </div>
@@ -445,32 +467,32 @@ export default function TvVodPage() {
           <button
             type="button"
             onClick={goBack}
-            className="tv-focus-card flex h-20 shrink-0 items-center gap-3 rounded-3xl border border-border bg-card px-8 text-2xl font-bold transition hover:border-primary/60 hover:bg-secondary"
+            className="tv-focus-card flex h-20 shrink-0 items-center gap-3 rounded-xl border border-border bg-card px-8 text-2xl font-bold transition hover:border-primary/60 hover:bg-secondary"
           >
-            <ArrowRight className="h-7 w-7" />
+            <ArrowRight className="h-4 w-4" />
             חזרה
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-10 pt-2 styled-scrollbar">
+        <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-5 pt-1 styled-scrollbar">
           {isLoading ? (
-            <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4">
+            <div className="grid grid-cols-5 gap-3 2xl:grid-cols-6">
               {Array.from({ length: 8 }).map((_, index) => (
                 <div
                   key={index}
-                  className="h-80 animate-pulse rounded-3xl border border-border bg-card"
+                  className="h-44 animate-pulse rounded-xl border border-border bg-card"
                 />
               ))}
             </div>
           ) : error ? (
-            <div className="flex min-h-96 items-center justify-center">
-              <div className="space-y-5 rounded-3xl border border-border bg-card p-10 text-center">
-                <p className="text-3xl font-bold text-destructive">שגיאה בטעינת ה-VOD</p>
+            <div className="flex min-h-28 items-center justify-center">
+              <div className="space-y-3 rounded-xl border border-border bg-card p-5 text-center">
+                <p className="text-lg font-bold text-destructive">שגיאה בטעינת ה-VOD</p>
                 {currentNode && (
                   <button
                     type="button"
                     onClick={() => retryItems()}
-                    className="tv-focus-card rounded-2xl border border-border px-7 py-4 text-xl font-bold transition hover:bg-secondary"
+                    className="tv-focus-card rounded-2xl border border-border px-4 py-2 text-sm font-bold transition hover:bg-secondary"
                   >
                     נסה שוב
                   </button>
@@ -479,16 +501,21 @@ export default function TvVodPage() {
             </div>
           ) : currentNode ? (
             items.length > 0 ? (
-              <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4">
+              <div className="grid grid-cols-5 gap-3 2xl:grid-cols-6">
                 {items.map((item) => (
-                  <VodItemCard key={item.id} item={item} onOpen={() => openItem(item)} />
+                  <VodItemCard
+                    key={item.id}
+                    item={item}
+                    parentName={currentNode?.name}
+                    onOpen={() => openItem(item)}
+                  />
                 ))}
               </div>
             ) : (
               <EmptyState label="לא נמצא תוכן בתיקייה הזו" />
             )
           ) : channels.length > 0 ? (
-            <div className="grid grid-cols-3 gap-6 2xl:grid-cols-4">
+            <div className="grid grid-cols-5 gap-3 2xl:grid-cols-6">
               {channels.map((channel) => (
                 <VodChannelCard
                   key={channel.id}
@@ -517,52 +544,67 @@ function VodChannelCard({
     <button
       type="button"
       onClick={onOpen}
-      className="tv-focus-card group flex h-80 flex-col overflow-hidden rounded-3xl border border-border bg-card/95 text-right transition hover:border-primary/60 hover:bg-secondary"
+      className="tv-focus-card group flex h-44 flex-col overflow-hidden rounded-xl border border-border bg-card/95 text-right transition hover:border-primary/60 hover:bg-secondary"
     >
-      <div className="flex h-48 items-center justify-center bg-background p-8">
+      <div className="flex h-24 items-center justify-center bg-background p-3">
         <img
           src={getImageSrc(channel.logo)}
           alt=""
           className="h-full w-full object-contain transition-transform group-focus:scale-110"
         />
       </div>
-      <div className="flex min-h-0 flex-1 items-center gap-4 p-6">
-        <Tv className="h-7 w-7 shrink-0 text-primary" />
+      <div className="flex min-h-0 flex-1 items-center gap-4 p-3">
+        <Tv className="h-4 w-4 shrink-0 text-primary" />
         <div className="min-w-0">
-          <p className="text-lg font-bold text-primary">ספריית VOD</p>
-          <h2 className="mt-1 truncate text-3xl font-bold">{channel.name}</h2>
+          <p className="text-xs font-bold text-primary">ספריית VOD</p>
+          <h2 className="mt-1 truncate text-lg font-bold">{channel.name}</h2>
         </div>
       </div>
     </button>
   );
 }
 
-function VodItemCard({ item, onOpen }: { item: VodItem; onOpen: () => void }) {
+function VodItemCard({
+  item,
+  parentName,
+  onOpen,
+}: {
+  item: VodItem;
+  parentName?: string;
+  onOpen: () => void;
+}) {
   const isDisabled = !item.isFolder && !item.isPlayable;
+  const folderName = getItemFolderName(item, parentName);
+  const programName = getItemProgramName(item, parentName);
+  const title = getItemTitle(item);
+  const metaLabel = item.isFolder ? folderName : programName;
 
   return (
     <button
       type="button"
       onClick={onOpen}
       disabled={isDisabled}
-      className="tv-focus-card group flex h-[25rem] flex-col overflow-hidden rounded-3xl border border-border bg-card/95 text-right transition hover:border-primary/60 hover:bg-secondary disabled:cursor-default disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-card"
+      className="tv-focus-card group flex h-44 flex-col overflow-hidden rounded-xl border border-border bg-card/95 text-right transition hover:border-primary/60 hover:bg-secondary disabled:cursor-default disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-card"
     >
-      <div className="relative h-56 shrink-0 overflow-hidden bg-background">
+      <div className="relative h-24 shrink-0 overflow-hidden bg-background">
         <img
           src={getImageSrc(item.logo)}
           alt=""
           className="h-full w-full object-cover object-top transition-transform group-focus:scale-105"
         />
         <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/10 to-transparent" />
-        <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-full bg-black/80 px-4 py-2 text-lg font-bold text-white">
-          {item.isFolder ? <FolderOpen className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
+        <span className="absolute bottom-2 right-2 inline-flex items-center gap-2 rounded-full bg-black/80 px-2 py-1 text-xs font-bold text-white">
+          {item.isFolder ? <FolderOpen className="h-4 w-4" /> : <Play className="h-4 w-4 fill-current" />}
           {item.isFolder ? "תיקייה" : "נגן"}
         </span>
       </div>
-      <div className="min-w-0 flex-1 p-6">
-        <h2 className="line-clamp-2 text-3xl font-bold leading-tight">{item.name}</h2>
+      <div className="min-w-0 flex-1 p-3">
+        <p className="truncate text-xs font-bold text-primary">
+          {item.isFolder ? "תיקייה" : "תוכנית"} · {metaLabel}
+        </p>
+        <h2 className="mt-1 line-clamp-2 text-base font-bold leading-tight text-foreground">{title}</h2>
         {item.description && (
-          <p className="mt-3 line-clamp-2 text-lg text-muted-foreground">{item.description}</p>
+          <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{item.description}</p>
         )}
       </div>
     </button>
@@ -571,8 +613,8 @@ function VodItemCard({ item, onOpen }: { item: VodItem; onOpen: () => void }) {
 
 function EmptyState({ label }: { label: string }) {
   return (
-    <div className="flex min-h-96 items-center justify-center rounded-3xl border border-border bg-card">
-      <p className="text-3xl font-bold text-muted-foreground">{label}</p>
+    <div className="flex min-h-28 items-center justify-center rounded-xl border border-border bg-card">
+      <p className="text-lg font-bold text-muted-foreground">{label}</p>
     </div>
   );
 }

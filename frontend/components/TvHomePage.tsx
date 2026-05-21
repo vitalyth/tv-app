@@ -318,7 +318,7 @@ export default function TvHomePage() {
 
   const playLive = useCallback(
     (channel: Channel) => {
-      play(channel, { fullscreen: true });
+      play(channel, { expanded: true });
     },
     [play]
   );
@@ -327,7 +327,7 @@ export default function TvHomePage() {
     (item: VodItem, stack: VodNode[]) => {
       saveRecentVodItem(item, stack);
       setRecentVodItems(loadRecentVodItems());
-      play(itemToChannel(item, stack), { fullscreen: true });
+      play(itemToChannel(item, stack), { expanded: true });
     },
     [play]
   );
@@ -374,35 +374,35 @@ export default function TvHomePage() {
         }
       `}</style>
 
-      <main className="flex h-full flex-col px-12 py-9">
-        <div className="tv-panel mb-9 shrink-0 overflow-hidden rounded-[2rem] px-8 py-7">
-          <div className="flex items-center justify-between gap-8">
-            <div className="flex min-w-0 items-center gap-6">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-[1.75rem] bg-primary shadow-[0_18px_42px_rgba(20,211,217,0.22)]">
-                <Tv className="h-11 w-11 text-primary-foreground" />
+      <main className="flex h-full flex-col px-7 py-5">
+        <div className="tv-panel mb-5 shrink-0 overflow-hidden rounded-2xl px-5 py-4">
+          <div className="flex items-center justify-between gap-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary shadow-[0_18px_42px_rgba(20,211,217,0.22)]">
+                <Tv className="h-7 w-7 text-primary-foreground" />
               </div>
               <div className="min-w-0">
-                <p className="text-lg font-bold text-primary">Best TV</p>
-                <h1 className="truncate text-6xl font-bold tracking-tight">TV App</h1>
+                <p className="text-sm font-bold text-primary">Best TV</p>
+                <h1 className="truncate text-sm font-bold tracking-tight">TV App</h1>
               </div>
             </div>
-            <div className="max-w-xl border-r border-border/80 pr-8 text-left">
-              <p className="text-2xl font-medium text-foreground">שידורים חיים ו-VOD למסך הגדול</p>
-              <p className="mt-2 text-lg text-muted-foreground">המשך ישיר לערוצים, ספריות ופרקים אחרונים.</p>
+            <div className="max-w-md border-r border-border/80 pr-5 text-left">
+              <p className="text-lg font-medium text-foreground">שידורים חיים ו-VOD למסך הגדול</p>
+              <p className="mt-1 text-sm text-muted-foreground">המשך ישיר לערוצים, ספריות ופרקים אחרונים.</p>
             </div>
           </div>
         </div>
 
         {isLoading ? (
-          <div className="min-h-0 flex-1 space-y-10 overflow-hidden">
+          <div className="min-h-0 flex-1 space-y-3 overflow-hidden">
             {Array.from({ length: 3 }).map((_, rowIndex) => (
-              <section key={rowIndex} className="space-y-5">
-                <div className="h-10 w-64 animate-pulse rounded-lg bg-muted" />
-                <div className="flex gap-6 overflow-hidden">
+              <section key={rowIndex} className="space-y-3">
+                <div className="h-6 w-40 animate-pulse rounded-lg bg-muted" />
+                <div className="flex gap-3 overflow-hidden">
                   {Array.from({ length: 5 }).map((_, index) => (
                     <div
                       key={index}
-                      className="h-52 w-80 shrink-0 animate-pulse rounded-3xl border border-border bg-card"
+                      className="h-32 w-52 shrink-0 animate-pulse rounded-xl border border-border bg-card"
                     />
                   ))}
                 </div>
@@ -411,18 +411,18 @@ export default function TvHomePage() {
           </div>
         ) : hasError ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="rounded-3xl border border-border bg-card p-10 text-2xl text-destructive">
+            <div className="rounded-xl border border-border bg-card p-10 text-2xl text-destructive">
               שגיאה בטעינת התוכן
             </div>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-12 styled-scrollbar">
+          <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-6 styled-scrollbar">
             {liveChannels.length > 0 && (
               <TvSection
                 title="ערוצים"
                 description="כל הערוצים החיים במקום אחד"
               >
-                <TvRail itemClassName="w-72 xl:w-80">
+                <TvRail itemClassName="w-40 xl:w-44">
                   {liveChannels.map((channel) => (
                     <LiveChannelCard
                       key={channel.id}
@@ -436,7 +436,7 @@ export default function TvHomePage() {
 
             {vodChannels.length > 0 && (
               <TvSection title="VOD" description="ספריות לצפייה לפי ערוץ">
-                <TvRail itemClassName="w-[25rem] xl:w-[28rem]">
+                <TvRail itemClassName="w-56 xl:w-64">
                   {vodChannels.map((channel) => (
                     <VodLibraryCard
                       key={channel.id}
@@ -450,7 +450,7 @@ export default function TvHomePage() {
 
             {vodRecentItems.length > 0 && (
               <TvSection title="חדש ב-VOD" description="פרקים ותוכניות שנוספו לאחרונה">
-                <TvRail itemClassName="w-[27rem] xl:w-[30rem]">
+                <TvRail itemClassName="w-56 xl:w-64">
                   {vodRecentItems.map((item) => {
                     const stack = vodRecentStack(item);
 
@@ -470,7 +470,7 @@ export default function TvHomePage() {
 
             {recentVodItems.length > 0 && (
               <TvSection title="נצפו לאחרונה" description="חזרה מהירה למה שהתחלת לראות">
-                <TvRail itemClassName="w-[27rem] xl:w-[30rem]">
+                <TvRail itemClassName="w-56 xl:w-64">
                   {recentVodItems.map(({ item, stack }) => (
                     <VodEpisodeCard
                       key={item.id}
@@ -500,12 +500,12 @@ function TvSection({
   children: ReactNode;
 }) {
   return (
-    <section className="mb-14 space-y-6">
+    <section className="mb-7 space-y-3">
       <div className="flex items-end gap-5">
-        <span className="mb-2 h-11 w-1.5 shrink-0 rounded-full bg-primary" />
+        <span className="mb-1 h-7 w-1 shrink-0 rounded-full bg-primary" />
         <div>
-          <h2 className="text-4xl font-bold">{title}</h2>
-          {description && <p className="mt-2 text-xl text-muted-foreground">{description}</p>}
+          <h2 className="text-2xl font-bold">{title}</h2>
+          {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
         </div>
       </div>
       {children}
@@ -523,7 +523,7 @@ function TvRail({
   const items = Array.isArray(children) ? children : [children];
 
   return (
-    <div className="flex snap-x snap-mandatory gap-6 overflow-x-auto px-2 pb-6 pt-2 scroll-smooth scrollbar-hide">
+    <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-3 pt-1 scroll-smooth scrollbar-hide">
       {items.map((child, index) => (
         <div key={index} className={`${itemClassName} shrink-0 snap-start *:h-full *:w-full`}>
           {child}
@@ -544,21 +544,21 @@ function LiveChannelCard({
     <button
       type="button"
       onClick={onPlay}
-      className="tv-focus-card group flex h-72 flex-col justify-between overflow-hidden rounded-3xl border border-border bg-card/95 p-6 text-right transition hover:border-primary/60 hover:bg-secondary"
+      className="tv-focus-card group flex h-24 flex-col justify-between overflow-hidden rounded-xl border border-border bg-card/95 p-3 text-right transition hover:border-primary/60 hover:bg-secondary"
     >
-      <div className="flex h-36 w-full items-center justify-center rounded-3xl border border-border bg-background/75">
+      <div className="flex h-20 w-full items-center justify-center rounded-xl border border-border bg-background/75">
         <img
           src={`/ch/${channel.logo}`}
           alt={channel.name}
-          className="h-28 w-28 object-contain p-2 transition-transform group-focus:scale-110"
+          className="h-14 w-14 object-contain p-2 transition-transform group-focus:scale-110"
         />
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-primary">
-          <RadioTower className="h-5 w-5" />
-          <span className="text-lg font-bold">LIVE</span>
+          <RadioTower className="h-4 w-4" />
+          <span className="text-xs font-bold">LIVE</span>
         </div>
-        <h3 className="mt-2 truncate text-3xl font-bold">{channel.name}</h3>
+        <h3 className="mt-2 truncate text-sm font-bold">{channel.name}</h3>
       </div>
     </button>
   );
@@ -575,21 +575,21 @@ function VodLibraryCard({
     <button
       type="button"
       onClick={onOpen}
-      className="tv-focus-card group flex h-72 items-center gap-6 overflow-hidden rounded-3xl border border-border bg-card/95 p-6 text-right transition hover:border-primary/60 hover:bg-secondary"
+      className="tv-focus-card group flex h-24 items-center gap-3 overflow-hidden rounded-xl border border-border bg-card/95 p-3 text-right transition hover:border-primary/60 hover:bg-secondary"
     >
-      <div className="flex h-36 w-36 shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-border bg-background">
+      <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
         <img
           src={getVodImageSrc(channel.logo)}
           alt={channel.name}
-          className="h-full w-full object-contain p-4 transition-transform group-focus:scale-110"
+          className="h-full w-full object-contain p-2 transition-transform group-focus:scale-110"
         />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-primary">
-          <Clapperboard className="h-5 w-5" />
-          <span className="text-lg font-bold">VOD</span>
+          <Clapperboard className="h-4 w-4" />
+          <span className="text-xs font-bold">VOD</span>
         </div>
-        <h3 className="mt-3 line-clamp-2 text-3xl font-bold">{channel.name}</h3>
+        <h3 className="mt-3 line-clamp-2 text-lg font-bold">{channel.name}</h3>
         <p className="mt-2 truncate text-xl text-muted-foreground">{channel.module}</p>
       </div>
     </button>
@@ -621,23 +621,23 @@ function VodEpisodeCard({
     <button
       type="button"
       onClick={onPlay}
-      className="tv-focus-card group flex h-[22rem] flex-col overflow-hidden rounded-3xl border border-border bg-card/95 text-right transition hover:border-primary/60 hover:bg-secondary"
+      className="tv-focus-card group flex h-52 flex-col overflow-hidden rounded-xl border border-border bg-card/95 text-right transition hover:border-primary/60 hover:bg-secondary"
     >
-      <div className="relative h-44 shrink-0 overflow-hidden bg-background">
+      <div className="relative h-24 shrink-0 overflow-hidden bg-background">
         <img
           src={getVodImageSrc(meta.episodeImage || meta.programImage || item.logo)}
           alt=""
           className="h-full w-full object-cover object-top transition-transform group-focus:scale-105"
         />
         <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/15 to-transparent" />
-        <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-full bg-black/75 px-4 py-2 text-base font-bold text-white">
-          {action === "המשך" ? <History className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
+        <span className="absolute bottom-2 right-2 inline-flex items-center gap-2 rounded-full bg-black/75 px-2 py-1 text-xs font-bold text-white">
+          {action === "המשך" ? <History className="h-4 w-4" /> : <Play className="h-4 w-4 fill-current" />}
           {action}
         </span>
       </div>
-      <div className="min-w-0 flex-1 p-6">
-        {subtitle && <p className="truncate text-lg text-muted-foreground">{subtitle}</p>}
-        <h3 className="mt-2 line-clamp-2 text-3xl font-bold leading-tight">{title}</h3>
+      <div className="min-w-0 flex-1 p-3">
+        {subtitle && <p className="truncate text-sm text-muted-foreground">{subtitle}</p>}
+        <h3 className="mt-2 line-clamp-2 text-lg font-bold leading-snug">{title}</h3>
       </div>
     </button>
   );
