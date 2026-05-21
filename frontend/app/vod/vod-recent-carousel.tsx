@@ -5,6 +5,8 @@ import { HorizontalCarousel } from "@/components/horizontal-carousel";
 import { type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 import { getVodProgressPercent } from "@/lib/vod-progress";
 
+const recentCarouselItemClassName = "w-[58vw] max-w-[13.5rem] shrink-0 sm:w-[12rem] lg:w-[13rem]";
+
 type VodNode = {
   name: string;
   module: string;
@@ -35,16 +37,8 @@ export function VodRecentCarousel({
   if (items.length === 0) return null;
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-end justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-foreground">המשך צפייה ב-VOD</h2>
-          <p className="mt-1 text-sm text-muted-foreground">חזרה מהירה לפרקים ולתוכניות האחרונות</p>
-        </div>
-        <span className="shrink-0 text-xs text-muted-foreground">{items.length}</span>
-      </div>
-
-      <HorizontalCarousel>
+    <section className="mb-8">
+      <HorizontalCarousel itemClassName={recentCarouselItemClassName}>
         {items.map(({ item, stack }) => {
           const meta = buildMeta(item, stack);
           const progressPercent = getVodProgressPercent(item.id);
@@ -67,8 +61,8 @@ export function VodRecentCarousel({
                   className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/15 to-transparent" />
-                <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
-                  <Play className="h-3.5 w-3.5 fill-current" />
+                <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
+                  <Play className="h-3 w-3 fill-current" />
                   המשך
                 </span>
                 {progressPercent > 0 && (
@@ -77,11 +71,11 @@ export function VodRecentCarousel({
                   </div>
                 )}
               </div>
-              <div className="min-w-0 p-4">
+              <div className="min-w-0 p-3">
                 {subtitle && <p className="line-clamp-1 text-xs text-muted-foreground">{subtitle}</p>}
-                <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">{title}</h3>
+                <h3 className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-foreground">{title}</h3>
                 {meta.episodeDescription && (
-                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                  <p className="mt-1.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
                     {meta.episodeDescription}
                   </p>
                 )}

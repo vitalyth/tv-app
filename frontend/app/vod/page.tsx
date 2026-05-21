@@ -394,34 +394,53 @@ export default function VodPage() {
                                             ))}
                                         </>
                                     ) : (
-                                        <span>כניסה לתוכן ספריות VOD</span>
+                                        <span>כל ספריות הצפייה במקום אחד, עם חזרה מהירה למה שהתחלת לראות</span>
                                     )}
                                 </div>
                             </div>
                         </div>
 
-                    <div className="relative w-full lg:w-96">
-                        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                            value={searchQuery}
-                            onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder={currentNode ? "חיפוש תוכניות" : "חיפוש VOD"}
-                            className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                        />
-                    </div>
+                    {currentNode && (
+                        <div className="relative w-full lg:w-96">
+                            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                                value={searchQuery}
+                                onChange={(event) => setSearchQuery(event.target.value)}
+                                placeholder="חיפוש תוכניות"
+                                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                            />
+                        </div>
+                    )}
                     </div>
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
+                    {!currentNode && (
+                        <VodRecentCarousel
+                            items={recentItems}
+                            buildMeta={buildVodMeta}
+                            getImageSrc={getImageSrc}
+                            onPlay={playRecentItem}
+                        />
+                    )}
+
                     {!currentNode && isLoading ? (
                         <section className="mb-8 space-y-4">
-                            <div>
-                                <h2 className="text-lg font-semibold text-foreground">VOD</h2>
-                                <p className="mt-1 text-sm text-muted-foreground">כניסה לתוכן ספריות VOD</p>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <h2 className="text-lg font-semibold text-foreground">ערוצי VOD</h2>
+                                <div className="relative w-full sm:w-80 lg:w-96">
+                                    <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <input
+                                        value={searchQuery}
+                                        onChange={(event) => setSearchQuery(event.target.value)}
+                                        placeholder="חיפוש VOD"
+                                        className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </div>
                             </div>
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                                 {Array.from({ length: 8 }).map((_, index) => (
-                                    <div key={index} className="h-28 animate-pulse rounded-lg border border-border bg-card" />
+                                    <div key={index} className="h-44 animate-pulse rounded-lg border border-border bg-card" />
                                 ))}
                             </div>
                         </section>
@@ -436,22 +455,29 @@ export default function VodPage() {
                         <>
                             {!currentNode ? (
                                 <section className="mb-8 space-y-4">
-                                    <div className="flex items-end justify-between gap-4">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                         <div className="min-w-0">
-                                            <h2 className="text-lg font-semibold text-foreground">VOD</h2>
-                                            <p className="mt-1 text-sm text-muted-foreground">כניסה לתוכן ספריות VOD</p>
+                                            <h2 className="text-lg font-semibold text-foreground">ערוצי VOD</h2>
                                         </div>
-                                        <span className="shrink-0 text-xs text-muted-foreground">{channels.length} ספריות</span>
+                                        <div className="relative w-full sm:w-80 lg:w-96">
+                                            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                            <input
+                                                value={searchQuery}
+                                                onChange={(event) => setSearchQuery(event.target.value)}
+                                                placeholder="חיפוש VOD"
+                                                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                            />
+                                        </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                                         {filteredChannels.map((channel) => (
                                             <button
                                                 key={channel.id}
                                                 onClick={() => openChannel(channel)}
-                                                className="group flex min-h-28 w-full items-center gap-4 rounded-lg border border-border bg-card p-4 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                                                className="group flex min-h-44 w-full items-center gap-6 rounded-lg border border-border bg-card p-6 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
                                             >
-                                                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+                                                <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
                                                     <img
                                                         src={getImageSrc(channel.logo)}
                                                         alt=""
@@ -462,8 +488,8 @@ export default function VodPage() {
                                                 <div className="min-w-0 flex-1">
                                                     <div className="flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
-                                                            <h3 className="truncate text-base font-semibold text-foreground">{channel.name}</h3>
-                                                            <p className="mt-1 text-xs text-muted-foreground">{channel.module}</p>
+                                                            <h3 className="truncate text-xl font-semibold text-foreground">{channel.name}</h3>
+                                                            <p className="mt-1.5 text-sm text-muted-foreground">{channel.module}</p>
                                                         </div>
                                                         <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
                                                     </div>
@@ -571,14 +597,6 @@ export default function VodPage() {
                                 </div>
                             )}
                         </>
-                    )}
-                    {!currentNode && (
-                        <VodRecentCarousel
-                            items={recentItems}
-                            buildMeta={buildVodMeta}
-                            getImageSrc={getImageSrc}
-                            onPlay={playRecentItem}
-                        />
                     )}
                 </div>
             </main>

@@ -6,7 +6,7 @@ import requests
 import time
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from config import CACHE_DIR
@@ -119,8 +119,10 @@ IDANPLUS_VOD_CHANNELS = [
 ]
 
 VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_keshet12", "vod_reshet13", "vod_14tv"]
+VOD_RECENT_LOOKBACK_DAYS = 3
+VOD_RECENT_TOTAL_LIMIT = 30
 VOD_SOURCE_CACHE_TTL_HOURS = 24
-VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_reshet13", "vod_14tv"}
+VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_keshet12", "vod_reshet13", "vod_14tv"}
 _original_addon_cache_get = addon_cache.get
 _vod_source_lock = threading.RLock()
 
@@ -293,12 +295,24 @@ def _timestamp_to_date(timestamp: int | float | str | None) -> str:
     if timestamp in (None, ""):
         return ""
     try:
-        value = float(timestamp)
-        if value > 10_000_000_000:
-            value = value / 1000
+        value = _normalize_unix_timestamp(timestamp)
+        if not value:
+            return ""
         return datetime.fromtimestamp(value).strftime("%d/%m/%Y")
     except Exception:
         return ""
+
+
+def _normalize_unix_timestamp(value: int | float | str | None) -> float:
+    if value in (None, ""):
+        return 0.0
+    try:
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp = timestamp / 1000
+        return timestamp
+    except Exception:
+        return 0.0
 
 
 def _make_vod_recent_item(
@@ -518,6 +532,7 @@ def _parse_aired_timestamp(aired_value: str) -> float:
         "%Y-%m-%d",
         "%d/%m/%Y %H:%M",
         "%d/%m/%Y",
+        "%d/%m/%y",
     ]
 
     for fmt in common_formats:
@@ -534,6 +549,77 @@ def _parse_aired_timestamp(aired_value: str) -> float:
         return timestamp
     except Exception:
         return 0.0
+
+
+def _vod_recent_cutoff_timestamp(days: int = VOD_RECENT_LOOKBACK_DAYS) -> float:
+    return (datetime.now() - timedelta(days=days)).timestamp()
+
+
+def _timestamp_matches_recent_days(timestamp: float, days: int = VOD_RECENT_LOOKBACK_DAYS) -> bool:
+    return timestamp >= _vod_recent_cutoff_timestamp(days)
+
+
+def _timestamp_matches_dates(timestamp: float, allowed_dates: set) -> bool:
+    if not timestamp:
+        return False
+    return datetime.fromtimestamp(timestamp).date() in allowed_dates
+
+
+def _vod_recent_item_matches_channel_window(item: dict) -> bool:
+    timestamp = _item_timestamp_from_fields(item)
+    channel_id = item.get("vodChannelId")
+
+    if channel_id == "vod_reshet13":
+        return _timestamp_matches_dates(timestamp, _today_and_yesterday_dates())
+    if channel_id == "vod_14tv":
+        return _timestamp_matches_dates(timestamp, _today_date_set())
+
+    return _timestamp_matches_recent_days(timestamp)
+
+
+def _today_and_yesterday_dates() -> set:
+    today = datetime.now().date()
+    return {today, today - timedelta(days=1)}
+
+
+def _today_date_set() -> set:
+    return {datetime.now().date()}
+
+
+def _text_episode_number(item: dict) -> int:
+    values = [
+        item.get("episode", ""),
+        item.get("episodeName", ""),
+        item.get("title", ""),
+        item.get("name", ""),
+    ]
+    for value in values:
+        text = clean_kodi_label(str(value or ""))
+        match = re.search(r"(?:פרק|episode|ep)\D*(\d{1,4})", text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+    return 0
+
+
+def _item_timestamp_from_fields(item: dict) -> float:
+    for field in ("name", "title", "episodeName", "description"):
+        text = clean_kodi_label(str(item.get(field, "") or ""))
+        timestamp = _parse_aired_timestamp(text)
+        if timestamp:
+            return timestamp
+
+        date_match = re.search(r"(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})", text)
+        if date_match:
+            timestamp = _parse_aired_timestamp(date_match.group(1).replace(".", "/").replace("-", "/"))
+            if timestamp:
+                return timestamp
+
+    timestamp = _vod_recent_timestamp(item)
+    if timestamp:
+        return timestamp
+
+    return 0.0
 
 
 def _sort_vod_items_by_recent(items: list[dict]) -> list[dict]:
@@ -611,6 +697,132 @@ def _sort_direct_recent_items(items: list[dict]) -> list[dict]:
     )
 
 
+def _folder_name_matches(item: dict, *needles: str) -> bool:
+    name = clean_kodi_label(str(item.get("name", "") or "")).strip()
+    return any(needle in name for needle in needles)
+
+
+def _node_from_vod_item(item: dict, fallback: dict | None = None) -> dict:
+    fallback = fallback or {}
+    return {
+        "module": item.get("module", fallback.get("module", "")),
+        "mode": item.get("mode", fallback.get("mode", 0)),
+        "url": item.get("url", fallback.get("url", "")),
+        "name": item.get("name", fallback.get("name", "")),
+        "iconimage": item.get("logo", fallback.get("iconimage", "")),
+        "moreData": item.get("moreData", fallback.get("moreData", "")),
+    }
+
+
+def _get_vod_children_for_node(node: dict, use_cache: bool) -> list[dict]:
+    return get_vod_items(
+        node.get("module", ""),
+        node.get("mode", 0),
+        node.get("url", ""),
+        node.get("name", ""),
+        node.get("iconimage", ""),
+        node.get("moreData", ""),
+        use_cache=use_cache,
+    )
+
+
+def _select_keshet_latest_episode(items: list[dict]) -> dict | None:
+    playable_items = [
+        {
+            **item,
+            "sourceTimestamp": _item_timestamp_from_fields(item),
+            "episodeNumber": _text_episode_number(item),
+        }
+        for item in items
+        if item.get("isPlayable") and not item.get("isFolder", False)
+    ]
+    if not playable_items:
+        return None
+
+    return sorted(
+        playable_items,
+        key=lambda item: (
+            item.get("sourceTimestamp", 0) > 0,
+            item.get("sourceTimestamp", 0),
+            item.get("episodeNumber", 0),
+            -item.get("sourceOrder", 0),
+        ),
+        reverse=True,
+    )[0]
+
+
+def _fetch_keshet_recent_items(channel: dict, limit: int, use_cache: bool) -> list[dict]:
+    root_node = {
+        "module": channel["module"],
+        "mode": channel["mode"],
+        "url": channel.get("url", ""),
+        "name": channel.get("name", ""),
+        "iconimage": channel.get("logo", ""),
+        "moreData": channel.get("moreData", ""),
+    }
+
+    try:
+        root_items = _get_vod_children_for_node(root_node, use_cache)
+    except Exception:
+        return []
+
+    all_programs_folder = next(
+        (
+            item
+            for item in root_items
+            if item.get("isFolder") and _folder_name_matches(item, "כל התוכניות", "כל התכניות")
+        ),
+        None,
+    )
+    if not all_programs_folder:
+        return []
+
+    try:
+        program_folders = [
+            item
+            for item in _get_vod_children_for_node(_node_from_vod_item(all_programs_folder, root_node), use_cache)
+            if item.get("isFolder")
+        ]
+    except Exception:
+        return []
+
+    recent_items: list[dict] = []
+    for source_order, program_folder in enumerate(program_folders[:4]):
+        program_node = _node_from_vod_item(program_folder, root_node)
+        program_items = _collect_playable_vod_items(
+            program_node["module"],
+            program_node["mode"],
+            program_node.get("url", ""),
+            program_node.get("name", ""),
+            program_node.get("iconimage", ""),
+            program_node.get("moreData", ""),
+            max_depth=4,
+            max_nodes=80,
+            use_cache=use_cache,
+        )
+        selected_item = _select_keshet_latest_episode(program_items)
+        if not selected_item:
+            continue
+
+        source_timestamp = selected_item.get("sourceTimestamp") or _item_timestamp_from_fields(selected_item)
+        if not source_timestamp:
+            source_timestamp = time.time()
+
+        recent_items.append(
+            {
+                **selected_item,
+                "programName": clean_kodi_label(program_folder.get("name", "")),
+                "programImage": normalize_vod_image(program_folder.get("logo", "")),
+                "channelName": "קשת 12",
+                "channelImage": normalize_vod_image(channel.get("logo", "")),
+                "sourceTimestamp": source_timestamp,
+                "sourceOrder": source_order,
+            }
+        )
+
+    return recent_items[:limit]
+
+
 def _get_reshet_build_id() -> str:
     html = _http_get_text(
         "https://13tv.co.il/allshows/screen/1170108/",
@@ -650,20 +862,24 @@ def _fetch_reshet_recent_items(limit: int = 8) -> list[dict]:
         series_id = metas.get("SeriesID")
         if not series_id:
             continue
+        serie_name = clean_kodi_label(serie.get("name", ""))
+        serie_description = clean_kodi_label(serie.get("description", ""))
+        if "חדשות 13" not in f"{serie_name} {serie_description}":
+            continue
         candidates.append(
             {
                 "series_id": str(series_id),
-                "name": serie.get("name", ""),
-                "description": serie.get("description", ""),
+                "name": serie_name,
+                "description": serie_description,
                 "image": _first_image(serie.get("images")),
                 "source_order": source_order,
-                "series_timestamp": float(serie.get("createDate") or 0),
+                "series_timestamp": _normalize_unix_timestamp(serie.get("createDate")),
             }
         )
 
-    # Cover the editorial source order and newer series, then let episode dates decide.
-    by_source_order = sorted(candidates, key=lambda item: item["source_order"])[:35]
-    by_new_series = sorted(candidates, key=lambda item: item["series_timestamp"], reverse=True)[:20]
+    allowed_dates = _today_and_yesterday_dates()
+    by_source_order = sorted(candidates, key=lambda item: item["source_order"])[:25]
+    by_new_series = sorted(candidates, key=lambda item: item["series_timestamp"], reverse=True)[:15]
     selected_series = {item["series_id"]: item for item in [*by_source_order, *by_new_series]}.values()
 
     recent_items: list[dict] = []
@@ -700,8 +916,10 @@ def _fetch_reshet_recent_items(limit: int = 8) -> list[dict]:
             if not isinstance(episodes, list):
                 continue
 
-            for episode in episodes[:8]:
-                created_at = float(episode.get("createDate") or 0)
+            for episode in episodes[:12]:
+                created_at = _normalize_unix_timestamp(episode.get("createDate"))
+                if not _timestamp_matches_dates(created_at, allowed_dates):
+                    continue
                 entry_id = episode.get("entryId")
                 if not entry_id:
                     continue
@@ -757,6 +975,7 @@ def _fetch_now14_recent_items(limit: int = 8) -> list[dict]:
         reverse=True,
     )[:18]
 
+    today_dates = _today_date_set()
     recent_items: list[dict] = []
     for serie in candidates:
         series_id = serie.get("id")
@@ -778,8 +997,9 @@ def _fetch_now14_recent_items(limit: int = 8) -> list[dict]:
                 video_url = episode.get("videoUrl")
                 if not video_url:
                     continue
-                timestamp_ms = float(episode.get("date") or 0)
-                timestamp = timestamp_ms / 1000 if timestamp_ms > 10_000_000_000 else timestamp_ms
+                timestamp = _normalize_unix_timestamp(episode.get("date"))
+                if not _timestamp_matches_dates(timestamp, today_dates):
+                    continue
                 name = episode.get("title") or serie.get("title") or ""
                 image = episode.get("image") or program_image
                 recent_items.append(
@@ -806,7 +1026,9 @@ def _fetch_now14_recent_items(limit: int = 8) -> list[dict]:
     return list(unique_items.values())[:limit]
 
 
-def _fetch_direct_vod_recent_items(channel: dict, limit: int) -> list[dict]:
+def _fetch_direct_vod_recent_items(channel: dict, limit: int, use_cache: bool) -> list[dict]:
+    if channel["id"] == "vod_keshet12":
+        return _fetch_keshet_recent_items(channel, limit, use_cache)
     if channel["id"] == "vod_reshet13":
         return _fetch_reshet_recent_items(limit)
     if channel["id"] == "vod_14tv":
@@ -826,16 +1048,17 @@ def _attach_vod_channel_metadata(items: list[dict], channel: dict) -> list[dict]
 
 
 def _get_vod_channels_for_recent(preserve_source_order: bool) -> list[dict]:
-    if not preserve_source_order:
-        return IDANPLUS_VOD_CHANNELS
-
     priority_rank = {
         channel_id: index for index, channel_id in enumerate(VOD_RECENT_PRIORITY_CHANNEL_IDS)
     }
     fallback_rank = len(priority_rank)
 
     return sorted(
-        IDANPLUS_VOD_CHANNELS,
+        [
+            channel
+            for channel in IDANPLUS_VOD_CHANNELS
+            if channel["id"] in priority_rank
+        ],
         key=lambda channel: (
             priority_rank.get(channel["id"], fallback_rank),
             IDANPLUS_VOD_CHANNELS.index(channel),
@@ -869,6 +1092,23 @@ def _write_vod_recent_cache_file(items: list[dict]) -> None:
         json.dump(items, cache_file, ensure_ascii=False)
         cache_file.write("\n")
     os.replace(tmp_path, VOD_RECENT_CACHE_FILE)
+
+
+def _merge_vod_recent_cache_items(new_items: list[dict], total_limit: int) -> list[dict]:
+    existing_items = _read_vod_recent_cache_file() or []
+    merged_by_id: dict[str, dict] = {}
+
+    for item in [*new_items, *existing_items]:
+        item_id = item.get("id")
+        if not item_id or item_id in merged_by_id:
+            continue
+
+        if not _vod_recent_item_matches_channel_window(item):
+            continue
+
+        merged_by_id[item_id] = item
+
+    return _sort_vod_recent_cache_items(list(merged_by_id.values()))[:total_limit]
 
 
 def _collect_playable_vod_items(
@@ -956,8 +1196,8 @@ def _collect_playable_vod_items(
 
 
 def _build_vod_recent_items(
-    max_per_channel: int = 2,
-    total_limit: int = 12,
+    max_per_channel: int = 10,
+    total_limit: int = VOD_RECENT_TOTAL_LIMIT,
     use_cache: bool = True,
     preserve_source_order: bool = False,
     allow_internal_fallback: bool = True,
@@ -971,6 +1211,7 @@ def _build_vod_recent_items(
             channel_items = _fetch_direct_vod_recent_items(
                 channel,
                 max(max_per_channel * 4, total_limit),
+                use_cache,
             )
 
         if not channel_items and (allow_internal_fallback or not direct_source_channel):
@@ -1009,8 +1250,8 @@ def _build_vod_recent_items(
 
 
 def refresh_vod_recent_cache(
-    max_per_channel: int = 2,
-    total_limit: int = 12,
+    max_per_channel: int = 10,
+    total_limit: int = VOD_RECENT_TOTAL_LIMIT,
     use_cache: bool = False,
     preserve_source_order: bool = True,
     allow_internal_fallback: bool = False,
@@ -1024,6 +1265,7 @@ def refresh_vod_recent_cache(
         preserve_source_order=preserve_source_order,
         allow_internal_fallback=allow_internal_fallback,
     )
+    recent_items = _merge_vod_recent_cache_items(recent_items, total_limit)
     _write_vod_recent_cache_file(recent_items)
 
     now = time.time()
@@ -1034,7 +1276,7 @@ def refresh_vod_recent_cache(
     return recent_items
 
 
-def get_vod_recent_items(max_per_channel: int = 2, total_limit: int = 12) -> list[dict]:
+def get_vod_recent_items(max_per_channel: int = 10, total_limit: int = VOD_RECENT_TOTAL_LIMIT) -> list[dict]:
     file_items = _read_vod_recent_cache_file()
     if file_items is not None:
         return file_items
