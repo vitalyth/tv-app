@@ -570,6 +570,36 @@ export function VideoPlayer({
     );
   }
 
+  // Handle remote/keyboard OK/Enter in fullscreen to show overlay
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Enter/OK on Android TV remotes is usually 'Enter' or 'NumpadEnter' or keyCode 13
+      if (
+        isFullscreen &&
+        (event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter' || event.keyCode === 13)
+      ) {
+        showControls();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      // Back button on Android TV is 'Backspace' or keyCode 8 or 'Escape' (for web/desktop)
+      if (
+        (event.key === 'Backspace' || event.key === 'Escape' || event.code === 'Backspace' || event.code === 'Escape' || event.keyCode === 8 || event.keyCode === 27)
+      ) {
+        if (isFullscreen && document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          handleClose();
+        }
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen, showControls]);
+
   return (
     <div
       ref={containerRef}

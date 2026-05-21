@@ -99,9 +99,44 @@ export function HorizontalCarousel({
         ref={scrollRef}
         onScroll={updateScrollButtons}
         className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth pb-2 pl-1 pr-1 scrollbar-hide sm:gap-4"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          const focusables = Array.from(
+            scrollRef.current?.querySelectorAll('[data-carousel-item]') || []
+          );
+          const active = document.activeElement;
+          const idx = focusables.indexOf(active as HTMLElement);
+          // RTL: הפוך את כיוון החיצים
+          const isRTL = scrollRef.current?.dir === 'rtl' || getComputedStyle(scrollRef.current!).direction === 'rtl';
+          if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            let nextIdx = idx;
+            if (isRTL) {
+              if (e.key === 'ArrowRight') nextIdx = Math.max(idx - 1, 0);
+              if (e.key === 'ArrowLeft') nextIdx = Math.min(idx + 1, focusables.length - 1);
+            } else {
+              if (e.key === 'ArrowRight') nextIdx = Math.min(idx + 1, focusables.length - 1);
+              if (e.key === 'ArrowLeft') nextIdx = Math.max(idx - 1, 0);
+            }
+            if (nextIdx !== idx && focusables[nextIdx]) {
+              (focusables[nextIdx] as HTMLElement).focus();
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }
+        }}
       >
         {items.map((child, index) => (
-          <div key={index} className={`${itemClassName} snap-start *:w-full`}>
+          <div
+            key={index}
+            className={`${itemClassName} snap-start *:w-full`}
+            tabIndex={0}
+            data-carousel-item
+            onFocus={(e) => {
+              // גלול את הכרטיס לפוקוס
+              const el = e.currentTarget;
+              el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            }}
+          >
             {child}
           </div>
         ))}

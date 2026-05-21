@@ -421,6 +421,14 @@ const LandingPage = () => {
     );
   };
 
+  // פוקוס אוטומטי על כפתור הבית בהדר בטעינת עמוד
+  useEffect(() => {
+    const homeBtn = document.querySelector('nav a[href="/"]');
+    if (homeBtn) {
+      (homeBtn as HTMLElement).focus();
+    }
+  }, []);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
       <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-3 md:px-6 md:py-5 lg:px-8">
