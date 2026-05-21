@@ -40,6 +40,13 @@ backend/old/
 *.zip
 
 # =========================
+# Android
+# =========================
+android-tv/.gradle/
+android-tv/**/build/
+android-tv/local.properties
+
+# =========================
 # Logs
 # =========================
 *.log
