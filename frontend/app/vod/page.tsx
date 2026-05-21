@@ -11,7 +11,6 @@ import { VodRecentCarousel } from "./vod-recent-carousel";
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
 const VOD_RECENT_KEY = "vod_recently_watched";
-const VOD_RECENT_MAX = 20;
 
 interface RecentItem {
     item: VodItem;
@@ -32,13 +31,17 @@ const saveRecentItem = (item: VodItem, stack: VodNode[]) => {
     if (typeof window === "undefined") return;
     try {
         const existing = loadRecentItems().filter((r) => r.item.id !== item.id);
-        const next: RecentItem[] = [{ item, stack, watchedAt: Date.now() }, ...existing].slice(0, VOD_RECENT_MAX);
+        const next: RecentItem[] = [{ item, stack, watchedAt: Date.now() }, ...existing];
         localStorage.setItem(VOD_RECENT_KEY, JSON.stringify(next));
     } catch {}
 };
 
 const fetchVodChannels = async (): Promise<VodChannel[]> => {
     return await channelService.getVodChannels();
+};
+
+const fetchVodRecent = async (): Promise<VodItem[]> => {
+    return await channelService.getVodRecent();
 };
 
 type VodNode = {
@@ -183,6 +186,13 @@ export default function VodPage() {
 
     const currentNode = navigationStack.at(-1) || null;
     const {
+        data: vodRecentItems = [],
+    } = useSWR("vod-page-vod-recent", fetchVodRecent, {
+        refreshInterval: 5 * 60 * 1000,
+        revalidateOnFocus: true,
+        dedupingInterval: 60000,
+    });
+    const {
         data: items = [],
         isLoading: isItemsLoading,
         error: itemsError,
@@ -238,6 +248,24 @@ export default function VodPage() {
             );
         });
     }, [items, searchQuery]);
+
+    const recentlyAddedItems = useMemo<RecentItem[]>(() => {
+        return vodRecentItems.map((item) => ({
+            item,
+            stack: [
+                {
+                    name: item.channelName || item.programName || item.name,
+                    module: item.module,
+                    mode: item.mode,
+                    url: item.url,
+                    logo: item.channelImage || item.logo,
+                    moreData: item.moreData,
+                    description: item.description,
+                },
+            ],
+            watchedAt: 0,
+        }));
+    }, [vodRecentItems]);
 
     const updateUrl = useCallback((stack: VodNode[], item?: VodItem | null) => {
         if (typeof window === "undefined") return;
@@ -400,44 +428,21 @@ export default function VodPage() {
                             </div>
                         </div>
 
-                    {currentNode && (
                         <div className="relative w-full lg:w-96">
                             <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                             <input
                                 value={searchQuery}
                                 onChange={(event) => setSearchQuery(event.target.value)}
-                                placeholder="חיפוש תוכניות"
+                                placeholder={currentNode ? "חיפוש תוכניות" : "חיפוש VOD"}
                                 className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
                             />
                         </div>
-                    )}
                     </div>
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
-                    {!currentNode && (
-                        <VodRecentCarousel
-                            items={recentItems}
-                            buildMeta={buildVodMeta}
-                            getImageSrc={getImageSrc}
-                            onPlay={playRecentItem}
-                        />
-                    )}
-
                     {!currentNode && isLoading ? (
                         <section className="mb-8 space-y-4">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                <h2 className="text-lg font-semibold text-foreground">ערוצי VOD</h2>
-                                <div className="relative w-full sm:w-80 lg:w-96">
-                                    <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                    <input
-                                        value={searchQuery}
-                                        onChange={(event) => setSearchQuery(event.target.value)}
-                                        placeholder="חיפוש VOD"
-                                        className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                                    />
-                                </div>
-                            </div>
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                                 {Array.from({ length: 8 }).map((_, index) => (
                                     <div key={index} className="h-44 animate-pulse rounded-lg border border-border bg-card" />
@@ -454,68 +459,74 @@ export default function VodPage() {
                     ) : (
                         <>
                             {!currentNode ? (
-                                <section className="mb-8 space-y-4">
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                        <div className="min-w-0">
-                                            <h2 className="text-lg font-semibold text-foreground">ערוצי VOD</h2>
-                                        </div>
-                                        <div className="relative w-full sm:w-80 lg:w-96">
-                                            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                            <input
-                                                value={searchQuery}
-                                                onChange={(event) => setSearchQuery(event.target.value)}
-                                                placeholder="חיפוש VOD"
-                                                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                                            />
-                                        </div>
-                                    </div>
+                                <>
+                                    <section className="mb-8 space-y-4">
+                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                            {filteredChannels.map((channel) => (
+                                                <button
+                                                    key={channel.id}
+                                                    onClick={() => openChannel(channel)}
+                                                    className="group flex min-h-44 w-full items-center gap-6 rounded-lg border border-border bg-card p-6 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                                                >
+                                                    <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+                                                        <img
+                                                            src={getImageSrc(channel.logo)}
+                                                            alt=""
+                                                            className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
+                                                        />
+                                                    </div>
 
-                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                        {filteredChannels.map((channel) => (
-                                            <button
-                                                key={channel.id}
-                                                onClick={() => openChannel(channel)}
-                                                className="group flex min-h-44 w-full items-center gap-6 rounded-lg border border-border bg-card p-6 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
-                                            >
-                                                <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
-                                                    <img
-                                                        src={getImageSrc(channel.logo)}
-                                                        alt=""
-                                                        className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
-                                                    />
-                                                </div>
-
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex items-start justify-between gap-3">
-                                                        <div className="min-w-0">
-                                                            <h3 className="truncate text-xl font-semibold text-foreground">{channel.name}</h3>
-                                                            <p className="mt-1.5 text-sm text-muted-foreground">{channel.module}</p>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div className="min-w-0">
+                                                                <h3 className="truncate text-xl font-semibold text-foreground">{channel.name}</h3>
+                                                                <p className="mt-1.5 text-sm text-muted-foreground">{channel.module}</p>
+                                                            </div>
+                                                            <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
                                                         </div>
-                                                        <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
-                                                    </div>
 
-                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                            <Clapperboard className="h-3.5 w-3.5" />
-                                                            VOD
-                                                        </span>
-                                                        {channel.url ? (
+                                                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                                                             <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                                <ExternalLink className="h-3.5 w-3.5" />
-                                                                אתר
+                                                                <Clapperboard className="h-3.5 w-3.5" />
+                                                                VOD
                                                             </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                                <Archive className="h-3.5 w-3.5" />
-                                                                פנימי
-                                                            </span>
-                                                        )}
+                                                            {channel.url ? (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
+                                                                    <ExternalLink className="h-3.5 w-3.5" />
+                                                                    אתר
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
+                                                                    <Archive className="h-3.5 w-3.5" />
+                                                                    פנימי
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </section>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </section>
+
+                                    <VodRecentCarousel
+                                        items={recentlyAddedItems}
+                                        title="VOD אחרונים"
+                                        description="פרקים ותוכניות שעלו לאחרונה בספריות ה-VOD."
+                                        actionLabel="נגן"
+                                        buildMeta={buildVodMeta}
+                                        getImageSrc={getImageSrc}
+                                        onPlay={playRecentItem}
+                                    />
+
+                                    <VodRecentCarousel
+                                        items={recentItems}
+                                        title="המשך צפייה ב-VOD"
+                                        description="חזרה מהירה לפרקים ולתוכניות שהתחלת לראות."
+                                        buildMeta={buildVodMeta}
+                                        getImageSrc={getImageSrc}
+                                        onPlay={playRecentItem}
+                                    />
+                                </>
                             ) : isItemsLoading ? (
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                                     {Array.from({ length: 8 }).map((_, index) => (

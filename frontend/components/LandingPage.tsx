@@ -15,7 +15,6 @@ import { ChevronLeft, Clapperboard, Play, RotateCcw, Tv } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
-const VOD_RECENT_MAX = 12;
 const QUICK_LIVE_CHANNEL_TVG_IDS = ["11", "12", "13", "14", "i24news"];
 
 type EpgProgram = {
@@ -50,9 +49,7 @@ const loadRecentVodItems = (): RecentVodItem[] => {
     if (!stored) return [];
 
     const items = JSON.parse(stored) as RecentVodItem[];
-    return items
-      .sort((a, b) => b.watchedAt - a.watchedAt)
-      .slice(0, VOD_RECENT_MAX);
+    return items.sort((a, b) => b.watchedAt - a.watchedAt);
   } catch {
     return [];
   }
@@ -63,7 +60,7 @@ const saveRecentVodItem = (item: VodItem, stack: VodNode[]) => {
 
   try {
     const stored = loadRecentVodItems().filter((saved) => saved.item.id !== item.id);
-    const next = [{ item, stack, watchedAt: Date.now() }, ...stored].slice(0, VOD_RECENT_MAX);
+    const next = [{ item, stack, watchedAt: Date.now() }, ...stored];
     localStorage.setItem(VOD_RECENT_KEY, JSON.stringify(next));
   } catch {
     // Ignore write errors
@@ -269,7 +266,7 @@ const LandingPage = () => {
 
   const recommendedVodChannels = useMemo(() => vodChannels.slice(0, 20), [vodChannels]);
   const recentlyAddedVodItems = useMemo(
-    () => vodRecentItems.slice(0, 10),
+    () => vodRecentItems,
     [vodRecentItems]
   );
 
@@ -504,7 +501,7 @@ const LandingPage = () => {
                 />
 
                 <HorizontalCarousel>
-                  {recentVodItems.slice(0, 6).map(({ item, stack }) => (
+                  {recentVodItems.map(({ item, stack }) => (
                     <VodItemCard key={item.id} item={item} stack={stack} label="המשך" />
                   ))}
                 </HorizontalCarousel>

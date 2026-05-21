@@ -15,6 +15,8 @@ from resources.lib import cache as addon_cache
 from services.epg_service import get_now_epg
 from models.schemas import Channel
 from services.custom_channel_service import load_custom_channels
+from services.vod_recent_common import VodRecentSourceContext
+from services.vod_recent_sources import fetch_direct_vod_recent_items
 
 IDANPLUS_VOD_CHANNELS = [
     {
@@ -572,7 +574,7 @@ def _vod_recent_item_matches_channel_window(item: dict) -> bool:
     if channel_id == "vod_reshet13":
         return _timestamp_matches_dates(timestamp, _today_and_yesterday_dates())
     if channel_id == "vod_14tv":
-        return _timestamp_matches_dates(timestamp, _today_date_set())
+        return _timestamp_matches_recent_days(timestamp)
 
     return _timestamp_matches_recent_days(timestamp)
 
@@ -584,22 +586,6 @@ def _today_and_yesterday_dates() -> set:
 
 def _today_date_set() -> set:
     return {datetime.now().date()}
-
-
-def _text_episode_number(item: dict) -> int:
-    values = [
-        item.get("episode", ""),
-        item.get("episodeName", ""),
-        item.get("title", ""),
-        item.get("name", ""),
-    ]
-    for value in values:
-        text = clean_kodi_label(str(value or ""))
-        match = re.search(r"(?:פרק|episode|ep)\D*(\d{1,4})", text, re.IGNORECASE)
-        if match:
-            return int(match.group(1))
-
-    return 0
 
 
 def _item_timestamp_from_fields(item: dict) -> float:
@@ -687,353 +673,26 @@ def _vod_recent_timestamp(item: dict) -> float:
     return _parse_aired_timestamp(item.get("aired", "") or "")
 
 
-def _sort_direct_recent_items(items: list[dict]) -> list[dict]:
-    return sorted(
-        items,
-        key=lambda item: (
-            -_vod_recent_timestamp(item),
-            item.get("sourceOrder", 0),
-        ),
-    )
-
-
-def _folder_name_matches(item: dict, *needles: str) -> bool:
-    name = clean_kodi_label(str(item.get("name", "") or "")).strip()
-    return any(needle in name for needle in needles)
-
-
-def _node_from_vod_item(item: dict, fallback: dict | None = None) -> dict:
-    fallback = fallback or {}
-    return {
-        "module": item.get("module", fallback.get("module", "")),
-        "mode": item.get("mode", fallback.get("mode", 0)),
-        "url": item.get("url", fallback.get("url", "")),
-        "name": item.get("name", fallback.get("name", "")),
-        "iconimage": item.get("logo", fallback.get("iconimage", "")),
-        "moreData": item.get("moreData", fallback.get("moreData", "")),
-    }
-
-
-def _get_vod_children_for_node(node: dict, use_cache: bool) -> list[dict]:
-    return get_vod_items(
-        node.get("module", ""),
-        node.get("mode", 0),
-        node.get("url", ""),
-        node.get("name", ""),
-        node.get("iconimage", ""),
-        node.get("moreData", ""),
-        use_cache=use_cache,
-    )
-
-
-def _select_keshet_latest_episode(items: list[dict]) -> dict | None:
-    playable_items = [
-        {
-            **item,
-            "sourceTimestamp": _item_timestamp_from_fields(item),
-            "episodeNumber": _text_episode_number(item),
-        }
-        for item in items
-        if item.get("isPlayable") and not item.get("isFolder", False)
-    ]
-    if not playable_items:
-        return None
-
-    return sorted(
-        playable_items,
-        key=lambda item: (
-            item.get("sourceTimestamp", 0) > 0,
-            item.get("sourceTimestamp", 0),
-            item.get("episodeNumber", 0),
-            -item.get("sourceOrder", 0),
-        ),
-        reverse=True,
-    )[0]
-
-
-def _fetch_keshet_recent_items(channel: dict, limit: int, use_cache: bool) -> list[dict]:
-    root_node = {
-        "module": channel["module"],
-        "mode": channel["mode"],
-        "url": channel.get("url", ""),
-        "name": channel.get("name", ""),
-        "iconimage": channel.get("logo", ""),
-        "moreData": channel.get("moreData", ""),
-    }
-
-    try:
-        root_items = _get_vod_children_for_node(root_node, use_cache)
-    except Exception:
-        return []
-
-    all_programs_folder = next(
-        (
-            item
-            for item in root_items
-            if item.get("isFolder") and _folder_name_matches(item, "כל התוכניות", "כל התכניות")
-        ),
-        None,
-    )
-    if not all_programs_folder:
-        return []
-
-    try:
-        program_folders = [
-            item
-            for item in _get_vod_children_for_node(_node_from_vod_item(all_programs_folder, root_node), use_cache)
-            if item.get("isFolder")
-        ]
-    except Exception:
-        return []
-
-    recent_items: list[dict] = []
-    for source_order, program_folder in enumerate(program_folders[:4]):
-        program_node = _node_from_vod_item(program_folder, root_node)
-        program_items = _collect_playable_vod_items(
-            program_node["module"],
-            program_node["mode"],
-            program_node.get("url", ""),
-            program_node.get("name", ""),
-            program_node.get("iconimage", ""),
-            program_node.get("moreData", ""),
-            max_depth=4,
-            max_nodes=80,
-            use_cache=use_cache,
-        )
-        selected_item = _select_keshet_latest_episode(program_items)
-        if not selected_item:
-            continue
-
-        source_timestamp = selected_item.get("sourceTimestamp") or _item_timestamp_from_fields(selected_item)
-        if not source_timestamp:
-            source_timestamp = time.time()
-
-        recent_items.append(
-            {
-                **selected_item,
-                "programName": clean_kodi_label(program_folder.get("name", "")),
-                "programImage": normalize_vod_image(program_folder.get("logo", "")),
-                "channelName": "קשת 12",
-                "channelImage": normalize_vod_image(channel.get("logo", "")),
-                "sourceTimestamp": source_timestamp,
-                "sourceOrder": source_order,
-            }
-        )
-
-    return recent_items[:limit]
-
-
-def _get_reshet_build_id() -> str:
-    html = _http_get_text(
-        "https://13tv.co.il/allshows/screen/1170108/",
-        headers={"User-Agent": "Mozilla/5.0"},
-    )
-    next_data = _extract_next_data(html)
-    build_id = (next_data or {}).get("buildId") or ""
-    if build_id:
-        return build_id
-
-    match = re.search(r"/_next/static/([^/]+)/_buildManifest\.js", html)
-    return match.group(1) if match else ""
-
-
-def _fetch_reshet_recent_items(limit: int = 8) -> list[dict]:
-    build_id = _get_reshet_build_id()
-    if not build_id:
-        return []
-
-    allshows_url = (
-        "https://13tv.co.il/_next/data/"
-        f"{build_id}/he/allshows/screen/1170108.json?all=screen&all=1170108"
-    )
-    data = _http_get_json(allshows_url, headers={"User-Agent": "Mozilla/5.0"})
-    children = (
-        (data or {})
-        .get("pageProps", {})
-        .get("leafs", [{}])[0]
-        .get("child", [])
-    )
-    if not isinstance(children, list):
-        return []
-
-    candidates = []
-    for source_order, serie in enumerate(children):
-        metas = serie.get("metas") or {}
-        series_id = metas.get("SeriesID")
-        if not series_id:
-            continue
-        serie_name = clean_kodi_label(serie.get("name", ""))
-        serie_description = clean_kodi_label(serie.get("description", ""))
-        if "חדשות 13" not in f"{serie_name} {serie_description}":
-            continue
-        candidates.append(
-            {
-                "series_id": str(series_id),
-                "name": serie_name,
-                "description": serie_description,
-                "image": _first_image(serie.get("images")),
-                "source_order": source_order,
-                "series_timestamp": _normalize_unix_timestamp(serie.get("createDate")),
-            }
-        )
-
-    allowed_dates = _today_and_yesterday_dates()
-    by_source_order = sorted(candidates, key=lambda item: item["source_order"])[:25]
-    by_new_series = sorted(candidates, key=lambda item: item["series_timestamp"], reverse=True)[:15]
-    selected_series = {item["series_id"]: item for item in [*by_source_order, *by_new_series]}.values()
-
-    recent_items: list[dict] = []
-    for serie in selected_series:
-        series_url = (
-            "https://13tv.co.il/_next/data/"
-            f"{build_id}/he/allshows/series/{serie['series_id']}.json"
-            f"?all=series&all={serie['series_id']}"
-        )
-        series_data = _http_get_json(series_url, headers={"User-Agent": "Mozilla/5.0"})
-        program = (series_data or {}).get("pageProps", {}).get("program", {})
-        seasons = program.get("seasonsList") or []
-        if not isinstance(seasons, list):
-            continue
-
-        season_positions = [
-            str(season.get("position"))
-            for season in seasons
-            if season.get("position") is not None
-        ]
-        for season_position in season_positions[:3]:
-            season_url = (
-                "https://13tv.co.il/_next/data/"
-                f"{build_id}/he/allshows/series/{serie['series_id']}/season/{season_position}.json"
-                f"?all=series&all={serie['series_id']}&all=season&all={season_position}"
-            )
-            season_data = _http_get_json(season_url, headers={"User-Agent": "Mozilla/5.0"})
-            episodes = (
-                (season_data or {})
-                .get("pageProps", {})
-                .get("program", {})
-                .get("episodes", [])
-            )
-            if not isinstance(episodes, list):
-                continue
-
-            for episode in episodes[:12]:
-                created_at = _normalize_unix_timestamp(episode.get("createDate"))
-                if not _timestamp_matches_dates(created_at, allowed_dates):
-                    continue
-                entry_id = episode.get("entryId")
-                if not entry_id:
-                    continue
-                name = episode.get("name") or serie["name"]
-                image = _first_image(episode.get("images")) or serie["image"]
-                recent_items.append(
-                    _make_vod_recent_item(
-                        module="reshet",
-                        mode=3,
-                        url=f"--kaltura--{entry_id}===",
-                        name=name,
-                        logo=image,
-                        more_data="",
-                        description=episode.get("description", ""),
-                        aired=_timestamp_to_date(created_at),
-                        program_name=serie["name"],
-                        program_image=serie["image"],
-                        channel_name="רשת 13",
-                        channel_image="13.jpg",
-                        source_timestamp=created_at,
-                    )
-                )
-
-    unique_items = {}
-    for item in _sort_direct_recent_items(recent_items):
-        unique_items.setdefault(item["id"], item)
-    return list(unique_items.values())[:limit]
-
-
-NOW14_API_HEADERS = {
-    "accept": "*/*",
-    "origin": "https://vod.c14.co.il",
-    "platform": "web",
-    "referer": "https://vod.c14.co.il/",
-    "user-agent": "Mozilla/5.0",
-    "x-device-type": "web",
-    "x-tenant-id": "channel14",
-}
-
-
-def _fetch_now14_recent_items(limit: int = 8) -> list[dict]:
-    data = _http_get_json(
-        "https://insight-api-shared.univtec.com/interface/pages/66d85aaa6e9a9c00237dec06",
-        headers=NOW14_API_HEADERS,
-    )
-    series = ((data or {}).get("sections") or [{}])[0].get("items", [])
-    if not isinstance(series, list):
-        return []
-
-    candidates = sorted(
-        [serie for serie in series if serie.get("id")],
-        key=lambda serie: float(serie.get("dateUpdate") or serie.get("date") or 0),
-        reverse=True,
-    )[:18]
-
-    today_dates = _today_date_set()
-    recent_items: list[dict] = []
-    for serie in candidates:
-        series_id = serie.get("id")
-        program_image = serie.get("image") or serie.get("poster") or ""
-        series_data = _http_get_json(
-            f"https://insight-api-shared.univtec.com/interface/pages/series/{series_id}",
-            headers=NOW14_API_HEADERS,
-        )
-        seasons = (series_data or {}).get("seasons", [])
-        if not isinstance(seasons, list):
-            continue
-
-        for season in seasons[:3]:
-            episodes = season.get("episodes", [])
-            if not isinstance(episodes, list):
-                continue
-
-            for episode in episodes[:10]:
-                video_url = episode.get("videoUrl")
-                if not video_url:
-                    continue
-                timestamp = _normalize_unix_timestamp(episode.get("date"))
-                if not _timestamp_matches_dates(timestamp, today_dates):
-                    continue
-                name = episode.get("title") or serie.get("title") or ""
-                image = episode.get("image") or program_image
-                recent_items.append(
-                    _make_vod_recent_item(
-                        module="14tv",
-                        mode=2,
-                        url=video_url,
-                        name=name,
-                        logo=image,
-                        more_data="",
-                        description=episode.get("keywords", "") or serie.get("description", ""),
-                        aired=_timestamp_to_date(timestamp),
-                        program_name=serie.get("title", ""),
-                        program_image=program_image,
-                        channel_name="עכשיו 14",
-                        channel_image="14tv.png",
-                        source_timestamp=timestamp,
-                    )
-                )
-
-    unique_items = {}
-    for item in _sort_direct_recent_items(recent_items):
-        unique_items.setdefault(item["id"], item)
-    return list(unique_items.values())[:limit]
-
-
 def _fetch_direct_vod_recent_items(channel: dict, limit: int, use_cache: bool) -> list[dict]:
-    if channel["id"] == "vod_keshet12":
-        return _fetch_keshet_recent_items(channel, limit, use_cache)
-    if channel["id"] == "vod_reshet13":
-        return _fetch_reshet_recent_items(limit)
-    if channel["id"] == "vod_14tv":
-        return _fetch_now14_recent_items(limit)
-    return []
+    return fetch_direct_vod_recent_items(
+        channel,
+        limit,
+        use_cache,
+        VodRecentSourceContext(
+            get_vod_items=get_vod_items,
+            collect_playable_vod_items=_collect_playable_vod_items,
+            make_vod_recent_item=_make_vod_recent_item,
+            clean_kodi_label=clean_kodi_label,
+            normalize_vod_image=normalize_vod_image,
+            http_get_json=_http_get_json,
+            http_get_text=_http_get_text,
+            extract_next_data=_extract_next_data,
+            first_image=_first_image,
+            timestamp_to_date=_timestamp_to_date,
+            normalize_unix_timestamp=_normalize_unix_timestamp,
+            parse_aired_timestamp=_parse_aired_timestamp,
+        ),
+    )
 
 
 def _attach_vod_channel_metadata(items: list[dict], channel: dict) -> list[dict]:
@@ -1094,9 +753,27 @@ def _write_vod_recent_cache_file(items: list[dict]) -> None:
     os.replace(tmp_path, VOD_RECENT_CACHE_FILE)
 
 
+def _vod_recent_dedupe_keys(item: dict) -> list[str]:
+    keys = []
+    item_id = item.get("id")
+    if item_id:
+        keys.append(f"id:{item_id}")
+
+    channel_id = item.get("vodChannelId", "")
+    program_name = clean_kodi_label(item.get("programName", "")).lower()
+    item_name = clean_kodi_label(item.get("name", "")).lower()
+    item_name = re.sub(r"\s*[-–]\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\s*$", "", item_name).strip()
+    item_name = re.sub(r"\s+", " ", item_name)
+    if channel_id and item_name:
+        keys.append(f"semantic:{channel_id}:{program_name}:{item_name}")
+
+    return keys
+
+
 def _merge_vod_recent_cache_items(new_items: list[dict], total_limit: int) -> list[dict]:
     existing_items = _read_vod_recent_cache_file() or []
     merged_by_id: dict[str, dict] = {}
+    seen_keys: set[str] = set()
 
     for item in [*new_items, *existing_items]:
         item_id = item.get("id")
@@ -1106,7 +783,12 @@ def _merge_vod_recent_cache_items(new_items: list[dict], total_limit: int) -> li
         if not _vod_recent_item_matches_channel_window(item):
             continue
 
+        item_keys = _vod_recent_dedupe_keys(item)
+        if any(key in seen_keys for key in item_keys):
+            continue
+
         merged_by_id[item_id] = item
+        seen_keys.update(item_keys)
 
     return _sort_vod_recent_cache_items(list(merged_by_id.values()))[:total_limit]
 

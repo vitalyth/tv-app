@@ -25,11 +25,17 @@ type RecentItem = {
 
 export function VodRecentCarousel({
   items,
+  title,
+  description,
+  actionLabel = "המשך",
   buildMeta,
   getImageSrc,
   onPlay,
 }: {
   items: RecentItem[];
+  title?: string;
+  description?: string;
+  actionLabel?: string;
   buildMeta: (item: VodItem, stack: VodNode[]) => VodPlaybackMeta;
   getImageSrc: (logo: string) => string;
   onPlay: (item: VodItem, stack: VodNode[]) => void;
@@ -37,7 +43,13 @@ export function VodRecentCarousel({
   if (items.length === 0) return null;
 
   return (
-    <section className="mb-8">
+    <section className="mb-8 space-y-4">
+      {(title || description) && (
+        <div className="min-w-0">
+          {title && <h2 className="text-lg font-semibold text-foreground">{title}</h2>}
+          {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+        </div>
+      )}
       <HorizontalCarousel itemClassName={recentCarouselItemClassName}>
         {items.map(({ item, stack }) => {
           const meta = buildMeta(item, stack);
@@ -63,7 +75,7 @@ export function VodRecentCarousel({
                 <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/15 to-transparent" />
                 <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
                   <Play className="h-3 w-3 fill-current" />
-                  המשך
+                  {actionLabel}
                 </span>
                 {progressPercent > 0 && (
                   <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden="true">
