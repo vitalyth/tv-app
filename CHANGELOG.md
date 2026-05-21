@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.3] - 2026-05-21
+### Added
+- Recent VOD refresh sources for Keshet 12, Reshet 13, and Now 14 with channel-specific discovery rules.
+- Recently added VOD carousel on the VOD page.
+
+### Changed
+- Refined VOD navigation, carousel layout, search placement, and recent viewing presentation.
+- Split channel-specific recent VOD search logic into dedicated backend source modules.
+
 ## [0.1.2] - 2026-05-07
 ### Added
 - Program guide now highlights the currently playing channel, row, and live program.

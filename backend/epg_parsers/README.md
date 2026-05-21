@@ -7,7 +7,7 @@ Full-stack streaming application with:
 * 🌐 Nginx (Reverse Proxy – custom image)
 * 🐳 Docker (Deployment)
 
-Current version: `0.1.2`
+Current version: `0.1.3`
 
 ---
 
