@@ -3,7 +3,7 @@
 This Android app is a quick installable wrapper for:
 
 ```text
-https://tv.bestcams.net/
+https://tv.bestcams.net/tv
 ```
 
 It is configured for Android phones and Google TV / Android TV:

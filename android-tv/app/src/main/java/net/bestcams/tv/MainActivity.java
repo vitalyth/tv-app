@@ -17,7 +17,18 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
 public class MainActivity extends Activity {
-    private static final String HOME_URL = "https://tv.bestcams.net/";
+    private static final String HOME_URL = "https://tv.bestcams.net/tv";
+    private static final String CLOSE_TV_PLAYER_SCRIPT =
+        "(() => {"
+            + "const player = document.querySelector('[data-tv-player=\"true\"]');"
+            + "if (!player) return false;"
+            + "const fullscreenElement = document.fullscreenElement;"
+            + "const fullscreenPlayer = (fullscreenElement && fullscreenElement.contains(player))"
+            + " || player.closest('.player-overlay-fullscreen');"
+            + "if (!fullscreenPlayer) return false;"
+            + "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));"
+            + "return true;"
+        + "})()";
 
     private FrameLayout root;
     private WebView webView;
@@ -98,15 +109,26 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (fullscreenView != null) {
-            hideFullscreenView();
-            return;
-        }
-        if (webView.canGoBack()) {
-            webView.goBack();
-            return;
-        }
-        super.onBackPressed();
+        webView.evaluateJavascript(CLOSE_TV_PLAYER_SCRIPT, result -> {
+            if ("true".equals(result)) {
+                if (fullscreenView != null) {
+                    hideFullscreenView();
+                }
+                return;
+            }
+
+            if (fullscreenView != null) {
+                hideFullscreenView();
+                return;
+            }
+
+            if (webView.canGoBack()) {
+                webView.goBack();
+                return;
+            }
+
+            MainActivity.super.onBackPressed();
+        });
     }
 
     @Override

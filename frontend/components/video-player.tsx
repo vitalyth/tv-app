@@ -32,6 +32,7 @@ const getPlayerImageSrc = (logo?: string) => {
 
 interface VideoPlayerProps {
   channel: Channel | null;
+  isTvMode?: boolean;
   onClose: () => void;
   onResize?: () => void;
   className?: string;
@@ -39,6 +40,7 @@ interface VideoPlayerProps {
 
 export function VideoPlayer({
   channel,
+  isTvMode = false,
   onClose,
   onResize,
   className,
@@ -184,6 +186,128 @@ export function VideoPlayer({
 
     toggleExpanded();
   }, [isExpanded, toggleExpanded, toggleFullscreen]);
+
+  useEffect(() => {
+    if (!isTvMode || !channel) return;
+
+    const isVisibleControl = (element: HTMLElement) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+
+    const getTvControls = () => {
+      const container = containerRef.current;
+      if (!container) return [];
+
+      return Array.from(
+        container.querySelectorAll<HTMLElement>(
+          "button:not([disabled]), input[type='range']:not([disabled])",
+        ),
+      ).filter(isVisibleControl);
+    };
+
+    const focusTvControl = (items: HTMLElement[], index: number) => {
+      const next = items[index];
+      if (!next) return;
+
+      next.focus();
+      next.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+
+    const moveTvFocus = (
+      items: HTMLElement[],
+      current: HTMLElement,
+      direction: "left" | "right" | "up" | "down",
+    ) => {
+      const currentRect = current.getBoundingClientRect();
+      const currentIndex = items.indexOf(current);
+      const candidates = items
+        .map((item, index) => ({ item, index, rect: item.getBoundingClientRect() }))
+        .filter(({ index }) => index !== currentIndex)
+        .filter(({ rect }) => {
+          if (direction === "right") return rect.left > currentRect.left + 8;
+          if (direction === "left") return rect.right < currentRect.right - 8;
+          if (direction === "down") return rect.top > currentRect.top + 8;
+          return rect.bottom < currentRect.bottom - 8;
+        })
+        .sort((a, b) => {
+          const aHorizontal = Math.abs(a.rect.left - currentRect.left);
+          const bHorizontal = Math.abs(b.rect.left - currentRect.left);
+          const aVertical = Math.abs(a.rect.top - currentRect.top);
+          const bVertical = Math.abs(b.rect.top - currentRect.top);
+
+          if (direction === "left" || direction === "right") {
+            return aVertical - bVertical || aHorizontal - bHorizontal;
+          }
+
+          return aHorizontal - bHorizontal || aVertical - bVertical;
+        });
+
+      if (typeof candidates[0]?.index === "number") {
+        focusTvControl(items, candidates[0].index);
+      }
+    };
+
+    const handleTvKeys = (event: KeyboardEvent) => {
+      showControls();
+
+      if (
+        event.key !== "ArrowLeft" &&
+        event.key !== "ArrowRight" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowDown"
+      ) {
+        return;
+      }
+
+      const items = getTvControls();
+      if (!items.length) return;
+
+      const active = document.activeElement as HTMLElement | null;
+      const activeIsControl = !!active && items.includes(active);
+      const activeIsRange = active instanceof HTMLInputElement && active.type === "range";
+
+      if (activeIsRange && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!activeIsControl) {
+        const rangeIndex = items.findIndex((item) => item instanceof HTMLInputElement);
+        focusTvControl(items, rangeIndex >= 0 ? rangeIndex : 0);
+        return;
+      }
+
+      const direction = event.key.replace("Arrow", "").toLowerCase() as
+        | "left"
+        | "right"
+        | "up"
+        | "down";
+      moveTvFocus(items, active, direction);
+    };
+
+    document.addEventListener("keydown", handleTvKeys, true);
+
+    return () => document.removeEventListener("keydown", handleTvKeys, true);
+  }, [channel, isTvMode, showControls]);
+
+  useEffect(() => {
+    if (!isTvMode || !channel || !containerRef.current) return;
+
+    const container = containerRef.current;
+    const timer = window.setTimeout(() => {
+      if (!document.fullscreenElement) {
+        container.requestFullscreen?.().catch(() => undefined);
+      }
+
+      container.focus();
+      showControls();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [channel, isTvMode, showControls]);
 
   const pauseLocalPlayerForCasting = useCallback((player: any) => {
     if (!player || player.isDisposed?.()) return;
@@ -574,8 +698,10 @@ export function VideoPlayer({
     <div
       ref={containerRef}
       data-player-root
+      data-tv-player={isTvMode ? "true" : "false"}
       data-mobile-device={isMobileDevice ? "true" : "false"}
       data-touch-device={isTouchDevice ? "true" : "false"}
+      tabIndex={isTvMode ? -1 : undefined}
       className={`
         relative overflow-hidden bg-black
         ${isExpanded && !isFullscreen ? "fixed inset-0 z-[1000] rounded-none" : "rounded-xl"}
@@ -587,7 +713,7 @@ export function VideoPlayer({
     >
       <div
         className="relative w-full h-full bg-black"
-        onClick={toggleControls}
+        onClick={isTvMode ? showControls : toggleControls}
         onDoubleClick={handlePlayerDoubleClick}
         dir="ltr"
       >
@@ -671,6 +797,7 @@ export function VideoPlayer({
             canCast={!!streamUrl}
             isCastConnecting={isCastConnecting}
             isMobileDevice={isMobileDevice}
+            isTvMode={isTvMode}
             onCast={isCasting ? stopCasting : requestCastSession}
             onClose={handleClose}
             onToggleExpanded={toggleExpanded}
@@ -689,7 +816,7 @@ export function VideoPlayer({
               showLive: channel.type !== "vod",
               showQuality: true,
               showCast: false,
-              showExpand: true,
+              showExpand: !isTvMode,
               showFullscreen: true,
             }}
           />
@@ -766,6 +893,21 @@ export function VideoPlayer({
         .video-js video {
           width: 100% !important;
           height: 100% !important;
+        }
+
+        [data-tv-player="true"] {
+          border-radius: 0 !important;
+        }
+
+        [data-tv-player="true"] button {
+          min-width: 3.5rem;
+          min-height: 3.5rem;
+        }
+
+        [data-tv-player="true"] button:focus-visible,
+        [data-tv-player="true"] input:focus-visible {
+          outline: 3px solid var(--primary);
+          outline-offset: 3px;
         }
       `}</style>
     </div>

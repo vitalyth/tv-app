@@ -47,6 +47,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
 
     const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [isTvMode, setIsTvMode] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
     const [isMobileLandscape, setIsMobileLandscape] = useState(false);
 
@@ -62,9 +63,12 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
             addRecentlyViewedChannel(channel.id);
         }
 
+        const tvMode = document.body.classList.contains("tv-mode");
+
         closeHandlerRef.current = options?.onClose ?? null;
         setCurrentChannel(channel);
-        setIsFullscreen(options?.fullscreen ?? isMobileLandscape);
+        setIsTvMode(tvMode);
+        setIsFullscreen(options?.fullscreen ?? (tvMode || isMobileLandscape));
     }, [isMobileLandscape]);
 
     const close = useCallback(() => {
@@ -72,6 +76,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         closeHandlerRef.current = null;
         setCurrentChannel(null);
         setIsFullscreen(false);
+        setIsTvMode(false);
         restorePosition(true);
     }, [restorePosition]);
 
@@ -102,6 +107,9 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault();
+                if (isTvMode && document.fullscreenElement) {
+                    document.exitFullscreen?.().catch(() => undefined);
+                }
                 close();
             }
         };
@@ -109,7 +117,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         document.addEventListener("keydown", handleKeyDown, true);
 
         return () => document.removeEventListener("keydown", handleKeyDown, true);
-    }, [currentChannel, close]);
+    }, [currentChannel, close, isTvMode]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -276,6 +284,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                     <VideoPlayer
                         className="h-full w-full"
                         channel={currentChannel}
+                        isTvMode={isTvMode}
                         onClose={close}
                         onResize={onResize}
                     />
@@ -313,8 +322,8 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
 
                 .player-overlay-fullscreen {
                     position: fixed;
-                    width: 99vw;
-                    height: 99vh;
+                    width: 100vw;
+                    height: 100vh;
                     top: 50%;
                     left: 50%;
                     transform: translate(-50%, -50%);

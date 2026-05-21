@@ -55,6 +55,7 @@ interface CustomPlayerControlsProps {
   canCast?: boolean;
   isCastConnecting?: boolean;
   isMobileDevice?: boolean;
+  isTvMode?: boolean;
   onCast?: () => void;
   onClose?: () => void;
   onToggleExpanded?: () => void;
@@ -76,6 +77,7 @@ export default function CustomPlayerControls({
   canCast = true,
   isCastConnecting,
   isMobileDevice = false,
+  isTvMode = false,
   onCast,
   onClose,
   onToggleExpanded,
@@ -632,9 +634,12 @@ export default function CustomPlayerControls({
         topOptions.showCast ||
         topOptions.showClose) && (
           <div
+            data-tv-controls={isTvMode ? "true" : undefined}
             onClick={(event) => event.stopPropagation()}
             onMouseEnter={onInteraction}
             onMouseMove={onInteraction}
+            onFocusCapture={onInteraction}
+            onKeyDownCapture={onInteraction}
             className={`
             absolute top-0 left-0 right-0 z-[60]
             bg-linear-to-b from-black/85 via-black/45 to-transparent
@@ -738,9 +743,12 @@ export default function CustomPlayerControls({
         )}
 
       <div
+        data-tv-controls={isTvMode ? "true" : undefined}
         onClick={(event) => event.stopPropagation()}
         onMouseEnter={onInteraction}
         onMouseMove={onInteraction}
+        onFocusCapture={onInteraction}
+        onKeyDownCapture={onInteraction}
         className={`
         absolute bottom-0 left-0 right-0 z-[60]
         bg-linear-to-t from-black/95 via-black/65 to-transparent
@@ -991,12 +999,12 @@ export default function CustomPlayerControls({
                   onPointerDown={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    setQualityOpen((value) => !value);
-                    setVolumeOpen(false);
                   }}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
+                    setQualityOpen((value) => !value);
+                    setVolumeOpen(false);
                   }}
                   className={`
                 h-8 sm:h-9 min-w-7 sm:min-w-8 px-1 rounded-md
@@ -1029,22 +1037,24 @@ export default function CustomPlayerControls({
                     onClick={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                   >
-                    <div
+                    <button
+                      type="button"
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
                         setAutoQuality();
                       }}
                       className={`
-                    px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
+                    block w-full px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
                     ${autoMode ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]" : ""}
                   `}
                     >
                       {autoLabel}
-                    </div>
+                    </button>
 
                     {levels.map((level) => (
-                      <div
+                      <button
+                        type="button"
                         key={level.height}
                         onClick={(event) => {
                           event.preventDefault();
@@ -1052,7 +1062,7 @@ export default function CustomPlayerControls({
                           setManualQuality(level.height);
                         }}
                         className={`
-                      px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
+                      block w-full px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
                       ${level.height === selectedHeight
                             ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]"
                             : ""
@@ -1060,7 +1070,7 @@ export default function CustomPlayerControls({
                     `}
                       >
                         {level.height}p
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
