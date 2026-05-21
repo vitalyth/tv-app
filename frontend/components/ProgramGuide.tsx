@@ -123,6 +123,15 @@ const ProgramCell = memo(function ProgramCell({
     didDrag: React.MutableRefObject<boolean>;
 }) {
     const [hovered, setHovered] = useState(false);
+    const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (hoverTimerRef.current) {
+                clearTimeout(hoverTimerRef.current);
+            }
+        };
+    }, []);
 
     // Clamp to visible window
     const visStart = Math.max(program.start, guideStart);
@@ -145,14 +154,22 @@ const ProgramCell = memo(function ProgramCell({
         ${isPlayingProgram
                     ? "bg-emerald-900/95 border-emerald-300/80 ring-2 ring-emerald-300/70 shadow-lg shadow-emerald-950/60"
                     : isLive
-                        ? "bg-blue-900/90 border-blue-400/60 shadow-lg shadow-blue-900/30"
+                        ? "bg-primary/20 border-primary/60 shadow-lg shadow-primary/10"
                         : "bg-zinc-800/90 border-zinc-700/50"
                 }
-        ${hovered ? "brightness-125 z-10 shadow-xl" : ""}
+        ${hovered ? "brightness-125 z-50 shadow-xl" : ""}
       `}
             style={{ right: right + 2, width, height: CELL_H - 12 }}
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
+            onMouseEnter={() => {
+                hoverTimerRef.current = setTimeout(() => setHovered(true), 1000);
+            }}
+            onMouseLeave={() => {
+                if (hoverTimerRef.current) {
+                    clearTimeout(hoverTimerRef.current);
+                    hoverTimerRef.current = null;
+                }
+                setHovered(false);
+            }}
             onClick={(e) => {
                 if (didDrag.current) {
                     e.preventDefault();
@@ -161,7 +178,6 @@ const ProgramCell = memo(function ProgramCell({
                 }
                 onClick?.(program, channel, isLive)
             }}
-            title={program.description}
             aria-current={isPlayingProgram ? "true" : undefined}
         >
             <div className="flex items-start gap-1 h-full overflow-hidden">
@@ -170,7 +186,7 @@ const ProgramCell = memo(function ProgramCell({
                         <Play className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
                     </span>
                 ) : isLive && (
-                    <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" aria-hidden="true" />
+                    <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
                 )}
                 <div className="overflow-hidden">
                     <p className="text-xs font-semibold text-white truncate leading-tight">{program.name}</p>
@@ -179,6 +195,31 @@ const ProgramCell = memo(function ProgramCell({
                     </p>
                 </div>
             </div>
+
+            {hovered && (
+                <div
+                    dir="rtl"
+                    className="pointer-events-none absolute right-0 top-full z-[200] mt-2 w-72 max-w-[min(18rem,80vw)] rounded-lg border border-primary/35 bg-popover/98 p-3 text-right shadow-2xl shadow-black/35 ring-1 ring-white/5"
+                    role="tooltip"
+                >
+                    <div className="mb-2 flex items-start justify-between gap-3 border-b border-border/70 pb-2">
+                        <div className="min-w-0">
+                            <p className="line-clamp-2 text-sm font-bold leading-5 text-foreground">{program.name}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                {formatTime(program.start)} - {formatTime(program.end)}
+                            </p>
+                        </div>
+                        {isLive && (
+                            <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
+                                עכשיו
+                            </span>
+                        )}
+                    </div>
+                    <p className="line-clamp-5 text-xs leading-5 text-muted-foreground">
+                        {program.description || "אין תיאור זמין לתוכנית הזו."}
+                    </p>
+                </div>
+            )}
         </div>
     );
 }, (prev, next) => {
@@ -357,12 +398,12 @@ function ProgramGuide({
     }, [nowRight, totalGridW]);
 
     return (
-        <div className="h-full w-full bg-zinc-950 flex flex-col font-sans overflow-hidden">
+        <div className="h-full w-full bg-background flex flex-col font-sans overflow-hidden">
             <div
                 ref={mainCallbackRef}
                 onMouseDown={onMouseDown}
                 className="flex-1 overflow-scroll cursor-grab active:cursor-grabbing"
-                style={{ scrollbarWidth: "thin", scrollbarColor: "#3f3f46 transparent" }}
+                style={{ scrollbarWidth: "thin", scrollbarColor: "var(--primary) transparent" }}
             >
                 <div
                     className="relative"
@@ -399,7 +440,7 @@ function ProgramGuide({
                         </div>
 
                         <div
-                            className="absolute bottom-0 z-30 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-md shadow-red-950 pointer-events-none"
+                            className="absolute bottom-0 z-30 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold leading-none text-background shadow-md shadow-primary/20 pointer-events-none"
                             style={{
                                 right: `${nowRight}px`,
                                 transform: "translate(50%, 50%)",
@@ -419,7 +460,7 @@ function ProgramGuide({
                     >
                         <button
                             onClick={scrollToNow}
-                            className="guide-now-button text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 hover:bg-red-500 text-white transition-colors"
+                            className="guide-now-button rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-background transition-colors hover:bg-accent"
                             aria-label="עכשיו"
                         >
                             <Clock3 className="guide-now-icon hidden h-4 w-4" aria-hidden="true" />
@@ -552,7 +593,7 @@ function ProgramGuide({
                         ))}
 
                         <div
-                            className="absolute top-0 bottom-0 z-30 w-0.5 bg-red-500/80 pointer-events-none"
+                            className="absolute top-0 bottom-0 z-30 w-0.5 bg-primary/85 pointer-events-none"
                             style={{ right: `${nowRight}px` }}
                         />
 

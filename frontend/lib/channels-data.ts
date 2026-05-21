@@ -34,6 +34,7 @@ export interface Channel {
   playerLogo?: string
   playerTitle?: string
   playerSubtitle?: string
+  resumeTime?: number
   vodMeta?: VodPlaybackMeta
 }
 

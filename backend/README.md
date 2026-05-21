@@ -10,6 +10,7 @@ Includes support for Kodi-based logic adapted to run in a Docker environment.
 
 * 📡 Stream proxy (`/proxy`)
 * 🗓️ EPG XML (`/epg`)
+* 🔁 EPG/VOD cache refresh scripts
 * 🧠 Kodi plugin integration (xbmc compatibility layer)
 * 🌍 Works with React / Next.js frontend
 * 🐳 Dockerized for easy deployment
@@ -38,6 +39,36 @@ pip install .
 
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+---
+
+# 🔁 Cache Refresh Jobs
+
+Manual refresh:
+
+```bash
+python refresh_vod_recent.py
+python parse_epg.py --all-channels
+```
+
+Scheduler:
+
+```bash
+python run_scheduler.py
+```
+
+The scheduler runs both jobs immediately on startup, then repeats:
+
+* EPG once per day (`EPG_INTERVAL_SECONDS=86400`)
+* Recent VOD twice per day (`VOD_RECENT_INTERVAL_SECONDS=43200`)
+
+Generated cache files are written under:
+
+```bash
+cache/
+```
+
+This directory is runtime data and is not tracked by git.
 
 ---
 

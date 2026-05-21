@@ -13,6 +13,7 @@ import { useCurrentProgram } from "@/hooks/useCurrentProgram";
 import { useGoogleCast } from "@/hooks/useGoogleCast";
 import { useMobileDevice } from "@/hooks/use-mobile-device";
 import CustomPlayerControls from "@/components/custom-player-controls";
+import { getVodProgress, saveVodProgress } from "@/lib/vod-progress";
 import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
@@ -20,6 +21,8 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
 }
 
 const OVERLAY_HIDE_DELAY = 3000; // ms
+const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000;
+const VOD_PROGRESS_END_THRESHOLD_SECONDS = 30;
 
 const getPlayerImageSrc = (logo?: string) => {
   if (!logo) return "/ch/vod.jpg";
@@ -45,6 +48,9 @@ export function VideoPlayer({
   const playerRef = useRef<any>(null);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoreExpandedAfterFullscreenRef = useRef(false);
+  const lastVodProgressSaveRef = useRef(0);
+  const preCastMutedRef = useRef(false);
+  const preCastVolumeRef = useRef(1);
 
   const suppressCastVolumeSyncRef = useRef(false);
   const isCastingRef = useRef(false);
@@ -183,6 +189,8 @@ export function VideoPlayer({
     if (!player || player.isDisposed?.()) return;
 
     suppressCastVolumeSyncRef.current = true;
+    preCastMutedRef.current = player.muted?.() ?? false;
+    preCastVolumeRef.current = player.volume?.() ?? 1;
     player.pause();
     player.muted(true);
     setIsLoading(false);
@@ -198,22 +206,33 @@ export function VideoPlayer({
 
   const handleCastEnded = useCallback(() => {
     const player = playerRef.current;
-    if (!player || player.isDisposed?.()) return;
+    if (!player || player.isDisposed?.() || !channel) return;
 
-    suppressCastVolumeSyncRef.current = true;
-    player.muted(false);
-    player.liveTracker?.seekToLiveEdge?.();
+    suppressCastVolumeSyncRef.current = true;;
+    player.volume(preCastVolumeRef.current);
+    player.muted(preCastMutedRef.current);
+    
+    if (channel.type === "vod") {
+      const progress = getVodProgress(channel.id);
+      const resumeTime = progress?.currentTime ?? 0;
 
-    try {
-      const seekable = player.seekable?.();
-      if (seekable && seekable.length > 0) {
-        const liveEdge = seekable.end(seekable.length - 1);
-        if (Number.isFinite(liveEdge)) {
-          player.currentTime(Math.max(0, liveEdge - 0.5));
-        }
+      if (resumeTime > 0) {
+        player.currentTime(resumeTime);
       }
-    } catch {
-      // ignore seek fallback errors
+    } else {
+      player.liveTracker?.seekToLiveEdge?.();
+
+      try {
+        const seekable = player.seekable?.();
+        if (seekable && seekable.length > 0) {
+          const liveEdge = seekable.end(seekable.length - 1);
+          if (Number.isFinite(liveEdge)) {
+            player.currentTime(Math.max(0, liveEdge - 0.5));
+          }
+        }
+      } catch {
+        // ignore seek fallback errors
+      }
     }
 
     player.play()?.catch?.(() => undefined);
@@ -221,7 +240,7 @@ export function VideoPlayer({
     window.setTimeout(() => {
       suppressCastVolumeSyncRef.current = false;
     }, 0);
-  }, []);
+  }, [channel]);
 
   const {
     deviceName,
@@ -289,6 +308,7 @@ export function VideoPlayer({
     setStreamUrl(null);
     setPlayerInstance(null);
     restoreExpandedAfterFullscreenRef.current = false;
+    lastVodProgressSaveRef.current = 0;
     setIsExpanded(false);
     showControls();
 
@@ -404,6 +424,19 @@ export function VideoPlayer({
 
     player.on("loadedmetadata", () => {
       setIsExpanded(false);
+      if (channel.type === "vod") {
+        const resumeTime = channel.resumeTime ?? getVodProgress(channel.id)?.currentTime ?? 0;
+        const duration = player.duration?.() ?? 0;
+        const canResume =
+          resumeTime > 0 &&
+          (!Number.isFinite(duration) ||
+            duration <= 0 ||
+            duration - resumeTime > VOD_PROGRESS_END_THRESHOLD_SECONDS);
+
+        if (canResume) {
+          player.currentTime(resumeTime);
+        }
+      }
       showControls();
     });
 
@@ -434,11 +467,28 @@ export function VideoPlayer({
       setCastVolumeRef.current(player.volume() ?? 1, player.muted() ?? false);
     });
 
+    const saveCurrentVodProgress = () => {
+      if (channel.type !== "vod" || player.isDisposed?.()) return;
+      saveVodProgress(channel.id, player.currentTime?.() ?? 0, player.duration?.() ?? 0);
+    };
+
+    const throttledVodProgressSave = () => {
+      const now = Date.now();
+      if (now - lastVodProgressSaveRef.current < VOD_PROGRESS_SAVE_INTERVAL_MS) return;
+      lastVodProgressSaveRef.current = now;
+      saveCurrentVodProgress();
+    };
+
+    player.on("timeupdate", throttledVodProgressSave);
+    player.on("pause", saveCurrentVodProgress);
+    player.on("ended", saveCurrentVodProgress);
+
     playerRef.current = player;
     setPlayerInstance(player);
 
     return () => {
       if (playerRef.current && !playerRef.current.isDisposed()) {
+        saveCurrentVodProgress();
         playerRef.current.dispose();
         playerRef.current = null;
         setPlayerInstance(null);

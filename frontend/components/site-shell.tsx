@@ -9,7 +9,7 @@ import { FloatingPlayerProvider } from "@/context/floating-player-context";
 export default function SiteShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const isLiveRoute = pathname === "/live" || pathname.startsWith("/live/");
-    const title = pathname.startsWith("/vod") ? "VOD" : "מדריך שידורים";
+    const title = pathname === "/" ? "בית" : pathname.startsWith("/vod") ? "VOD" : "מדריך שידורים";
 
     useEffect(() => {
         if (isLiveRoute) return;

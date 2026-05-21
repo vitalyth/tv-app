@@ -5,6 +5,7 @@ import Header from "@/components/Header";
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Channel } from '@/lib/channels-data';
+import { addRecentlyViewedChannel } from '@/hooks/useRecentlyViewed';
 import { SidebarChannelList } from '@/components/sidebar-channel-list';
 import { useChannelsContext } from "@/context/channels-context";
 import { useFilteredChannels } from '@/hooks/useFilteredChannels';
@@ -54,6 +55,11 @@ const channelPage = () => {
         setSelectedChannel(channelbyId ?? null);
 
     }, [channels, params.id]);
+
+    useEffect(() => {
+        if (!selectedChannel || selectedChannel.type === "vod") return;
+        addRecentlyViewedChannel(selectedChannel.id);
+    }, [selectedChannel]);
   
     const toggleMobileSidebar = () => setIsMobileSidebarOpen((prev) => !prev);
 

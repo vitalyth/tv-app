@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
-import { Archive, ChevronLeft, ChevronRight, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
+import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
 import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 import { useFloatingPlayer } from "@/context/floating-player-context";
+import { VodRecentCarousel } from "./vod-recent-carousel";
 
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
@@ -171,27 +172,6 @@ export default function VodPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [navigationStack, setNavigationStack] = useState<VodNode[]>([]);
     const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
-    const recentScrollRef = useRef<HTMLDivElement>(null);
-    const [canScrollLeft, setCanScrollLeft] = useState(false);
-    const [canScrollRight, setCanScrollRight] = useState(false);
-
-    const updateScrollButtons = useCallback(() => {
-        const el = recentScrollRef.current;
-        if (!el) return;
-        // dir="ltr", items start from left (newest first on right visually via RTL parent)
-        // scrollLeft=0 means at the start (rightmost in visual RTL)
-        const scrollLeft = el.scrollLeft;
-        const maxScroll = el.scrollWidth - el.clientWidth;
-        // can scroll right (visually left) if we are not at the start (scrollLeft < 0 due to RTL)
-        setCanScrollLeft(scrollLeft < 0);          // can go back (right visually)
-        setCanScrollRight(maxScroll - Math.abs(scrollLeft) > 1); // can go forward (left visually)
-    }, []);
-
-    const scrollRecent = useCallback((dir: "left" | "right") => {
-        const el = recentScrollRef.current;
-        if (!el) return;
-        el.scrollBy({ left: dir === "left" ? -300 : 300, behavior: "smooth" });
-    }, []);
     const { data: channels = [], isLoading, error, mutate } = useSWR(
         "vod-channels",
         fetchVodChannels,
@@ -305,16 +285,7 @@ export default function VodPage() {
 
     useEffect(() => {
         setRecentItems(loadRecentItems());
-        setTimeout(updateScrollButtons, 100);
-    }, [updateScrollButtons]);
-
-    useEffect(() => {
-        const el = recentScrollRef.current;
-        if (!el) return;
-        const ro = new ResizeObserver(updateScrollButtons);
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, [updateScrollButtons]);
+    }, []);
 
     useEffect(() => {
         return () => setCloseHandler(null);
@@ -362,6 +333,14 @@ export default function VodPage() {
         });
     };
 
+    const playRecentItem = useCallback((item: VodItem, stack: VodNode[]) => {
+        setNavigationStack(stack);
+        updateUrl(stack, item);
+        play(itemToChannel(item, stack), {
+            onClose: () => updateUrl(stack),
+        });
+    }, [play, updateUrl]);
+
     return (
         <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
             <main className="flex-1 min-h-0 flex flex-col px-4 py-5 max-w-7xl mx-auto w-full overflow-hidden">
@@ -382,7 +361,7 @@ export default function VodPage() {
 
                             <div className="min-w-0">
                                 <h1 className="truncate text-2xl font-bold text-foreground">
-                                    {currentNode ? currentNode.name : "ערוצי VOD"}
+                                    {currentNode ? currentNode.name : "VOD"}
                                 </h1>
 
                                 <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
@@ -415,109 +394,56 @@ export default function VodPage() {
                                             ))}
                                         </>
                                     ) : (
-                                        <span>{channels.length || " "} מקורות זמינים</span>
+                                        <span>כל ספריות הצפייה במקום אחד, עם חזרה מהירה למה שהתחלת לראות</span>
                                     )}
                                 </div>
                             </div>
                         </div>
 
-                    <div className="relative w-full lg:w-96">
-                        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                            value={searchQuery}
-                            onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder={currentNode ? "חיפוש תוכניות" : "חיפוש VOD"}
-                            className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                        />
-                    </div>
+                    {currentNode && (
+                        <div className="relative w-full lg:w-96">
+                            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                                value={searchQuery}
+                                onChange={(event) => setSearchQuery(event.target.value)}
+                                placeholder="חיפוש תוכניות"
+                                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                            />
+                        </div>
+                    )}
                     </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto pb-6">
-                    {!currentNode && recentItems.length > 0 && (
-                        <section className="mb-7">
-                            <div className="mb-3 flex items-center justify-between">
-                                <h2 className="text-base font-semibold text-foreground">נצפו לאחרונה</h2>
-                                <span className="text-xs text-muted-foreground">{recentItems.length}</span>
-                            </div>
-                            <div className="relative">
-                                {canScrollLeft && (
-                                    <button
-                                        onClick={() => scrollRecent("right")}
-                                        className="absolute right-0 top-1/2 z-10 -mr-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
-                                        aria-label="גלול אחורה"
-                                    >
-                                        <ChevronRight className="h-4 w-4 text-foreground" />
-                                    </button>
-                                )}
-                                {canScrollRight && (
-                                    <button
-                                        onClick={() => scrollRecent("left")}
-                                        className="absolute left-0 top-1/2 z-10 -ml-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/95 shadow-lg transition-colors hover:bg-secondary"
-                                        aria-label="גלול קדימה"
-                                    >
-                                        <ChevronLeft className="h-4 w-4 text-foreground" />
-                                    </button>
-                                )}
-                                <div
-                                    ref={recentScrollRef}
-                                    onScroll={updateScrollButtons}
-                                    className="flex gap-3 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden"
-                                    style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-                                >
-                                    {[...recentItems].map(({ item, stack }) => (
-                                        <button
-                                            key={item.id}
-                                            onClick={() => {
-                                                setNavigationStack(stack);
-                                                updateUrl(stack, item);
-                                                play(itemToChannel(item, stack), {
-                                                    onClose: () => updateUrl(stack),
-                                                });
-                                            }}
-                                            className="group relative h-28 w-44 shrink-0 overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary"
-                                        >
-                                            <img
-                                                src={getImageSrc(buildVodMeta(item, stack).programImage || item.logo)}
-                                                alt=""
-                                                className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                                            />
-                                            <div className="absolute inset-0 bg-linear-to-t from-black/85 via-black/35 to-black/5" />
-                                            <div className="absolute bottom-0 inset-x-0 p-2">
-                                                {(() => {
-                                                    const meta = buildVodMeta(item, stack);
-                                                    const programName = meta.programName !== item.name ? meta.programName : null;
-                                                    return (
-                                                        <>
-                                                            {programName && (
-                                                                <p className="line-clamp-1 text-right text-[10px] text-white/70">
-                                                                    {programName}
-                                                                </p>
-                                                            )}
-                                                            <p className="line-clamp-1 text-right text-xs font-semibold text-white">
-                                                                {item.name}
-                                                            </p>
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                                                <div className="rounded-full bg-black/65 p-2">
-                                                    <Play className="h-5 w-5 text-white" />
-                                                </div>
-                                            </div>
-                                        </button>
-                                    ))}
+                <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
+                    {!currentNode && (
+                        <VodRecentCarousel
+                            items={recentItems}
+                            buildMeta={buildVodMeta}
+                            getImageSrc={getImageSrc}
+                            onPlay={playRecentItem}
+                        />
+                    )}
+
+                    {!currentNode && isLoading ? (
+                        <section className="mb-8 space-y-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <h2 className="text-lg font-semibold text-foreground">ערוצי VOD</h2>
+                                <div className="relative w-full sm:w-80 lg:w-96">
+                                    <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <input
+                                        value={searchQuery}
+                                        onChange={(event) => setSearchQuery(event.target.value)}
+                                        placeholder="חיפוש VOD"
+                                        className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                    />
                                 </div>
                             </div>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                {Array.from({ length: 8 }).map((_, index) => (
+                                    <div key={index} className="h-44 animate-pulse rounded-lg border border-border bg-card" />
+                                ))}
+                            </div>
                         </section>
-                    )}
-                    {!currentNode && isLoading ? (
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                            {Array.from({ length: 8 }).map((_, index) => (
-                                <div key={index} className="h-28 animate-pulse rounded-lg border border-border bg-card" />
-                            ))}
-                        </div>
                     ) : !currentNode && error ? (
                         <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-6 text-center">
                             <p className="text-base font-medium text-red-500">שגיאה בטעינת ערוצי ה-VOD</p>
@@ -528,51 +454,68 @@ export default function VodPage() {
                     ) : (
                         <>
                             {!currentNode ? (
-                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                    {filteredChannels.map((channel) => (
-                                        <button
-                                            key={channel.id}
-                                            onClick={() => openChannel(channel)}
-                                            className="group flex min-h-28 w-full items-center gap-4 rounded-lg border border-border bg-card p-4 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
-                                        >
-                                            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
-                                                <img
-                                                    src={getImageSrc(channel.logo)}
-                                                    alt=""
-                                                    className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
-                                                />
-                                            </div>
+                                <section className="mb-8 space-y-4">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="min-w-0">
+                                            <h2 className="text-lg font-semibold text-foreground">ערוצי VOD</h2>
+                                        </div>
+                                        <div className="relative w-full sm:w-80 lg:w-96">
+                                            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                            <input
+                                                value={searchQuery}
+                                                onChange={(event) => setSearchQuery(event.target.value)}
+                                                placeholder="חיפוש VOD"
+                                                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                            />
+                                        </div>
+                                    </div>
 
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                        <h3 className="truncate text-base font-semibold text-foreground">{channel.name}</h3>
-                                                        <p className="mt-1 text-xs text-muted-foreground">{channel.module}</p>
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                        {filteredChannels.map((channel) => (
+                                            <button
+                                                key={channel.id}
+                                                onClick={() => openChannel(channel)}
+                                                className="group flex min-h-44 w-full items-center gap-6 rounded-lg border border-border bg-card p-6 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                                            >
+                                                <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+                                                    <img
+                                                        src={getImageSrc(channel.logo)}
+                                                        alt=""
+                                                        className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
+                                                    />
+                                                </div>
+
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <h3 className="truncate text-xl font-semibold text-foreground">{channel.name}</h3>
+                                                            <p className="mt-1.5 text-sm text-muted-foreground">{channel.module}</p>
+                                                        </div>
+                                                        <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
                                                     </div>
-                                                    <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
-                                                </div>
 
-                                                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                                                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                        <Clapperboard className="h-3.5 w-3.5" />
-                                                        VOD
-                                                    </span>
-                                                    {channel.url ? (
+                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                                                         <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                            <ExternalLink className="h-3.5 w-3.5" />
-                                                            אתר
+                                                            <Clapperboard className="h-3.5 w-3.5" />
+                                                            VOD
                                                         </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                            <Archive className="h-3.5 w-3.5" />
-                                                            פנימי
-                                                        </span>
-                                                    )}
+                                                        {channel.url ? (
+                                                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
+                                                                <ExternalLink className="h-3.5 w-3.5" />
+                                                                אתר
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
+                                                                <Archive className="h-3.5 w-3.5" />
+                                                                פנימי
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </section>
                             ) : isItemsLoading ? (
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                                     {Array.from({ length: 8 }).map((_, index) => (
@@ -599,7 +542,7 @@ export default function VodPage() {
                                                 <img
                                                     src={getImageSrc(item.logo)}
                                                     alt=""
-                                                    className="h-full w-full object-cover object-[center_20%] transition-transform duration-300 group-hover:scale-105"
+                                                    className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                                                 />
                                                 <div className="absolute inset-0 bg-linear-to-t from-black/55 via-transparent to-transparent" />
 

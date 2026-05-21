@@ -147,6 +147,18 @@ python parse_epg.py --all-channels
 python refresh_vod_recent.py
 ```
 
+Run a single channel manually:
+
+```bash
+python parse_epg.py --channel 33
+python parse_epg.py --channel 10
+python parse_epg.py --channel 99
+python parse_epg.py --channel i24news
+python parse_epg.py --channel 11
+```
+
+This updates the specific channel JSON file, for example `epg/33.json`, and rebuilds the combined `epg.json` automatically.
+
 Default intervals:
 
 ```env
