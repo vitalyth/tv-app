@@ -20,7 +20,7 @@ services:
 
   backend-scheduler:
     image: vitalyth/tv-app-backend:latest
-    command: ["python", "run_scheduler.py"]
+    command: ["python", "/app/run_scheduler.py"]
     environment:
       - EPG_INTERVAL_SECONDS=${EPG_INTERVAL_SECONDS:-86400}
       - VOD_RECENT_INTERVAL_SECONDS=${VOD_RECENT_INTERVAL_SECONDS:-43200}

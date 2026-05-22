@@ -174,6 +174,9 @@ To run only the scheduler locally:
 docker compose -f docker-compose.dev.yml up --build backend-scheduler
 ```
 
+When configuring the scheduler in a container UI instead of Compose, set the
+container command to `python` and `/app/run_scheduler.py`.
+
 ---
 
 ## 🐳 Build Docker Images (Manual)
