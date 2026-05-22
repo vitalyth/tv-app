@@ -1,34 +1,19 @@
-import requests
-import xmltodict
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 import threading
-import html
-from plugin_video_idanplus.resources.lib import epg
+from typing import Callable, Optional
+from xml.etree import ElementTree
 
-def get_epg():
-    r = requests.get("https://iptv-epg.org/files/epg-il.xml")
-    
-    data = xmltodict.parse(r.text)
 
-    programmes = data["tv"]["programme"]
+def _load_guide_epg() -> dict:
+    from services.epg_service import get_now_epg
 
-    result = [
-        {
-            "channel": p.get("@channel"),
-            "title": p.get("title", {}).get("#text") if isinstance(p.get("title"), dict) else None,
-            "start": p.get("@start"),
-            "end": p.get("@stop"),
-        }
-        for p in programmes
-    ]
-
-    return result
+    return get_now_epg()
 
 
 class EPGService:
-    def __init__(self, ttl_seconds: int = 3600):
+    def __init__(self, ttl_seconds: int = 3600, data_loader: Callable[[], dict] = _load_guide_epg):
         self.ttl = timedelta(seconds=ttl_seconds)
+        self._data_loader = data_loader
         self._cache_xml: Optional[str] = None
         self._last_update: Optional[datetime] = None
         self._lock = threading.Lock()
@@ -43,33 +28,28 @@ class EPGService:
         return dt.strftime("%Y%m%d%H%M%S +0000")
 
     def _build_epg_xml(self, data: dict) -> str:
-        xml_parts = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv>']
+        tv = ElementTree.Element("tv")
 
         for channel_id, programs in data.items():
             if not programs:
                 continue
 
-            # channel
-            xml_parts.append(f'<channel id="{channel_id}">')
-            xml_parts.append(f'<display-name>{html.escape(str(channel_id))}</display-name>')
-            xml_parts.append('</channel>')
+            channel_id = str(channel_id)
+            channel = ElementTree.SubElement(tv, "channel", {"id": channel_id})
+            ElementTree.SubElement(channel, "display-name").text = channel_id
 
-            # programmes
             for p in programs:
                 start = self._unix_to_xmltv(p["start"])
                 end = self._unix_to_xmltv(p["end"])
-                title = html.escape(p.get("name", ""))
-                desc = html.escape(p.get("description", ""))
-
-                xml_parts.append(
-                    f'<programme start="{start}" stop="{end}" channel="{channel_id}">'
+                programme = ElementTree.SubElement(
+                    tv,
+                    "programme",
+                    {"start": start, "stop": end, "channel": channel_id},
                 )
-                xml_parts.append(f'<title>{title}</title>')
-                xml_parts.append(f'<desc>{desc}</desc>')
-                xml_parts.append('</programme>')
+                ElementTree.SubElement(programme, "title").text = str(p.get("name") or "")
+                ElementTree.SubElement(programme, "desc").text = str(p.get("description") or "")
 
-        xml_parts.append('</tv>')
-        return "\n".join(xml_parts)
+        return ElementTree.tostring(tv, encoding="utf-8", xml_declaration=True).decode("utf-8")
 
     def get_epg_xml(self) -> str:
         if self._is_cache_valid():
@@ -79,13 +59,10 @@ class EPGService:
             if self._is_cache_valid():
                 return self._cache_xml
 
-            # fetch data
-            data = epg.GetEPG(deltaInSec=3 * 86400)
+            data = self._data_loader()
 
-            # build xml
             xml = self._build_epg_xml(data)
 
-            # cache
             self._cache_xml = xml
             self._last_update = datetime.utcnow()
 

@@ -5,7 +5,7 @@ from services.channel_service import get_live_channels, get_vod_channels, get_vo
 from services.epg_service import get_now_epg
 from services.stream_service import get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy
-from services.epg_service_ext import get_epg, EPGService
+from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
 import os
 import socket
