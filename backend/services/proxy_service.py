@@ -1,4 +1,7 @@
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from pathlib import Path
+import os
+import mimetypes
 from utils.http import create_session
 from fastapi.responses import Response, StreamingResponse
 import requests
@@ -340,6 +343,122 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
 
     return text
 
+
+
+def _content_type_for_file(path: str) -> str:
+    guessed, _ = mimetypes.guess_type(path)
+    if guessed:
+        return guessed
+
+    lower_path = path.lower()
+    if lower_path.endswith(".mkv"):
+        return "video/x-matroska"
+    if lower_path.endswith(".mp4") or lower_path.endswith(".m4v"):
+        return "video/mp4"
+    if lower_path.endswith(".avi"):
+        return "video/x-msvideo"
+    if lower_path.endswith(".mov"):
+        return "video/quicktime"
+    if lower_path.endswith(".ts"):
+        return "video/mp2t"
+    if lower_path.endswith(".webm"):
+        return "video/webm"
+
+    return "application/octet-stream"
+
+
+def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | None:
+    if not range_header or not range_header.startswith("bytes="):
+        return None
+
+    range_value = range_header.replace("bytes=", "", 1).split(",", 1)[0].strip()
+    if "-" not in range_value:
+        return None
+
+    start_text, end_text = range_value.split("-", 1)
+
+    try:
+        if start_text == "":
+            # suffix range: bytes=-500
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return None
+            start = max(file_size - suffix_length, 0)
+            end = file_size - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else file_size - 1
+    except ValueError:
+        return None
+
+    if start < 0 or start >= file_size or end < start:
+        return None
+
+    return start, min(end, file_size - 1)
+
+
+def _file_iterator(file_path: str, start: int, end: int, chunk_size: int = 1024 * 1024):
+    with open(file_path, "rb") as video_file:
+        video_file.seek(start)
+        remaining = end - start + 1
+
+        while remaining > 0:
+            chunk = video_file.read(min(chunk_size, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+
+
+def handle_local_file_proxy(request, file_path: str, root_dir: str):
+    """Stream a local media file with byte-range support for seeking."""
+    real_root = os.path.realpath(root_dir)
+    real_file = os.path.realpath(file_path)
+
+    if real_file != real_root and not real_file.startswith(real_root + os.sep):
+        return Response("Invalid file path", status_code=403, headers=CORS_HEADERS)
+
+    if not os.path.isfile(real_file):
+        return Response("File not found", status_code=404, headers=CORS_HEADERS)
+
+    file_size = os.path.getsize(real_file)
+    content_type = _content_type_for_file(real_file)
+    range_header = request.headers.get("range")
+    byte_range = _parse_range_header(range_header, file_size)
+
+    if range_header and byte_range is None:
+        return Response(
+            status_code=416,
+            headers=_response_headers({
+                "Content-Range": f"bytes */{file_size}",
+                "Accept-Ranges": "bytes",
+            }),
+        )
+
+    if byte_range:
+        start, end = byte_range
+        status_code = 206
+    else:
+        start, end = 0, file_size - 1
+        status_code = 200
+
+    content_length = end - start + 1
+    headers = _response_headers({
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(content_length),
+        "Content-Range": f"bytes {start}-{end}/{file_size}" if status_code == 206 else "",
+        "Cache-Control": "no-cache",
+    })
+
+    if request.method == "HEAD":
+        return Response(status_code=status_code, media_type=content_type, headers=headers)
+
+    return StreamingResponse(
+        _file_iterator(real_file, start, end),
+        status_code=status_code,
+        media_type=content_type,
+        headers=headers,
+    )
 
 def handle_proxy(request, url, referer, cast=False):
     origin = _origin_for_url(url)

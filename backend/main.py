@@ -4,9 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.channel_service import get_live_channels, get_vod_channels, get_vod_items, get_vod_recent_items
 from services.epg_service import get_now_epg
 from services.stream_service import get_stream, get_vod_stream
-from services.proxy_service import cors_preflight, handle_proxy
+from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
+from services.local_series_service import LOCAL_VOD_TV_DIR, scan_local_series
 import os
 import socket
 from models.schemas import Channel
@@ -48,6 +49,16 @@ CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
     ",".join(get_local_addresses(port=8001))
 ).split(",")
+
+
+def get_request_api_prefix(request: Request) -> str:
+    """Return the API prefix for generated relative URLs.
+
+    Local dev usually has no prefix: /local-series/stream
+    Docker/prod may run FastAPI with ROOT_PATH=/api: /api/local-series/stream
+    """
+    prefix = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "") or ROOT_PATH
+    return prefix.rstrip("/")
 
 app = FastAPI(
     title="TV App API",
@@ -99,7 +110,22 @@ def live_channel(channel: Channel):
     return {"stream": get_stream(channel)}
 
 @app.post('/vod_stream')
-def vod_stream(item: dict):
+def vod_stream(request: Request, item: dict):
+    if item.get("module") == "local-series":
+        url = item.get("url") or ""
+
+        if url.startswith("/"):
+            base_url = str(request.base_url).rstrip("/")
+            root_path = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "") or ROOT_PATH
+            root_path = root_path.rstrip("/")
+
+            if root_path and url.startswith(root_path + "/"):
+                return {"stream": f"{base_url}{url}"}
+
+            return {"stream": f"{base_url}{root_path}{url}"}
+
+        return {"stream": url}
+
     return {"stream": get_vod_stream(item)}
 
 @app.get("/stream")
@@ -158,3 +184,13 @@ def iptv_list(request: Request):
     iptv.MakeIPTVlist(channels)
 
     return Response(content='IPTV playlist generated', media_type="text/plain")
+
+
+@app.get("/local-series")
+def local_series(request: Request):
+    return scan_local_series(api_prefix=get_request_api_prefix(request))
+
+@app.get("/local-series/stream")
+@app.head("/local-series/stream")
+def local_series_stream(request: Request, path: str = Query(..., min_length=1)):
+    return handle_local_file_proxy(request, path, LOCAL_VOD_TV_DIR)

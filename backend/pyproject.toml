@@ -10,7 +10,8 @@ dependencies = [
     "email-validator",
     "python-multipart",
     "xmltodict",
-    "questionary"
+    "questionary",
+    "guessit>=3.8.0",
 ]
 
 [project.optional-dependencies]
