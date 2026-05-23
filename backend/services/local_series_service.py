@@ -138,6 +138,77 @@ def get_series_title_from_path(full_path: str, parsed: dict) -> str:
     return os.path.splitext(os.path.basename(full_path))[0].strip()
 
 
+def is_hls_index_file(full_path: str) -> bool:
+    return (
+        os.path.basename(full_path).lower() == "index.m3u8"
+        and os.path.basename(os.path.dirname(os.path.dirname(full_path))).lower() == "hls"
+    )
+
+
+def get_parse_name_for_episode(full_path: str, filename: str) -> str:
+    """
+    Normal files:
+      Series/file.mp4
+      Series/season/file.mp4
+      -> parse from filename
+
+    HLS files:
+      Series/hls/s3e1/index.m3u8
+      -> parse from hls child folder name: s3e1
+    """
+    if is_hls_index_file(full_path):
+        return os.path.basename(os.path.dirname(full_path))
+
+    return filename
+
+
+
+def get_episode_dedupe_key(episode: dict) -> tuple:
+    """
+    Dedupe multiple files for the same logical episode.
+
+    If both a regular file and an HLS index exist for the same series/season/episode,
+    keep the HLS version.
+    """
+    season = episode.get("season") or 0
+    episode_number = episode.get("episode") or 0
+
+    if episode_number:
+        return (season, episode_number)
+
+    filename = str(episode.get("filename") or "").lower()
+    return (season, filename)
+
+
+def prefer_hls_episodes(episodes: list[dict]) -> list[dict]:
+    by_key = {}
+
+    for episode in episodes:
+        key = get_episode_dedupe_key(episode)
+        existing = by_key.get(key)
+
+        if existing is None:
+            by_key[key] = episode
+            continue
+
+        existing_is_hls = bool(existing.get("isHls"))
+        current_is_hls = bool(episode.get("isHls"))
+
+        if current_is_hls and not existing_is_hls:
+            by_key[key] = episode
+            continue
+
+        if current_is_hls == existing_is_hls:
+            # Stable fallback: keep the one with the cleaner/shorter path.
+            existing_path = str(existing.get("path") or "")
+            current_path = str(episode.get("path") or "")
+            if current_path and (not existing_path or len(current_path) < len(existing_path)):
+                by_key[key] = episode
+
+    return list(by_key.values())
+
+
+
 def get_tmdb_details(title: str) -> dict | None:
     print("TMDB SEARCH:", title)
 
@@ -378,7 +449,8 @@ def scan_local_series(api_prefix: str = ""):
                 continue
 
             full_path = os.path.join(root, filename)
-            parsed = guessit(filename)
+            parse_name = get_parse_name_for_episode(full_path, filename)
+            parsed = guessit(parse_name)
 
             # The series name is always the first folder under LOCAL_VOD_TV_DIR.
             # Season subfolders like s1/s2 are only organization folders, not series names.
@@ -406,7 +478,7 @@ def scan_local_series(api_prefix: str = ""):
 
             series_map[key]["episodes"].append({
                 "id": make_id(full_path),
-                "filename": filename,
+                "filename": parse_name if is_hls_index_file(full_path) else filename,
                 "path": full_path,
                 "season": season,
                 "episode": episode,
@@ -433,6 +505,7 @@ def scan_local_series(api_prefix: str = ""):
     series = list(series_map.values())
 
     for item in series:
+        item["episodes"] = prefer_hls_episodes(item["episodes"])
         item["episodes"].sort(
             key=lambda ep: (
                 ep.get("season") or 0,
