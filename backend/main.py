@@ -118,6 +118,13 @@ def vod_stream(request: Request, item: dict):
             return {"stream": url}
 
         base_url = str(request.base_url).rstrip("/")
+
+        if (
+            request.headers.get("x-forwarded-proto") == "https"
+            or '"scheme":"https"' in request.headers.get("cf-visitor", "")
+        ):
+            base_url = base_url.replace("http://", "https://", 1)
+
         root_path = get_request_api_prefix(request)
 
         if root_path and base_url.endswith(root_path):
