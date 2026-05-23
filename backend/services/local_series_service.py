@@ -371,7 +371,7 @@ def scan_local_series(api_prefix: str = ""):
                 "audioCodec": parsed.get("audio_codec"),
                 "container": parsed.get("container"),
                 "mimetype": parsed.get("mimetype"),
-                "streamUrl": f"{api_prefix}/local-series/stream?path={quote(full_path)}",
+                "streamUrl": f"/local-series/stream?path={quote(full_path)}",
                 "parsed": parsed,
             })
 

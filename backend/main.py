@@ -114,17 +114,19 @@ def vod_stream(request: Request, item: dict):
     if item.get("module") == "local-series":
         url = item.get("url") or ""
 
+        if url.startswith("http://") or url.startswith("https://"):
+            return {"stream": url}
+
+        base_url = str(request.base_url).rstrip("/")
+        root_path = get_request_api_prefix(request)
+
+        if root_path and url.startswith(root_path + "/"):
+            return {"stream": f"{base_url}{url}"}
+
         if url.startswith("/"):
-            base_url = str(request.base_url).rstrip("/")
-            root_path = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "") or ROOT_PATH
-            root_path = root_path.rstrip("/")
-
-            if root_path and url.startswith(root_path + "/"):
-                return {"stream": f"{base_url}{url}"}
-
             return {"stream": f"{base_url}{root_path}{url}"}
 
-        return {"stream": url}
+        return {"stream": f"{base_url}{root_path}/{url}"}
 
     return {"stream": get_vod_stream(item)}
 
