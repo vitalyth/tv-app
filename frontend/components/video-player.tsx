@@ -373,14 +373,20 @@ export function VideoPlayer({
 
     const keepLocalPaused = isCastingRef.current;
     const isLocalSeriesStream = streamUrl.includes("/stream/local-series");
-    const finalStreamUrl = isLocalSeriesStream
+    const isLocalSeriesHls =
+      isLocalSeriesStream &&
+      (streamUrl.toLowerCase().includes(".m3u8") ||
+        channel?.linkDetails?.manifest_type === "hls");
+
+    const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
       ? streamUrl
       : api(
           `/proxy?url=${encodeURIComponent(
             streamUrl,
           )}&referer=${encodeURIComponent(referer)}`,
         );
-    const sourceType = isLocalSeriesStream
+
+    const sourceType = isLocalSeriesStream && !isLocalSeriesHls
       ? "video/mp4"
       : isDash
         ? "application/dash+xml"

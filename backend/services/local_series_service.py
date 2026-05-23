@@ -425,6 +425,8 @@ def scan_local_series(api_prefix: str = ""):
                 "container": parsed.get("container"),
                 "mimetype": parsed.get("mimetype"),
                 "streamUrl": f"/stream/local-series?path={quote(full_path)}",
+                "isHls": full_path.lower().endswith(".m3u8"),
+                "manifestType": "hls" if full_path.lower().endswith(".m3u8") else None,
                 "parsed": parsed,
             })
 
