@@ -13,8 +13,12 @@ services:
     environment:
       - ROOT_PATH=/api
       - BACKEND_CACHE_DIR=/app/cache
+      - LOCAL_VOD_TV_DIR=/media/tv
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+      - ${LOCAL_VOD_TV_HOST_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:/media/tv:ro
     networks:
       - tv-network
 

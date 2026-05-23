@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { ArrowRight, ChevronLeft, Clapperboard, Play, Search, Star } from "lucide-react";
 
+import { HorizontalCarousel } from "@/components/horizontal-carousel";
 import { useFloatingPlayer } from "@/context/floating-player-context";
 import { type Channel, type VodPlaybackMeta } from "@/lib/channels-data";
 import { localSeriesService, type LocalEpisode, type LocalSeries } from "@/lib/services/local-series-service";
@@ -25,11 +26,31 @@ const getSeriesImage = (series: LocalSeries) => {
   return series.metadata?.poster || series.metadata?.backdrop || "/ch/vod.jpg";
 };
 
+const getSeasonTitle = (season: string) => {
+  return season === "0" ? "פרקים" : `עונה ${season}`;
+};
+
 const getEpisodeLabel = (episode: LocalEpisode) => {
   const season = episode.season ? `S${String(episode.season).padStart(2, "0")}` : "";
   const ep = episode.episode ? `E${String(episode.episode).padStart(2, "0")}` : "";
   const code = `${season}${ep}`;
   return code || episode.filename;
+};
+
+const getEpisodeTitle = (episode: LocalEpisode) => {
+  return episode.episodeName || (episode.episode ? `פרק ${episode.episode}` : episode.filename);
+};
+
+const getEpisodeImage = (series: LocalSeries, episode: LocalEpisode) => {
+  return episode.episodeImage || series.metadata?.backdrop || series.metadata?.poster || "";
+};
+
+const getEpisodeMetaText = (episode: LocalEpisode) => {
+  return [
+    getEpisodeLabel(episode),
+    episode.airDate,
+    episode.runtime ? `${episode.runtime} דק׳` : null,
+  ].filter(Boolean).join(" · ");
 };
 
 const loadRecentItems = (): LocalRecentItem[] => {
@@ -52,18 +73,18 @@ const saveRecentItem = (seriesId: string, episodeId: string) => {
 
 const buildVodMeta = (series: LocalSeries, episode: LocalEpisode): VodPlaybackMeta => {
   const title = getSeriesTitle(series);
-  const label = getEpisodeLabel(episode);
-  const image = getSeriesImage(series);
+  const image = getEpisodeImage(series, episode) || getSeriesImage(series);
+  const episodeTitle = getEpisodeTitle(episode);
 
   return {
     programName: title,
     seasonName: episode.season ? `Season ${episode.season}` : undefined,
     channelName: "Local Series",
-    episodeName: episode.episode ? `Episode ${episode.episode}` : episode.filename,
-    episodeDescription: series.metadata?.overview || "",
+    episodeName: episodeTitle,
+    episodeDescription: episode.episodeOverview || series.metadata?.overview || "",
     programDescription: series.metadata?.overview || "",
-    programImage: image,
-    channelImage: image,
+    programImage: getSeriesImage(series),
+    channelImage: getSeriesImage(series),
     episodeImage: image,
   };
 };
@@ -105,6 +126,7 @@ export default function LocalSeriesDetailsPage() {
   const params = useParams<{ id: string }>();
   const { play, setCloseHandler } = useFloatingPlayer();
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeSeason, setActiveSeason] = useState<string | null>(null);
 
   const seriesId = decodeURIComponent(params.id || "");
 
@@ -133,27 +155,37 @@ export default function LocalSeriesDetailsPage() {
     }, {});
   }, [series]);
 
+  const seasonEntries = useMemo(() => {
+    return Object.entries(episodesBySeason).sort(([a], [b]) => Number(a) - Number(b));
+  }, [episodesBySeason]);
+
   const filteredSeasons = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    const entries = Object.entries(episodesBySeason);
-    if (!query) return entries;
+    if (!query) return seasonEntries;
 
-    return entries
+    return seasonEntries
       .map(([season, episodes]) => [
         season,
         episodes.filter((episode) => {
           return (
             episode.filename.toLowerCase().includes(query) ||
-            getEpisodeLabel(episode).toLowerCase().includes(query)
+            getEpisodeLabel(episode).toLowerCase().includes(query) ||
+            (episode.episodeName || "").toLowerCase().includes(query) ||
+            (episode.episodeOverview || "").toLowerCase().includes(query)
           );
         }),
       ] as [string, LocalEpisode[]])
       .filter(([, episodes]) => episodes.length > 0);
-  }, [episodesBySeason, searchQuery]);
+  }, [seasonEntries, searchQuery]);
 
   useEffect(() => {
     return () => setCloseHandler(null);
   }, [setCloseHandler]);
+
+  useEffect(() => {
+    if (activeSeason && filteredSeasons.some(([season]) => season === activeSeason)) return;
+    setActiveSeason(filteredSeasons[0]?.[0] || null);
+  }, [activeSeason, filteredSeasons]);
 
   const handleBack = () => {
     router.push("/local-series");
@@ -206,6 +238,7 @@ export default function LocalSeriesDetailsPage() {
   const poster = series.metadata?.poster;
   const backdrop = series.metadata?.backdrop || series.metadata?.poster;
   const genres = series.metadata?.genres || [];
+  const activeSeasonEpisodes = filteredSeasons.find(([season]) => season === activeSeason)?.[1] || [];
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
@@ -289,30 +322,56 @@ export default function LocalSeriesDetailsPage() {
               <p className="mt-1 text-sm text-muted-foreground">נסה חיפוש אחר.</p>
             </div>
           ) : (
-            <div className="space-y-8">
-              {filteredSeasons.map(([season, episodes]) => (
-                <section key={season} className="space-y-4">
-                  <div className="flex items-end justify-between gap-4">
-                    <div className="min-w-0">
-                      <h2 className="text-xl font-semibold text-foreground">
-                        {season === "0" ? "פרקים" : `עונה ${season}`}
-                      </h2>
-                      <p className="mt-1 text-sm text-muted-foreground">{episodes.length} פרקים</p>
-                    </div>
-                  </div>
+            <div className="space-y-5">
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" role="tablist" aria-label="עונות">
+                {filteredSeasons.map(([season, episodes]) => {
+                  const isActive = season === activeSeason;
+                  return (
+                    <button
+                      key={season}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => setActiveSeason(season)}
+                      className={`shrink-0 rounded-full border px-4 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-primary ${
+                        isActive
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-card text-muted-foreground hover:border-primary/60 hover:bg-secondary hover:text-foreground"
+                      }`}
+                    >
+                      {getSeasonTitle(season)} · {episodes.length}
+                    </button>
+                  );
+                })}
+              </div>
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {episodes.map((episode) => (
+              <section className="space-y-4">
+                <div className="flex items-end justify-between gap-4">
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-semibold text-foreground">
+                      {activeSeason ? getSeasonTitle(activeSeason) : "פרקים"}
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">{activeSeasonEpisodes.length} פרקים</p>
+                  </div>
+                </div>
+
+                <HorizontalCarousel itemClassName="w-[82vw] max-w-[22rem] shrink-0 sm:w-[20rem] lg:w-[21rem]">
+                  {activeSeasonEpisodes.map((episode) => {
+                    const episodeImage = getEpisodeImage(series, episode);
+                    const episodeTitle = getEpisodeTitle(episode);
+                    const episodeMeta = getEpisodeMetaText(episode);
+
+                    return (
                       <button
                         key={episode.id}
                         type="button"
                         onClick={() => playEpisode(episode)}
-                        className="group flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="group flex h-full min-h-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
                       >
                         <div className="relative aspect-video overflow-hidden bg-background">
-                          {backdrop || poster ? (
+                          {episodeImage ? (
                             <img
-                              src={backdrop || poster || ""}
+                              src={episodeImage}
                               alt=""
                               className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                             />
@@ -326,18 +385,33 @@ export default function LocalSeriesDetailsPage() {
                             <Play className="h-3.5 w-3.5" />
                             נגן
                           </div>
+                          {episode.runtime ? (
+                            <div className="absolute bottom-2 left-2 rounded-full bg-black/65 px-2 py-1 text-xs text-white">
+                              {episode.runtime} דק׳
+                            </div>
+                          ) : null}
                         </div>
 
                         <div className="min-w-0 p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="text-xs text-muted-foreground">{getEpisodeLabel(episode)}</p>
+                              <p className="text-xs text-muted-foreground">{episodeMeta}</p>
                               <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">
-                                {episode.filename}
+                                {episodeTitle}
                               </h3>
                             </div>
                             <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
                           </div>
+
+                          {episode.episodeOverview ? (
+                            <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">
+                              {episode.episodeOverview}
+                            </p>
+                          ) : (
+                            <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                              {episode.filename}
+                            </p>
+                          )}
 
                           <div className="mt-3 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
                             {episode.screenSize ? <span className="rounded-full bg-muted px-2 py-1">{episode.screenSize}</span> : null}
@@ -346,10 +420,10 @@ export default function LocalSeriesDetailsPage() {
                           </div>
                         </div>
                       </button>
-                    ))}
-                  </div>
-                </section>
-              ))}
+                    );
+                  })}
+                </HorizontalCarousel>
+              </section>
             </div>
           )}
         </div>

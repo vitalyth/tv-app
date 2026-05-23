@@ -58,6 +58,11 @@ export type LocalEpisode = {
   path: string;
   season?: number | null;
   episode?: number | null;
+  episodeName?: string | null;
+  episodeOverview?: string | null;
+  episodeImage?: string | null;
+  airDate?: string | null;
+  runtime?: number | null;
   screenSize?: string;
   source?: string;
   videoCodec?: string;
