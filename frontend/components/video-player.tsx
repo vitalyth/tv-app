@@ -372,7 +372,7 @@ export function VideoPlayer({
       /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
     const keepLocalPaused = isCastingRef.current;
-    const isLocalSeriesStream = streamUrl.includes("/local-series/stream");
+    const isLocalSeriesStream = streamUrl.includes("/stream/local-series");
     const finalStreamUrl = isLocalSeriesStream
       ? streamUrl
       : api(

@@ -204,7 +204,7 @@ def iptv_list(request: Request):
 def local_series(request: Request):
     return scan_local_series(api_prefix=get_request_api_prefix(request))
 
-@app.get("/local-series/stream")
-@app.head("/local-series/stream")
+@app.get("/stream/local-series")
+@app.head("/stream/local-series")
 def local_series_stream(request: Request, path: str = Query(..., min_length=1)):
     return handle_local_file_proxy(request, path, LOCAL_VOD_TV_DIR)
