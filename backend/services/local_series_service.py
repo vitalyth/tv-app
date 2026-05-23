@@ -44,9 +44,12 @@ def is_video_file(filename: str) -> bool:
     ):
         return False
 
-    # HLS: keep only the main playlist, not generated variants/segments.
+    # HLS: keep only main playlists.
+    # Single HLS: hls/s1e1/index.m3u8
+    # Adaptive HLS: hls/s1e1/master.m3u8
+    # Variant playlists like hls/s1e1/1080p/index.m3u8 are filtered later by path.
     if lower.endswith(".m3u8"):
-        return lower == "index.m3u8"
+        return lower in {"index.m3u8", "master.m3u8"}
 
     # HLS segments should not be shown as episodes.
     if lower.endswith(".ts") and lower.startswith("segment_"):
@@ -138,11 +141,42 @@ def get_series_title_from_path(full_path: str, parsed: dict) -> str:
     return os.path.splitext(os.path.basename(full_path))[0].strip()
 
 
+def is_hls_main_playlist(full_path: str) -> bool:
+    """
+    True only for main HLS playlists.
+
+    Single HLS:
+      Series/hls/s3e1/index.m3u8
+
+    Adaptive HLS:
+      Series/hls/s3e1/master.m3u8
+
+    False for variant playlists:
+      Series/hls/s3e1/1080p/index.m3u8
+    """
+    playlist_name = os.path.basename(full_path).lower()
+    if playlist_name not in {"index.m3u8", "master.m3u8"}:
+        return False
+
+    playlist_dir = os.path.dirname(full_path)
+    episode_dir = os.path.basename(playlist_dir).lower()
+    hls_dir = os.path.basename(os.path.dirname(playlist_dir)).lower()
+
+    return hls_dir == "hls" and episode_dir not in {
+        "2160p",
+        "1440p",
+        "1080p",
+        "720p",
+        "480p",
+        "360p",
+        "audio",
+        "subs",
+        "subtitles",
+    }
+
+
 def is_hls_index_file(full_path: str) -> bool:
-    return (
-        os.path.basename(full_path).lower() == "index.m3u8"
-        and os.path.basename(os.path.dirname(os.path.dirname(full_path))).lower() == "hls"
-    )
+    return is_hls_main_playlist(full_path)
 
 
 def get_parse_name_for_episode(full_path: str, filename: str) -> str:
@@ -154,13 +188,30 @@ def get_parse_name_for_episode(full_path: str, filename: str) -> str:
 
     HLS files:
       Series/hls/s3e1/index.m3u8
-      -> parse from hls child folder name: s3e1
+      Series/hls/s3e1/master.m3u8
+      -> parse from HLS episode folder name: s3e1
     """
-    if is_hls_index_file(full_path):
+    if is_hls_main_playlist(full_path):
         return os.path.basename(os.path.dirname(full_path))
 
     return filename
 
+
+
+def should_skip_hls_variant_playlist(full_path: str) -> bool:
+    """
+    Skip adaptive variant playlists, for example:
+      hls/s1e1/1080p/index.m3u8
+
+    Keep:
+      hls/s1e1/master.m3u8
+      hls/s1e1/index.m3u8
+    """
+    filename = os.path.basename(full_path).lower()
+    if not filename.endswith(".m3u8"):
+        return False
+
+    return not is_hls_main_playlist(full_path)
 
 
 def get_episode_dedupe_key(episode: dict) -> tuple:
@@ -196,6 +247,22 @@ def prefer_hls_episodes(episodes: list[dict]) -> list[dict]:
 
         if current_is_hls and not existing_is_hls:
             by_key[key] = episode
+            continue
+
+        if current_is_hls and existing_is_hls:
+            existing_type = existing.get("hlsPlaylistType")
+            current_type = episode.get("hlsPlaylistType")
+
+            if current_type == "master" and existing_type != "master":
+                by_key[key] = episode
+                continue
+
+            if current_type == existing_type:
+                existing_path = str(existing.get("path") or "")
+                current_path = str(episode.get("path") or "")
+                if current_path and (not existing_path or len(current_path) < len(existing_path)):
+                    by_key[key] = episode
+
             continue
 
         if current_is_hls == existing_is_hls:
@@ -449,6 +516,10 @@ def scan_local_series(api_prefix: str = ""):
                 continue
 
             full_path = os.path.join(root, filename)
+
+            if should_skip_hls_variant_playlist(full_path):
+                continue
+
             parse_name = get_parse_name_for_episode(full_path, filename)
             parsed = guessit(parse_name)
 
@@ -497,8 +568,15 @@ def scan_local_series(api_prefix: str = ""):
                 "container": parsed.get("container"),
                 "mimetype": parsed.get("mimetype"),
                 "streamUrl": f"/stream/local-series?path={quote(full_path)}",
-                "isHls": full_path.lower().endswith(".m3u8"),
-                "manifestType": "hls" if full_path.lower().endswith(".m3u8") else None,
+                "isHls": is_hls_main_playlist(full_path),
+                "manifestType": "hls" if is_hls_main_playlist(full_path) else None,
+                "hlsPlaylistType": (
+                    "master"
+                    if os.path.basename(full_path).lower() == "master.m3u8"
+                    else "index"
+                    if is_hls_main_playlist(full_path)
+                    else None
+                ),
                 "parsed": parsed,
             })
 
