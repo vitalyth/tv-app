@@ -116,6 +116,13 @@ const isDashStream = (streamUrl: string, channel?: Channel) => {
 }
 
 const getCastContentType = (castSourceUrl: string, channel: Channel) => {
+    if (
+        castSourceUrl.includes("/stream/local-series") ||
+        castSourceUrl.endsWith(".mp4")
+    ) {
+        return "video/mp4"
+    }
+
     return isDashStream(castSourceUrl, channel)
         ? "application/dash+xml"
         : "application/x-mpegURL"
