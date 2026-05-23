@@ -120,13 +120,18 @@ def vod_stream(request: Request, item: dict):
         base_url = str(request.base_url).rstrip("/")
         root_path = get_request_api_prefix(request)
 
+        if root_path and base_url.endswith(root_path):
+            base_with_prefix = base_url
+        else:
+            base_with_prefix = f"{base_url}{root_path}"
+
         if root_path and url.startswith(root_path + "/"):
-            return {"stream": f"{base_url}{url}"}
+            url = url[len(root_path):]
 
         if url.startswith("/"):
-            return {"stream": f"{base_url}{root_path}{url}"}
+            return {"stream": f"{base_with_prefix}{url}"}
 
-        return {"stream": f"{base_url}{root_path}/{url}"}
+        return {"stream": f"{base_with_prefix}/{url}"}
 
     return {"stream": get_vod_stream(item)}
 
