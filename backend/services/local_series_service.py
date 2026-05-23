@@ -6,7 +6,7 @@ import requests
 from guessit import guessit
 from urllib.parse import quote
 
-VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts", ".webm"}
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts", ".webm", ".m3u8"}
 
 LOCAL_VOD_TV_DIR = os.getenv("LOCAL_VOD_TV_DIR", "/media/tv")
 BACKEND_CACHE_DIR = os.getenv("BACKEND_CACHE_DIR", "cache")
@@ -18,7 +18,41 @@ TMDB_CACHE_TTL_SECONDS = 60 * 60 * 24
 
 
 def is_video_file(filename: str) -> bool:
-    return os.path.splitext(filename.lower())[1] in VIDEO_EXTENSIONS
+    if not filename:
+        return False
+
+    if filename.startswith("."):
+        return False
+
+    lower = filename.lower()
+
+    if lower in {
+        "thumbs.db",
+        "desktop.ini",
+        ".ds_store",
+    }:
+        return False
+
+    if (
+        lower.endswith(".tmp")
+        or lower.endswith(".part")
+        or lower.endswith(".download")
+        or lower.endswith(".crdownload")
+        or ".faststart." in lower
+        or ".transcoded." in lower
+        or ".cast." in lower
+    ):
+        return False
+
+    # HLS: keep only the main playlist, not generated variants/segments.
+    if lower.endswith(".m3u8"):
+        return lower == "index.m3u8"
+
+    # HLS segments should not be shown as episodes.
+    if lower.endswith(".ts") and lower.startswith("segment_"):
+        return False
+
+    return os.path.splitext(lower)[1] in VIDEO_EXTENSIONS
 
 
 def make_id(value: str) -> str:
@@ -319,7 +353,26 @@ def scan_local_series(api_prefix: str = ""):
     series_map = {}
     season_cache = {}
 
-    for root, _, files in os.walk(LOCAL_VOD_TV_DIR):
+    for root, dirs, files in os.walk(LOCAL_VOD_TV_DIR):
+        dirs[:] = [
+            d for d in dirs
+            if not d.startswith(".")
+            and d.lower() not in {
+                "@eadir",
+                "#recycle",
+                "$recycle.bin",
+                "system volume information",
+                "__macosx",
+                "cache",
+                ".cache",
+                "transcode",
+                ".transcode",
+                "transcoded",
+                ".transcoded",
+                "tmp",
+                "temp",
+            }
+        ]
         for filename in files:
             if not is_video_file(filename):
                 continue
