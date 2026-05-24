@@ -238,20 +238,22 @@ export default function LocalSeriesDetailsPage() {
   const poster = series.metadata?.poster;
   const backdrop = series.metadata?.backdrop || series.metadata?.poster;
   const genres = series.metadata?.genres || [];
+  const cast = series.metadata?.cast || [];
   const activeSeasonEpisodes = filteredSeasons.find(([season]) => season === activeSeason)?.[1] || [];
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
-      <main className="flex-1 min-h-0 flex flex-col px-4 py-5 max-w-7xl mx-auto w-full overflow-hidden">
-        <div className="mb-5 shrink-0 overflow-hidden rounded-lg border border-border bg-card">
-          <div className="relative min-h-64 overflow-hidden">
+      <main className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-4 sm:py-5 styled-scrollbar">
+        <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col">
+        <div className="mb-4 shrink-0 overflow-hidden rounded-lg border border-border bg-card">
+          <div className="relative min-h-[13rem] overflow-hidden sm:min-h-64">
             {backdrop ? (
               <img src={backdrop} alt="" className="absolute inset-0 h-full w-full object-cover opacity-35" />
             ) : null}
             <div className="absolute inset-0 bg-linear-to-t from-card via-card/80 to-card/30" />
 
-            <div className="relative z-10 flex flex-col gap-5 p-5 md:flex-row md:items-end">
-              <div className="hidden w-36 shrink-0 overflow-hidden rounded-lg border border-border bg-background md:block">
+            <div className="relative z-10 flex flex-col gap-4 p-4 sm:p-5 md:flex-row md:items-start">
+              <div className="w-24 shrink-0 overflow-hidden rounded-lg border border-border bg-background sm:w-28 md:w-36">
                 {poster ? (
                   <img src={poster} alt="" className="aspect-[2/3] h-full w-full object-cover" />
                 ) : (
@@ -265,13 +267,13 @@ export default function LocalSeriesDetailsPage() {
                 <button
                   type="button"
                   onClick={handleBack}
-                  className="mb-3 inline-flex items-center gap-2 rounded-lg border border-border bg-background/70 px-3 py-2 text-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="mb-2 inline-flex items-center gap-2 rounded-lg border border-border bg-background/70 px-2.5 py-1.5 text-xs transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:mb-3 sm:px-3 sm:py-2 sm:text-sm"
                 >
                   <ArrowRight className="h-4 w-4" />
                   חזרה לסדרות
                 </button>
 
-                <h1 className="text-3xl font-bold text-foreground md:text-4xl">{title}</h1>
+                <h1 className="text-2xl font-bold text-foreground sm:text-3xl md:text-4xl">{title}</h1>
 
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   {series.metadata?.firstAirDate ? <span>{series.metadata.firstAirDate}</span> : null}
@@ -285,7 +287,7 @@ export default function LocalSeriesDetailsPage() {
                 </div>
 
                 {genres.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
+                  <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-3">
                     {genres.map((genre) => (
                       <span key={genre} className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
                         {genre}
@@ -294,10 +296,35 @@ export default function LocalSeriesDetailsPage() {
                   </div>
                 )}
 
+                {cast.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-sm font-medium text-foreground">שחקנים</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide sm:gap-3">
+                      {cast.slice(0, 10).map((person) => (
+                        <div key={person.id || person.name} className="w-16 shrink-0 text-center sm:w-20">
+                          <div className="mx-auto h-12 w-12 overflow-hidden rounded-full border border-border bg-muted sm:h-14 sm:w-14">
+                            {person.profile ? (
+                              <img src={person.profile} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-muted-foreground">
+                                {person.name?.slice(0, 1)}
+                              </div>
+                            )}
+                          </div>
+                          <p className="mt-1 line-clamp-1 text-xs font-medium text-foreground">{person.name}</p>
+                          {person.character ? (
+                            <p className="line-clamp-1 text-[11px] text-muted-foreground">{person.character}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {series.metadata?.overview && (
-                  <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground md:text-base">
+                  <div className="mt-3 max-h-24 max-w-3xl overflow-y-auto pr-1 text-sm leading-6 text-muted-foreground sm:mt-4 sm:max-h-28 md:text-base styled-scrollbar">
                     {series.metadata.overview}
-                  </p>
+                  </div>
                 )}
               </div>
 
@@ -307,14 +334,14 @@ export default function LocalSeriesDetailsPage() {
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="חיפוש פרקים"
-                  className="w-full rounded-lg border border-border bg-background/80 py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  className="w-full rounded-lg border border-border bg-background/80 py-2 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 sm:py-2.5"
                 />
               </div>
             </div>
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
+        <div className="min-h-0 flex-1 pb-6">
           {filteredSeasons.length === 0 ? (
             <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center">
               <Search className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
@@ -322,7 +349,7 @@ export default function LocalSeriesDetailsPage() {
               <p className="mt-1 text-sm text-muted-foreground">נסה חיפוש אחר.</p>
             </div>
           ) : (
-            <div className="space-y-5">
+            <div className="space-y-4 sm:space-y-5">
               <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" role="tablist" aria-label="עונות">
                 {filteredSeasons.map(([season, episodes]) => {
                   const isActive = season === activeSeason;
@@ -333,7 +360,7 @@ export default function LocalSeriesDetailsPage() {
                       role="tab"
                       aria-selected={isActive}
                       onClick={() => setActiveSeason(season)}
-                      className={`shrink-0 rounded-full border px-4 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-primary ${
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-primary sm:px-4 sm:py-2 sm:text-sm ${
                         isActive
                           ? "border-primary bg-primary text-primary-foreground"
                           : "border-border bg-card text-muted-foreground hover:border-primary/60 hover:bg-secondary hover:text-foreground"
@@ -348,14 +375,14 @@ export default function LocalSeriesDetailsPage() {
               <section className="space-y-4">
                 <div className="flex items-end justify-between gap-4">
                   <div className="min-w-0">
-                    <h2 className="text-xl font-semibold text-foreground">
+                    <h2 className="text-lg font-semibold text-foreground sm:text-xl">
                       {activeSeason ? getSeasonTitle(activeSeason) : "פרקים"}
                     </h2>
                     <p className="mt-1 text-sm text-muted-foreground">{activeSeasonEpisodes.length} פרקים</p>
                   </div>
                 </div>
 
-                <HorizontalCarousel itemClassName="w-[82vw] max-w-[22rem] shrink-0 sm:w-[20rem] lg:w-[21rem]">
+                <HorizontalCarousel itemClassName="w-[78vw] max-w-[19rem] shrink-0 sm:w-[20rem] sm:max-w-[22rem] lg:w-[21rem]">
                   {activeSeasonEpisodes.map((episode) => {
                     const episodeImage = getEpisodeImage(series, episode);
                     const episodeTitle = getEpisodeTitle(episode);
@@ -366,7 +393,7 @@ export default function LocalSeriesDetailsPage() {
                         key={episode.id}
                         type="button"
                         onClick={() => playEpisode(episode)}
-                        className="group flex h-full min-h-[22rem] flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                        className="group flex h-full min-h-[19rem] flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:min-h-[22rem]"
                       >
                         <div className="relative aspect-video overflow-hidden bg-background">
                           {episodeImage ? (
@@ -392,11 +419,11 @@ export default function LocalSeriesDetailsPage() {
                           ) : null}
                         </div>
 
-                        <div className="min-w-0 p-4">
+                        <div className="min-w-0 p-3 sm:p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <p className="text-xs text-muted-foreground">{episodeMeta}</p>
-                              <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">
+                              <h3 className="mt-1 line-clamp-2 text-sm font-semibold text-foreground sm:text-base">
                                 {episodeTitle}
                               </h3>
                             </div>
@@ -404,11 +431,11 @@ export default function LocalSeriesDetailsPage() {
                           </div>
 
                           {episode.episodeOverview ? (
-                            <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">
+                            <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground sm:line-clamp-3 sm:text-sm sm:leading-6">
                               {episode.episodeOverview}
                             </p>
                           ) : (
-                            <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                            <p className="mt-2 line-clamp-1 text-xs text-muted-foreground sm:line-clamp-2">
                               {episode.filename}
                             </p>
                           )}
@@ -426,6 +453,7 @@ export default function LocalSeriesDetailsPage() {
               </section>
             </div>
           )}
+        </div>
         </div>
       </main>
     </div>
