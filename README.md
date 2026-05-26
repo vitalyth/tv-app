@@ -51,12 +51,33 @@ tv-app/
 ```bash
 cd backend
 
-python -m venv venv
-source venv/bin/activate  # Mac/Linux
+# pyenv will use backend/.python-version and select tv-channels.
+pyenv version
 
 pip install .
 
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+For local development, install in editable mode so code changes are picked up without reinstalling:
+
+```bash
+cd backend
+pip install -e .
+```
+
+With development tools:
+
+```bash
+cd backend
+pip install -e ".[dev]"
+```
+
+If you use the `backend/.venv` managed by uv:
+
+```bash
+cd backend
+uv sync
 ```
 
 Open:
