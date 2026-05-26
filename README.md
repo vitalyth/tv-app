@@ -390,7 +390,7 @@ Use this compose when `tv.bastcams.net` should reach the app through
 Cloudflare Tunnel, while only VOD API/proxy traffic exits through Surfshark VPN:
 
 ```bash
-docker compose -f docker-compose.casaos.vpn.yml up -d
+docker compose -f docker-compose.vpn.yml up -d
 ```
 
 Required environment variables:
@@ -426,7 +426,7 @@ Routing in this compose:
 Quick checks on the server:
 
 ```bash
-docker compose -f docker-compose.casaos.vpn.yml ps
+docker compose -f docker-compose.vpn.yml ps
 docker logs gluetun --tail 80
 curl -I https://tv.bastcams.net
 curl https://tv.bastcams.net/api/version
