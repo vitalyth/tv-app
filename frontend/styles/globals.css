@@ -169,3 +169,28 @@
 .styled-scrollbar:hover {
   scrollbar-color: var(--primary) transparent;
 }
+
+@media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 499px) {
+  .site-header {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+
+  .site-header a[aria-label="מעבר לעמוד הבית"] {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .site-header h1 {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .site-header p {
+    display: none;
+  }
+
+  .app-shell footer {
+    display: none;
+  }
+}

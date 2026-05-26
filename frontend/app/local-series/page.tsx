@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { ChevronLeft, Clapperboard, Play, Search, Star, Tv } from "lucide-react";
 
+import { PageMain } from "@/components/page-main";
 import { localSeriesService, type LocalSeries } from "@/lib/services/local-series-service";
 
 const getSeriesTitle = (series: LocalSeries) => {
@@ -52,35 +53,35 @@ export default function LocalSeriesPage() {
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
-      <main className="flex-1 min-h-0 flex flex-col px-4 py-5 max-w-7xl mx-auto w-full overflow-hidden">
-        <div className="mb-5 shrink-0 border-b border-border pb-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
-                <Tv className="h-6 w-6 text-primary" />
-              </div>
-
-              <div className="min-w-0">
-                <h1 className="truncate text-2xl font-bold text-foreground">סדרות מקומיות</h1>
-                <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-                  <span>סדרות מתוך הספרייה המקומית שלך, עם מידע ותמונות מ-TMDB</span>
-                </div>
-              </div>
+      <div className="mb-5 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
+              <Tv className="h-6 w-6 text-primary" />
             </div>
 
-            <div className="relative w-full lg:w-96">
-              <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="חיפוש סדרות"
-                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-bold text-foreground">סדרות מקומיות</h1>
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                <span>סדרות מתוך הספרייה המקומית שלך, עם מידע ותמונות מ-TMDB</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
+          <div className="relative w-full lg:w-96">
+            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="חיפוש סדרות"
+              className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+        </div>
+      </div>
+
+      <PageMain>
+        <div className="flex-1 px-4 pb-6">
           {isLoading ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {Array.from({ length: 8 }).map((_, index) => (
@@ -168,7 +169,7 @@ export default function LocalSeriesPage() {
             </div>
           )}
         </div>
-      </main>
+      </PageMain>
     </div>
   );
 }

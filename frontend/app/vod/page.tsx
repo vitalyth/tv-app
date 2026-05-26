@@ -5,6 +5,7 @@ import useSWR from "swr";
 import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
 import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
+import { PageMain } from "@/components/page-main";
 import { useFloatingPlayer } from "@/context/floating-player-context";
 import { VodRecentCarousel } from "./vod-recent-carousel";
 
@@ -371,76 +372,76 @@ export default function VodPage() {
 
     return (
         <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
-            <main className="flex-1 min-h-0 flex flex-col px-4 py-5 max-w-7xl mx-auto w-full overflow-hidden">
-                <div className="mb-5 shrink-0 border-b border-border pb-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                        <div className="flex min-w-0 items-start gap-3">
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
-                                {currentNode && navigationStack[0]?.logo ? (
-                                    <img
-                                        src={getImageSrc(navigationStack[0].logo)}
-                                        alt=""
-                                        className="h-full w-full object-contain p-2"
-                                    />
+            <div className="mb-5 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
+                            {currentNode && navigationStack[0]?.logo ? (
+                                <img
+                                    src={getImageSrc(navigationStack[0].logo)}
+                                    alt=""
+                                    className="h-full w-full object-contain p-2"
+                                />
+                            ) : (
+                                <Clapperboard className="h-6 w-6 text-primary" />
+                            )}
+                        </div>
+
+                        <div className="min-w-0">
+                            <h1 className="truncate text-2xl font-bold text-foreground">
+                                {currentNode ? currentNode.name : "VOD"}
+                            </h1>
+
+                            <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                                {currentNode ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => goToPathLevel(-1)}
+                                            className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                                        >
+                                            VOD
+                                        </button>
+                                        {navigationStack.map((node, index) => (
+                                            <span key={`${node.module}:${node.mode}:${node.url}:${index}`} className="inline-flex items-center gap-1">
+                                                <ChevronLeft className="h-3 w-3 text-muted-foreground/70" />
+                                                {index === navigationStack.length - 1 ? (
+                                                    <span className="rounded bg-secondary px-1 font-medium text-foreground">
+                                                        {node.name}
+                                                    </span>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => goToPathLevel(index)}
+                                                        className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                                                    >
+                                                        {node.name}
+                                                    </button>
+                                                )}
+                                            </span>
+                                        ))}
+                                    </>
                                 ) : (
-                                    <Clapperboard className="h-6 w-6 text-primary" />
+                                    <span>כל ספריות הצפייה במקום אחד, עם חזרה מהירה למה שהתחלת לראות</span>
                                 )}
                             </div>
-
-                            <div className="min-w-0">
-                                <h1 className="truncate text-2xl font-bold text-foreground">
-                                    {currentNode ? currentNode.name : "VOD"}
-                                </h1>
-
-                                <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-                                    {currentNode ? (
-                                        <>
-                                            <button
-                                                type="button"
-                                                onClick={() => goToPathLevel(-1)}
-                                                className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
-                                            >
-                                                VOD
-                                            </button>
-                                            {navigationStack.map((node, index) => (
-                                                <span key={`${node.module}:${node.mode}:${node.url}:${index}`} className="inline-flex items-center gap-1">
-                                                    <ChevronLeft className="h-3 w-3 text-muted-foreground/70" />
-                                                    {index === navigationStack.length - 1 ? (
-                                                        <span className="rounded bg-secondary px-1 font-medium text-foreground">
-                                                            {node.name}
-                                                        </span>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => goToPathLevel(index)}
-                                                            className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
-                                                        >
-                                                            {node.name}
-                                                        </button>
-                                                    )}
-                                                </span>
-                                            ))}
-                                        </>
-                                    ) : (
-                                        <span>כל ספריות הצפייה במקום אחד, עם חזרה מהירה למה שהתחלת לראות</span>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="relative w-full lg:w-96">
-                            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <input
-                                value={searchQuery}
-                                onChange={(event) => setSearchQuery(event.target.value)}
-                                placeholder={currentNode ? "חיפוש תוכניות" : "חיפוש VOD"}
-                                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                            />
                         </div>
                     </div>
-                </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
+                    <div className="relative w-full lg:w-96">
+                        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                            value={searchQuery}
+                            onChange={(event) => setSearchQuery(event.target.value)}
+                            placeholder={currentNode ? "חיפוש תוכניות" : "חיפוש VOD"}
+                            className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <PageMain>
+                <div className="flex-1 px-4 pb-6">
                     {!currentNode && isLoading ? (
                         <section className="mb-8 space-y-4">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -610,7 +611,7 @@ export default function VodPage() {
                         </>
                     )}
                 </div>
-            </main>
+            </PageMain>
 
         </div>
     );

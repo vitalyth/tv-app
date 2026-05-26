@@ -68,7 +68,7 @@ const channelPage = () => {
     };
     
     return (
-        <div className="h-screen flex flex-col bg-background overflow-hidden">
+        <div className="flex h-dvh flex-col overflow-hidden bg-background">
             <Header
                 onClose={handleClose}
                 onToggleSidebar={toggleMobileSidebar}
@@ -113,7 +113,7 @@ const channelPage = () => {
                 )}
 
                 <div
-                    className={`lg:hidden fixed top-0 left-0 h-screen z-50 transition-transform duration-300 ${
+                    className={`lg:hidden fixed top-0 left-0 h-dvh z-50 transition-transform duration-300 ${
                         isMobileSidebarOpen
                         ? "translate-x-0"
                         : "-translate-x-full"
