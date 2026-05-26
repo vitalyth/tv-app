@@ -1,4 +1,4 @@
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, parse_qsl, unquote, urlencode, urljoin, urlparse
 from pathlib import Path
 import os
 import mimetypes
@@ -37,13 +37,18 @@ def _is_public_host(host: str) -> bool:
     return True
 
 
-def _request_public_base_proxy(request):
+def _request_public_proxy_url(request):
     root_path = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "")
 
     if not root_path and request.url.path.endswith("/proxy"):
         root_path = request.url.path[:-len("/proxy")]
 
     root_path = root_path or ""
+    current_endpoint = request.url.path.strip("/").split("/")[-1] or "proxy"
+    proxy_endpoint = (
+        request.headers.get("x-forwarded-proxy-endpoint")
+        or current_endpoint
+    ).strip("/") or "proxy"
 
     proto = request.headers.get("x-forwarded-proto")
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
@@ -60,7 +65,7 @@ def _request_public_base_proxy(request):
     if proto == "http" and host and _is_public_host(host):
         proto = "https"
 
-    return f"{proto}://{host}{root_path}"
+    return f"{proto}://{host}{root_path}/{proxy_endpoint}"
 
 
 def cors_preflight():
@@ -123,7 +128,10 @@ def _is_segment_url(url):
 
 def _is_local_proxy_url(uri):
     parsed = urlparse(uri)
-    return parsed.path.endswith("/proxy") and "url" in parse_qs(parsed.query)
+    return (
+        parsed.path.endswith("/proxy")
+        or parsed.path.endswith("/vod_proxy")
+    ) and "url" in parse_qs(parsed.query)
 
 
 def _origin_for_url(url):
@@ -131,11 +139,32 @@ def _origin_for_url(url):
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def _split_kodi_url_props(url):
+    for separator in ("|", "%7C", "%7c"):
+        if separator in url:
+            clean_url, raw_props = url.split(separator, 1)
+            break
+    else:
+        return url, {}
+
+    headers = {}
+    for key, value in parse_qsl(unquote(raw_props), keep_blank_values=True):
+        normalized_key = key.strip().lower()
+        if normalized_key == "user-agent":
+            headers["User-Agent"] = value
+        elif normalized_key in ("referer", "referrer"):
+            headers["Referer"] = value
+        elif normalized_key == "accept":
+            headers["Accept"] = value
+
+    return clean_url, headers
+
+
 def _default_referer(url, referer):
     return referer or _origin_for_url(url) + "/"
 
 
-def _proxied_url(base_proxy, full_url, referer, cast, preserve_dash_tokens=False):
+def _proxied_url(proxy_url, full_url, referer, cast, preserve_dash_tokens=False):
     if _is_local_proxy_url(full_url):
         return full_url
 
@@ -148,7 +177,7 @@ def _proxied_url(base_proxy, full_url, referer, cast, preserve_dash_tokens=False
         params["cast"] = "1"
 
     safe_chars = "$" if preserve_dash_tokens else ""
-    return f"{base_proxy}/proxy?{urlencode(params, safe=safe_chars)}"
+    return f"{proxy_url}?{urlencode(params, safe=safe_chars)}"
 
 
 def _response_metadata_headers(upstream):
@@ -191,7 +220,7 @@ def _stream_response(upstream, content_type, cast=False):
     )
 
 
-def _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast):
+def _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast):
     if not uri or uri.startswith(("data:", "blob:")):
         return uri
 
@@ -201,19 +230,13 @@ def _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast):
         if parsed.netloc:
             return uri
 
-        base_path = urlparse(base_proxy).path.rstrip("/")
-        uri_path = parsed.path
-
-        if base_path and uri_path.startswith(base_path + "/"):
-            uri_path = uri_path[len(base_path):]
-
-        return f"{base_proxy}{uri_path}?{parsed.query}"
+        return f"{proxy_url}?{parsed.query}"
 
     full_url = urljoin(manifest_base, uri)
-    return _proxied_url(base_proxy, full_url, _default_referer(source_url, referer), cast)
+    return _proxied_url(proxy_url, full_url, _default_referer(source_url, referer), cast)
 
 
-def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
+def _rewrite_hls_manifest(text, source_url, referer, proxy_url, cast):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     rewritten_lines = []
 
@@ -227,14 +250,14 @@ def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
         if stripped.startswith("#"):
             def replace_uri(match):
                 uri = match.group(1)
-                proxied = _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast)
+                proxied = _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast)
                 return f'URI="{proxied}"'
 
             rewritten_lines.append(re.sub(r'URI="([^"]+)"', replace_uri, line))
             continue
 
         rewritten_lines.append(
-            _rewrite_hls_uri(stripped, manifest_base, source_url, referer, base_proxy, cast)
+            _rewrite_hls_uri(stripped, manifest_base, source_url, referer, proxy_url, cast)
         )
 
     return "\n".join(rewritten_lines)
@@ -317,7 +340,7 @@ def _looks_like_html_response(text, content_type):
     )
 
 
-def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
+def _rewrite_mpd_for_cast(text, source_url, referer, proxy_url):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
     segment_base = html.unescape(base_url_match.group(1)) if base_url_match else manifest_base
@@ -328,7 +351,7 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
         uri = html.unescape(match.group(2))
         full_url = urljoin(segment_base, uri)
         proxied = _proxied_url(
-            base_proxy,
+            proxy_url,
             full_url,
             request_referer,
             True,
@@ -461,6 +484,7 @@ def handle_local_file_proxy(request, file_path: str, root_dir: str):
     )
 
 def handle_proxy(request, url, referer, cast=False):
+    url, kodi_headers = _split_kodi_url_props(url)
     origin = _origin_for_url(url)
 
     headers = {
@@ -469,6 +493,7 @@ def handle_proxy(request, url, referer, cast=False):
         "Origin": origin,
         "Referer": referer or origin + "/",
     }
+    headers.update(kodi_headers)
 
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
@@ -508,8 +533,8 @@ def handle_proxy(request, url, referer, cast=False):
     )
 
     if is_mpd:
-        base_proxy = _request_public_base_proxy(request)
-        content = _rewrite_mpd_for_cast(text, url, referer, base_proxy).encode("utf-8") if cast else r.content
+        proxy_url = _request_public_proxy_url(request)
+        content = _rewrite_mpd_for_cast(text, url, referer, proxy_url).encode("utf-8") if cast else r.content
         return Response(
             content=content,
             media_type="application/dash+xml",
@@ -538,9 +563,9 @@ def handle_proxy(request, url, referer, cast=False):
         )
 
     # Always use public base so URLs are absolute — required for cast and external players
-    base_proxy = _request_public_base_proxy(request)
+    proxy_url = _request_public_proxy_url(request)
     source_text = _prepare_hls_media_playlist(text, cast=cast)
-    content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
+    content = _rewrite_hls_manifest(source_text, url, referer, proxy_url, cast)
 
     return Response(
         content=content,

@@ -378,10 +378,11 @@ export function VideoPlayer({
       (streamUrl.toLowerCase().includes(".m3u8") ||
         channel?.linkDetails?.manifest_type === "hls");
 
+    const proxyPath = channel.type === "vod" ? "/vod_proxy" : "/proxy";
     const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
       ? streamUrl
       : api(
-          `/proxy?url=${encodeURIComponent(
+          `${proxyPath}?url=${encodeURIComponent(
             streamUrl,
           )}&referer=${encodeURIComponent(referer)}`,
         );

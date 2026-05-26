@@ -384,6 +384,65 @@ http://YOUR_SERVER_IP:8001
 
 ---
 
+### 🔹 CasaOS with Cloudflare Tunnel + VOD VPN
+
+Use this compose when `tv.bastcams.net` should reach the app through
+Cloudflare Tunnel, while only VOD API/proxy traffic exits through Surfshark VPN:
+
+```bash
+docker compose -f docker-compose.casaos.vpn.yml up -d
+```
+
+Required environment variables:
+
+```env
+TUNNEL_TOKEN=your_cloudflare_tunnel_token
+WIREGUARD_PRIVATE_KEY=your_surfshark_wireguard_private_key
+WIREGUARD_ADDRESSES=your_surfshark_wireguard_address
+```
+
+Recommended environment variables:
+
+```env
+BACKEND_CACHE_DIR=/DATA/AppData/tv-app/backend-cache
+NGINX_CACHE_DIR=/DATA/AppData/tv-app/nginx-cache
+LOCAL_VOD_TV_HOST_DIR=/srv/dev-disk-by-uuid-.../data/tv
+VPN_SERVER_COUNTRIES=Israel
+TMDB_API_KEY=your_tmdb_key
+TMDB_LANGUAGE=he-IL
+```
+
+Cloudflare Tunnel should route:
+
+```txt
+tv.bastcams.net -> http://nginx:80
+```
+
+Routing in this compose:
+
+* `/`, live, EPG, local series, regular `/api/proxy` → regular `backend`
+* `/api/vod_channels`, `/api/vod_recent`, `/api/vod_items`, `/api/vod_stream`, `/api/vod_proxy` → `backend-vpn` through `gluetun`
+
+Quick checks on the server:
+
+```bash
+docker compose -f docker-compose.casaos.vpn.yml ps
+docker logs gluetun --tail 80
+curl -I https://tv.bastcams.net
+curl https://tv.bastcams.net/api/version
+```
+
+Verify that only the VOD backend uses VPN:
+
+```bash
+docker exec backend python -c "import requests; print(requests.get('https://ifconfig.io/ip').text.strip())"
+docker exec backend-vpn python -c "import requests; print(requests.get('https://ifconfig.io/ip').text.strip())"
+```
+
+The two IP addresses should be different.
+
+---
+
 ### 🔹 Scheduler on CasaOS
 
 The `backend-scheduler` service starts automatically with Docker Compose.

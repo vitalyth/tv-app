@@ -355,11 +355,9 @@ export default function VodPage() {
         }
 
         setSearchQuery("");
-        setNavigationStack((stack) => {
-            const nextStack = [...stack, itemToVodNode(item)];
-            updateUrl(nextStack);
-            return nextStack;
-        });
+        const nextStack = [...navigationStack, itemToVodNode(item)];
+        setNavigationStack(nextStack);
+        updateUrl(nextStack);
     };
 
     const playRecentItem = useCallback((item: VodItem, stack: VodNode[]) => {

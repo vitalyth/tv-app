@@ -1,0 +1,115 @@
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      - SERVER_COUNTRIES=${VPN_SERVER_COUNTRIES:-Israel}
+      - TZ=${TZ:-America/New_York}
+      - HTTP_CONTROL_SERVER=off
+    restart: unless-stopped
+    networks:
+      - tv-network
+
+  frontend:
+    image: vitalyth/tv-app-frontend:latest
+    container_name: frontend
+    environment:
+      - NEXT_PUBLIC_API_BASE=/api
+    restart: unless-stopped
+    networks:
+      - tv-network
+
+  backend:
+    image: vitalyth/tv-app-backend:latest
+    container_name: backend
+    environment:
+      - ROOT_PATH=/api
+      - BACKEND_CACHE_DIR=/app/cache
+      - LOCAL_VOD_TV_DIR=/media/tv
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
+    volumes:
+      - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+      - ${LOCAL_VOD_TV_HOST_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:/media/tv:ro
+    restart: unless-stopped
+    networks:
+      - tv-network
+
+  backend-vpn:
+    image: vitalyth/tv-app-backend:latest
+    container_name: backend-vpn
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      - ROOT_PATH=/api
+      - BACKEND_CACHE_DIR=/app/cache
+      - LOCAL_VOD_TV_DIR=/media/tv
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
+    volumes:
+      - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+      - ${LOCAL_VOD_TV_HOST_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:/media/tv:ro
+    network_mode: "service:gluetun"
+    restart: unless-stopped
+    depends_on:
+      - gluetun
+
+  backend-scheduler:
+    image: vitalyth/tv-app-backend:latest
+    container_name: backend-scheduler
+    command: ["python", "/app/run_scheduler.py"]
+    environment:
+      - EPG_INTERVAL_SECONDS=${EPG_INTERVAL_SECONDS:-86400}
+      - VOD_RECENT_INTERVAL_SECONDS=${VOD_RECENT_INTERVAL_SECONDS:-43200}
+      - BACKEND_CACHE_DIR=/app/cache
+    volumes:
+      - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - tv-network
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "8001:80"
+    volumes:
+      - ./nginx/nginx.vpn.conf:/etc/nginx/nginx.conf:ro
+      - ${NGINX_CACHE_DIR:-/DATA/AppData/tv-app/nginx-cache}:/var/cache/nginx
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+      - backend-vpn
+    networks:
+      - tv-network
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${TUNNEL_TOKEN}
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - nginx
+    networks:
+      - tv-network
+
+networks:
+  tv-network:
+    driver: bridge

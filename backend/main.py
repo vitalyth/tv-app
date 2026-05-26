@@ -164,14 +164,17 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
     return handle_proxy(request, url, referer)
 
 @app.get("/proxy")
+@app.get("/vod_proxy")
 def proxy(request: Request, url: str, referer: str = None, cast: bool = False):
     return handle_proxy(request, url, referer, cast=cast)
 
 @app.head("/proxy")
+@app.head("/vod_proxy")
 def proxy_head(request: Request, url: str, referer: str = None, cast: bool = False):
     return handle_proxy(request, url, referer, cast=cast)
 
 @app.options("/proxy")
+@app.options("/vod_proxy")
 def proxy_options():
     return cors_preflight()
 

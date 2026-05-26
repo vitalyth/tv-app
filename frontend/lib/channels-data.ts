@@ -1,4 +1,4 @@
-type ManifestType = "hls" | "mpd"
+type ManifestType = "hls" | "mpd" | "mp4"
 
 export interface LinkDetails {
   link: string

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from config import CACHE_DIR
 from plugin_video_idanplus.resources import main as idan_main
 from resources.lib import cache as addon_cache
@@ -253,8 +254,19 @@ def clean_kodi_label(value):
         return ""
     return KODI_TAG_RE.sub("", str(value)).replace("[CR]", "\n").strip()
 
+def clean_kodi_url(value):
+    url = clean_kodi_label(value)
+    if not url:
+        return ""
+
+    for separator in ("|", "%7C", "%7c"):
+        if separator in url:
+            return url.split(separator, 1)[0]
+
+    return url
+
 def normalize_vod_image(iconimage):
-    image = clean_kodi_label(iconimage)
+    image = clean_kodi_url(iconimage)
     if not image:
         return ""
     if image.startswith("http://") or image.startswith("https://"):
@@ -376,6 +388,144 @@ def _extract_next_data(html: str) -> dict | None:
         return json.loads(match.group(1))
     except Exception:
         return None
+
+
+def _kan_normalize_url(url: str, base_url: str = "https://www.kan.org.il") -> str:
+    from urllib.parse import urljoin
+
+    return clean_kodi_url(urljoin(base_url, url or ""))
+
+
+def _kan_program_id_from_url(url: str) -> str:
+    match = re.search(r"/p-(\d+)/?", url or "")
+    return match.group(1) if match else ""
+
+
+def _kan_episode_id_from_url(url: str) -> str:
+    for pattern in (r"/s\d+/(\d+)/?", r"/episodes?/(\d+)/?", r"/p-\d+/(\d+)/?$"):
+        match = re.search(pattern, url or "")
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _kan_is_episode_url(url: str, program_id: str) -> bool:
+    if not url or (program_id and f"/p-{program_id}/" not in url):
+        return False
+
+    episode_id = _kan_episode_id_from_url(url)
+    return bool(episode_id and episode_id != program_id)
+
+
+def _kan_fetch_page(url: str) -> str:
+    import cloudscraper
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/121.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.kan.org.il/",
+        "Accept": "*/*",
+    }
+    scraper = cloudscraper.create_scraper(interpreter="native")
+    response = scraper.get(url, headers=headers, timeout=30)
+    response.raise_for_status()
+    return response.text
+
+
+def _kan_card_text(card, selectors: tuple[str, ...]) -> str:
+    for selector in selectors:
+        node = card.select_one(selector)
+        if node:
+            value = clean_kodi_label(node.get_text(" ", strip=True))
+            if value:
+                return value
+    return ""
+
+
+def _kan_card_image(card, base_url: str) -> str:
+    image = card.select_one("img[src]")
+    if image and image.get("src"):
+        return normalize_vod_image(_kan_normalize_url(image.get("src"), base_url))
+
+    for attr in ("data-src", "data-original", "data-lazy", "data-bg"):
+        image = card.select_one(f"img[{attr}]")
+        if image and image.get(attr):
+            return normalize_vod_image(_kan_normalize_url(image.get(attr), base_url))
+
+    match = re.search(r"url\(['\"]?([^'\")]+)", str(card), re.I)
+    if match:
+        return normalize_vod_image(_kan_normalize_url(match.group(1), base_url))
+
+    return ""
+
+
+def _kan_fallback_vod_items(url: str, iconimage: str = "") -> list[dict]:
+    program_id = _kan_program_id_from_url(url)
+    if not program_id:
+        return []
+
+    try:
+        html = _kan_fetch_page(url)
+    except Exception as ex:
+        print(f"KAN VOD fallback fetch failed for url={url}: {ex}")
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    root = soup.select_one(".seasons") or soup
+    items: list[dict] = []
+    seen: set[str] = set()
+
+    for anchor in root.select("a[href]"):
+        episode_url = _kan_normalize_url(anchor.get("href"), url)
+        if not _kan_is_episode_url(episode_url, program_id) or episode_url in seen:
+            continue
+
+        seen.add(episode_url)
+        episode_id = _kan_episode_id_from_url(episode_url)
+        card = (
+            anchor.find_parent("li")
+            or anchor.find_parent("article")
+            or anchor.find_parent(class_=re.compile(r"(card|item|media|program|vod)", re.I))
+            or anchor
+        )
+
+        title = _kan_card_text(card, (".card-title", ".title", "[class*='title']", "h1", "h2", "h3"))
+        description = _kan_card_text(card, (".card-text", ".description", "[class*='description']", "p"))
+
+        if not title:
+            aria_label = clean_kodi_label(anchor.get("aria-label") or "")
+            title = aria_label.split("-", 1)[0].strip() if aria_label else f"Episode {episode_id}"
+            if aria_label and not description and "-" in aria_label:
+                description = aria_label.split("-", 1)[1].strip()
+
+        image = _kan_card_image(card, url) or normalize_vod_image(iconimage)
+
+        items.append({
+            "id": f"kan:3:{episode_url}:best",
+            "name": title,
+            "url": episode_url,
+            "mode": 3,
+            "logo": image,
+            "module": "kan",
+            "moreData": "best",
+            "description": description,
+            "title": title,
+            "plot": description,
+            "aired": "",
+            "season": "",
+            "episode": "",
+            "episodeName": title,
+            "episodeDescription": description,
+            "episodeImage": image,
+            "isFolder": False,
+            "isPlayable": True,
+            "sourceOrder": len(items),
+        })
+
+    return items
 
 def _bounded_addon_cache_get(function, timeout, *args, **table):
     effective_timeout = timeout
@@ -511,6 +661,9 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_
         finally:
             addon_common.addDir = original_add_dir
             addon_common.OpenURL = original_open_url
+
+    if not captured_items and requested_module == "kan" and int(mode) == 2:
+        captured_items = _kan_fallback_vod_items(url or "", iconimage or "")
 
     return captured_items
 

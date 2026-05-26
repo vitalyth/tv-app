@@ -143,15 +143,17 @@ const getCastContentType = (castSourceUrl: string, channel: Channel) => {
         : "application/x-mpegURL"
 }
 
-const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, referer = "") => {
+const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, channel: Channel, referer = "") => {
     console.log("Original stream URL:", castSourceUrl)
 
     if (isLocalSeriesStream(castSourceUrl) && castContentType !== "application/x-mpegURL") {
         return resolveAbsoluteUrl(castSourceUrl)
     }
 
+    const proxyPath = channel.type === "vod" ? "/vod_proxy" : "/proxy"
+
     return resolveAbsoluteUrl(
-        api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
+        api(`${proxyPath}?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )
 }
 
@@ -228,7 +230,7 @@ export function useGoogleCast({
         const castContentType = getCastContentType(castSourceUrl, channel)
 
         const mediaInfo = new chromeCast.media.MediaInfo(
-            buildCastStreamUrl(castSourceUrl, castContentType, channel.linkDetails?.referer),
+            buildCastStreamUrl(castSourceUrl, castContentType, channel, channel.linkDetails?.referer),
             castContentType
         )
 
