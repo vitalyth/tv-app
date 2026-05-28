@@ -11,7 +11,7 @@ type Props = {
     setSearchQuery: (value: string) => void;
     selectedCategory: string;
     setSelectedCategory: (value: string) => void;
-    onRefresh: () => void;
+    onRefresh: () => void | Promise<unknown>;
 };
 
 export const ChannelsFilters = ({
@@ -26,6 +26,17 @@ export const ChannelsFilters = ({
         left: false,
         right: false,
     });
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    const handleRefresh = async () => {
+        setIsRefreshing(true);
+
+        try {
+            await onRefresh();
+        } finally {
+            window.setTimeout(() => setIsRefreshing(false), 250);
+        }
+    };
 
     const updateScrollHint = useCallback(() => {
         const el = categoryScrollRef.current;
@@ -88,11 +99,12 @@ export const ChannelsFilters = ({
 
             <div className="flex min-w-0 flex-1 gap-2 pb-2">
                 <Button
-                    onClick={onRefresh}
+                    onClick={handleRefresh}
                     size="sm"
+                    disabled={isRefreshing}
                     className="shrink-0 whitespace-nowrap bg-emerald-600 text-white hover:bg-emerald-500"
                 >
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                     רענן
                 </Button>
 

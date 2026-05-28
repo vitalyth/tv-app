@@ -9,7 +9,7 @@ type ChannelsContextType = {
     channels: Channel[];
     isLoading: boolean;
     error: any;
-    refresh: () => void;
+    refresh: () => Promise<Channel[] | undefined>;
 };
 
 const ChannelsContext = createContext<ChannelsContextType | null>(null);

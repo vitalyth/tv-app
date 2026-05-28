@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Header from "@/components/Header";
 import { APP_VERSION } from "@/lib/version";
 import { FloatingPlayerProvider } from "@/context/floating-player-context";
+import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 
 export default function SiteShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -31,11 +32,17 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
     }, [isLiveRoute]);
 
     if (isLiveRoute) {
-        return <>{children}</>;
+        return (
+            <>
+                <GlobalLoadingIndicator />
+                {children}
+            </>
+        );
     }
 
     return (
         <FloatingPlayerProvider>
+            <GlobalLoadingIndicator />
             <div className="app-shell flex h-dvh flex-col bg-background">
                 <Header title={title} />
 
