@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { ArrowRight, ChevronLeft, Clapperboard, Play, RefreshCw, Search } from "lucide-react";
 
+import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { useFloatingPlayer } from "@/context/floating-player-context";
 import { type Channel, type VodPlaybackMeta } from "@/lib/channels-data";
@@ -245,6 +246,28 @@ export default function KanVodDetailsPage() {
                   </button>
                 </div>
 
+                <div className="mb-2 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={() => router.push("/vod")}
+                    className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    VOD
+                  </button>
+                  <ChevronLeft className="h-3 w-3 text-muted-foreground/70" />
+                  <button
+                    type="button"
+                    onClick={() => router.push("/kan-vod")}
+                    className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    כאן VOD
+                  </button>
+                  <ChevronLeft className="h-3 w-3 text-muted-foreground/70" />
+                  <span className="rounded bg-secondary px-1 font-medium text-foreground">
+                    {series.title}
+                  </span>
+                </div>
+
                 <h1 className="text-2xl font-bold text-foreground md:text-3xl">{series.title}</h1>
                 <div className="mt-2 flex flex-wrap gap-2 text-sm text-muted-foreground">
                   <span>{series.episodeCount} פרקים</span>
@@ -258,15 +281,12 @@ export default function KanVodDetailsPage() {
                 ) : null}
               </div>
 
-              <div className="relative h-10 w-full self-start md:w-80" dir="rtl">
-                <Search className="pointer-events-none absolute inset-y-0 right-3 my-auto h-4 w-4 text-muted-foreground" />
-                <input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="חיפוש פרקים"
-                  className="h-10 w-full rounded-lg border border-border bg-background/80 pr-9 pl-3 text-right text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
+              <DebouncedSearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="חיפוש פרקים"
+                className="relative h-10 w-full self-start md:w-80"
+              />
             </div>
 
             {filteredSeasons.length > 0 && (

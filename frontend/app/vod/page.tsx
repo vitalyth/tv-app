@@ -6,6 +6,7 @@ import useSWR from "swr";
 import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
 import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
+import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { useFloatingPlayer } from "@/context/floating-player-context";
 import { VodRecentCarousel } from "./vod-recent-carousel";
@@ -13,6 +14,7 @@ import { VodRecentCarousel } from "./vod-recent-carousel";
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
 const VOD_RECENT_KEY = "vod_recently_watched";
+const SEARCH_RESULT_LIMIT = 120;
 
 interface RecentItem {
     item: VodItem;
@@ -256,6 +258,10 @@ export default function VodPage() {
         });
     }, [items, searchQuery]);
 
+    const visibleFilteredItems = useMemo(() => {
+        return searchQuery.trim() ? filteredItems.slice(0, SEARCH_RESULT_LIMIT) : filteredItems;
+    }, [filteredItems, searchQuery]);
+
     const recentlyAddedItems = useMemo<RecentItem[]>(() => {
         return vodRecentItems.map((item) => ({
             item,
@@ -437,15 +443,11 @@ export default function VodPage() {
                         </div>
                     </div>
 
-                    <div className="relative w-full lg:w-96">
-                        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                            value={searchQuery}
-                            onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder={currentNode ? "חיפוש תוכניות" : "חיפוש VOD"}
-                            className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                        />
-                    </div>
+                    <DebouncedSearchInput
+                        value={searchQuery}
+                        onChange={setSearchQuery}
+                        placeholder={currentNode ? "חיפוש תוכניות" : "חיפוש VOD"}
+                    />
                 </div>
             </div>
 
@@ -552,7 +554,7 @@ export default function VodPage() {
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                    {filteredItems.map((item) => (
+                                    {visibleFilteredItems.map((item) => (
                                         <button
                                             key={item.id}
                                             onClick={() => openItem(item)}

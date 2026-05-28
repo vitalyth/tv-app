@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { ChevronLeft, Clapperboard, Play, RefreshCw, Search, Tv } from "lucide-react";
 
+import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { kanVodService, type KanVodSeries } from "@/lib/services/kan-vod-service";
 
@@ -15,6 +16,7 @@ const getEpisodeCountText = (count: number) => {
 };
 
 const getSeriesImage = (series: KanVodSeries) => series.image || "/ch/vod.jpg";
+const SEARCH_RESULT_LIMIT = 120;
 
 export default function KanVodPage() {
   const router = useRouter();
@@ -44,6 +46,10 @@ export default function KanVodPage() {
     });
   }, [series, searchQuery]);
 
+  const visibleSeries = useMemo(() => {
+    return searchQuery.trim() ? filteredSeries.slice(0, SEARCH_RESULT_LIMIT) : filteredSeries;
+  }, [filteredSeries, searchQuery]);
+
   const refresh = async () => {
     setIsRefreshing(true);
 
@@ -65,22 +71,29 @@ export default function KanVodPage() {
 
             <div className="min-w-0">
               <h1 className="truncate text-2xl font-bold text-foreground">כאן VOD</h1>
-              <div className="mt-1 text-sm text-muted-foreground">
-                סדרות ופרקים מכאן 11 דרך הסורק החדש
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => router.push("/vod")}
+                  className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  VOD
+                </button>
+                <ChevronLeft className="h-3 w-3 text-muted-foreground/70" />
+                <span className="rounded bg-secondary px-1 font-medium text-foreground">
+                  כאן VOD
+                </span>
               </div>
             </div>
           </div>
 
           <div className="flex w-full gap-2 lg:w-[30rem]">
-            <div className="relative min-w-0 flex-1">
-              <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="חיפוש בכאן"
-                className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
+            <DebouncedSearchInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="חיפוש בכאן"
+              className="relative min-w-0 flex-1"
+            />
             <button
               type="button"
               onClick={refresh}
@@ -116,7 +129,7 @@ export default function KanVodPage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
-              {filteredSeries.map((item) => {
+              {visibleSeries.map((item) => {
                 const image = getSeriesImage(item);
 
                 return (

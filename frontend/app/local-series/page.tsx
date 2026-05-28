@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { ChevronLeft, Clapperboard, Play, Search, Star, Tv } from "lucide-react";
 
+import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { localSeriesService, type LocalSeries } from "@/lib/services/local-series-service";
 
@@ -20,6 +21,8 @@ const getEpisodeCountText = (count: number) => {
   if (count === 1) return "פרק אחד";
   return `${count} פרקים`;
 };
+
+const SEARCH_RESULT_LIMIT = 120;
 
 export default function LocalSeriesPage() {
   const router = useRouter();
@@ -47,6 +50,10 @@ export default function LocalSeriesPage() {
     });
   }, [series, searchQuery]);
 
+  const visibleSeries = useMemo(() => {
+    return searchQuery.trim() ? filteredSeries.slice(0, SEARCH_RESULT_LIMIT) : filteredSeries;
+  }, [filteredSeries, searchQuery]);
+
   const openSeries = (item: LocalSeries) => {
     router.push(`/local-series/${encodeURIComponent(item.id)}`);
   };
@@ -68,15 +75,11 @@ export default function LocalSeriesPage() {
             </div>
           </div>
 
-          <div className="relative w-full lg:w-96">
-            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="חיפוש סדרות"
-              className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
+          <DebouncedSearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="חיפוש סדרות"
+          />
         </div>
       </div>
 
@@ -103,7 +106,7 @@ export default function LocalSeriesPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {filteredSeries.map((item) => {
+              {visibleSeries.map((item) => {
                 const title = getSeriesTitle(item);
                 const image = getSeriesImage(item);
                 const genres = item.metadata?.genres?.slice(0, 2) || [];
