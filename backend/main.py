@@ -18,6 +18,19 @@ from plugin_video_idanplus.resources.lib import common, iptv, epg
 from services.custom_channel_service import get_custom_channel
 from config import APP_VERSION
 
+def get_external_base_url(request: Request) -> str:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+    cf_visitor = request.headers.get("cf-visitor", "")
+    proto = forwarded_proto or request.url.scheme
+
+    if '"scheme":"https"' in cf_visitor or request.headers.get("x-forwarded-ssl") == "on":
+        proto = "https"
+
+    host = forwarded_host or request.headers.get("host") or request.url.netloc
+
+    return f"{proto}://{host}".rstrip("/")
+
 def get_local_addresses(port: int = 8001) -> list[str]:
     """Auto-detect server's IP and hostname addresses"""
     origins = [
@@ -154,6 +167,7 @@ def vod_stream(request: Request, item: dict):
     return {"stream": get_vod_stream(item)}
 
 @app.get("/stream")
+@app.head("/stream")
 def stream(request: Request, channel_id: str = Query(..., min_length=1, max_length=50, pattern="^[a-zA-Z0-9_-]+$")):
     custom_channel = get_custom_channel(channel_id)
 
@@ -198,8 +212,9 @@ def epg_xml():
     return Response(content=xml, media_type="application/xml")
 
 @app.get("/playlist.m3u")
+@app.head("/playlist.m3u")
 def playlist(request: Request):
-    content = generate_playlist(str(request.base_url).rstrip("/"))
+    content = generate_playlist(get_external_base_url(request))
 
     return Response(
         content=content,
