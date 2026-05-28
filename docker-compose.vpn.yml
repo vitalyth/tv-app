@@ -33,12 +33,17 @@ services:
     environment:
       - ROOT_PATH=/api
       - BACKEND_CACHE_DIR=/app/cache
-      - LOCAL_VOD_TV_DIR=/media/tv
+      - KAN_VOD_DB_PATH=/app/db/kan_vod.db
+      - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
+      - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
+      - KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS=${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
+      - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
-      - ${LOCAL_VOD_TV_HOST_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:/media/tv:ro
+      - ${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/db
+      - ${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:ro
     restart: unless-stopped
     networks:
       - tv-network
@@ -50,12 +55,17 @@ services:
     environment:
       - ROOT_PATH=/api
       - BACKEND_CACHE_DIR=/app/cache
-      - LOCAL_VOD_TV_DIR=/media/tv
+      - KAN_VOD_DB_PATH=/app/db/kan_vod.db
+      - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
+      - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
+      - KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS=${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
+      - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
-      - ${LOCAL_VOD_TV_HOST_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:/media/tv:ro
+      - ${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/db
+      - ${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:ro
     network_mode: "service:gluetun"
     restart: unless-stopped
     depends_on:

@@ -9,6 +9,7 @@ from services.proxy_service import cors_preflight, handle_proxy, handle_local_fi
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
 from services.local_series_service import LOCAL_VOD_TV_DIR, scan_local_series
+from services.kan_vod_service import get_kan_vod_series, get_kan_vod_series_details, get_kan_vod_stream
 import os
 import socket
 from models.schemas import Channel
@@ -140,6 +141,15 @@ def vod_stream(request: Request, item: dict):
             return {"stream": f"{base_with_prefix}{url}"}
 
         return {"stream": f"{base_with_prefix}/{url}"}
+
+    if item.get("module") == "kan-vod":
+        episode_id = item.get("id") or item.get("episodeId") or ""
+        stream_url = item.get("streamUrl") or item.get("url") or ""
+
+        if not stream_url and episode_id:
+            stream_url = get_kan_vod_stream(episode_id) or ""
+
+        return {"stream": stream_url}
 
     return {"stream": get_vod_stream(item)}
 
@@ -277,8 +287,44 @@ def _rewrite_local_hls_playlist(request: Request, playlist_path: str) -> Respons
 
 
 @app.get("/local-series")
-def local_series(request: Request):
-    return scan_local_series(api_prefix=get_request_api_prefix(request))
+def local_series(request: Request, refresh: bool = False):
+    return scan_local_series(
+        api_prefix=get_request_api_prefix(request),
+        force_refresh=refresh,
+    )
+
+@app.get("/kan-vod")
+def kan_vod(refresh: bool = False):
+    return get_kan_vod_series(refresh=refresh)
+
+@app.get("/kan-vod/stream")
+def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
+    stream_url = get_kan_vod_stream(episode_id)
+    if not stream_url:
+        return Response("Kan VOD stream not found", status_code=404)
+
+    return {"stream": stream_url}
+
+@app.get("/kan-vod/{program_id}")
+def kan_vod_details(
+    request: Request,
+    program_id: str,
+    refresh: bool = False,
+    with_streams: bool = False,
+    stream_limit: int = 20,
+):
+    details = get_kan_vod_series_details(
+        program_id,
+        api_prefix=get_request_api_prefix(request),
+        refresh=refresh,
+        with_streams=with_streams,
+        stream_limit=stream_limit,
+    )
+
+    if details is None:
+        return Response("Kan VOD program not found", status_code=404)
+
+    return details
 
 @app.get("/stream/local-series")
 @app.head("/stream/local-series")

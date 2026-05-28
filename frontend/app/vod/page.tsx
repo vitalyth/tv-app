@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
@@ -43,6 +44,10 @@ const fetchVodChannels = async (): Promise<VodChannel[]> => {
 
 const fetchVodRecent = async (): Promise<VodItem[]> => {
     return await channelService.getVodRecent();
+};
+
+const isKanVodChannel = (channel: VodChannel) => {
+    return channel.module === "kan" || channel.id === "kan" || channel.name.trim() === "כאן 11";
 };
 
 type VodNode = {
@@ -172,6 +177,7 @@ const parseJsonParam = <T,>(value: string | null): T | null => {
 };
 
 export default function VodPage() {
+    const router = useRouter();
     const { play, setCloseHandler } = useFloatingPlayer();
     const [searchQuery, setSearchQuery] = useState("");
     const [navigationStack, setNavigationStack] = useState<VodNode[]>([]);
@@ -335,6 +341,11 @@ export default function VodPage() {
     };
 
     const openChannel = (channel: VodChannel) => {
+        if (isKanVodChannel(channel)) {
+            router.push("/kan-vod");
+            return;
+        }
+
         const nextStack = [toVodNode(channel)];
         setSearchQuery("");
         setNavigationStack(nextStack);
