@@ -25,15 +25,7 @@ const getEpisodeImage = (series: KanVodSeriesDetails, episode: KanVodEpisode) =>
   return episode.episodeImage || series.image || "/ch/vod.jpg";
 };
 
-const getStreamReferer = (episode: KanVodEpisode) => {
-  try {
-    const streamUrl = episode.streamUrl || "";
-    if (streamUrl) {
-      const parsed = new URL(streamUrl);
-      return `${parsed.origin}/`;
-    }
-  } catch {}
-
+const getStreamReferer = () => {
   return "https://www.kan.org.il/";
 };
 
@@ -68,7 +60,7 @@ const episodeToChannel = (series: KanVodSeriesDetails, episode: KanVodEpisode): 
     mode: 0,
     linkDetails: {
       link: episode.streamUrl || episode.playUrl || episode.url,
-      referer: getStreamReferer(episode),
+      referer: getStreamReferer(),
       manifest_type: "hls",
     },
     type: "vod",
