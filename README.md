@@ -386,11 +386,12 @@ http://YOUR_SERVER_IP:8001
 
 ### 🔹 CasaOS with Cloudflare Tunnel + VOD VPN
 
-Use this compose when `tv.bastcams.net` should reach the app through
+The default `docker-compose.yml` includes Cloudflare Tunnel and Surfshark VPN.
+Use it when `tv.bastcams.net` should reach the app through
 Cloudflare Tunnel, while only VOD API/proxy traffic exits through Surfshark VPN:
 
 ```bash
-docker compose -f docker-compose.vpn.yml up -d
+docker compose up -d
 ```
 
 Required environment variables:
@@ -422,8 +423,8 @@ tv.bastcams.net -> http://nginx:80
 
 Routing in this compose:
 
-* `/`, live, EPG, local series, regular `/api/proxy` → regular `backend`
-* `/api/vod_channels`, `/api/vod_recent`, `/api/vod_items`, `/api/vod_stream`, `/api/vod_proxy` → `backend-vpn` through `gluetun`
+* `/`, EPG, local series, and non-Kan API traffic → regular `backend`
+* `/api/stream`, `/stream`, VOD APIs, Kan VOD, and Kan/proxy stream URLs → `backend-vpn` through `gluetun`
 
 Local series are cached after the first scan. Use `/api/local-series?refresh=true` to force a rescan after adding or renaming files.
 Kan season episode lists are also cached after a successful fetch so temporary Cloudflare 403 responses do not return empty lists.
@@ -431,7 +432,7 @@ Kan season episode lists are also cached after a successful fetch so temporary C
 Quick checks on the server:
 
 ```bash
-docker compose -f docker-compose.vpn.yml ps
+docker compose ps
 docker logs gluetun --tail 80
 curl -I https://tv.bastcams.net
 curl https://tv.bastcams.net/api/version
