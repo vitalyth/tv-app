@@ -36,7 +36,7 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
 
     return (
         <FloatingPlayerProvider>
-            <div className="h-screen flex flex-col bg-background">
+            <div className="app-shell flex h-dvh flex-col bg-background">
                 <Header title={title} />
 
                 <div className="site-content flex-1 min-h-0 flex flex-col">

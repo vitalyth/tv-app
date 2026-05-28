@@ -372,6 +372,25 @@ export function VideoPlayer({
       /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
     const keepLocalPaused = isCastingRef.current;
+    const isLocalSeriesStream = streamUrl.includes("/stream/local-series");
+    const isLocalSeriesHls =
+      isLocalSeriesStream &&
+      (streamUrl.toLowerCase().includes(".m3u8") ||
+        channel?.linkDetails?.manifest_type === "hls");
+
+    const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
+      ? streamUrl
+      : api(
+          `/proxy?url=${encodeURIComponent(
+            streamUrl,
+          )}&referer=${encodeURIComponent(referer)}`,
+        );
+
+    const sourceType = isLocalSeriesStream && !isLocalSeriesHls
+      ? "video/mp4"
+      : isDash
+        ? "application/dash+xml"
+        : "application/x-mpegURL";
 
     const player = videojs(videoElement, {
       autoplay: !keepLocalPaused,
@@ -390,12 +409,8 @@ export function VideoPlayer({
       },
       sources: [
         {
-          src: api(
-            `/proxy?url=${encodeURIComponent(
-              streamUrl,
-            )}&referer=${encodeURIComponent(referer)}`,
-          ),
-          type: isDash ? "application/dash+xml" : "application/x-mpegURL",
+          src: finalStreamUrl,
+          type: sourceType,
         },
       ],
     });

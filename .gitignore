@@ -52,3 +52,4 @@ android-tv/local.properties
 *.log
 
 .python-version
+.envrc.local

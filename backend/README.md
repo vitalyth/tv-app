@@ -17,6 +17,54 @@ Includes support for Kodi-based logic adapted to run in a Docker environment.
 
 ---
 
+## Local Series HLS Conversion
+
+Convert local series files into HLS for better browser playback and Chromecast support.
+
+### Adaptive HLS (recommended)
+
+Creates multiple qualities + master playlist:
+
+```bash
+python convert_local_series_to_hls.py "/Volumes/Data/tv" --adaptive
+```
+
+Limit maximum quality:
+
+```bash
+python convert_local_series_to_hls.py "/Volumes/Data/tv" --adaptive --max-height 1080
+```
+
+With subtitles export:
+
+```bash
+python convert_local_series_to_hls.py "/Volumes/Data/tv" --adaptive --subtitles
+```
+
+Adaptive output structure:
+
+```text
+Series Name/
+  hls/
+    s1e1/
+      master.m3u8
+      1080p/index.m3u8
+      720p/index.m3u8
+      480p/index.m3u8
+      subs/he_0.vtt
+      source_metadata.json
+```
+
+### Single HLS
+
+```bash
+python convert_local_series_to_hls.py "/Volumes/Data/tv/המפקדת"
+python convert_local_series_to_hls.py "/Volumes/Data/tv/פאודה" --transcode
+python convert_local_series_to_hls.py "/Volumes/Data/tv/פאודה" --all-audio
+python convert_local_series_to_hls.py "/Volumes/Data/tv" --force
+python convert_local_series_to_hls.py "/Volumes/Data/tv" --adaptive --dry-run
+```
+
 ## 🛠️ Tech Stack
 
 * Python 3.11+
@@ -31,13 +79,32 @@ Includes support for Kodi-based logic adapted to run in a Docker environment.
 ```bash
 git clone https://github.com/vitalyth/tv-channels.git
 cd tv-channels
+cd backend
 
-python -m venv venv
-source venv/bin/activate  # Mac/Linux
+# pyenv will use backend/.python-version and select tv-channels.
+pyenv version
 
 pip install .
 
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+For local development, install in editable mode so code changes are picked up without reinstalling:
+
+```bash
+pip install -e .
+```
+
+With development tools:
+
+```bash
+pip install -e ".[dev]"
+```
+
+If you use the `backend/.venv` managed by uv:
+
+```bash
+uv sync
 ```
 
 ---

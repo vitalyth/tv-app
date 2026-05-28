@@ -52,6 +52,9 @@ def get_stream(channel):
     return _clean_stream_url(xbmcplugin.getStream())
 
 def get_vod_stream(item):
+    if item.get("module") == "local-series":
+        return item.get("url")
+
     xbmcplugin.clearStream()
 
     module_script = __import__(

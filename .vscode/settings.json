@@ -1,3 +1,5 @@
 {
-    "java.compile.nullAnalysis.mode": "automatic"
+    "java.compile.nullAnalysis.mode": "automatic",
+    "python.terminal.activateEnvironment": false,
+    "python-envs.alwaysUseUv": true
 }

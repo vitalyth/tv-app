@@ -115,14 +115,41 @@ const isDashStream = (streamUrl: string, channel?: Channel) => {
     }
 }
 
+const isLocalSeriesStream = (streamUrl: string) => {
+    return streamUrl.includes("/stream/local-series")
+}
+
+const isLocalSeriesHlsStream = (streamUrl: string, channel?: Channel) => {
+    return (
+        isLocalSeriesStream(streamUrl) &&
+        (
+            streamUrl.toLowerCase().includes(".m3u8") ||
+            channel?.linkDetails?.manifest_type === "hls"
+        )
+    )
+}
+
 const getCastContentType = (castSourceUrl: string, channel: Channel) => {
+    if (isLocalSeriesHlsStream(castSourceUrl, channel)) {
+        return "application/x-mpegURL"
+    }
+
+    if (isLocalSeriesStream(castSourceUrl) || castSourceUrl.endsWith(".mp4")) {
+        return "video/mp4"
+    }
+
     return isDashStream(castSourceUrl, channel)
         ? "application/dash+xml"
         : "application/x-mpegURL"
 }
 
 const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, referer = "") => {
-    console.log("Original stream URL:", castSourceUrl);
+    console.log("Original stream URL:", castSourceUrl)
+
+    if (isLocalSeriesStream(castSourceUrl) && castContentType !== "application/x-mpegURL") {
+        return resolveAbsoluteUrl(castSourceUrl)
+    }
+
     return resolveAbsoluteUrl(
         api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
     )

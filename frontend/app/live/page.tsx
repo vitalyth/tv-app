@@ -8,6 +8,7 @@ import { useChannelsContext } from "@/context/channels-context";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
 import { ChannelsFilters } from "@/components/channels-filters";
 import { Channel } from '@/lib/channels-data';
+import { PageMain } from "@/components/page-main";
 
 const ChannelsList = () => {
     const [searchQuery, setSearchQuery] = useState("");
@@ -25,9 +26,9 @@ const ChannelsList = () => {
     };
     
     return (
-        <div className="min-h-screen flex flex-col bg-background">
+        <div className="flex min-h-dvh flex-col bg-background">
             <Header />
-            <main className="flex-1 px-4 py-6 max-w-7xl mx-auto w-full">
+            <PageMain className="overflow-visible px-4 py-6">
                 {/* Search + filters */}
                 <ChannelsFilters
                     searchQuery={searchQuery}
@@ -73,7 +74,7 @@ const ChannelsList = () => {
                     )}
                 </>
                 )}
-            </main>
+            </PageMain>
         </div>
     )
 }

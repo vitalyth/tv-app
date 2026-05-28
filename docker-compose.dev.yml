@@ -12,8 +12,13 @@ services:
     build: ./backend
     environment:
       - ROOT_PATH=/api
+      - BACKEND_CACHE_DIR=/app/cache
+      - LOCAL_VOD_TV_DIR=/media/tv
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ./backend/cache:/app/cache
+      - ${LOCAL_VOD_TV_HOST_DIR:-/Volumes/Data/tv}:/media/tv:ro
     container_name: fastapi
     restart: unless-stopped
 

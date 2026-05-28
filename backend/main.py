@@ -1,12 +1,14 @@
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+from urllib.parse import quote
 from services.channel_service import get_live_channels, get_vod_channels, get_vod_items, get_vod_recent_items
 from services.epg_service import get_now_epg
 from services.stream_service import get_stream, get_vod_stream
-from services.proxy_service import cors_preflight, handle_proxy
+from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
+from services.local_series_service import LOCAL_VOD_TV_DIR, scan_local_series
 import os
 import socket
 from models.schemas import Channel
@@ -48,6 +50,16 @@ CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
     ",".join(get_local_addresses(port=8001))
 ).split(",")
+
+
+def get_request_api_prefix(request: Request) -> str:
+    """Return the API prefix for generated relative URLs.
+
+    Local dev usually has no prefix: /local-series/stream
+    Docker/prod may run FastAPI with ROOT_PATH=/api: /api/local-series/stream
+    """
+    prefix = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "") or ROOT_PATH
+    return prefix.rstrip("/")
 
 app = FastAPI(
     title="TV App API",
@@ -99,7 +111,36 @@ def live_channel(channel: Channel):
     return {"stream": get_stream(channel)}
 
 @app.post('/vod_stream')
-def vod_stream(item: dict):
+def vod_stream(request: Request, item: dict):
+    if item.get("module") == "local-series":
+        url = item.get("url") or ""
+
+        if url.startswith("http://") or url.startswith("https://"):
+            return {"stream": url}
+
+        base_url = str(request.base_url).rstrip("/")
+
+        if (
+            request.headers.get("x-forwarded-proto") == "https"
+            or '"scheme":"https"' in request.headers.get("cf-visitor", "")
+        ):
+            base_url = base_url.replace("http://", "https://", 1)
+
+        root_path = get_request_api_prefix(request)
+
+        if root_path and base_url.endswith(root_path):
+            base_with_prefix = base_url
+        else:
+            base_with_prefix = f"{base_url}{root_path}"
+
+        if root_path and url.startswith(root_path + "/"):
+            url = url[len(root_path):]
+
+        if url.startswith("/"):
+            return {"stream": f"{base_with_prefix}{url}"}
+
+        return {"stream": f"{base_with_prefix}/{url}"}
+
     return {"stream": get_vod_stream(item)}
 
 @app.get("/stream")
@@ -158,3 +199,88 @@ def iptv_list(request: Request):
     iptv.MakeIPTVlist(channels)
 
     return Response(content='IPTV playlist generated', media_type="text/plain")
+
+
+
+def _local_series_stream_url(request: Request, path: str) -> str:
+    base_url = str(request.base_url).rstrip("/")
+
+    if (
+        request.headers.get("x-forwarded-proto") == "https"
+        or '"scheme":"https"' in request.headers.get("cf-visitor", "")
+    ):
+        base_url = base_url.replace("http://", "https://", 1)
+
+    root_path = get_request_api_prefix(request)
+
+    if root_path and base_url.endswith(root_path):
+        base_with_prefix = base_url
+    else:
+        base_with_prefix = f"{base_url}{root_path}"
+
+    return f"{base_with_prefix}/stream/local-series?path={quote(path)}"
+
+
+def _is_safe_local_media_path(path: str) -> bool:
+    real_root = os.path.realpath(LOCAL_VOD_TV_DIR)
+    real_file = os.path.realpath(path)
+    return real_file == real_root or real_file.startswith(real_root + os.sep)
+
+
+def _rewrite_local_hls_playlist(request: Request, playlist_path: str) -> Response:
+    if not _is_safe_local_media_path(playlist_path):
+        return Response("Invalid file path", status_code=403)
+
+    if not os.path.isfile(playlist_path):
+        return Response("File not found", status_code=404)
+
+    playlist_dir = os.path.dirname(playlist_path)
+
+    with open(playlist_path, "r", encoding="utf-8") as playlist_file:
+        lines = playlist_file.read().splitlines()
+
+    rewritten_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if (
+            not stripped
+            or stripped.startswith("#")
+            or stripped.startswith("http://")
+            or stripped.startswith("https://")
+            or stripped.startswith("data:")
+            or stripped.startswith("blob:")
+        ):
+            rewritten_lines.append(line)
+            continue
+
+        segment_path = os.path.normpath(os.path.join(playlist_dir, stripped))
+        rewritten_lines.append(_local_series_stream_url(request, segment_path))
+
+    content = "\n".join(rewritten_lines) + "\n"
+
+    return Response(
+        content=content,
+        media_type="application/vnd.apple.mpegurl",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Origin, Accept, Content-Type, User-Agent, Referer",
+            "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range, Content-Type",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+@app.get("/local-series")
+def local_series(request: Request):
+    return scan_local_series(api_prefix=get_request_api_prefix(request))
+
+@app.get("/stream/local-series")
+@app.head("/stream/local-series")
+def local_series_stream(request: Request, path: str = Query(..., min_length=1)):
+    if path.lower().endswith(".m3u8"):
+        return _rewrite_local_hls_playlist(request, path)
+
+    return handle_local_file_proxy(request, path, LOCAL_VOD_TV_DIR)

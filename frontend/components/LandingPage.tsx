@@ -9,6 +9,7 @@ import { useFloatingPlayer } from "@/context/floating-player-context";
 import { Channel, Program, VodChannel, VodItem, VodPlaybackMeta } from "@/lib/channels-data";
 import { ChannelCard } from "@/components/channel-card";
 import { HorizontalCarousel } from "@/components/horizontal-carousel";
+import { PageMain } from "@/components/page-main";
 import { Button } from "@/components/ui/button";
 import { getVodProgressPercent } from "@/lib/vod-progress";
 import { ChevronLeft, Clapperboard, Play, RotateCcw, Tv } from "lucide-react";
@@ -423,44 +424,44 @@ const LandingPage = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
-      <main className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-3 md:px-6 md:py-5 lg:px-8">
-        <section className="mb-3 shrink-0 border-b border-border pb-2">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <div className="hidden min-w-0 lg:block">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
-                  <Tv className="h-6 w-6 text-primary" />
-                </div>
-                <div className="min-w-0">
-                  <h1 className="text-3xl font-bold text-foreground">ברוכים הבאים</h1>
-                  <p className="text-sm text-muted-foreground">
-                    המשך צפייה, VOD ושידורים חיים במקום אחד.
-                  </p>
-                </div>
+      <section className="mb-3 shrink-0 border-b border-border bg-background px-3 pb-2 pt-3 md:px-6 md:pt-5 lg:px-8">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="hidden min-w-0 lg:block">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
+                <Tv className="h-6 w-6 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-3xl font-bold text-foreground">ברוכים הבאים</h1>
+                <p className="text-sm text-muted-foreground">
+                  המשך צפייה, VOD ושידורים חיים במקום אחד.
+                </p>
               </div>
             </div>
-
-            <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 scrollbar-hide lg:overflow-visible lg:pb-0">
-              {quickLiveChannels.map((channel) => (
-                <button
-                  key={channel.tvgID}
-                  type="button"
-                  aria-label={`פתח ${channel.name}`}
-                  onClick={() => handlePlayLiveChannel(channel)}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted transition hover:border-primary/70 hover:bg-primary/10 sm:h-11 sm:w-11 lg:h-14 lg:w-14"
-                >
-                  <img
-                    src={`/ch/${channel.logo}`}
-                    alt={channel.name}
-                    className="h-7 w-7 rounded-full object-contain sm:h-8 sm:w-8 lg:h-10 lg:w-10"
-                  />
-                </button>
-              ))}
-            </div>
           </div>
-        </section>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pb-6 styled-scrollbar">
+          <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 scrollbar-hide lg:overflow-visible lg:pb-0">
+            {quickLiveChannels.map((channel) => (
+              <button
+                key={channel.tvgID}
+                type="button"
+                aria-label={`פתח ${channel.name}`}
+                onClick={() => handlePlayLiveChannel(channel)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted transition hover:border-primary/70 hover:bg-primary/10 sm:h-11 sm:w-11 lg:h-14 lg:w-14"
+              >
+                <img
+                  src={`/ch/${channel.logo}`}
+                  alt={channel.name}
+                  className="h-7 w-7 rounded-full object-contain sm:h-8 sm:w-8 lg:h-10 lg:w-10"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <PageMain>
+        <div className="flex-1 px-3 pb-6 md:px-6 lg:px-8">
           {isLoading ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 9 }).map((_, index) => (
@@ -598,7 +599,7 @@ const LandingPage = () => {
           </div>
         )}
       </div>
-      </main>
+      </PageMain>
     </div>
   );
 };
