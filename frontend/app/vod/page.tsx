@@ -49,7 +49,8 @@ const fetchVodRecent = async (): Promise<VodItem[]> => {
 };
 
 const isKanVodChannel = (channel: VodChannel) => {
-    return channel.module === "kan" || channel.id === "kan" || channel.name.trim() === "כאן 11";
+    const name = channel.name.trim();
+    return channel.id === "kan" || name === "כאן 11";
 };
 
 type VodNode = {
