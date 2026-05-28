@@ -406,10 +406,12 @@ Recommended environment variables:
 ```env
 BACKEND_CACHE_DIR=/DATA/AppData/tv-app/backend-cache
 NGINX_CACHE_DIR=/DATA/AppData/tv-app/nginx-cache
-LOCAL_VOD_TV_HOST_DIR=/srv/dev-disk-by-uuid-.../data/tv
+LOCAL_VOD_TV_DIR=/srv/dev-disk-by-uuid-.../data/tv
 VPN_SERVER_COUNTRIES=Israel
 TMDB_API_KEY=your_tmdb_key
 TMDB_LANGUAGE=he-IL
+LOCAL_SERIES_SCAN_CACHE_TTL_SECONDS=300
+VOD_ITEMS_CACHE_TTL_SECONDS=604800
 ```
 
 Cloudflare Tunnel should route:
@@ -422,6 +424,9 @@ Routing in this compose:
 
 * `/`, live, EPG, local series, regular `/api/proxy` → regular `backend`
 * `/api/vod_channels`, `/api/vod_recent`, `/api/vod_items`, `/api/vod_stream`, `/api/vod_proxy` → `backend-vpn` through `gluetun`
+
+Local series are cached after the first scan. Use `/api/local-series?refresh=true` to force a rescan after adding or renaming files.
+Kan season episode lists are also cached after a successful fetch so temporary Cloudflare 403 responses do not return empty lists.
 
 Quick checks on the server:
 

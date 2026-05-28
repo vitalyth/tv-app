@@ -28,6 +28,7 @@ __pycache__/
 backend/profile/
 backend/build/
 backend/cache/
+backend/db/
 backend/tv_channels.egg-info/
 backend/tv-channels/
 

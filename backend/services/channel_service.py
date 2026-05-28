@@ -1,4 +1,5 @@
 import importlib
+import hashlib
 import json
 import os
 import re
@@ -125,6 +126,8 @@ VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_keshet12", "vod_reshet13", "vod_14tv"]
 VOD_RECENT_LOOKBACK_DAYS = 3
 VOD_RECENT_TOTAL_LIMIT = 30
 VOD_SOURCE_CACHE_TTL_HOURS = 24
+VOD_ITEMS_CACHE_TTL_SECONDS = int(os.getenv("VOD_ITEMS_CACHE_TTL_SECONDS", str(7 * 24 * 60 * 60)))
+VOD_ITEMS_CACHE_DIR = CACHE_DIR / "vod_items"
 VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_keshet12", "vod_reshet13", "vod_14tv"}
 _original_addon_cache_get = addon_cache.get
 _vod_source_lock = threading.RLock()
@@ -135,6 +138,57 @@ VOD_RECENT_CACHE_FILE = VOD_RECENT_CACHE_DIR / "vod_recent.json"
 _vod_recent_cache_lock = threading.Lock()
 _vod_recent_cache: list[dict] | None = None
 _vod_recent_cache_updated = 0.0
+
+
+def _vod_items_cache_key(module: str, mode: int, url: str, name: str, iconimage: str, more_data: str) -> str:
+    payload = json.dumps(
+        {
+            "module": module,
+            "mode": int(mode),
+            "url": url or "",
+            "name": name or "",
+            "iconimage": iconimage or "",
+            "moreData": more_data or "",
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _vod_items_cache_path(cache_key: str) -> Path:
+    return VOD_ITEMS_CACHE_DIR / f"{cache_key}.json"
+
+
+def _read_vod_items_cache(cache_key: str) -> list[dict]:
+    cache_path = _vod_items_cache_path(cache_key)
+    if not cache_path.exists():
+        return []
+
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    if time.time() - float(payload.get("savedAt", 0)) > VOD_ITEMS_CACHE_TTL_SECONDS:
+        return []
+
+    items = payload.get("items")
+    return items if isinstance(items, list) else []
+
+
+def _write_vod_items_cache(cache_key: str, items: list[dict]) -> None:
+    if not items:
+        return
+
+    VOD_ITEMS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _vod_items_cache_path(cache_key)
+    tmp_path = cache_path.with_suffix(".tmp")
+    tmp_path.write_text(
+        json.dumps({"savedAt": time.time(), "items": items}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    tmp_path.replace(cache_path)
 
 CHANNELS_BY_CATEGORY = {
     "news": [
@@ -430,9 +484,18 @@ def _kan_fetch_page(url: str) -> str:
         "Accept": "*/*",
     }
     scraper = cloudscraper.create_scraper(interpreter="native")
-    response = scraper.get(url, headers=headers, timeout=30)
-    response.raise_for_status()
-    return response.text
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = scraper.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            return response.text
+        except Exception as ex:
+            last_error = ex
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+
+    raise last_error
 
 
 def _kan_card_text(card, selectors: tuple[str, ...]) -> str:
@@ -589,6 +652,12 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_
     addon_common = importlib.import_module("resources.lib.common")
     module_script = importlib.import_module(f"resources.lib.{module}")
     requested_module = module
+    requested_mode = int(mode)
+    vod_items_cache_key = (
+        _vod_items_cache_key(requested_module, requested_mode, url, name, iconimage, moreData)
+        if requested_module == "kan" and requested_mode == 2
+        else ""
+    )
     captured_items = []
 
     def capture_add_dir(
@@ -652,7 +721,7 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_
             module_script.Run(
                 clean_kodi_label(name),
                 url or "",
-                int(mode),
+                requested_mode,
                 iconimage or "",
                 moreData or "",
             )
@@ -662,8 +731,16 @@ def get_vod_items(module, mode, url="", name="", iconimage="", moreData="", use_
             addon_common.addDir = original_add_dir
             addon_common.OpenURL = original_open_url
 
-    if not captured_items and requested_module == "kan" and int(mode) == 2:
+    if not captured_items and requested_module == "kan" and requested_mode == 2:
         captured_items = _kan_fallback_vod_items(url or "", iconimage or "")
+
+    if captured_items and vod_items_cache_key:
+        _write_vod_items_cache(vod_items_cache_key, captured_items)
+    elif vod_items_cache_key:
+        cached_items = _read_vod_items_cache(vod_items_cache_key)
+        if cached_items:
+            print(f"Using cached Kan VOD items for url={url}")
+            return cached_items
 
     return captured_items
 

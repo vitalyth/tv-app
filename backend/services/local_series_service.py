@@ -3,6 +3,7 @@ import json
 import time
 import hashlib
 import requests
+import threading
 from guessit import guessit
 from urllib.parse import quote
 
@@ -15,6 +16,12 @@ TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 TMDB_LANGUAGE = os.getenv("TMDB_LANGUAGE", "he-IL")
 TMDB_CACHE_FILE = os.path.join(BACKEND_CACHE_DIR, "series_metadata.json")
 TMDB_CACHE_TTL_SECONDS = 60 * 60 * 24
+LOCAL_SERIES_SCAN_CACHE_FILE = os.path.join(BACKEND_CACHE_DIR, "local_series_scan.json")
+LOCAL_SERIES_SCAN_CACHE_TTL_SECONDS = int(os.getenv("LOCAL_SERIES_SCAN_CACHE_TTL_SECONDS", "300"))
+
+_scan_cache_lock = threading.Lock()
+_scan_cache_memory: dict | None = None
+_scan_cache_memory_saved_at = 0.0
 
 
 def is_video_file(filename: str) -> bool:
@@ -88,6 +95,61 @@ def save_cache(cache: dict) -> None:
 
     with open(TMDB_CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def load_scan_cache() -> dict | None:
+    global _scan_cache_memory, _scan_cache_memory_saved_at
+
+    now = time.time()
+    if (
+        _scan_cache_memory
+        and now - _scan_cache_memory_saved_at < LOCAL_SERIES_SCAN_CACHE_TTL_SECONDS
+    ):
+        return _scan_cache_memory
+
+    if not os.path.exists(LOCAL_SERIES_SCAN_CACHE_FILE):
+        return None
+
+    try:
+        with open(LOCAL_SERIES_SCAN_CACHE_FILE, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+    except Exception:
+        return None
+
+    if now - cached.get("savedAt", 0) >= LOCAL_SERIES_SCAN_CACHE_TTL_SECONDS:
+        return None
+
+    if cached.get("root") != LOCAL_VOD_TV_DIR:
+        return None
+
+    data = cached.get("data")
+    if not isinstance(data, dict):
+        return None
+
+    _scan_cache_memory = data
+    _scan_cache_memory_saved_at = cached.get("savedAt", now)
+    return data
+
+
+def save_scan_cache(data: dict) -> None:
+    global _scan_cache_memory, _scan_cache_memory_saved_at
+
+    saved_at = time.time()
+    _scan_cache_memory = data
+    _scan_cache_memory_saved_at = saved_at
+
+    os.makedirs(BACKEND_CACHE_DIR, exist_ok=True)
+    tmp_file = f"{LOCAL_SERIES_SCAN_CACHE_FILE}.tmp"
+    payload = {
+        "savedAt": saved_at,
+        "root": LOCAL_VOD_TV_DIR,
+        "data": data,
+    }
+
+    with open(tmp_file, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+    os.replace(tmp_file, LOCAL_SERIES_SCAN_CACHE_FILE)
 
 
 def tmdb_image(path: str | None, size: str = "w500") -> str | None:
@@ -478,7 +540,7 @@ def get_episode_metadata(series_metadata: dict | None, season, episode, season_c
     return episode_data or {}
 
 
-def scan_local_series(api_prefix: str = ""):
+def build_local_series_scan(api_prefix: str = "") -> dict:
     api_prefix = (api_prefix or "").rstrip("/")
     if not os.path.isdir(LOCAL_VOD_TV_DIR):
         return {
@@ -594,8 +656,24 @@ def scan_local_series(api_prefix: str = ""):
 
     series.sort(key=lambda item: item["title"].lower())
 
-    return {
+    data = {
         "root": LOCAL_VOD_TV_DIR,
         "count": len(series),
         "series": series,
     }
+
+    return data
+
+
+def scan_local_series(api_prefix: str = "", force_refresh: bool = False):
+    with _scan_cache_lock:
+        if not force_refresh:
+            cached = load_scan_cache()
+            if cached and cached.get("count", 0) > 0:
+                return cached
+
+        data = build_local_series_scan(api_prefix=api_prefix)
+        if "error" not in data:
+            save_scan_cache(data)
+
+        return data
