@@ -120,7 +120,7 @@ export default function KanVodDetailsPage() {
     );
 
     return Object.entries(episodesBySeason).sort(([a], [b]) => {
-      return (seasonOrder.get(a) ?? 9999) - (seasonOrder.get(b) ?? 9999);
+      return (seasonOrder.get(b) ?? -1) - (seasonOrder.get(a) ?? -1);
     });
   }, [episodesBySeason, series]);
 

@@ -275,7 +275,7 @@ def get_kan_vod_series_details(
             SELECT *
             FROM seasons
             WHERE program_id = ?
-            ORDER BY season_number IS NULL, season_number, title
+            ORDER BY season_number IS NULL, season_number DESC, title DESC
             """,
             (program_id,),
         ).fetchall()
@@ -286,9 +286,9 @@ def get_kan_vod_series_details(
             FROM episodes
             WHERE program_id = ?
             ORDER BY
-                season_id,
-                CAST(id AS INTEGER),
-                title COLLATE NOCASE
+                season_id DESC,
+                CAST(id AS INTEGER) DESC,
+                title COLLATE NOCASE DESC
             """,
             (program_id,),
         ).fetchall()
