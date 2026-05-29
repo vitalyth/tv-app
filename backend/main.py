@@ -219,7 +219,14 @@ def epg_xml():
 @app.get("/playlist.m3u")
 @app.head("/playlist.m3u")
 def playlist(request: Request):
-    content = generate_playlist(get_external_base_url(request))
+    base_url = get_external_base_url(request)
+    is_direct_backend = request.url.port == 8000
+
+    content = generate_playlist(
+        base_url,
+        use_api_prefix=not is_direct_backend,
+        use_vpn_routes=not is_direct_backend,
+    )
 
     return Response(
         content=content,
