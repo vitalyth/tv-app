@@ -167,7 +167,9 @@ def vod_stream(request: Request, item: dict):
     return {"stream": get_vod_stream(item)}
 
 @app.get("/stream")
+@app.get("/v/stream")
 @app.head("/stream")
+@app.head("/v/stream")
 def stream(request: Request, channel_id: str = Query(..., min_length=1, max_length=50, pattern="^[a-zA-Z0-9_-]+$")):
     custom_channel = get_custom_channel(channel_id)
 
@@ -188,16 +190,19 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
     return handle_proxy(request, url, referer)
 
 @app.get("/proxy")
+@app.get("/v/proxy")
 @app.get("/vod_proxy")
 def proxy(request: Request, url: str, referer: str = None, cast: bool = False):
     return handle_proxy(request, url, referer, cast=cast)
 
 @app.head("/proxy")
+@app.head("/v/proxy")
 @app.head("/vod_proxy")
 def proxy_head(request: Request, url: str, referer: str = None, cast: bool = False):
     return handle_proxy(request, url, referer, cast=cast)
 
 @app.options("/proxy")
+@app.options("/v/proxy")
 @app.options("/vod_proxy")
 def proxy_options():
     return cors_preflight()
@@ -309,10 +314,12 @@ def local_series(request: Request, refresh: bool = False):
     )
 
 @app.get("/kan-vod")
+@app.get("/v/kan-vod")
 def kan_vod(refresh: bool = False):
     return get_kan_vod_series(refresh=refresh)
 
 @app.get("/kan-vod/stream")
+@app.get("/v/kan-vod/stream")
 def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
     stream_url = get_kan_vod_stream(episode_id)
     if not stream_url:
@@ -321,6 +328,7 @@ def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
     return {"stream": stream_url}
 
 @app.get("/kan-vod/{program_id}")
+@app.get("/v/kan-vod/{program_id}")
 def kan_vod_details(
     request: Request,
     program_id: str,

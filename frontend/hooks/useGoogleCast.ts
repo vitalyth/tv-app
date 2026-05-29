@@ -150,7 +150,7 @@ const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, chan
         return resolveAbsoluteUrl(castSourceUrl)
     }
 
-    const proxyPath = channel.type === "vod" ? "/vod_proxy" : "/proxy"
+    const proxyPath = channel.module === "kan-vod" ? "/v/proxy" : "/proxy"
 
     return resolveAbsoluteUrl(
         api(`${proxyPath}?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)

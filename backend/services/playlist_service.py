@@ -29,7 +29,12 @@ def generate_playlist(base_url):
 
         channel_id = ch.channelID
 
-        proxy_url = f"{base_url}/stream?{urlencode({'channel_id': channel_id})}"
+        api_base = base_url.rstrip("/")
+        if not api_base.endswith("/api"):
+            api_base = f"{api_base}/api"
+
+        stream_base = f"{api_base}/v" if channel_id.startswith("ch_11") else api_base
+        proxy_url = f"{stream_base}/stream?{urlencode({'channel_id': channel_id})}"
 
         logo_base = remove_api_prefix(base_url)
         logo = f"{logo_base}/ch/{ch.logo}"
