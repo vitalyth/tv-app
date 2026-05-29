@@ -23,7 +23,10 @@ import os
 import re
 import sqlite3
 import sys
+import subprocess
+import shutil
 import time
+import select
 from dataclasses import asdict, dataclass
 from html import unescape
 from typing import Any, Optional
@@ -1630,6 +1633,1068 @@ def command_resolve_missing_streams(args: argparse.Namespace) -> None:
         con.close()
 
 
+
+
+
+
+
+
+def episode_file_exists(
+    folder: str,
+    season_num: int,
+    episode_num: int,
+    extension: str,
+) -> Optional[str]:
+    """
+    Case-insensitive and zero-padding-insensitive check.
+
+    Treat these as the same episode:
+    - S01E01.mp4
+    - S1E01.mp4
+    - s1e01.mp4
+    - s1e1.mp4
+    """
+    if not os.path.isdir(folder):
+        return None
+
+    ext = extension.lower().lstrip(".")
+    episode_pattern = re.compile(
+        rf"^s0*{season_num}e0*{episode_num}\.{re.escape(ext)}$",
+        re.IGNORECASE,
+    )
+
+    for name in os.listdir(folder):
+        full_path = os.path.join(folder, name)
+
+        if not os.path.isfile(full_path):
+            continue
+
+        if ".part" in name.lower():
+            continue
+
+        if episode_pattern.match(name):
+            return full_path
+
+    return None
+
+
+def run_json_command(cmd: list[str], timeout: int = 45) -> Optional[dict[str, Any]]:
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return json.loads(result.stdout or "{}")
+    except Exception:
+        return None
+
+
+def get_duration_seconds(path_or_url: str, timeout: int = 45) -> Optional[float]:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+
+    data = run_json_command(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            path_or_url,
+        ],
+        timeout=timeout,
+    )
+
+    if not data:
+        return None
+
+    try:
+        value = data.get("format", {}).get("duration")
+        duration = float(value)
+        return duration if duration > 0 else None
+    except Exception:
+        return None
+
+
+def is_existing_file_complete(
+    existing_file: str,
+    stream_url: str,
+    min_ratio: float = 0.95,
+) -> tuple[bool, Optional[float], Optional[float]]:
+    """
+    Returns (is_complete, file_duration, source_duration).
+    """
+    if not existing_file or not os.path.isfile(existing_file):
+        return False, None, None
+
+    if os.path.getsize(existing_file) <= 0:
+        return False, None, None
+
+    source_duration = get_duration_seconds(stream_url)
+    file_duration = get_duration_seconds(existing_file)
+
+    if source_duration is None:
+        # If source duration cannot be detected, do not force a re-download of a non-empty file.
+        return True, file_duration, source_duration
+
+    if file_duration is None:
+        return False, file_duration, source_duration
+
+    return file_duration >= (source_duration * min_ratio), file_duration, source_duration
+
+
+def format_time(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "--:--"
+
+    seconds = max(0, int(seconds))
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def format_size_kb(kb: Optional[int]) -> str:
+    if kb is None:
+        return "--"
+
+    if kb >= 1024 * 1024:
+        return f"{kb / (1024 * 1024):.2f}GiB"
+
+    if kb >= 1024:
+        return f"{kb / 1024:.1f}MiB"
+
+    return f"{kb}KiB"
+
+
+def print_progress_bar(
+    current_seconds: float,
+    total_seconds: Optional[float],
+    speed: str = "",
+    size_kb: Optional[int] = None,
+) -> None:
+    width = 32
+
+    if total_seconds and total_seconds > 0:
+        ratio = min(max(current_seconds / total_seconds, 0.0), 1.0)
+        filled = int(width * ratio)
+        bar = "█" * filled + "░" * (width - filled)
+        percent = f"{ratio * 100:6.2f}%"
+        total_text = format_time(total_seconds)
+    else:
+        bar = "█" * ((int(current_seconds) // 2) % width)
+        bar = bar.ljust(width, "░")
+        percent = "  ---%"
+        total_text = "--:--"
+
+    line = (
+        f"\r      [{bar}] {percent} "
+        f"{format_time(current_seconds)}/{total_text} "
+        f"size={format_size_kb(size_kb)} "
+        f"speed={speed or '--'}"
+    )
+
+    print(line, end="", flush=True)
+
+
+
+def parse_ytdlp_progress_line(line: str) -> Optional[dict[str, Any]]:
+    """
+    Parse yt-dlp progress lines, for example:
+    [download]  42.3% of ~ 633.66MiB at  2.12MiB/s ETA 03:15 (frag 120/958)
+
+    Returns percent/speed/eta/text when this is a progress line.
+    """
+    if "[download]" not in line or "%" not in line:
+        return None
+
+    percent_match = re.search(r"\[download\]\s+([0-9]+(?:\.[0-9]+)?)%", line)
+    if not percent_match:
+        return None
+
+    speed_match = re.search(r"\bat\s+([^\s]+(?:/s)?)", line)
+    eta_match = re.search(r"\bETA\s+([^\s]+)", line)
+    frag_match = re.search(r"\(frag\s+([^)]+)\)", line)
+
+    try:
+        percent = float(percent_match.group(1))
+    except ValueError:
+        return None
+
+    return {
+        "percent": percent,
+        "speed": speed_match.group(1) if speed_match else "",
+        "eta": eta_match.group(1) if eta_match else "",
+        "frag": frag_match.group(1) if frag_match else "",
+        "raw": line,
+    }
+
+
+def print_ytdlp_progress_bar(
+    percent: float,
+    speed: str = "",
+    eta: str = "",
+    frag: str = "",
+) -> None:
+    width = 32
+    ratio = min(max(percent / 100.0, 0.0), 1.0)
+    filled = int(width * ratio)
+    bar = "█" * filled + "░" * (width - filled)
+
+    extra = []
+    if speed:
+        extra.append(f"speed={speed}")
+    if eta:
+        extra.append(f"ETA={eta}")
+    if frag:
+        extra.append(f"frag={frag}")
+
+    suffix = " ".join(extra)
+    print(f"\r      [{bar}] {percent:6.2f}% {suffix}", end="", flush=True)
+
+def stream_info_from_streams(
+    streams: list[dict[str, Any]],
+    fmt: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), {})
+    fmt = fmt or {}
+
+    def to_int(value: Any) -> Optional[int]:
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    return {
+        "width": to_int(video.get("width")),
+        "height": to_int(video.get("height")),
+        "video_bitrate": to_int(video.get("bit_rate")),
+        "audio_bitrate": to_int(audio.get("bit_rate")),
+        "total_bitrate": to_int(fmt.get("bit_rate")),
+    }
+
+
+def get_stream_info(stream_url: str) -> dict[str, Any]:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return {}
+
+    data = run_json_command(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=index,codec_type,width,height,bit_rate,avg_frame_rate:format=bit_rate,duration",
+            "-of",
+            "json",
+            stream_url,
+        ],
+        timeout=45,
+    )
+
+    if not data:
+        return {}
+
+    return stream_info_from_streams(data.get("streams") or [], data.get("format") or {})
+
+
+def normalize_program_info(program: dict[str, Any]) -> dict[str, Any]:
+    info = stream_info_from_streams(program.get("streams") or [], program)
+
+    def to_int(value: Any) -> Optional[int]:
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    info["program_id"] = program.get("program_id")
+    info["program_num"] = program.get("program_num")
+    info["total_bitrate"] = info.get("total_bitrate") or to_int(program.get("bit_rate"))
+    return info
+
+
+def select_program_by_quality(stream_url: str, mode: str) -> tuple[Optional[str], dict[str, Any], str]:
+    """
+    Select an HLS program for ffmpeg.
+
+    best: highest height, width, bitrate.
+    worst: lowest height, width, bitrate.
+    720p/1080p: closest source at or below requested height if possible.
+    """
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None, {}, f"{mode}/default"
+
+    data = run_json_command(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_programs",
+            "-show_streams",
+            "-of",
+            "json",
+            stream_url,
+        ],
+        timeout=45,
+    )
+
+    if not data:
+        return None, get_stream_info(stream_url), f"{mode}/default"
+
+    programs = data.get("programs") or []
+    candidates: list[tuple[tuple[int, int, int], str, dict[str, Any]]] = []
+
+    for idx, program in enumerate(programs):
+        info = normalize_program_info(program)
+        width = info.get("width") or 0
+        height = info.get("height") or 0
+        bitrate = info.get("total_bitrate") or info.get("video_bitrate") or 0
+
+        if width <= 0 or height <= 0:
+            continue
+
+        candidates.append(((height, width, bitrate), f"p:{idx}", info))
+
+    if not candidates:
+        fallback = get_stream_info(stream_url)
+        return None, fallback, f"{mode}/default"
+
+    if mode == "worst":
+        candidates.sort(key=lambda item: item[0])
+        _, selector, info = candidates[0]
+        return selector, info, "worst"
+
+    if mode in {"720p", "1080p"}:
+        target = int(mode.replace("p", ""))
+        at_or_below = [c for c in candidates if c[0][0] <= target]
+        pool = at_or_below or candidates
+        pool.sort(key=lambda item: (item[0][0], item[0][1], item[0][2]), reverse=True)
+        _, selector, info = pool[0]
+        return selector, info, f"{mode} source"
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    _, selector, info = candidates[0]
+    return selector, info, "best"
+
+
+def print_quality_info(label: str, info: dict[str, Any]) -> None:
+    width = info.get("width")
+    height = info.get("height")
+    bitrate = info.get("total_bitrate") or info.get("video_bitrate")
+
+    resolution = f"{width}x{height}" if width and height else "unknown resolution"
+    bitrate_text = f"{int(bitrate) / 1000:.0f} kb/s" if bitrate else "unknown bitrate"
+
+    print(f"      Selected quality ({label}): {resolution}, {bitrate_text}")
+
+
+def build_ffmpeg_command(
+    ffmpeg: str,
+    stream_url: str,
+    temp_file: Path,
+    quality: str,
+    output_format: str,
+    map_selector: Optional[str],
+) -> list[str]:
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-nostats",
+        "-loglevel",
+        "error",
+        "-progress",
+        "pipe:1",
+        "-fflags",
+        "+genpts+discardcorrupt",
+        "-err_detect",
+        "ignore_err",
+        "-i",
+        stream_url,
+    ]
+
+    if map_selector:
+        cmd += ["-map", map_selector, "-sn", "-dn"]
+    else:
+        cmd += ["-map", "0:v:0?", "-map", "0:a:0?", "-sn", "-dn"]
+
+    if quality in {"best", "worst"}:
+        cmd += ["-c", "copy"]
+
+        if output_format == "mp4":
+            cmd += [
+                "-bsf:a",
+                "aac_adtstoasc",
+                "-movflags",
+                "+faststart",
+                "-f",
+                "mp4",
+            ]
+
+        cmd.append(str(temp_file))
+        return cmd
+
+    if quality in {"720p", "1080p"}:
+        height = quality.replace("p", "")
+        cmd += [
+            "-vf",
+            f"scale=-2:{height}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "22",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "160k",
+        ]
+
+        if output_format == "mp4":
+            cmd += ["-movflags", "+faststart", "-f", "mp4"]
+
+        cmd.append(str(temp_file))
+        return cmd
+
+    raise ValueError(f"Unsupported quality: {quality}")
+
+
+def download_stream_ffmpeg(stream_url: str, output_file: str, quality: str = "best") -> None:
+    ffmpeg = shutil.which("ffmpeg")
+
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found. Install it with: brew install ffmpeg")
+
+    output_path = Path(output_file)
+    output_format = output_path.suffix.lower().lstrip(".") or "mp4"
+
+    # Keep real extension last.
+    temp_file = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
+
+    total_seconds = get_duration_seconds(stream_url)
+    map_selector, quality_info, quality_label = select_program_by_quality(stream_url, quality)
+    print_quality_info(quality_label, quality_info)
+
+    cmd = build_ffmpeg_command(
+        ffmpeg=ffmpeg,
+        stream_url=stream_url,
+        temp_file=temp_file,
+        quality=quality,
+        output_format=output_format,
+        map_selector=map_selector,
+    )
+
+    current_seconds = 0.0
+    current_speed = ""
+    current_size_kb: Optional[int] = None
+
+    try:
+        print("      Starting ffmpeg download...")
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        assert process.stdout is not None
+
+        try:
+            for line in process.stdout:
+                line = line.strip()
+
+                if not line or "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+
+                if key == "out_time_ms":
+                    try:
+                        current_seconds = int(value) / 1_000_000
+                    except ValueError:
+                        pass
+
+                elif key == "out_time":
+                    parts = value.split(":")
+                    try:
+                        if len(parts) == 3:
+                            current_seconds = (
+                                int(parts[0]) * 3600
+                                + int(parts[1]) * 60
+                                + float(parts[2])
+                            )
+                    except ValueError:
+                        pass
+
+                elif key == "speed":
+                    current_speed = value
+
+                elif key == "total_size":
+                    try:
+                        current_size_kb = int(value) // 1024
+                    except ValueError:
+                        pass
+
+                elif key == "progress":
+                    print_progress_bar(
+                        current_seconds=current_seconds,
+                        total_seconds=total_seconds,
+                        speed=current_speed,
+                        size_kb=current_size_kb,
+                    )
+
+            return_code = process.wait()
+
+        except KeyboardInterrupt:
+            print("\n      Stopping ffmpeg...")
+            process.terminate()
+
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+            if temp_file.exists():
+                temp_file.unlink(missing_ok=True)
+
+            raise
+
+        print()
+
+        if return_code != 0:
+            stderr = ""
+            if process.stderr is not None:
+                stderr = process.stderr.read().strip()
+
+            raise subprocess.CalledProcessError(return_code, cmd, stderr=stderr)
+
+        if not temp_file.exists() or temp_file.stat().st_size == 0:
+            raise RuntimeError("ffmpeg finished but output file is empty")
+
+        temp_file.replace(output_path)
+
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        if temp_file.exists():
+            temp_file.unlink(missing_ok=True)
+        raise
+
+
+
+def run_ytdlp_json(ytdlp: str, stream_url: str) -> Optional[dict[str, Any]]:
+    """
+    Ask yt-dlp for all available formats.
+
+    This lets us choose the real best HLS variant instead of relying on
+    yt-dlp's generic default selection or ffprobe's default stream.
+    """
+    try:
+        result = subprocess.run(
+            [
+                ytdlp,
+                "--dump-single-json",
+                "--no-warnings",
+                "--no-playlist",
+                stream_url,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return json.loads(result.stdout or "{}")
+    except Exception:
+        return None
+
+
+def format_number(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def choose_ytdlp_format(
+    ytdlp: str,
+    stream_url: str,
+    quality: str,
+) -> tuple[list[str], dict[str, Any]]:
+    """
+    Return (yt-dlp -f args, selected_info).
+
+    For Kan HLS, forcing "-f best" can fail. Instead, we inspect formats and
+    select the highest video format id explicitly, usually something like:
+    5500+acc-HEB-aac
+    """
+    data = run_ytdlp_json(ytdlp, stream_url)
+    if not data:
+        return ytdlp_quality_args(quality), {}
+
+    formats = data.get("formats") or []
+
+    videos = []
+    audios = []
+
+    for fmt in formats:
+        format_id = str(fmt.get("format_id") or "")
+        if not format_id:
+            continue
+
+        vcodec = fmt.get("vcodec")
+        acodec = fmt.get("acodec")
+
+        has_video = vcodec and vcodec != "none"
+        has_audio = acodec and acodec != "none"
+
+        height = int(format_number(fmt.get("height")) or 0)
+        width = int(format_number(fmt.get("width")) or 0)
+        tbr = format_number(fmt.get("tbr")) or format_number(fmt.get("vbr")) or 0
+        abr = format_number(fmt.get("abr")) or 0
+
+        if has_video:
+            videos.append((height, width, tbr, format_id, fmt, has_audio))
+
+        if has_audio and not has_video:
+            audios.append((abr, tbr, format_id, fmt))
+
+    if not videos:
+        return ytdlp_quality_args(quality), {}
+
+    if quality == "worst":
+        videos.sort(key=lambda item: (item[0], item[1], item[2]))
+        selected_video = videos[0]
+    elif quality in {"720p", "1080p"}:
+        target = int(quality.replace("p", ""))
+        at_or_below = [item for item in videos if item[0] <= target]
+        pool = at_or_below or videos
+        pool.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        selected_video = pool[0]
+    else:
+        videos.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        selected_video = videos[0]
+
+    height, width, tbr, video_id, video_fmt, video_has_audio = selected_video
+
+    audio_id = ""
+    audio_fmt: dict[str, Any] = {}
+
+    if not video_has_audio and audios:
+        audios.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        _, _, audio_id, audio_fmt = audios[0]
+
+    selector = f"{video_id}+{audio_id}" if audio_id else video_id
+
+    selected_info = {
+        "format_selector": selector,
+        "video_id": video_id,
+        "audio_id": audio_id,
+        "width": width or video_fmt.get("width"),
+        "height": height or video_fmt.get("height"),
+        "tbr": tbr or video_fmt.get("tbr"),
+        "vcodec": video_fmt.get("vcodec"),
+        "acodec": audio_fmt.get("acodec") or video_fmt.get("acodec"),
+    }
+
+    return ["-f", selector], selected_info
+
+
+def print_ytdlp_selected_format(info: dict[str, Any]) -> None:
+    if not info:
+        print("      Selected quality: yt-dlp automatic")
+        return
+
+    width = info.get("width")
+    height = info.get("height")
+    tbr = info.get("tbr")
+    selector = info.get("format_selector") or ""
+
+    resolution = f"{width}x{height}" if width and height else "unknown resolution"
+    bitrate = f"{float(tbr):.0f} kb/s" if tbr else "unknown bitrate"
+
+    print(f"      Selected quality: {resolution}, {bitrate}, format={selector}")
+
+def ytdlp_quality_args(quality: str) -> list[str]:
+    """
+    Fallback format args.
+
+    Normally choose_ytdlp_format() selects an explicit best format id.
+    If format inspection fails, do not force "-f best" because Kan direct HLS
+    can fail with "Requested format is not available".
+    """
+    if quality == "best":
+        return []
+
+    if quality == "worst":
+        return ["-f", "worst/best"]
+
+    if quality == "720p":
+        return ["-f", "best[height<=720]/best"]
+
+    if quality == "1080p":
+        return ["-f", "best[height<=1080]/best"]
+
+    return []
+
+def download_stream_ytdlp(
+    stream_url: str,
+    output_file: str,
+    quality: str = "best",
+    stall_timeout: int = 180,
+    retries: int = 3,
+) -> None:
+    """
+    Download HLS with real resume support using yt-dlp.
+
+    - Chooses the real best format by inspecting yt-dlp formats.
+    - Keeps partial files so retry/resume continues from the previous point.
+    - Shows a clean single-line progress bar.
+    - Suppresses noisy generic/redirect/info lines.
+    """
+    ytdlp = shutil.which("yt-dlp")
+
+    if not ytdlp:
+        print("      yt-dlp not found, falling back to ffmpeg.")
+        return download_stream_ffmpeg(stream_url, output_file, quality)
+
+    output_path = Path(output_file)
+    output_format = output_path.suffix.lower().lstrip(".") or "mkv"
+
+    format_args, selected_info = choose_ytdlp_format(ytdlp, stream_url, quality)
+    print_ytdlp_selected_format(selected_info)
+
+    # Use a base output template. yt-dlp may create temporary files like:
+    # S01E03.mp4.part / S01E03.f5500.mp4.part.
+    # After successful completion, we normalize the final media file to output_path.
+    temp_output_template = str(output_path.with_suffix("")) + ".%(ext)s"
+
+    cmd = [
+        ytdlp,
+        "--continue",
+        "--newline",
+        "--progress",
+        "--no-warnings",
+        "--no-playlist",
+        "--hls-use-mpegts",
+        "--socket-timeout",
+        str(max(30, stall_timeout)),
+        "--retries",
+        str(max(1, retries)),
+        "--fragment-retries",
+        str(max(1, retries)),
+        "--ffmpeg-location",
+        shutil.which("ffmpeg") or "ffmpeg",
+        "--merge-output-format",
+        output_format,
+        "-o",
+        temp_output_template,
+    ]
+
+    cmd += format_args
+    cmd.append(stream_url)
+
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, retries + 2):
+        if attempt > 1:
+            print(f"\n      Retry {attempt - 1}/{retries}; resuming partial download...")
+
+        print("      Starting yt-dlp download/resume...")
+
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        last_output_time = time.monotonic()
+        last_progress_time = time.monotonic()
+        last_percent = -1.0
+        last_frag = ""
+
+        try:
+            assert process.stdout is not None
+
+            while True:
+                ready, _, _ = select.select([process.stdout], [], [], 1.0)
+
+                if ready:
+                    line = process.stdout.readline()
+                    if line:
+                        line = line.rstrip()
+                        last_output_time = time.monotonic()
+
+                        progress = parse_ytdlp_progress_line(line)
+
+                        if progress:
+                            percent = float(progress["percent"])
+                            frag = progress.get("frag") or ""
+
+                            if percent > last_percent or (frag and frag != last_frag):
+                                last_progress_time = time.monotonic()
+                                last_percent = max(last_percent, percent)
+                                last_frag = frag
+
+                            print_ytdlp_progress_bar(
+                                percent=percent,
+                                speed=progress.get("speed") or "",
+                                eta=progress.get("eta") or "",
+                                frag=frag,
+                            )
+                        else:
+                            # Keep only important messages, hide noisy:
+                            # [generic], [redirect], [info], [hlsnative], etc.
+                            lower = line.lower()
+                            if "error:" in lower or line.startswith("ERROR"):
+                                print(f"\n      {line}")
+                            elif "warning:" in lower:
+                                # Hide the noisy native-HLS live warning. It is common for Kan VOD.
+                                if "live hls streams are not supported" not in lower:
+                                    print(f"\n      {line}")
+
+                    continue
+
+                return_code = process.poll()
+
+                if return_code is not None:
+                    break
+
+                now = time.monotonic()
+                no_output = now - last_output_time > stall_timeout
+                no_progress = now - last_progress_time > stall_timeout
+
+                if no_output or no_progress:
+                    print(
+                        f"\n      No real yt-dlp progress for {stall_timeout}s. "
+                        "Stopping and retrying with resume..."
+                    )
+
+                    process.terminate()
+
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+
+                    raise TimeoutError(
+                        f"yt-dlp stalled for {stall_timeout} seconds"
+                    )
+
+            print()
+
+            if return_code == 0:
+                break
+
+            last_error = subprocess.CalledProcessError(return_code, cmd)
+
+        except KeyboardInterrupt:
+            print("\n      Stopping yt-dlp. Partial file is kept; next run will resume from it.")
+            process.terminate()
+
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+            raise
+
+        except Exception as ex:
+            last_error = ex
+
+            # Keep yt-dlp partial files. They are needed for resume.
+            if attempt <= retries:
+                continue
+
+            raise RuntimeError(
+                f"yt-dlp failed after {attempt} attempt(s): {last_error}"
+            ) from last_error
+
+    else:
+        raise RuntimeError(f"yt-dlp failed: {last_error}")
+
+    # yt-dlp may leave the final file as .mp4/.mkv/.ts depending on stream/merge behavior.
+    # Normalize the largest completed media file with the same stem to output_path.
+    if not output_path.exists():
+        stem = output_path.with_suffix("")
+        candidates = list(stem.parent.glob(stem.name + ".*"))
+        candidates = [
+            p for p in candidates
+            if p.is_file()
+            and ".part" not in p.name.lower()
+            and p.suffix.lower() in {".mp4", ".mkv", ".ts"}
+        ]
+
+        if candidates:
+            requested = [p for p in candidates if p.suffix.lower() == output_path.suffix.lower()]
+            chosen = requested[0] if requested else max(candidates, key=lambda p: p.stat().st_size)
+            if chosen != output_path:
+                chosen.replace(output_path)
+
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise RuntimeError("yt-dlp finished but output file is missing or empty")
+
+    final_info = get_stream_info(str(output_path))
+    print_quality_info("final file", final_info)
+
+def download_stream(
+    stream_url: str,
+    output_file: str,
+    quality: str = "best",
+    downloader: str = "yt-dlp",
+    stall_timeout: int = 180,
+    retries: int = 3,
+) -> None:
+    if downloader == "yt-dlp":
+        return download_stream_ytdlp(
+            stream_url,
+            output_file,
+            quality,
+            stall_timeout=stall_timeout,
+            retries=retries,
+        )
+
+    if downloader == "ffmpeg":
+        return download_stream_ffmpeg(stream_url, output_file, quality)
+
+    raise ValueError(f"Unsupported downloader: {downloader}")
+
+def command_download_program(args: argparse.Namespace) -> None:
+    programs = filter_programs(
+        fetch_all_programs(),
+        titles=args.program_title,
+        ids=args.program_id,
+        mainids=args.program_mainid,
+    )
+
+    if not programs:
+        print("No programs found.")
+        return
+
+    os.makedirs(args.output, exist_ok=True)
+
+    for program in programs:
+        print(f"Program: {program.title} ({program.id}, mainid={program.mainid})")
+
+        try:
+            seasons = parse_seasons(program)
+        except Exception as ex:
+            print(f"  Failed to parse seasons: {ex}")
+            continue
+
+        for season in seasons:
+            season_num = season.season_number or 1
+
+            if args.season and season_num != args.season:
+                continue
+
+            season_folder = os.path.join(args.output, f"s{season_num}")
+            os.makedirs(season_folder, exist_ok=True)
+
+            print(f"  Season: s{season_num} -> {season.url}")
+
+            try:
+                episodes = parse_episodes_from_page(program, season)
+            except Exception as ex:
+                print(f"    Failed to parse episodes: {ex}")
+                continue
+
+            if args.limit_episodes:
+                episodes = episodes[: args.limit_episodes]
+
+            for idx, episode in enumerate(episodes, start=1):
+                filename = f"S{season_num:02d}E{idx:02d}.{args.format}"
+                output_file = os.path.join(season_folder, filename)
+
+                existing_file = episode_file_exists(
+                    season_folder,
+                    season_num,
+                    idx,
+                    args.format,
+                )
+
+                print(f"    Resolving stream: {filename} | {episode.title}")
+
+                stream_url = episode.stream_url
+
+                if not stream_url:
+                    stream_url, _ = resolve_episode_stream(
+                        episode.play_url or episode.url,
+                        raise_on_error=False,
+                    )
+
+                if not stream_url:
+                    print(f"    No stream found: {episode.title}")
+                    continue
+
+                if existing_file:
+                    print(f"    Checking existing file duration: {existing_file}")
+                    is_complete, file_duration, source_duration = is_existing_file_complete(
+                        existing_file=existing_file,
+                        stream_url=stream_url,
+                        min_ratio=args.verify_ratio,
+                    )
+
+                    if is_complete:
+                        print(
+                            "    Exists and complete, skipping: "
+                            f"{format_time(file_duration)} / {format_time(source_duration)}"
+                        )
+                        continue
+
+                    print(
+                        "    Existing file is incomplete, re-downloading/resuming: "
+                        f"{format_time(file_duration)} / {format_time(source_duration)}"
+                    )
+
+                    # Remove broken final file. yt-dlp .part files are kept separately.
+                    try:
+                        os.remove(existing_file)
+                    except OSError:
+                        pass
+
+                print(f"    Downloading: {output_file} using {args.downloader}")
+
+                try:
+                    download_stream(
+                        stream_url=stream_url,
+                        output_file=output_file,
+                        quality=args.quality,
+                        downloader=args.downloader,
+                        stall_timeout=args.stall_timeout,
+                        retries=args.retries,
+                    )
+                except KeyboardInterrupt:
+                    if args.downloader == "yt-dlp":
+                        print("\nStopped by user. yt-dlp partial file was kept; next run will resume from it.")
+                    else:
+                        print("\nStopped by user. Partial .part file was removed.")
+                    return
+                except Exception as ex:
+                    print(f"    Failed: {episode.title} -> {ex}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Kan 11 VOD scanner")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1729,13 +2794,32 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_missing.add_argument("--limit", type=int, default=50)
     resolve_missing.set_defaults(func=command_resolve_missing_streams)
 
+
+    download = sub.add_parser("download-program", help="Download all episodes from a program")
+    add_program_filters(download)
+    download.add_argument("--output", required=True, help="Destination folder")
+    download.add_argument("--format", default="mkv", choices=["mp4", "mkv", "ts"], help="Output container format")
+    download.add_argument("--quality", default="best", choices=["best", "worst", "720p", "1080p"], help="Download/transcode quality")
+    download.add_argument("--downloader", default="yt-dlp", choices=["yt-dlp", "ffmpeg"], help="Downloader backend. yt-dlp supports resume and retry; ffmpeg gives cleaner progress but restarts from zero.")
+    download.add_argument("--season", type=int, help="Download only one season number")
+    download.add_argument("--limit-episodes", type=int, help="Limit episodes per season")
+    download.add_argument("--verify-ratio", type=float, default=0.95, help="Existing file is complete if duration is at least this ratio of source duration")
+    download.add_argument("--stall-timeout", type=int, default=180, help="Retry the same episode if yt-dlp has no progress output for this many seconds")
+    download.add_argument("--retries", type=int, default=3, help="How many times to retry the same episode after stalls or download errors")
+    download.set_defaults(func=command_download_program)
+
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    args.func(args)
+
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        print("\nStopped by user.")
+        return
 
 
 if __name__ == "__main__":
