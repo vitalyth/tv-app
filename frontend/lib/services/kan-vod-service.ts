@@ -77,7 +77,7 @@ export const kanVodService = {
   async getSeries(refresh = false): Promise<KanVodSeriesResponse> {
     const searchParams = refresh ? "?refresh=true" : "";
     return fetchJson<KanVodSeriesResponse>(
-      `/v/kan-vod${searchParams}`,
+      `/kan-vod${searchParams}`,
       "Failed to load Kan VOD",
       (data) => {
         if (data.error && !data.series?.length) {
@@ -95,7 +95,7 @@ export const kanVodService = {
   async getSeriesDetails(programId: string, refresh = false): Promise<KanVodSeriesDetails> {
     const searchParams = refresh ? "?refresh=true" : "";
     return fetchJson<KanVodSeriesDetails>(
-      `/v/kan-vod/${encodeURIComponent(programId)}${searchParams}`,
+      `/kan-vod/${encodeURIComponent(programId)}${searchParams}`,
       "Failed to load Kan VOD series",
       (data) => {
         if (data.error && !data.episodes?.length) {
