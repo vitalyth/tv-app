@@ -27,9 +27,16 @@ import subprocess
 import shutil
 import time
 import select
+import tempfile
+import threading
+import signal
+import atexit
+import traceback
 from dataclasses import asdict, dataclass
 from html import unescape
+from collections import deque
 from typing import Any, Optional
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -808,6 +815,71 @@ def extract_direct_stream_from_html(html: str) -> Optional[str]:
     return None
 
 
+def normalize_youtube_url(value: str) -> Optional[str]:
+    value = (value or "").strip()
+    if not value:
+        return None
+
+    value = (
+        value.replace("\\u0026", "&")
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
+    )
+
+    if value.startswith("//"):
+        value = "https:" + value
+
+    embed_match = re.search(r"(?:youtube(?:-nocookie)?\.com/embed/)([A-Za-z0-9_-]{6,})", value, re.I)
+    if embed_match:
+        return f"https://www.youtube.com/watch?v={embed_match.group(1)}"
+
+    short_match = re.search(r"(?:youtu\.be/)([A-Za-z0-9_-]{6,})", value, re.I)
+    if short_match:
+        return f"https://www.youtube.com/watch?v={short_match.group(1)}"
+
+    watch_match = re.search(r"(?:youtube(?:-nocookie)?\.com/watch\?[^\"'<> ]*v=)([A-Za-z0-9_-]{6,})", value, re.I)
+    if watch_match:
+        return f"https://www.youtube.com/watch?v={watch_match.group(1)}"
+
+    return None
+
+
+def extract_youtube_url_from_html(html: str) -> Optional[str]:
+    """
+    Fallback for older Kan pages where the player is an embedded YouTube video
+    instead of Kan/Kaltura HLS.
+
+    Returns a canonical YouTube watch URL that yt-dlp can download.
+    """
+    patterns = [
+        r'https?:\\?/\\?/(?:www\.)?youtube(?:-nocookie)?\.com/watch\?[^"\'<> ]*v=[A-Za-z0-9_-]+',
+        r'https?:\\?/\\?/youtu\.be/[A-Za-z0-9_-]+',
+        r'https?:\\?/\\?/(?:www\.)?youtube(?:-nocookie)?\.com/embed/[A-Za-z0-9_-]+',
+        r'//(?:www\.)?youtube(?:-nocookie)?\.com/embed/[A-Za-z0-9_-]+',
+        r'src=["\']([^"\']*youtube(?:-nocookie)?\.com/embed/[^"\']+)["\']',
+        r'data-src=["\']([^"\']*youtube(?:-nocookie)?\.com/embed/[^"\']+)["\']',
+        r'"(?:youtube|youtubeUrl|youtube_url|videoUrl|video_url|embedUrl|embed_url)"\s*:\s*"([^"]*(?:youtube|youtu\.be)[^"]*)"',
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, html, re.I | re.S):
+            candidate = match.group(1) if match.lastindex else match.group(0)
+            normalized = normalize_youtube_url(candidate)
+            if normalized:
+                return normalized
+
+    id_patterns = [
+        r'"youtubeId"\s*:\s*"([A-Za-z0-9_-]{6,})"',
+        r'"youtube_id"\s*:\s*"([A-Za-z0-9_-]{6,})"',
+        r'"videoId"\s*:\s*"([A-Za-z0-9_-]{6,})"',
+    ]
+    for pattern in id_patterns:
+        m = re.search(pattern, html, re.I)
+        if m:
+            return f"https://www.youtube.com/watch?v={m.group(1)}"
+
+    return None
+
 def extract_kaltura_entry_id(html: str) -> Optional[str]:
     patterns = [
         r'data-entryId="([^"]+)"',
@@ -911,6 +983,10 @@ def resolve_episode_stream(
         direct = extract_direct_stream_from_html(html)
         if direct:
             return direct, None
+
+        youtube_url = extract_youtube_url_from_html(html)
+        if youtube_url:
+            return youtube_url, "youtube"
 
         entry_id = extract_kaltura_entry_id(html)
         if not entry_id:
@@ -1296,10 +1372,12 @@ def command_stream_url(args: argparse.Namespace) -> None:
 def command_debug_stream(args: argparse.Namespace) -> None:
     html = fetch_cf_text(args.episode_url)
     direct = extract_direct_stream_from_html(html)
+    youtube_url = extract_youtube_url_from_html(html)
     entry_id = extract_kaltura_entry_id(html)
 
     print(f"page length: {len(html)}")
     print(f"direct stream: {direct or ''}")
+    print(f"youtube url: {youtube_url or ''}")
     print(f"kaltura entry id: {entry_id or ''}")
 
     if args.save_html:
@@ -1307,7 +1385,7 @@ def command_debug_stream(args: argparse.Namespace) -> None:
         print(f"saved html: {args.save_html}")
 
     hints = []
-    for pattern in ["data-hls-url", "data-dash-url", "entry_id", "entryId", "kaltura", "UrlRedirector", "bynetURL"]:
+    for pattern in ["data-hls-url", "data-dash-url", "entry_id", "entryId", "kaltura", "UrlRedirector", "bynetURL", "youtube", "youtu.be", "youtube.com/embed"]:
         if pattern in html:
             hints.append(pattern)
 
@@ -1639,6 +1717,884 @@ def command_resolve_missing_streams(args: argparse.Namespace) -> None:
 
 
 
+# -----------------------------
+# Special / promo episode handling
+# -----------------------------
+
+DEFAULT_SPECIAL_KEYWORDS = [
+    "פרומו",
+    "promo",
+    "טריילר",
+    "trailer",
+    "teaser",
+    "בקרוב",
+    "הצצה",
+    "טעימה",
+    "ריקאפ",
+    "recap",
+    "מאחורי הקלעים",
+    "על הסט",
+    "ריכולים על הסט",
+    "לקראת העונה",
+    "בונוס",
+    "bonus",
+]
+
+
+def normalize_special_text(value: str) -> str:
+    return clean_text(value).lower().replace("־", "-").replace("–", "-").replace("—", "-")
+
+
+def special_keywords_from_args(args: argparse.Namespace) -> list[str]:
+    raw_keywords = list(DEFAULT_SPECIAL_KEYWORDS)
+
+    for item in getattr(args, "special_keyword", []) or []:
+        raw_keywords.extend(part.strip() for part in str(item).split(",") if part.strip())
+
+    return [normalize_special_text(item) for item in raw_keywords if normalize_special_text(item)]
+
+
+def is_special_episode(
+    episode: Episode,
+    season: Optional[Season] = None,
+    extra_keywords: Optional[list[str]] = None,
+) -> tuple[bool, str]:
+    """
+    Detect promo/trailer/special items that should not be counted as real season episodes.
+
+    Returns (is_special, reason).
+    """
+    text = " ".join(
+        [
+            episode.title or "",
+            episode.description or "",
+            episode.url or "",
+            episode.play_url or "",
+            season.title if season else "",
+        ]
+    )
+    normalized = normalize_special_text(text)
+
+    keywords = list(extra_keywords or [])
+    if not keywords:
+        keywords = [normalize_special_text(item) for item in DEFAULT_SPECIAL_KEYWORDS]
+
+    for keyword in keywords:
+        if keyword and keyword in normalized:
+            return True, keyword
+
+    return False, ""
+
+
+def extract_episode_number_from_title(title: str) -> Optional[int]:
+    """
+    Extract explicit regular episode number from the page title.
+
+    Returns a number only when the title clearly says "פרק X" / "Episode X".
+    This is intentionally strict so promos/teasers without a real episode
+    number do not become regular episodes.
+    """
+    text = normalize_special_text(title)
+
+    patterns = [
+        r"(?:^|[\s|:,-])פרק\s*(\d{1,3})(?:\D|$)",
+        r"(?:^|[\s|:,-])episode\s*(\d{1,3})(?:\D|$)",
+        r"(?:^|[\s|:,-])ep\.?\s*(\d{1,3})(?:\D|$)",
+    ]
+
+    for pattern in patterns:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                return None
+
+    return None
+
+
+def regular_episode_numbers_in_page(episodes: list[Episode]) -> set[int]:
+    numbers: set[int] = set()
+    for episode in episodes:
+        number = extract_episode_number_from_title(episode.title)
+        if number is not None:
+            numbers.add(number)
+    return numbers
+
+
+def classify_episode_as_special(
+    episode: Episode,
+    season: Season,
+    source_index: int,
+    episodes: list[Episode],
+    args: argparse.Namespace,
+) -> tuple[bool, str]:
+    """
+    Classify using the actual Kan page metadata, not a fixed season length.
+
+    Important rule:
+    If the title clearly contains "פרק X" / "Episode X", it is a regular episode
+    even if the title contains broad words like "עונה" or "אחרון לעונה".
+
+    Special:
+    - unnumbered item with promo/trailer/teaser/behind-the-scenes keywords
+    - OR when the season page has numbered episodes, an unnumbered item is special
+    """
+    if bool(getattr(args, "disable_special_detection", False)):
+        return False, ""
+
+    explicit_num = extract_episode_number_from_title(episode.title)
+    if explicit_num is not None:
+        return False, ""
+
+    keywords = special_keywords_from_args(args)
+    keyword_special, keyword_reason = is_special_episode(
+        episode,
+        season=season,
+        extra_keywords=keywords,
+    )
+    if keyword_special:
+        return True, keyword_reason
+
+    numbered_episodes = regular_episode_numbers_in_page(episodes)
+    if numbered_episodes:
+        return True, "no-explicit-episode-number"
+
+    # If this season/page has no numbered episodes at all, keep items regular.
+    # This avoids breaking documentaries/movies/single-item pages that do not
+    # use "פרק X" naming.
+    return False, ""
+
+def season_folder_name(season_num: int) -> str:
+    return f"s{season_num}"
+
+
+def build_episode_plan(
+    episodes: list[Episode],
+    season: Season,
+    real_season_num: int,
+    output_root: str,
+    extension: str,
+    args: argparse.Namespace,
+    special_counter_start: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    Build download/NFO numbering for a season.
+
+    Regular items keep SxxExx numbering inside their real season folder.
+    Promo/trailer/special items go to s00/S00E.. so Plex does not count them as
+    real episodes of that season.
+
+    Detection is based on the actual Kan page:
+    - items titled like "פרק X" are regular episodes
+    - promo/trailer/teaser/behind-the-scenes items are specials
+    - when a season page has numbered episodes, unnumbered items are specials
+    """
+    planned: list[dict[str, Any]] = []
+    regular_counter = 0
+    special_counter = special_counter_start
+
+    for source_index, episode in enumerate(episodes, start=1):
+        special, reason = classify_episode_as_special(
+            episode=episode,
+            season=season,
+            source_index=source_index,
+            episodes=episodes,
+            args=args,
+        )
+
+        if special:
+            special_counter += 1
+            target_season_num = 0
+            target_episode_num = special_counter
+            target_folder = os.path.join(output_root, season_folder_name(0))
+            target_title = f"S{real_season_num:02d} special: {episode.title}"
+            detail = f"special/{reason} · original S{real_season_num:02d}"
+        else:
+            regular_counter += 1
+            explicit_episode_num = extract_episode_number_from_title(episode.title)
+            target_season_num = real_season_num
+            target_episode_num = explicit_episode_num or regular_counter
+            target_folder = os.path.join(output_root, season_folder_name(real_season_num))
+            target_title = episode.title
+            detail = episode.title
+
+        key = f"S{target_season_num:02d}E{target_episode_num:02d}.{extension}"
+
+        planned.append(
+            {
+                "episode": episode,
+                "source_index": source_index,
+                "source_season_num": real_season_num,
+                "source_season_title": season.title,
+                "target_season_num": target_season_num,
+                "target_episode_num": target_episode_num,
+                "target_folder": target_folder,
+                "target_title": target_title,
+                "is_special": special,
+                "special_reason": reason,
+                "key": key,
+                "detail": detail,
+                "explicit_episode_number": extract_episode_number_from_title(episode.title),
+            }
+        )
+
+    return planned, special_counter
+
+
+def print_episode_plan_summary(planned: list[dict[str, Any]]) -> None:
+    real_count = sum(1 for item in planned if not item["is_special"])
+    special_count = sum(1 for item in planned if item["is_special"])
+    print(f"    Episode plan: {real_count} regular, {special_count} special" + (" -> s00" if special_count else ""))
+
+    for item in planned:
+        marker = "SPECIAL" if item["is_special"] else "REGULAR"
+        reason = f" reason={item['special_reason']}" if item["is_special"] else ""
+        explicit = item.get("explicit_episode_number")
+        explicit_text = f" explicit_ep={explicit}" if explicit is not None else ""
+        print(
+            f"      {marker}: {item['key']} | source item {item['source_index']}"
+            f"{explicit_text}{reason} | {item['episode'].title}"
+        )
+
+
+
+# -----------------------------
+# Progress colors
+# -----------------------------
+
+class ProgressColors:
+    RESET="\033[0m"
+    BOLD="\033[1m"
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BLUE="\033[34m"
+    MAGENTA="\033[35m"
+    CYAN="\033[36m"
+
+def stage_color(stage: str) -> str:
+    return {
+        "WAIT": ProgressColors.CYAN,
+        "QUEUE": ProgressColors.CYAN,
+        "RESOLVE": ProgressColors.CYAN,
+        "CHECK": ProgressColors.CYAN,
+        "VIDEO-DL": ProgressColors.BLUE,
+        "AUDIO-DL": ProgressColors.CYAN,
+        "MERGE": ProgressColors.MAGENTA,
+        "DOWNLOADED": ProgressColors.MAGENTA,
+        "POST": ProgressColors.MAGENTA,
+        "COPY": ProgressColors.YELLOW,
+        "COPY-WAIT": ProgressColors.YELLOW,
+        "DONE": ProgressColors.GREEN,
+        "SKIPPED": ProgressColors.GREEN,
+        "FAILED": ProgressColors.RED,
+        "RETRY": ProgressColors.RED,
+    }.get(stage, "")
+
+# -----------------------------
+# Parallel download progress UI / shutdown state
+# -----------------------------
+
+_PROGRESS_LOCK = threading.Lock()
+_PROGRESS_STATE: dict[str, dict[str, Any]] = {}
+_PROGRESS_ENABLED = False
+_PROGRESS_RENDERED_LINES = 0
+_PROGRESS_LAST_RENDER = 0.0
+_PROGRESS_MODE = "table"
+_PROGRESS_LAST_SNAPSHOT = 0.0
+_PROGRESS_ACTIVE_DOWNLOADS = 0
+_PROGRESS_ACTIVE_COPIES = 0
+_PROGRESS_COPY_WAIT = 0
+_PROGRESS_DISPLAY_SEQUENCE = 0
+_STOP_EVENT = threading.Event()
+_SHUTDOWN_STARTED = False
+_ACTIVE_PROCESSES: set[subprocess.Popen] = set()
+_FORCE_EXIT_ON_INTERRUPT = False
+
+PROGRESS_BAR_WIDTH = 28
+PROGRESS_BAR_FILLED = "■"
+PROGRESS_BAR_EMPTY = "·"
+
+
+def parallel_progress_enabled() -> bool:
+    return bool(_PROGRESS_ENABLED)
+
+
+def set_parallel_progress_enabled(enabled: bool) -> None:
+    global _PROGRESS_ENABLED
+    _PROGRESS_ENABLED = bool(enabled)
+
+
+def progress_line_key(output_file: str) -> str:
+    return Path(output_file).name
+
+
+def short_stage(stage: str) -> str:
+    return {
+        "waiting": "WAIT",
+        "queued": "QUEUE",
+        "resolving": "RESOLVE",
+        "checking": "CHECK",
+        # Generic yt-dlp download progress is the video stream by default.
+        # This avoids showing DOWNLOAD and then VIDEO-DL for the same episode.
+        "downloading": "VIDEO-DL",
+        "video": "VIDEO-DL",
+        "audio": "AUDIO-DL",
+        "downloaded": "DOWNLOADED",
+        "postprocess": "POST",
+        "merging": "MERGE",
+        "ready_copy": "COPY-WAIT",
+        "copy_wait": "COPY-WAIT",
+        "copying": "COPY",
+        "retry": "RETRY",
+        "skipped": "SKIPPED",
+        "done": "DONE",
+        "failed": "FAILED",
+    }.get(stage, stage.upper())
+
+def progress_stage_is_active_or_pending(stage: str) -> bool:
+    return stage in {
+        "WAIT", "QUEUE", "RESOLVE", "CHECK", "VIDEO-DL", "AUDIO-DL", "DOWNLOAD", "VIDEO", "AUDIO", "MERGE",
+        "DOWNLOADED", "POST", "READY-COPY", "COPY-WAIT", "COPY", "RETRY",
+        "waiting", "queued", "resolving", "checking", "downloading", "video", "audio",
+        "merging", "downloaded", "postprocess", "ready_copy", "copy_wait", "copying", "retry",
+    }
+
+
+def progress_stage_is_done(stage: str) -> bool:
+    return stage in {"DONE", "SKIPPED", "done", "skipped"}
+
+
+def progress_stage_is_failed(stage: str) -> bool:
+    return stage in {"FAILED", "failed"}
+
+
+def update_parallel_progress(
+    key: str,
+    stage: str,
+    percent: Optional[float] = None,
+    detail: str = "",
+    order: Optional[int] = None,
+    force: bool = False,
+) -> None:
+    if not parallel_progress_enabled():
+        return
+
+    global _PROGRESS_DISPLAY_SEQUENCE
+
+    with _PROGRESS_LOCK:
+        current = _PROGRESS_STATE.get(key, {})
+        new_stage = short_stage(stage)
+        current["stage"] = new_stage
+
+        # Sort the table by when a row first becomes visible/active.
+        # New files therefore appear at the bottom instead of jumping into
+        # season/episode order.
+        if "display_order" not in current and progress_stage_should_show(new_stage):
+            _PROGRESS_DISPLAY_SEQUENCE += 1
+            current["display_order"] = _PROGRESS_DISPLAY_SEQUENCE
+
+        if percent is not None:
+            current["percent"] = max(0.0, min(100.0, float(percent)))
+        if detail:
+            current["detail"] = detail
+        elif "detail" not in current:
+            current["detail"] = ""
+        if order is not None:
+            current["order"] = order
+        _PROGRESS_STATE[key] = current
+        render_parallel_progress_locked(force=force)
+
+def remove_parallel_progress_row(key: str, force: bool = True) -> None:
+    """
+    Remove a completed successful/skipped item from the live table.
+
+    The final result is still kept in the results list for the summary report,
+    but the progress table stays focused only on active/retry/failed work.
+    """
+    if not parallel_progress_enabled():
+        return
+
+    with _PROGRESS_LOCK:
+        _PROGRESS_STATE.pop(key, None)
+        render_parallel_progress_locked(force=force)
+
+def progress_stage_should_show(stage: str) -> bool:
+    """
+    Show only items that already started or reached a final state.
+    Hide WAIT/QUEUE rows so the table stays focused on active work.
+    """
+    return stage not in {"WAIT", "QUEUE", "waiting", "queued", ""}
+
+
+def render_parallel_progress_locked(force: bool = False) -> None:
+    """
+    Stable progress renderer.
+
+    Always redraws a clean table in table mode:
+    - clears the screen before each table render
+    - shows only active/final rows, not WAIT items that did not start yet
+    - keeps a compact one-line mode for logs/non-interactive terminals
+    """
+    global _PROGRESS_RENDERED_LINES, _PROGRESS_LAST_RENDER, _PROGRESS_LAST_SNAPSHOT
+
+    now = time.monotonic()
+
+    # Keep UI responsive but do not redraw for every yt-dlp line.
+    if not force and (now - _PROGRESS_LAST_RENDER) < 0.50:
+        return
+
+    _PROGRESS_LAST_RENDER = now
+    width = PROGRESS_BAR_WIDTH
+
+    states = list(_PROGRESS_STATE.values())
+
+    downloading_count = sum(
+        1
+        for state in states
+        if state.get("stage") in {"RESOLVE", "CHECK", "VIDEO-DL", "AUDIO-DL", "DOWNLOAD", "VIDEO", "AUDIO"}
+    )
+    post_count = sum(
+        1
+        for state in states
+        if state.get("stage") in {"DOWNLOADED", "POST", "MERGE"}
+    )
+    copy_active_count = sum(
+        1
+        for state in states
+        if state.get("stage") == "COPY"
+    )
+    copy_wait_count = sum(
+        1
+        for state in states
+        if state.get("stage") in {"COPY-WAIT", "READY-COPY"}
+    )
+    done_count = sum(
+        1
+        for state in states
+        if state.get("stage") in {"DONE", "SKIPPED"}
+    )
+    failed_count = sum(
+        1
+        for state in states
+        if state.get("stage") == "FAILED"
+    )
+    total_count = len(states)
+    visible_count = sum(1 for state in states if progress_stage_should_show(state.get("stage", "")))
+
+    lines = [
+        f"Progress: dl={downloading_count} post/merge={post_count} "
+        f"copy={copy_active_count} copy_wait={copy_wait_count} "
+        f"done={done_count} failed={failed_count} active/visible={visible_count} total={total_count}",
+        "",
+    ]
+
+    def sort_key(item: tuple[str, dict[str, Any]]) -> tuple[int, str]:
+        key, state = item
+        try:
+            return int(state.get("display_order", state.get("order", 999999))), key
+        except Exception:
+            return 999999, key
+
+    for key, state in sorted(_PROGRESS_STATE.items(), key=sort_key):
+        stage = state.get("stage", "")
+        if not progress_stage_should_show(stage):
+            continue
+
+        percent = float(state.get("percent", 0.0))
+        filled = int(width * percent / 100.0)
+        bar = PROGRESS_BAR_FILLED * filled + PROGRESS_BAR_EMPTY * (width - filled)
+
+        detail = state.get("detail", "")
+        if len(detail) > 62:
+            detail = detail[:59] + "..."
+
+        color = stage_color(stage)
+        plain_line = f"  {key:<14} {bar} {percent:6.2f}% {stage:<12} {detail}"
+
+        # Color the whole row according to the status, and bold only the status word.
+        if color:
+            stage_plain = f"{stage:<12}"
+            stage_bold = f"{ProgressColors.BOLD}{stage_plain}{ProgressColors.RESET}{color}"
+            colored_line = plain_line.replace(stage_plain, stage_bold, 1)
+            lines.append(f"{color}{colored_line}{ProgressColors.RESET}")
+        else:
+            lines.append(plain_line)
+
+    mode = globals().get("_PROGRESS_MODE", "table")
+
+    if mode == "off":
+        return
+
+    if mode == "compact":
+        line = lines[0]
+        print("\r\033[2K" + line, end="", flush=True)
+        return
+
+    # Table mode: always clear the screen and redraw.
+    # Use both alternate clear commands for better behavior in VS Code/macOS terminals.
+    output = "\033[2J\033[H\033[3J" + "\n".join(lines)
+    print(output, end="\n", flush=True)
+    _PROGRESS_RENDERED_LINES = len(lines)
+
+def finish_parallel_progress() -> None:
+    global _PROGRESS_RENDERED_LINES
+    if _PROGRESS_RENDERED_LINES:
+        print()
+        _PROGRESS_RENDERED_LINES = 0
+
+def quiet_print(message: str = "") -> None:
+    if not parallel_progress_enabled():
+        print(message)
+
+
+def register_process(process: subprocess.Popen) -> None:
+    with _PROGRESS_LOCK:
+        _ACTIVE_PROCESSES.add(process)
+
+
+def unregister_process(process: subprocess.Popen) -> None:
+    with _PROGRESS_LOCK:
+        _ACTIVE_PROCESSES.discard(process)
+
+
+def stop_active_processes() -> None:
+    _STOP_EVENT.set()
+
+    with _PROGRESS_LOCK:
+        processes = list(_ACTIVE_PROCESSES)
+
+    for process in processes:
+        try:
+            if process.poll() is None:
+                process.terminate()
+        except Exception:
+            pass
+
+    deadline = time.monotonic() + 2.0
+    for process in processes:
+        try:
+            while process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if process.poll() is None:
+                process.kill()
+        except Exception:
+            pass
+
+    with _PROGRESS_LOCK:
+        _ACTIVE_PROCESSES.clear()
+
+
+def raise_if_stopping() -> None:
+    if _STOP_EVENT.is_set():
+        raise KeyboardInterrupt
+
+
+def request_shutdown(signum: Optional[int] = None, frame: Any = None) -> None:
+    """
+    Ctrl+C handler.
+
+    First Ctrl+C requests stop and terminates child processes.
+    Second Ctrl+C exits immediately without waiting for ThreadPoolExecutor atexit.
+    """
+    global _SHUTDOWN_STARTED, _FORCE_EXIT_ON_INTERRUPT
+
+    if not _SHUTDOWN_STARTED:
+        _SHUTDOWN_STARTED = True
+        _STOP_EVENT.set()
+        stop_active_processes()
+        return
+
+    _FORCE_EXIT_ON_INTERRUPT = True
+    stop_active_processes()
+    try:
+        finish_parallel_progress()
+        print("\nForce stopped by user.")
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(130)
+
+
+def install_signal_handlers() -> None:
+    try:
+        signal.signal(signal.SIGINT, request_shutdown)
+        signal.signal(signal.SIGTERM, request_shutdown)
+    except Exception:
+        pass
+
+
+def force_exit_if_requested() -> None:
+    if _FORCE_EXIT_ON_INTERRUPT:
+        os._exit(130)
+
+
+def compact_traceback() -> str:
+    return traceback.format_exc().strip()
+
+
+def episode_debug_context(
+    episode: Episode,
+    output_file: Optional[str] = None,
+    season_folder: Optional[str] = None,
+    season_num: Optional[int] = None,
+    episode_num: Optional[int] = None,
+    stream_url: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "episode_id": getattr(episode, "id", None),
+        "title": getattr(episode, "title", None),
+        "program_id": getattr(episode, "program_id", None),
+        "season_id": getattr(episode, "season_id", None),
+        "season_num": season_num,
+        "episode_num": episode_num,
+        "folder": season_folder,
+        "output_file": output_file,
+        "url": getattr(episode, "url", None),
+        "play_url": getattr(episode, "play_url", None),
+        "stream_url": stream_url or getattr(episode, "stream_url", None),
+        "kaltura_entry_id": getattr(episode, "kaltura_entry_id", None),
+    }
+
+
+def format_debug_context(context: dict[str, Any]) -> str:
+    return " | ".join(f"{key}={value!r}" for key, value in context.items())
+
+
+def make_failure_result(
+    key: str,
+    status: str,
+    message: str,
+    context: Optional[dict[str, Any]] = None,
+    trace: str = "",
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "status": status,
+        "key": key,
+        "message": message,
+        "context": context or {},
+        "traceback": trace,
+    }
+
+def download_one_episode_job(
+    episode: Episode,
+    season_folder: str,
+    season_num: int,
+    episode_num: int,
+    extension: str,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    output_file = os.path.join(
+        season_folder,
+        f"S{season_num:02d}E{episode_num:02d}.{extension}",
+    )
+    key = progress_line_key(output_file)
+    stream_url = episode.stream_url
+
+    try:
+        raise_if_stopping()
+        update_parallel_progress(key, "resolving", 0.0, episode.title, order=episode_num)
+
+        if not stream_url:
+            source_url = episode.play_url or episode.url
+            if not source_url:
+                context = episode_debug_context(
+                    episode,
+                    output_file=output_file,
+                    season_folder=season_folder,
+                    season_num=season_num,
+                    episode_num=episode_num,
+                    stream_url=stream_url,
+                )
+                raise RuntimeError(f"missing episode URL/play_url; {format_debug_context(context)}")
+
+            stream_url, _ = resolve_episode_stream(source_url, raise_on_error=True)
+
+        if not stream_url:
+            context = episode_debug_context(
+                episode,
+                output_file=output_file,
+                season_folder=season_folder,
+                season_num=season_num,
+                episode_num=episode_num,
+                stream_url=stream_url,
+            )
+            raise RuntimeError(f"could not resolve stream URL; {format_debug_context(context)}")
+
+        raise_if_stopping()
+
+        existing_file = episode_file_exists(
+            folder=season_folder,
+            season_num=season_num,
+            episode_num=episode_num,
+            extension=extension,
+        )
+
+        if existing_file:
+            update_parallel_progress(key, "checking", 2.0, "existing file", order=episode_num)
+            is_complete, file_duration, source_duration = is_existing_file_complete(
+                existing_file,
+                stream_url,
+                min_ratio=getattr(args, "min_duration_ratio", 0.95),
+                quality=getattr(args, "quality", "best"),
+                min_quality_ratio=getattr(args, "min_quality_ratio", 0.95),
+                check_quality=not getattr(args, "skip_quality_check", False),
+            )
+
+            if is_complete:
+                update_parallel_progress(
+                    key,
+                    "skipped",
+                    100.0,
+                    f"{format_time(file_duration)} / {format_time(source_duration)}",
+                    order=episode_num,
+                    force=True,
+                )
+                return {
+                    "ok": True,
+                    "status": "skipped",
+                    "key": key,
+                    "episode": episode,
+                    "episode_num": episode_num,
+                    "message": f"skipped existing complete: {existing_file}",
+                }
+
+        raise_if_stopping()
+
+        update_parallel_progress(key, "downloading", 3.0, "starting", order=episode_num, force=True)
+
+        copy_info = download_stream(
+            stream_url=stream_url,
+            output_file=output_file,
+            quality=args.quality,
+            downloader=args.downloader,
+            stall_timeout=args.stall_timeout,
+            retries=args.retries,
+            local_temp_root=args.local_temp,
+            progress_key=key,
+            defer_copy=True,
+        )
+
+        if copy_info is not None:
+            update_parallel_progress(key, "copy_wait", 100.0, "waiting for SMB copy", order=episode_num, force=True)
+            return {
+                "ok": True,
+                "status": "ready_copy",
+                "key": key,
+                "episode": episode,
+                "episode_num": episode_num,
+                "copy_info": copy_info,
+                "message": f"downloaded locally, waiting copy: {output_file}",
+            }
+
+        update_parallel_progress(key, "done", 100.0, "downloaded", order=episode_num, force=True)
+        return {
+            "ok": True,
+            "status": "done",
+            "key": key,
+            "episode": episode,
+            "episode_num": episode_num,
+            "message": f"downloaded: {output_file}",
+        }
+
+    except KeyboardInterrupt:
+        update_parallel_progress(key, "failed", 100.0, "stopped by user", order=episode_num, force=True)
+        context = episode_debug_context(
+            episode,
+            output_file=output_file,
+            season_folder=season_folder,
+            season_num=season_num,
+            episode_num=episode_num,
+            stream_url=stream_url,
+        )
+        return make_failure_result(
+            key=key,
+            status="stopped",
+            message=f"download stopped: {episode.title}",
+            context=context,
+            trace=compact_traceback(),
+        )
+
+    except Exception as ex:
+        trace = compact_traceback()
+        context = episode_debug_context(
+            episode,
+            output_file=output_file,
+            season_folder=season_folder,
+            season_num=season_num,
+            episode_num=episode_num,
+            stream_url=stream_url,
+        )
+        message = f"download failed: {episode.title} | {ex}"
+        update_parallel_progress(key, "failed", 100.0, message[:120], order=episode_num, force=True)
+        return make_failure_result(
+            key=key,
+            status="download_failed",
+            message=message,
+            context=context,
+            trace=trace,
+        )
+
+def copy_one_episode_job(
+    key: str,
+    copy_info: tuple[Path, Path, Path],
+    episode_num: int,
+) -> dict[str, Any]:
+    local_file = destination_path = work_dir = None
+
+    try:
+        local_file, destination_path, work_dir = copy_info
+
+        if local_file is None or destination_path is None or work_dir is None:
+            raise RuntimeError(
+                f"invalid copy_info: local_file={local_file!r}, "
+                f"destination_path={destination_path!r}, work_dir={work_dir!r}"
+            )
+
+        raise_if_stopping()
+        update_parallel_progress(key, "copying", 0.0, "copying to SMB", order=episode_num, force=True)
+        move_completed_file_to_destination(local_file, destination_path, progress_key=key)
+        cleanup_local_work_dir(work_dir)
+        update_parallel_progress(key, "done", 100.0, "copied", order=episode_num, force=True)
+        return {"ok": True, "status": "done", "key": key, "message": f"copied: {destination_path}"}
+
+    except KeyboardInterrupt:
+        update_parallel_progress(key, "failed", 100.0, "stopped by user", order=episode_num, force=True)
+        context = {
+            "local_file": str(local_file) if local_file is not None else None,
+            "destination_path": str(destination_path) if destination_path is not None else None,
+            "work_dir": str(work_dir) if work_dir is not None else None,
+            "episode_num": episode_num,
+        }
+        return make_failure_result(
+            key=key,
+            status="stopped",
+            message=f"copy stopped: {destination_path}",
+            context=context,
+            trace=compact_traceback(),
+        )
+
+    except Exception as ex:
+        trace = compact_traceback()
+        context = {
+            "local_file": str(local_file) if local_file is not None else None,
+            "destination_path": str(destination_path) if destination_path is not None else None,
+            "work_dir": str(work_dir) if work_dir is not None else None,
+            "episode_num": episode_num,
+            "copy_info_type": type(copy_info).__name__,
+        }
+        message = f"copy failed: {destination_path}: {ex}"
+        update_parallel_progress(key, "failed", 100.0, message[:120], order=episode_num, force=True)
+        return make_failure_result(
+            key=key,
+            status="copy_failed",
+            message=message,
+            context=context,
+            trace=trace,
+        )
+
 def episode_file_exists(
     folder: str,
     season_num: int,
@@ -1722,13 +2678,123 @@ def get_duration_seconds(path_or_url: str, timeout: int = 45) -> Optional[float]
         return None
 
 
+def quality_value(value: Any) -> int:
+    try:
+        return int(float(value or 0))
+    except Exception:
+        return 0
+
+
+def video_quality_summary(info: dict[str, Any]) -> str:
+    width = info.get("width")
+    height = info.get("height")
+    bitrate = info.get("total_bitrate") or info.get("video_bitrate")
+    video_codec = info.get("video_codec") or info.get("vcodec") or ""
+    audio_codec = info.get("audio_codec") or info.get("acodec") or ""
+
+    resolution = f"{width}x{height}" if width and height else "unknown resolution"
+    bitrate_text = f"{int(float(bitrate)) / 1000:.0f} kb/s" if bitrate else "unknown bitrate"
+    audio_text = "audio" if info.get("has_audio") or audio_codec else "no audio"
+    codecs = ", ".join(x for x in [video_codec, audio_codec or audio_text] if x)
+    return f"{resolution}, {bitrate_text}" + (f", {codecs}" if codecs else "")
+
+
+def get_expected_quality_info(stream_url: str, quality: str = "best") -> dict[str, Any]:
+    """
+    Best-effort expected quality for the requested source.
+
+    For yt-dlp downloads, prefer yt-dlp format inspection because it sees the
+    same video/audio formats the downloader will choose. If that fails, fall
+    back to ffprobe-based HLS program selection.
+    """
+    ytdlp = shutil.which("yt-dlp")
+    if ytdlp:
+        try:
+            _, selected = choose_ytdlp_format(ytdlp, stream_url, quality)
+            if selected:
+                return {
+                    "width": quality_value(selected.get("width")),
+                    "height": quality_value(selected.get("height")),
+                    "total_bitrate": int((float(selected.get("tbr") or 0)) * 1000) or None,
+                    "video_codec": str(selected.get("vcodec") or "").lower(),
+                    "audio_codec": str(selected.get("acodec") or "").lower(),
+                    "has_video": bool(selected.get("height") or selected.get("width")),
+                    "has_audio": bool(selected.get("audio_id") or selected.get("acodec")),
+                }
+        except Exception:
+            pass
+
+    try:
+        _, info, _ = select_program_by_quality(stream_url, quality)
+        if info:
+            return info
+    except Exception:
+        pass
+
+    return get_stream_info(stream_url)
+
+
+def existing_quality_is_good_enough(
+    existing_info: dict[str, Any],
+    expected_info: dict[str, Any],
+    min_quality_ratio: float = 0.95,
+    require_audio: bool = True,
+) -> tuple[bool, str]:
+    """
+    Compare existing file quality against expected source quality.
+
+    Checks:
+    - video exists
+    - audio exists when the source/selected format has audio
+    - resolution is not lower than min_quality_ratio
+    - bitrate is not much lower when both bitrates are known
+    """
+    if not existing_info:
+        return False, "cannot read existing file quality"
+
+    if not existing_info.get("has_video", True):
+        return False, "existing file has no video stream"
+
+    source_has_audio = bool(expected_info.get("has_audio") or expected_info.get("audio_codec"))
+    if require_audio and source_has_audio and not existing_info.get("has_audio"):
+        return False, "existing file has no audio stream"
+
+    existing_height = quality_value(existing_info.get("height"))
+    expected_height = quality_value(expected_info.get("height"))
+    if expected_height and existing_height:
+        if existing_height < int(expected_height * min_quality_ratio):
+            return False, f"existing height {existing_height} < expected {expected_height}"
+
+    existing_width = quality_value(existing_info.get("width"))
+    expected_width = quality_value(expected_info.get("width"))
+    if expected_width and existing_width:
+        if existing_width < int(expected_width * min_quality_ratio):
+            return False, f"existing width {existing_width} < expected {expected_width}"
+
+    existing_bitrate = quality_value(existing_info.get("total_bitrate") or existing_info.get("video_bitrate"))
+    expected_bitrate = quality_value(expected_info.get("total_bitrate") or expected_info.get("video_bitrate"))
+    if expected_bitrate and existing_bitrate:
+        if existing_bitrate < int(expected_bitrate * min_quality_ratio):
+            return False, f"existing bitrate {existing_bitrate} < expected {expected_bitrate}"
+
+    return True, "quality ok"
+
 def is_existing_file_complete(
     existing_file: str,
     stream_url: str,
     min_ratio: float = 0.95,
+    quality: str = "best",
+    min_quality_ratio: float = 0.95,
+    check_quality: bool = True,
 ) -> tuple[bool, Optional[float], Optional[float]]:
     """
     Returns (is_complete, file_duration, source_duration).
+
+    A file is considered complete only when:
+    - it exists and is non-empty
+    - duration is close enough to source duration
+    - when enabled, video quality is not lower than the requested source quality
+      and audio exists when the source has audio
     """
     if not existing_file or not os.path.isfile(existing_file):
         return False, None, None
@@ -1739,15 +2805,32 @@ def is_existing_file_complete(
     source_duration = get_duration_seconds(stream_url)
     file_duration = get_duration_seconds(existing_file)
 
-    if source_duration is None:
-        # If source duration cannot be detected, do not force a re-download of a non-empty file.
-        return True, file_duration, source_duration
+    duration_ok = True
+    if source_duration is not None:
+        if file_duration is None:
+            return False, file_duration, source_duration
+        duration_ok = file_duration >= (source_duration * min_ratio)
 
-    if file_duration is None:
+    if not duration_ok:
         return False, file_duration, source_duration
 
-    return file_duration >= (source_duration * min_ratio), file_duration, source_duration
+    if check_quality:
+        existing_info = get_stream_info(existing_file)
+        expected_info = get_expected_quality_info(stream_url, quality)
+        quality_ok, reason = existing_quality_is_good_enough(
+            existing_info,
+            expected_info,
+            min_quality_ratio=min_quality_ratio,
+            require_audio=True,
+        )
 
+        if not quality_ok:
+            print(f"    Existing file quality too low, re-downloading: {reason}")
+            print(f"      existing: {video_quality_summary(existing_info)}")
+            print(f"      expected: {video_quality_summary(expected_info)}")
+            return False, file_duration, source_duration
+
+    return True, file_duration, source_duration
 
 def format_time(seconds: Optional[float]) -> str:
     if seconds is None:
@@ -1788,7 +2871,7 @@ def print_progress_bar(
     if total_seconds and total_seconds > 0:
         ratio = min(max(current_seconds / total_seconds, 0.0), 1.0)
         filled = int(width * ratio)
-        bar = "█" * filled + "░" * (width - filled)
+        bar = PROGRESS_BAR_FILLED * filled + PROGRESS_BAR_EMPTY * (width - filled)
         percent = f"{ratio * 100:6.2f}%"
         total_text = format_time(total_seconds)
     else:
@@ -1822,9 +2905,12 @@ def parse_ytdlp_progress_line(line: str) -> Optional[dict[str, Any]]:
     if not percent_match:
         return None
 
+    # HLS often says: at 2.12MiB/s ETA 03:15 (frag 120/958)
+    # YouTube often says: of 123.45MiB at 6.34MiB/s ETA 00:48
     speed_match = re.search(r"\bat\s+([^\s]+(?:/s)?)", line)
     eta_match = re.search(r"\bETA\s+([^\s]+)", line)
     frag_match = re.search(r"\(frag\s+([^)]+)\)", line)
+    total_match = re.search(r"\bof\s+~?\s*([^\s]+)", line)
 
     try:
         percent = float(percent_match.group(1))
@@ -1836,6 +2922,7 @@ def parse_ytdlp_progress_line(line: str) -> Optional[dict[str, Any]]:
         "speed": speed_match.group(1) if speed_match else "",
         "eta": eta_match.group(1) if eta_match else "",
         "frag": frag_match.group(1) if frag_match else "",
+        "total": total_match.group(1) if total_match else "",
         "raw": line,
     }
 
@@ -1845,11 +2932,38 @@ def print_ytdlp_progress_bar(
     speed: str = "",
     eta: str = "",
     frag: str = "",
-) -> None:
+    total: str = "",
+    progress_key: Optional[str] = None,
+    defer_copy: bool = False,
+) -> Optional[tuple[Path, Path, Path]]:
+    if progress_key:
+        extra = []
+        if speed:
+            extra.append(f"speed={speed}")
+        if eta:
+            extra.append(f"ETA={eta}")
+        if frag:
+            extra.append(f"frag={frag}")
+        elif total:
+            extra.append(f"of={total}")
+
+        with _PROGRESS_LOCK:
+            current_stage = (_PROGRESS_STATE.get(progress_key, {}) or {}).get("stage", "")
+
+        if current_stage in {"VIDEO", "AUDIO", "VIDEO-DL", "AUDIO-DL"}:
+            stage = "video" if current_stage in {"VIDEO", "VIDEO-DL"} else "audio" if current_stage in {"AUDIO", "AUDIO-DL"} else current_stage.lower()
+        elif current_stage in {"DOWNLOADED", "MERGE", "POST", "COPY-WAIT", "COPY", "DONE"}:
+            stage = current_stage.lower()
+        else:
+            stage = "downloading"
+
+        update_parallel_progress(progress_key, stage, percent, " ".join(extra), force=False)
+        return
+
     width = 32
     ratio = min(max(percent / 100.0, 0.0), 1.0)
     filled = int(width * ratio)
-    bar = "█" * filled + "░" * (width - filled)
+    bar = PROGRESS_BAR_FILLED * filled + PROGRESS_BAR_EMPTY * (width - filled)
 
     extra = []
     if speed:
@@ -1858,6 +2972,8 @@ def print_ytdlp_progress_bar(
         extra.append(f"ETA={eta}")
     if frag:
         extra.append(f"frag={frag}")
+    elif total:
+        extra.append(f"of={total}")
 
     suffix = " ".join(extra)
     print(f"\r      [{bar}] {percent:6.2f}% {suffix}", end="", flush=True)
@@ -1872,9 +2988,12 @@ def stream_info_from_streams(
 
     def to_int(value: Any) -> Optional[int]:
         try:
-            return int(value)
+            return int(float(value))
         except Exception:
             return None
+
+    def clean_codec(value: Any) -> str:
+        return str(value or "").strip().lower()
 
     return {
         "width": to_int(video.get("width")),
@@ -1882,8 +3001,12 @@ def stream_info_from_streams(
         "video_bitrate": to_int(video.get("bit_rate")),
         "audio_bitrate": to_int(audio.get("bit_rate")),
         "total_bitrate": to_int(fmt.get("bit_rate")),
+        "video_codec": clean_codec(video.get("codec_name")),
+        "audio_codec": clean_codec(audio.get("codec_name")),
+        "audio_channels": to_int(audio.get("channels")) or 0,
+        "has_video": bool(video),
+        "has_audio": bool(audio),
     }
-
 
 def get_stream_info(stream_url: str) -> dict[str, Any]:
     ffprobe = shutil.which("ffprobe")
@@ -1896,7 +3019,10 @@ def get_stream_info(stream_url: str) -> dict[str, Any]:
             "-v",
             "error",
             "-show_entries",
-            "stream=index,codec_type,width,height,bit_rate,avg_frame_rate:format=bit_rate,duration",
+            (
+                "stream=index,codec_type,codec_name,width,height,bit_rate,"
+                "channels,avg_frame_rate:format=bit_rate,duration"
+            ),
             "-of",
             "json",
             stream_url,
@@ -1907,8 +3033,13 @@ def get_stream_info(stream_url: str) -> dict[str, Any]:
     if not data:
         return {}
 
-    return stream_info_from_streams(data.get("streams") or [], data.get("format") or {})
-
+    info = stream_info_from_streams(data.get("streams") or [], data.get("format") or {})
+    try:
+        duration = float((data.get("format") or {}).get("duration") or 0)
+        info["duration"] = duration if duration > 0 else None
+    except Exception:
+        info["duration"] = None
+    return info
 
 def normalize_program_info(program: dict[str, Any]) -> dict[str, Any]:
     info = stream_info_from_streams(program.get("streams") or [], program)
@@ -2104,6 +3235,7 @@ def download_stream_ffmpeg(stream_url: str, output_file: str, quality: str = "be
 
     try:
         print("      Starting ffmpeg download...")
+        raise_if_stopping()
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -2111,6 +3243,7 @@ def download_stream_ffmpeg(stream_url: str, output_file: str, quality: str = "be
             text=True,
             bufsize=1,
         )
+        register_process(process)
 
         assert process.stdout is not None
 
@@ -2159,6 +3292,7 @@ def download_stream_ffmpeg(stream_url: str, output_file: str, quality: str = "be
                     )
 
             return_code = process.wait()
+            unregister_process(process)
 
         except KeyboardInterrupt:
             print("\n      Stopping ffmpeg...")
@@ -2233,23 +3367,121 @@ def format_number(value: Any) -> Optional[float]:
         return None
 
 
+def is_youtube_stream_url(stream_url: str) -> bool:
+    value = (stream_url or "").lower()
+    return "youtube.com/watch" in value or "youtu.be/" in value or "youtube.com/embed/" in value or "youtube-nocookie.com" in value
+
+
+def ytdlp_youtube_selector(quality: str) -> str:
+    """
+    YouTube usually exposes best video and best audio as separate DASH formats.
+    Using plain "best" can select the best pre-merged file, which is often only 720p.
+    """
+    if quality == "worst":
+        return "worstvideo*+worstaudio/worst"
+
+    if quality == "720p":
+        return "bestvideo*[height<=720]+bestaudio/best[height<=720]/best"
+
+    if quality == "1080p":
+        return "bestvideo*[height<=1080]+bestaudio/best[height<=1080]/best"
+
+    return "bestvideo*+bestaudio/best"
+
+
+def selected_youtube_info_from_formats(
+    formats: list[dict[str, Any]],
+    selector: str,
+    quality: str,
+) -> dict[str, Any]:
+    videos: list[tuple[int, int, float, str, dict[str, Any]]] = []
+    audios: list[tuple[float, float, str, dict[str, Any]]] = []
+
+    for fmt in formats:
+        format_id = str(fmt.get("format_id") or "")
+        if not format_id:
+            continue
+
+        vcodec = str(fmt.get("vcodec") or "")
+        acodec = str(fmt.get("acodec") or "")
+
+        has_video = bool(vcodec and vcodec != "none")
+        has_audio = bool(acodec and acodec != "none")
+
+        height = int(format_number(fmt.get("height")) or 0)
+        width = int(format_number(fmt.get("width")) or 0)
+        tbr = format_number(fmt.get("tbr")) or format_number(fmt.get("vbr")) or 0
+        abr = format_number(fmt.get("abr")) or 0
+
+        if has_video:
+            videos.append((height, width, tbr, format_id, fmt))
+
+        if has_audio and not has_video:
+            audios.append((abr, tbr, format_id, fmt))
+
+    target_height: Optional[int] = None
+    if quality in {"720p", "1080p"}:
+        target_height = int(quality.replace("p", ""))
+
+    if quality == "worst":
+        video_pool = videos
+        video_pool.sort(key=lambda item: (item[0], item[1], item[2]))
+    else:
+        video_pool = [item for item in videos if not target_height or item[0] <= target_height] or videos
+        video_pool.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+
+    audios.sort(key=lambda item: (item[0], item[1]), reverse=True)
+
+    selected_video = video_pool[0] if video_pool else (0, 0, 0, "", {})
+    selected_audio = audios[0] if audios else (0, 0, "", {})
+
+    height, width, tbr, video_id, video_fmt = selected_video
+    _, _, audio_id, audio_fmt = selected_audio
+
+    return {
+        "format_selector": selector,
+        "video_id": video_id or "bestvideo",
+        "audio_id": audio_id or "bestaudio",
+        "width": width or video_fmt.get("width"),
+        "height": height or video_fmt.get("height"),
+        "tbr": tbr or video_fmt.get("tbr"),
+        "vcodec": video_fmt.get("vcodec"),
+        "acodec": audio_fmt.get("acodec") or "bestaudio",
+        "source": "youtube",
+    }
+
 def choose_ytdlp_format(
     ytdlp: str,
     stream_url: str,
     quality: str,
 ) -> tuple[list[str], dict[str, Any]]:
     """
-    Return (yt-dlp -f args, selected_info).
+    Select real best VIDEO + AUDIO format for yt-dlp.
 
-    For Kan HLS, forcing "-f best" can fail. Instead, we inspect formats and
-    select the highest video format id explicitly, usually something like:
-    5500+acc-HEB-aac
+    Kan HLS pages work best with explicit format IDs chosen from inspection.
+    YouTube is different: plain "best" often means the best already-merged file,
+    which can be lower quality. For YouTube, force bestvideo+bestaudio.
     """
     data = run_ytdlp_json(ytdlp, stream_url)
+    formats = (data or {}).get("formats") or []
+
+    if is_youtube_stream_url(stream_url):
+        selector = ytdlp_youtube_selector(quality)
+        selected_info = selected_youtube_info_from_formats(formats, selector, quality)
+        if not selected_info:
+            selected_info = {
+                "format_selector": selector,
+                "video_id": "bestvideo",
+                "audio_id": "bestaudio",
+                "source": "youtube",
+            }
+
+        # -S helps yt-dlp prefer higher resolution/fps/bitrate among matching
+        # YouTube DASH formats.
+        return ["-f", selector, "-S", "res,fps,br"], selected_info
+
     if not data:
         return ytdlp_quality_args(quality), {}
-
-    formats = data.get("formats") or []
 
     videos = []
     audios = []
@@ -2261,9 +3493,20 @@ def choose_ytdlp_format(
 
         vcodec = fmt.get("vcodec")
         acodec = fmt.get("acodec")
+        ext = str(fmt.get("ext") or "").lower()
+        resolution = str(fmt.get("resolution") or "").lower()
+        note = str(fmt.get("format_note") or "").lower()
 
-        has_video = vcodec and vcodec != "none"
-        has_audio = acodec and acodec != "none"
+        has_video = bool(vcodec and vcodec != "none")
+        has_audio = bool(acodec and acodec != "none")
+        looks_audio = (
+            has_audio
+            or "aac" in format_id.lower()
+            or "audio" in format_id.lower()
+            or "audio" in resolution
+            or "audio" in note
+            or ext in {"m4a", "aac"}
+        )
 
         height = int(format_number(fmt.get("height")) or 0)
         width = int(format_number(fmt.get("width")) or 0)
@@ -2273,7 +3516,7 @@ def choose_ytdlp_format(
         if has_video:
             videos.append((height, width, tbr, format_id, fmt, has_audio))
 
-        if has_audio and not has_video:
+        if looks_audio and not has_video:
             audios.append((abr, tbr, format_id, fmt))
 
     if not videos:
@@ -2284,8 +3527,7 @@ def choose_ytdlp_format(
         selected_video = videos[0]
     elif quality in {"720p", "1080p"}:
         target = int(quality.replace("p", ""))
-        at_or_below = [item for item in videos if item[0] <= target]
-        pool = at_or_below or videos
+        pool = [item for item in videos if item[0] <= target] or videos
         pool.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
         selected_video = pool[0]
     else:
@@ -2297,9 +3539,14 @@ def choose_ytdlp_format(
     audio_id = ""
     audio_fmt: dict[str, Any] = {}
 
-    if not video_has_audio and audios:
-        audios.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        _, _, audio_id, audio_fmt = audios[0]
+    if not video_has_audio:
+        if audios:
+            preferred = [item for item in audios if "heb" in item[2].lower() or "aac" in item[2].lower()]
+            pool = preferred or audios
+            pool.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            _, _, audio_id, audio_fmt = pool[0]
+        else:
+            audio_id = "bestaudio"
 
     selector = f"{video_id}+{audio_id}" if audio_id else video_id
 
@@ -2311,11 +3558,10 @@ def choose_ytdlp_format(
         "height": height or video_fmt.get("height"),
         "tbr": tbr or video_fmt.get("tbr"),
         "vcodec": video_fmt.get("vcodec"),
-        "acodec": audio_fmt.get("acodec") or video_fmt.get("acodec"),
+        "acodec": audio_fmt.get("acodec") or video_fmt.get("acodec") or ("audio" if audio_id else ""),
     }
 
     return ["-f", selector], selected_info
-
 
 def print_ytdlp_selected_format(info: dict[str, Any]) -> None:
     if not info:
@@ -2326,11 +3572,14 @@ def print_ytdlp_selected_format(info: dict[str, Any]) -> None:
     height = info.get("height")
     tbr = info.get("tbr")
     selector = info.get("format_selector") or ""
+    audio_id = info.get("audio_id") or ""
 
     resolution = f"{width}x{height}" if width and height else "unknown resolution"
     bitrate = f"{float(tbr):.0f} kb/s" if tbr else "unknown bitrate"
+    audio_text = f", audio={audio_id}" if audio_id else ", audio=included/unknown"
+    source_text = f", source={info.get('source')}" if info.get("source") else ""
 
-    print(f"      Selected quality: {resolution}, {bitrate}, format={selector}")
+    print(f"      Selected quality: {resolution}, {bitrate}, format={selector}{audio_text}{source_text}")
 
 def ytdlp_quality_args(quality: str) -> list[str]:
     """
@@ -2354,36 +3603,325 @@ def ytdlp_quality_args(quality: str) -> list[str]:
 
     return []
 
+
+def is_network_volume_path(path: str) -> bool:
+    """Treat macOS /Volumes paths as SMB/NAS/external output."""
+    try:
+        resolved = str(Path(path).expanduser())
+    except Exception:
+        resolved = path
+    return resolved.startswith("/Volumes/")
+
+
+def build_local_download_path(
+    output_file: str,
+    local_temp_root: Optional[str] = None,
+) -> tuple[Path, Path]:
+    """
+    Build local output path for yt-dlp.
+
+    Example:
+    final: /Volumes/Data/tv/show/s1/S01E03.mkv
+    temp:  /tmp/kan_downloads/S01E03/S01E03.mkv
+    """
+    final_path = Path(output_file)
+    base_root = Path(local_temp_root or tempfile.gettempdir()).expanduser()
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", final_path.stem).strip("_") or "download"
+    work_dir = base_root / "kan_downloads" / safe_stem
+    work_dir.mkdir(parents=True, exist_ok=True)
+    return work_dir / final_path.name, work_dir
+
+
+
+def format_bytes(value: int) -> str:
+    if value >= 1024 * 1024 * 1024:
+        return f"{value / (1024 * 1024 * 1024):.2f}GiB"
+    if value >= 1024 * 1024:
+        return f"{value / (1024 * 1024):.1f}MiB"
+    if value >= 1024:
+        return f"{value / 1024:.1f}KiB"
+    return f"{value}B"
+
+
+def print_copy_progress(copied: int, total: int, progress_key: Optional[str] = None) -> None:
+    width = 32
+    ratio = min(max(copied / total, 0.0), 1.0) if total > 0 else 0.0
+
+    if progress_key:
+        update_parallel_progress(
+            progress_key,
+            "copying",
+            ratio * 100,
+            f"{format_bytes(copied)}/{format_bytes(total)}",
+        )
+        return
+
+    filled = int(width * ratio)
+    bar = PROGRESS_BAR_FILLED * filled + PROGRESS_BAR_EMPTY * (width - filled)
+    print(
+        f"\r      Copying to SMB: [{bar}] {ratio * 100:6.2f}% "
+        f"{format_bytes(copied)}/{format_bytes(total)}",
+        end="",
+        flush=True,
+    )
+
+def local_temp_file_is_ready(path: Path) -> bool:
+    """
+    True when a final local temp media file already exists from a previous run.
+
+    Do not treat yt-dlp partial files as ready. This is intentionally simple:
+    a non-empty final .mkv/.mp4/.ts in the local temp folder means we can skip
+    yt-dlp and copy it to the destination.
+    """
+    if not path.exists() or not path.is_file():
+        return False
+
+    if path.stat().st_size <= 0:
+        return False
+
+    lower = path.name.lower()
+    if ".part" in lower or lower.endswith(".ytdl"):
+        return False
+
+    return path.suffix.lower() in {".mkv", ".mp4", ".ts"}
+
+def move_completed_file_to_destination(
+    local_file: Path,
+    destination_file: Path,
+    progress_key: Optional[str] = None,
+) -> None:
+    """
+    Copy completed local file to SMB destination.
+
+    Important:
+    - Do NOT use macOS built-in rsync with --info=progress2. The built-in rsync
+      is often old and exits immediately with an unsupported-option error.
+    - Use an external cp process instead. Python polls the temporary file size
+      to update progress.
+    - Copy to a unique *.copying.<pid>.<thread>.tmp file first, then replace
+      the final file only after a full successful copy.
+    """
+    destination_file.parent.mkdir(parents=True, exist_ok=True)
+
+    unique_id = f"{os.getpid()}.{threading.get_ident()}.{int(time.time() * 1000)}"
+    temp_destination = destination_file.with_name(
+        f"{destination_file.stem}.copying.{unique_id}{destination_file.suffix}"
+    )
+
+    total_size = local_file.stat().st_size
+    copied = 0
+
+    if progress_key:
+        update_parallel_progress(
+            progress_key,
+            "copying",
+            0.0,
+            f"copy {format_bytes(total_size)}",
+            force=True,
+        )
+    else:
+        print(f"      Copying completed file to SMB destination ({format_bytes(total_size)})...")
+
+    cp = shutil.which("cp") or "/bin/cp"
+    cmd = [cp, str(local_file), str(temp_destination)]
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    register_process(process)
+
+    stderr_text = ""
+
+    try:
+        last_stat_time = 0.0
+
+        while True:
+            raise_if_stopping()
+
+            now = time.monotonic()
+            if now - last_stat_time > 0.5:
+                last_stat_time = now
+
+                if temp_destination.exists():
+                    copied = temp_destination.stat().st_size
+                    percent = min(100.0, (copied / total_size) * 100.0) if total_size else 0.0
+
+                    if progress_key:
+                        update_parallel_progress(
+                            progress_key,
+                            "copying",
+                            percent,
+                            f"{format_bytes(copied)}/{format_bytes(total_size)}",
+                        )
+
+            if process.poll() is not None:
+                break
+
+            time.sleep(0.1)
+
+        _, stderr_text = process.communicate(timeout=2)
+        unregister_process(process)
+
+        if process.returncode != 0:
+            error = (stderr_text or "").strip()
+            if error:
+                raise RuntimeError(f"SMB copy failed with exit code {process.returncode}: {error}")
+            raise RuntimeError(f"SMB copy failed with exit code {process.returncode}")
+
+        if not temp_destination.exists():
+            raise RuntimeError("SMB copy finished but temp copy file is missing")
+
+        copied_size = temp_destination.stat().st_size
+        if copied_size != total_size:
+            raise RuntimeError(
+                f"SMB copy size mismatch: copied {copied_size}, expected {total_size}"
+            )
+
+        # Replace final only after complete copy. This is atomic enough for the SMB mount
+        # and prevents partial files from looking complete.
+        temp_destination.replace(destination_file)
+
+        if progress_key:
+            update_parallel_progress(progress_key, "done", 100.0, "copied", force=True)
+        else:
+            print(f"      Copy complete: {destination_file}")
+
+    except KeyboardInterrupt:
+        try:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+        except Exception:
+            pass
+
+        unregister_process(process)
+
+        try:
+            temp_destination.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        raise
+
+    except Exception:
+        try:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+        except Exception:
+            pass
+
+        unregister_process(process)
+
+        try:
+            temp_destination.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        raise
+
+def cleanup_local_work_dir(work_dir: Path) -> None:
+    """Clean local temp folder only after successful copy to destination."""
+    try:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    except Exception:
+        pass
+
 def download_stream_ytdlp(
     stream_url: str,
     output_file: str,
     quality: str = "best",
     stall_timeout: int = 180,
     retries: int = 3,
-) -> None:
+    local_temp_root: Optional[str] = None,
+    progress_key: Optional[str] = None,
+    defer_copy: bool = False,
+) -> Optional[tuple[Path, Path, Path]]:
     """
-    Download HLS with real resume support using yt-dlp.
+    Download HLS with resume/retry and VIDEO + AUDIO selection.
 
-    - Chooses the real best format by inspecting yt-dlp formats.
-    - Keeps partial files so retry/resume continues from the previous point.
-    - Shows a clean single-line progress bar.
-    - Suppresses noisy generic/redirect/info lines.
+    When defer_copy=True and the destination is /Volumes/...:
+    - download + merge to local temp only
+    - return (local_file, destination_file, work_dir)
+    - caller schedules SMB copy separately, so copy does not block download slots
     """
     ytdlp = shutil.which("yt-dlp")
 
     if not ytdlp:
-        print("      yt-dlp not found, falling back to ffmpeg.")
-        return download_stream_ffmpeg(stream_url, output_file, quality)
+        quiet_print("      yt-dlp not found, falling back to ffmpeg.")
+        download_stream_ffmpeg(stream_url, output_file, quality)
+        return None
 
-    output_path = Path(output_file)
-    output_format = output_path.suffix.lower().lstrip(".") or "mkv"
+    destination_path = Path(output_file)
+    use_local_work_dir = is_network_volume_path(str(destination_path))
+
+    if use_local_work_dir:
+        output_path, work_dir = build_local_download_path(
+            str(destination_path),
+            local_temp_root=local_temp_root,
+        )
+        if progress_key:
+            update_parallel_progress(
+                progress_key,
+                "resolving",
+                0.0,
+                f"temp={work_dir.name} → {destination_path.parent.name}",
+                force=True,
+            )
+        else:
+            print(f"      Temp download folder: {work_dir}")
+            print(f"      Final destination: {destination_path}")
+    else:
+        output_path = destination_path
+        work_dir = output_path.parent
+        if progress_key:
+            update_parallel_progress(
+                progress_key,
+                "resolving",
+                0.0,
+                f"direct={output_path.parent}",
+                force=True,
+            )
+
+    output_format = destination_path.suffix.lower().lstrip(".") or "mkv"
+
+    if local_temp_file_is_ready(output_path):
+        if progress_key:
+            update_parallel_progress(progress_key, "ready_copy" if use_local_work_dir else "done", 100.0, "existing temp file", force=True)
+        else:
+            print(f"      Found completed local temp file, skipping download: {output_path}")
+            final_info = get_stream_info(str(output_path))
+            print_quality_info("existing local temp file", final_info)
+
+        if use_local_work_dir:
+            if defer_copy:
+                return output_path, destination_path, work_dir
+            move_completed_file_to_destination(output_path, destination_path, progress_key=progress_key)
+            cleanup_local_work_dir(work_dir)
+        return None
 
     format_args, selected_info = choose_ytdlp_format(ytdlp, stream_url, quality)
-    print_ytdlp_selected_format(selected_info)
 
-    # Use a base output template. yt-dlp may create temporary files like:
-    # S01E03.mp4.part / S01E03.f5500.mp4.part.
-    # After successful completion, we normalize the final media file to output_path.
+    if progress_key:
+        res = ""
+        if selected_info.get("width") and selected_info.get("height"):
+            res = f"{selected_info.get('width')}x{selected_info.get('height')}"
+        selector = selected_info.get("format_selector") or ""
+        update_parallel_progress(progress_key, "downloading", 0.0, f"{res} {selector}".strip(), force=True)
+    else:
+        print_ytdlp_selected_format(selected_info)
+
     temp_output_template = str(output_path.with_suffix("")) + ".%(ext)s"
 
     cmd = [
@@ -2394,6 +3932,8 @@ def download_stream_ytdlp(
         "--no-warnings",
         "--no-playlist",
         "--hls-use-mpegts",
+        "--concurrent-fragments",
+        "6",
         "--socket-timeout",
         str(max(30, stall_timeout)),
         "--retries",
@@ -2414,11 +3954,20 @@ def download_stream_ytdlp(
     last_error: Optional[Exception] = None
 
     for attempt in range(1, retries + 2):
+        raise_if_stopping()
+
         if attempt > 1:
-            print(f"\n      Retry {attempt - 1}/{retries}; resuming partial download...")
+            if progress_key:
+                update_parallel_progress(progress_key, "retry", None, f"download retry {attempt - 1}/{retries}", force=True)
+            else:
+                print(f"\n      Retry {attempt - 1}/{retries}; resuming partial download...")
 
-        print("      Starting yt-dlp download/resume...")
+        if progress_key:
+            update_parallel_progress(progress_key, "downloading", None, "starting", force=True)
+        else:
+            print("      Starting yt-dlp download/resume...")
 
+        raise_if_stopping()
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -2426,82 +3975,145 @@ def download_stream_ytdlp(
             text=True,
             bufsize=1,
         )
+        register_process(process)
 
         last_output_time = time.monotonic()
         last_progress_time = time.monotonic()
         last_percent = -1.0
         last_frag = ""
+        reached_100_time: Optional[float] = None
+        media_phase = "video"
+        completed_media_parts = 0
 
         try:
             assert process.stdout is not None
 
             while True:
+                raise_if_stopping()
                 ready, _, _ = select.select([process.stdout], [], [], 1.0)
 
                 if ready:
                     line = process.stdout.readline()
-                    if line:
-                        line = line.rstrip()
-                        last_output_time = time.monotonic()
 
-                        progress = parse_ytdlp_progress_line(line)
+                    if line == "":
+                        return_code = process.poll()
+                        if return_code is None:
+                            try:
+                                return_code = process.wait(timeout=1)
+                            except subprocess.TimeoutExpired:
+                                continue
+                        break
 
-                        if progress:
-                            percent = float(progress["percent"])
-                            frag = progress.get("frag") or ""
+                    line = line.rstrip()
+                    last_output_time = time.monotonic()
+                    progress = parse_ytdlp_progress_line(line)
 
-                            if percent > last_percent or (frag and frag != last_frag):
-                                last_progress_time = time.monotonic()
-                                last_percent = max(last_percent, percent)
-                                last_frag = frag
+                    if progress:
+                        percent = float(progress["percent"])
+                        frag = progress.get("frag") or ""
 
-                            print_ytdlp_progress_bar(
-                                percent=percent,
-                                speed=progress.get("speed") or "",
-                                eta=progress.get("eta") or "",
-                                frag=frag,
-                            )
-                        else:
-                            # Keep only important messages, hide noisy:
-                            # [generic], [redirect], [info], [hlsnative], etc.
-                            lower = line.lower()
-                            if "error:" in lower or line.startswith("ERROR"):
+                        if percent >= 100.0:
+                            reached_100_time = time.monotonic()
+                            if last_percent < 100.0:
+                                completed_media_parts += 1
+
+                            if progress_key:
+                                if media_phase == "video":
+                                    update_parallel_progress(progress_key, "video", 100.0, "video downloaded", force=True)
+                                elif media_phase == "audio":
+                                    update_parallel_progress(progress_key, "audio", 100.0, "audio downloaded", force=True)
+                                else:
+                                    update_parallel_progress(progress_key, "downloaded", 100.0, "media downloaded", force=True)
+                            else:
+                                print("\n      Media stream complete. Waiting for next stream or post-processing...")
+
+                        if percent > last_percent or (frag and frag != last_frag):
+                            last_progress_time = time.monotonic()
+                            last_percent = max(last_percent, percent)
+                            last_frag = frag
+
+                        print_ytdlp_progress_bar(
+                            percent=percent,
+                            speed=progress.get("speed") or "",
+                            eta=progress.get("eta") or "",
+                            frag=frag,
+                            total=progress.get("total") or "",
+                            progress_key=progress_key,
+                        )
+                    else:
+                        lower = line.lower()
+
+                        if "[merger]" in lower or "merging formats" in lower:
+                            media_phase = "merge"
+                            if progress_key:
+                                update_parallel_progress(progress_key, "merging", 100.0, "merge video+audio", force=True)
+                            else:
                                 print(f"\n      {line}")
-                            elif "warning:" in lower:
-                                # Hide the noisy native-HLS live warning. It is common for Kan VOD.
-                                if "live hls streams are not supported" not in lower:
-                                    print(f"\n      {line}")
+                            last_progress_time = time.monotonic()
+
+                        elif "[ffmpeg]" in lower or "[fixup" in lower or "[metadata]" in lower or "post-process" in lower or "postprocessing" in lower:
+                            media_phase = "postprocess"
+                            if progress_key:
+                                update_parallel_progress(progress_key, "postprocess", 100.0, "post-processing", force=True)
+                            elif "warning:" not in lower:
+                                print(f"\n      {line}")
+                            last_progress_time = time.monotonic()
+
+                        elif "[download]" in lower and ("destination:" in lower or "has already been downloaded" in lower):
+                            if completed_media_parts >= 1 or ".aac" in lower or ".facc" in lower or "audio" in lower:
+                                media_phase = "audio"
+                                label = "audio stream"
+                            else:
+                                media_phase = "video"
+                                label = "video stream"
+
+                            last_percent = -1.0
+                            last_frag = ""
+
+                            if progress_key:
+                                update_parallel_progress(progress_key, media_phase, 0.0, f"starting {label}", force=True)
+                            else:
+                                print(f"\n      {line}")
+
+                        elif "error:" in lower or line.startswith("ERROR"):
+                            if progress_key:
+                                update_parallel_progress(progress_key, "failed", 100.0, line[:100], force=True)
+                            else:
+                                print(f"\n      {line}")
+
+                        elif not progress_key and "warning:" in lower and "live hls streams are not supported" not in lower:
+                            print(f"\n      {line}")
 
                     continue
 
                 return_code = process.poll()
-
                 if return_code is not None:
                     break
 
                 now = time.monotonic()
-                no_output = now - last_output_time > stall_timeout
-                no_progress = now - last_progress_time > stall_timeout
+                effective_timeout = max(stall_timeout, 600) if reached_100_time else stall_timeout
 
-                if no_output or no_progress:
-                    print(
-                        f"\n      No real yt-dlp progress for {stall_timeout}s. "
-                        "Stopping and retrying with resume..."
-                    )
-
+                if (now - last_output_time > effective_timeout) or (now - last_progress_time > effective_timeout):
+                    if progress_key:
+                        update_parallel_progress(progress_key, "retry", None, f"stalled {effective_timeout}s", force=True)
+                    else:
+                        print(
+                            f"\n      No real yt-dlp progress for {effective_timeout}s. "
+                            "Stopping and retrying with resume..."
+                        )
                     process.terminate()
-
                     try:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
+                    unregister_process(process)
+                    raise TimeoutError(f"yt-dlp stalled for {effective_timeout} seconds")
 
-                    raise TimeoutError(
-                        f"yt-dlp stalled for {stall_timeout} seconds"
-                    )
+            if not progress_key:
+                print()
 
-            print()
+            unregister_process(process)
 
             if return_code == 0:
                 break
@@ -2509,33 +4121,27 @@ def download_stream_ytdlp(
             last_error = subprocess.CalledProcessError(return_code, cmd)
 
         except KeyboardInterrupt:
-            print("\n      Stopping yt-dlp. Partial file is kept; next run will resume from it.")
+            if not progress_key:
+                print("\n      Stopping yt-dlp. Local partial file is kept; next run will resume from it.")
             process.terminate()
-
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
-
+            unregister_process(process)
             raise
 
         except Exception as ex:
+            unregister_process(process)
             last_error = ex
-
-            # Keep yt-dlp partial files. They are needed for resume.
             if attempt <= retries:
                 continue
-
-            raise RuntimeError(
-                f"yt-dlp failed after {attempt} attempt(s): {last_error}"
-            ) from last_error
+            raise RuntimeError(f"yt-dlp failed after {attempt} attempt(s): {last_error}") from last_error
 
     else:
         raise RuntimeError(f"yt-dlp failed: {last_error}")
 
-    # yt-dlp may leave the final file as .mp4/.mkv/.ts depending on stream/merge behavior.
-    # Normalize the largest completed media file with the same stem to output_path.
     if not output_path.exists():
         stem = output_path.with_suffix("")
         candidates = list(stem.parent.glob(stem.name + ".*"))
@@ -2555,9 +4161,21 @@ def download_stream_ytdlp(
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("yt-dlp finished but output file is missing or empty")
 
-    final_info = get_stream_info(str(output_path))
-    print_quality_info("final file", final_info)
+    if progress_key:
+        update_parallel_progress(progress_key, "ready_copy" if use_local_work_dir else "checking", 100.0, "download complete", force=True)
+    else:
+        final_info = get_stream_info(str(output_path))
+        print_quality_info("final file", final_info)
 
+    if use_local_work_dir:
+        if defer_copy:
+            return output_path, destination_path, work_dir
+        move_completed_file_to_destination(output_path, destination_path, progress_key=progress_key)
+        cleanup_local_work_dir(work_dir)
+        if not progress_key:
+            print("      Copied to destination and cleaned local temp files.")
+
+    return None
 def download_stream(
     stream_url: str,
     output_file: str,
@@ -2565,7 +4183,10 @@ def download_stream(
     downloader: str = "yt-dlp",
     stall_timeout: int = 180,
     retries: int = 3,
-) -> None:
+    local_temp_root: Optional[str] = None,
+    progress_key: Optional[str] = None,
+    defer_copy: bool = False,
+) -> Optional[tuple[Path, Path, Path]]:
     if downloader == "yt-dlp":
         return download_stream_ytdlp(
             stream_url,
@@ -2573,14 +4194,65 @@ def download_stream(
             quality,
             stall_timeout=stall_timeout,
             retries=retries,
+            local_temp_root=local_temp_root,
+            progress_key=progress_key,
+            defer_copy=defer_copy,
         )
 
     if downloader == "ffmpeg":
-        return download_stream_ffmpeg(stream_url, output_file, quality)
+        download_stream_ffmpeg(stream_url, output_file, quality)
+        return None
 
     raise ValueError(f"Unsupported downloader: {downloader}")
 
+def print_download_summary_report(program_title: str, results: list[dict[str, Any]], total_count: int) -> None:
+    ok_results = [r for r in results if r.get("ok")]
+    failed_results = [r for r in results if not r.get("ok")]
+
+    downloaded = sum(1 for r in ok_results if r.get("status") == "done")
+    skipped = sum(1 for r in ok_results if r.get("status") == "skipped")
+    other_ok = len(ok_results) - downloaded - skipped
+
+    print()
+    print("Download summary")
+    print(f"  Program: {program_title}")
+    print(f"  Total planned: {total_count}")
+    print(f"  Downloaded/copied: {downloaded}")
+    print(f"  Skipped existing complete: {skipped}")
+    if other_ok:
+        print(f"  Other OK: {other_ok}")
+    print(f"  Failed after retries: {len(failed_results)}")
+
+    if failed_results:
+        print()
+        print("Failed items:")
+        for result in failed_results:
+            key = result.get("key") or "unknown"
+            message = result.get("message") or "failed"
+            print(f"  - {key}: {message}")
+
+            context = result.get("context") or {}
+            if context:
+                print("    Context:")
+                for ctx_key, ctx_value in context.items():
+                    print(f"      {ctx_key}: {ctx_value!r}")
+
+            trace = result.get("traceback") or ""
+            if trace:
+                print("    Traceback:")
+                for line in trace.splitlines():
+                    print(f"      {line}")
+
 def command_download_program(args: argparse.Namespace) -> None:
+    install_signal_handlers()
+
+    global _SHUTDOWN_STARTED, _FORCE_EXIT_ON_INTERRUPT, _PROGRESS_MODE, _PROGRESS_DISPLAY_SEQUENCE
+    _SHUTDOWN_STARTED = False
+    _FORCE_EXIT_ON_INTERRUPT = False
+
+    _PROGRESS_MODE = getattr(args, "progress_mode", "table")
+    _STOP_EVENT.clear()
+
     programs = filter_programs(
         fetch_all_programs(),
         titles=args.program_title,
@@ -2589,111 +4261,396 @@ def command_download_program(args: argparse.Namespace) -> None:
     )
 
     if not programs:
-        print("No programs found.")
+        print("No matching program found")
         return
 
-    os.makedirs(args.output, exist_ok=True)
+    extension = args.format.lower().lstrip(".")
+    parallel_count = max(1, int(getattr(args, "parallel_downloads", 1) or 1))
+    copy_count = max(1, int(getattr(args, "parallel_copies", 1) or 1))
+    max_job_retries = max(0, int(getattr(args, "job_retries", 2) or 0))
 
-    for program in programs:
-        print(f"Program: {program.title} ({program.id}, mainid={program.mainid})")
+    try:
+        for program in programs:
+            raise_if_stopping()
+            print(f"Program: {program.title} ({program.id}, mainid={program.mainid})")
 
-        try:
             seasons = parse_seasons(program)
-        except Exception as ex:
-            print(f"  Failed to parse seasons: {ex}")
-            continue
+            special_episode_counter = 0
+            planned_episodes: list[dict[str, Any]] = []
 
-        for season in seasons:
-            season_num = season.season_number or 1
+            # Build one queue for the whole series first.
+            # This is important: downloads should not wait for a whole season to finish.
+            # If parallel-downloads=4 and season 1 has only 3 episodes, the 4th slot
+            # should immediately start the first episode of season 2.
+            for season in seasons:
+                raise_if_stopping()
+                real_season_num = season.season_number or 1
 
-            if args.season and season_num != args.season:
-                continue
-
-            season_folder = os.path.join(args.output, f"s{season_num}")
-            os.makedirs(season_folder, exist_ok=True)
-
-            print(f"  Season: s{season_num} -> {season.url}")
-
-            try:
+                print(f"  Season: s{real_season_num} -> {season.url}")
                 episodes = parse_episodes_from_page(program, season)
-            except Exception as ex:
-                print(f"    Failed to parse episodes: {ex}")
-                continue
 
-            if args.limit_episodes:
-                episodes = episodes[: args.limit_episodes]
+                if args.limit_episodes:
+                    episodes = episodes[: args.limit_episodes]
 
-            for idx, episode in enumerate(episodes, start=1):
-                filename = f"S{season_num:02d}E{idx:02d}.{args.format}"
-                output_file = os.path.join(season_folder, filename)
-
-                existing_file = episode_file_exists(
-                    season_folder,
-                    season_num,
-                    idx,
-                    args.format,
+                season_plan, special_episode_counter = build_episode_plan(
+                    episodes=episodes,
+                    season=season,
+                    real_season_num=real_season_num,
+                    output_root=args.output,
+                    extension=extension,
+                    args=args,
+                    special_counter_start=special_episode_counter,
                 )
 
-                print(f"    Resolving stream: {filename} | {episode.title}")
+                print_episode_plan_summary(season_plan)
+                planned_episodes.extend(season_plan)
 
-                stream_url = episode.stream_url
+            if not planned_episodes:
+                print("  No episodes found.")
+                continue
 
-                if not stream_url:
-                    stream_url, _ = resolve_episode_stream(
-                        episode.play_url or episode.url,
-                        raise_on_error=False,
-                    )
+            for order, item in enumerate(planned_episodes, start=1):
+                item["global_order"] = order
+                os.makedirs(item["target_folder"], exist_ok=True)
 
-                if not stream_url:
-                    print(f"    No stream found: {episode.title}")
-                    continue
+            print(f"  Total queued episodes across all seasons: {len(planned_episodes)}")
 
-                if existing_file:
-                    print(f"    Checking existing file duration: {existing_file}")
-                    is_complete, file_duration, source_duration = is_existing_file_complete(
-                        existing_file=existing_file,
-                        stream_url=stream_url,
-                        min_ratio=args.verify_ratio,
-                    )
+            if getattr(args, "dry_run", False):
+                continue
 
-                    if is_complete:
+            if parallel_count <= 1:
+                set_parallel_progress_enabled(False)
+
+                for item in planned_episodes:
+                    episode = item["episode"]
+                    target_season_num = item["target_season_num"]
+                    target_episode_num = item["target_episode_num"]
+                    target_folder = item["target_folder"]
+                    output_file = os.path.join(target_folder, item["key"])
+
+                    raise_if_stopping()
+
+                    if item["is_special"]:
                         print(
-                            "    Exists and complete, skipping: "
-                            f"{format_time(file_duration)} / {format_time(source_duration)}"
+                            f"    Resolving special: {Path(output_file).name} | "
+                            f"{episode.title} (from s{item['source_season_num']}, reason={item['special_reason']})"
                         )
+                    else:
+                        print(f"    Resolving stream: {Path(output_file).name} | {episode.title}")
+
+                    try:
+                        stream_url = episode.stream_url
+                        if not stream_url:
+                            stream_url, _ = resolve_episode_stream(
+                                episode.play_url or episode.url,
+                                raise_on_error=True,
+                            )
+
+                        existing_file = episode_file_exists(
+                            folder=target_folder,
+                            season_num=target_season_num,
+                            episode_num=target_episode_num,
+                            extension=extension,
+                        )
+
+                        if existing_file:
+                            print(f"    Checking existing file duration: {existing_file}")
+                            is_complete, file_duration, source_duration = is_existing_file_complete(
+                                existing_file,
+                                stream_url,
+                                min_ratio=getattr(args, "min_duration_ratio", 0.95),
+                                quality=getattr(args, "quality", "best"),
+                                min_quality_ratio=getattr(args, "min_quality_ratio", 0.95),
+                                check_quality=not getattr(args, "skip_quality_check", False),
+                            )
+
+                            if is_complete:
+                                print(
+                                    f"    Exists and complete, skipping: "
+                                    f"{format_time(file_duration)} / {format_time(source_duration)}"
+                                )
+                                continue
+
+                        print(f"    Downloading: {output_file} using {args.downloader}")
+                        download_stream(
+                            stream_url=stream_url,
+                            output_file=output_file,
+                            quality=args.quality,
+                            downloader=args.downloader,
+                            stall_timeout=args.stall_timeout,
+                            retries=args.retries,
+                            local_temp_root=args.local_temp,
+                        )
+
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as ex:
+                        print(f"    Failed: {episode.title} -> {ex}")
+
+                continue
+
+            set_parallel_progress_enabled(True)
+            _PROGRESS_STATE.clear()
+            _PROGRESS_DISPLAY_SEQUENCE = 0
+
+            print(f"  Parallel downloads: {parallel_count}; SMB copies: {copy_count}")
+            print("  Queue mode: whole series, not season-by-season")
+
+            pending = deque((item, 0) for item in planned_episodes)
+            retry_queue = deque()
+            active_downloads: dict[Any, tuple[dict[str, Any], int]] = {}
+            active_copies: dict[Any, tuple[dict[str, Any], int]] = {}
+            copy_queue = deque()
+            results: list[dict[str, Any]] = []
+
+            order_map = {id(item): idx for idx, item in enumerate(planned_episodes, start=1)}
+
+            with _PROGRESS_LOCK:
+                for order, item in enumerate(planned_episodes, start=1):
+                    detail = item["detail"]
+                    if item["is_special"]:
+                        detail = f"SPECIAL → s00 ({item['special_reason']}) | {item['episode'].title}"
+
+                    _PROGRESS_STATE[item["key"]] = {
+                        "stage": "WAIT",
+                        "percent": 0.0,
+                        "detail": detail,
+                        "order": order,
+                    }
+                render_parallel_progress_locked(force=True)
+
+            download_executor = ThreadPoolExecutor(max_workers=parallel_count, thread_name_prefix="kan-download")
+            copy_executor = ThreadPoolExecutor(max_workers=copy_count, thread_name_prefix="kan-copy")
+
+            def plan_order(item: dict[str, Any]) -> int:
+                return order_map.get(id(item), 999999)
+
+            def submit_downloads() -> None:
+                while (
+                    not _STOP_EVENT.is_set()
+                    and (pending or retry_queue)
+                    and len(active_downloads) < parallel_count
+                ):
+                    # New episodes go first. Failed episodes are retried after the
+                    # current series queue has been walked through once.
+                    if pending:
+                        item, attempt = pending.popleft()
+                    else:
+                        item, attempt = retry_queue.popleft()
+
+                    key = item["key"]
+                    order = plan_order(item)
+                    detail = "starting" if attempt == 0 else f"retry {attempt}/{max_job_retries}"
+                    if item["is_special"]:
+                        detail = f"{detail}; SPECIAL from S{item['source_season_num']:02d}"
+
+                    update_parallel_progress(
+                        key,
+                        "queued" if attempt == 0 else "retry",
+                        0.0,
+                        detail,
+                        order=order,
+                        force=True,
+                    )
+                    future = download_executor.submit(
+                        download_one_episode_job,
+                        item["episode"],
+                        item["target_folder"],
+                        item["target_season_num"],
+                        item["target_episode_num"],
+                        extension,
+                        args,
+                    )
+                    active_downloads[future] = (item, attempt)
+
+            def submit_copies() -> None:
+                while (
+                    not _STOP_EVENT.is_set()
+                    and copy_queue
+                    and len(active_copies) < copy_count
+                ):
+                    result = copy_queue.popleft()
+                    item = result["plan_item"]
+                    key = result["key"]
+                    order = plan_order(item)
+                    update_parallel_progress(
+                        key,
+                        "copying",
+                        0.0,
+                        "copying to SMB",
+                        order=order,
+                        force=True,
+                    )
+                    future = copy_executor.submit(
+                        copy_one_episode_job,
+                        key,
+                        result["copy_info"],
+                        item["target_episode_num"],
+                    )
+                    active_copies[future] = (item, result.get("attempt", 0))
+
+            def retry_or_fail(
+                item: dict[str, Any],
+                attempt: int,
+                failure: Any,
+            ) -> None:
+                key = item["key"]
+                order = plan_order(item)
+
+                if isinstance(failure, dict):
+                    message = str(failure.get("message") or "failed")
+                else:
+                    message = str(failure or "failed")
+
+                if attempt < max_job_retries and not _STOP_EVENT.is_set():
+                    next_attempt = attempt + 1
+                    update_parallel_progress(
+                        key,
+                        "retry",
+                        0.0,
+                        f"queued for retry at end {next_attempt}/{max_job_retries}: {message[:55]}",
+                        order=order,
+                        force=True,
+                    )
+                    item["last_failure"] = failure
+                    retry_queue.append((item, next_attempt))
+                else:
+                    update_parallel_progress(
+                        key,
+                        "failed",
+                        100.0,
+                        message[:120],
+                        order=order,
+                        force=True,
+                    )
+
+                    if isinstance(failure, dict):
+                        failure_result = dict(failure)
+                        failure_result["ok"] = False
+                        failure_result["status"] = "failed"
+                        failure_result["key"] = key
+                        failure_result["attempts"] = attempt + 1
+                    else:
+                        failure_result = {
+                            "ok": False,
+                            "status": "failed",
+                            "key": key,
+                            "message": message,
+                            "attempts": attempt + 1,
+                        }
+
+                    results.append(failure_result)
+
+            try:
+                submit_downloads()
+
+                while pending or retry_queue or active_downloads or copy_queue or active_copies:
+                    raise_if_stopping()
+
+                    all_futures = list(active_downloads.keys()) + list(active_copies.keys())
+                    if not all_futures:
+                        submit_downloads()
+                        submit_copies()
+                        time.sleep(0.1)
                         continue
 
-                    print(
-                        "    Existing file is incomplete, re-downloading/resuming: "
-                        f"{format_time(file_duration)} / {format_time(source_duration)}"
-                    )
+                    done, _ = wait(all_futures, timeout=0.5, return_when=FIRST_COMPLETED)
 
-                    # Remove broken final file. yt-dlp .part files are kept separately.
-                    try:
-                        os.remove(existing_file)
-                    except OSError:
-                        pass
+                    for future in done:
+                        if future in active_downloads:
+                            item, attempt = active_downloads.pop(future)
+                            result = future.result()
+                            result["plan_item"] = item
 
-                print(f"    Downloading: {output_file} using {args.downloader}")
+                            if result.get("ok") and result.get("status") == "ready_copy":
+                                result["attempt"] = attempt
+                                copy_queue.append(result)
+                                order = plan_order(item)
+                                update_parallel_progress(
+                                    result["key"],
+                                    "copy_wait",
+                                    100.0,
+                                    "waiting for SMB copy",
+                                    order=order,
+                                    force=True,
+                                )
+                            elif result.get("ok"):
+                                results.append(result)
+                                remove_parallel_progress_row(result.get("key", item["key"]), force=True)
+                            else:
+                                retry_or_fail(item, attempt, result)
+
+                        elif future in active_copies:
+                            item, attempt = active_copies.pop(future)
+                            result = future.result()
+
+                            if result.get("ok"):
+                                results.append(result)
+                                remove_parallel_progress_row(result.get("key", item["key"]), force=True)
+                            else:
+                                retry_or_fail(item, attempt, result)
+
+                    # Important: download slots are filled from the entire series queue.
+                    # A new episode can start even if the previous one is copying, and
+                    # even if the previous season still has copy-wait items.
+                    submit_downloads()
+                    submit_copies()
+
+            except KeyboardInterrupt:
+                _STOP_EVENT.set()
+                stop_active_processes()
+
+                for future in list(active_downloads) + list(active_copies):
+                    future.cancel()
+
+                with _PROGRESS_LOCK:
+                    for key, state in _PROGRESS_STATE.items():
+                        if progress_stage_is_active_or_pending(state.get("stage", "")):
+                            state["stage"] = "FAILED"
+                            state["percent"] = 100.0
+                            state["detail"] = "stopped by user"
+                    render_parallel_progress_locked(force=True)
+                raise
+
+            finally:
+                if _STOP_EVENT.is_set():
+                    stop_active_processes()
+
+                # Normal completion: wait for executors to close cleanly, then continue to next program.
+                # Ctrl+C / stop: do not wait forever for blocked SMB threads.
+                should_wait = not _STOP_EVENT.is_set()
 
                 try:
-                    download_stream(
-                        stream_url=stream_url,
-                        output_file=output_file,
-                        quality=args.quality,
-                        downloader=args.downloader,
-                        stall_timeout=args.stall_timeout,
-                        retries=args.retries,
-                    )
-                except KeyboardInterrupt:
-                    if args.downloader == "yt-dlp":
-                        print("\nStopped by user. yt-dlp partial file was kept; next run will resume from it.")
-                    else:
-                        print("\nStopped by user. Partial .part file was removed.")
-                    return
-                except Exception as ex:
-                    print(f"    Failed: {episode.title} -> {ex}")
+                    download_executor.shutdown(wait=should_wait, cancel_futures=True)
+                except TypeError:
+                    download_executor.shutdown(wait=should_wait)
 
+                try:
+                    copy_executor.shutdown(wait=should_wait, cancel_futures=True)
+                except TypeError:
+                    copy_executor.shutdown(wait=should_wait)
+
+                with _PROGRESS_LOCK:
+                    render_parallel_progress_locked(force=True)
+                finish_parallel_progress()
+                set_parallel_progress_enabled(False)
+
+            if _STOP_EVENT.is_set():
+                raise KeyboardInterrupt
+
+            print_download_summary_report(program.title, results, len(planned_episodes))
+
+    except KeyboardInterrupt:
+        _STOP_EVENT.set()
+        stop_active_processes()
+        finish_parallel_progress()
+        set_parallel_progress_enabled(False)
+        print("\nStopped by user. Active downloads/copies were stopped. Partial local temp files are kept and can resume next run.")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        # Important: ThreadPoolExecutor can otherwise hang in threading._shutdown
+        # if a worker is blocked inside SMB I/O.
+        os._exit(130)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Kan 11 VOD scanner")
@@ -2806,6 +4763,17 @@ def build_parser() -> argparse.ArgumentParser:
     download.add_argument("--verify-ratio", type=float, default=0.95, help="Existing file is complete if duration is at least this ratio of source duration")
     download.add_argument("--stall-timeout", type=int, default=180, help="Retry the same episode if yt-dlp has no progress output for this many seconds")
     download.add_argument("--retries", type=int, default=3, help="How many times to retry the same episode after stalls or download errors")
+    download.add_argument("--local-temp", default=None, help="Local temp root before copying final file to SMB/NAS. Default: system temp folder.")
+    download.add_argument("--parallel-downloads", type=int, default=1, help="Download multiple episodes from the same season in parallel. Default: 1.")
+    download.add_argument("--progress-mode", choices=["table", "compact", "off"], default="table", help="Progress display mode. table=clear/redraw table, compact=single line, off=no live progress. Default: table.")
+    download.add_argument("--dry-run", action="store_true", help="Only show episode plan. Do not resolve streams, download, or copy files.")
+    download.add_argument("--parallel-copies", type=int, default=1, help="How many SMB copies may run at once. Default: 1 to avoid SMB stalls.")
+    download.add_argument("--job-retries", type=int, default=2, help="Retry a failed episode by returning it to the end of the queue. Default: 2.")
+    download.add_argument("--min-duration-ratio", type=float, default=0.95, help="Existing file is considered complete if duration is at least this ratio of source duration. Default: 0.95.")
+    download.add_argument("--min-quality-ratio", type=float, default=0.95, help="Existing file quality is considered good if resolution/bitrate are at least this ratio of requested source quality. Default: 0.95.")
+    download.add_argument("--skip-quality-check", action="store_true", help="Only check existing file duration; do not compare resolution/bitrate/audio quality.")
+    download.add_argument("--disable-special-detection", action="store_true", help="Do not move promo/trailer/special items to s00. Default: detect and move to s00.")
+    download.add_argument("--special-keyword", action="append", default=[], help="Extra keyword for detecting specials/promos. Can be repeated or comma-separated.")
     download.set_defaults(func=command_download_program)
 
     return parser
