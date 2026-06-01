@@ -15,6 +15,7 @@ dependencies = [
     "guessit>=3.8.0",
     "beautifulsoup4",
     "cloudscraper",
+    "curl-cffi",
     "yt-dlp",
 ]
 

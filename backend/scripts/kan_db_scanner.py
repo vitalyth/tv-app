@@ -48,6 +48,11 @@ try:
 except ImportError:
     cloudscraper = None
 
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:
+    curl_requests = None
+
 
 API_URL = "https://mobapi.kan.org.il/api/mobile/subClass"
 KAN11_ID = "4444"
@@ -310,15 +315,41 @@ def make_scraper():
 
 
 def fetch_cf_text(url: str, retries: int = 3, timeout: int = 30) -> str:
+    """
+    Fetch Kan pages behind Cloudflare.
+
+    Docker/Linux can be blocked by Cloudflare even when cloudscraper works on macOS.
+    Try curl_cffi first because it can impersonate a real Chrome TLS/browser
+    fingerprint. Fall back to cloudscraper for local environments where it works.
+    """
     last_error: Optional[Exception] = None
 
     for attempt in range(1, retries + 1):
         try:
+            if curl_requests is not None:
+                try:
+                    response = curl_requests.get(
+                        url,
+                        headers=HEADERS,
+                        timeout=timeout,
+                        impersonate="chrome124",
+                    )
+
+                    if response.status_code != 403:
+                        response.raise_for_status()
+                        return response.text
+
+                    last_error = RuntimeError(f"403 Forbidden with curl_cffi: {url}")
+                except KeyboardInterrupt:
+                    raise
+                except Exception as ex:
+                    last_error = ex
+
             scraper = make_scraper()
             response = scraper.get(url, headers=HEADERS, timeout=timeout)
 
             if response.status_code == 403:
-                last_error = RuntimeError(f"403 Forbidden: {url}")
+                last_error = RuntimeError(f"403 Forbidden with cloudscraper: {url}")
                 time.sleep(1)
                 continue
 
@@ -332,7 +363,6 @@ def fetch_cf_text(url: str, retries: int = 3, timeout: int = 30) -> str:
             time.sleep(1)
 
     raise RuntimeError(f"Failed to fetch {url}: {last_error}")
-
 
 def fetch_all_programs() -> list[Program]:
     programs: list[Program] = []
