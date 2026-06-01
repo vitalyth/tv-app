@@ -55,7 +55,7 @@ except ImportError:
 
 
 API_URL = "https://mobapi.kan.org.il/api/mobile/subClass"
-KAN11_ID = "4444"
+DEFAULT_SUBCLASS_IDS = ["4444"]
 KAN_BASE_URL = "https://www.kan.org.il"
 KALTURA_PARTNER_ID = 2717431
 
@@ -364,54 +364,57 @@ def fetch_cf_text(url: str, retries: int = 3, timeout: int = 30) -> str:
 
     raise RuntimeError(f"Failed to fetch {url}: {last_error}")
 
-def fetch_all_programs() -> list[Program]:
+def fetch_all_programs(subclass_ids: Optional[list[str]] = None) -> list[Program]:
     programs: list[Program] = []
     seen: set[str] = set()
-    start = 1
+    source_ids = [str(item).strip() for item in (subclass_ids or DEFAULT_SUBCLASS_IDS) if str(item).strip()]
 
-    while True:
-        response = requests.get(
-            API_URL,
-            params={"from": start, "id": KAN11_ID},
-            headers=HEADERS,
-            timeout=30,
-        )
-        response.raise_for_status()
+    for subclass_id in source_ids:
+        start = 1
 
-        entries = response.json().get("entry") or []
-
-        if not entries:
-            break
-
-        for item in entries:
-            link = ((item.get("link") or {}).get("href") or "")
-            link = normalize_url(link)
-
-            if not link or link in seen:
-                continue
-
-            seen.add(link)
-
-            ext = item.get("extensions") or {}
-            analytics = ext.get("analyticsCustomProperties") or {}
-
-            programs.append(
-                Program(
-                    id=str(item.get("id") or ""),
-                    mainid=str(ext.get("mainid") or analytics.get("cq_id") or ""),
-                    title=clean_text(item.get("title")),
-                    description=clean_text(item.get("description") or item.get("summary")),
-                    url=link,
-                    image=pick_image(item),
-                    program_format=analytics.get("program_format"),
-                    program_genre=pick_program_genre(item, analytics),
-                )
+        while True:
+            response = requests.get(
+                API_URL,
+                params={"from": start, "id": subclass_id},
+                headers=HEADERS,
+                timeout=30,
             )
+            response.raise_for_status()
 
-        if len(entries) < 200:
-            break
+            entries = response.json().get("entry") or []
 
-        start += 200
+            if not entries:
+                break
+
+            for item in entries:
+                link = ((item.get("link") or {}).get("href") or "")
+                link = normalize_url(link)
+
+                if not link or link in seen:
+                    continue
+
+                seen.add(link)
+
+                ext = item.get("extensions") or {}
+                analytics = ext.get("analyticsCustomProperties") or {}
+
+                programs.append(
+                    Program(
+                        id=str(item.get("id") or ""),
+                        mainid=str(ext.get("mainid") or analytics.get("cq_id") or ""),
+                        title=clean_text(item.get("title")),
+                        description=clean_text(item.get("description") or item.get("summary")),
+                        url=link,
+                        image=pick_image(item),
+                        program_format=analytics.get("program_format"),
+                        program_genre=pick_program_genre(item, analytics),
+                    )
+                )
+
+            if len(entries) < 200:
+                break
+
+            start += 200
 
     return programs
 
@@ -1287,7 +1290,7 @@ def upsert_episode(con: sqlite3.Connection, episode: Episode) -> None:
 
 
 def command_list_programs(args: argparse.Namespace) -> None:
-    programs = fetch_all_programs()
+    programs = fetch_all_programs(args.subclass_id)
     programs = filter_programs(
         programs,
         titles=args.program_title,
@@ -1305,7 +1308,7 @@ def command_list_programs(args: argparse.Namespace) -> None:
 
 def command_count_seasons(args: argparse.Namespace) -> None:
     programs = filter_programs(
-        fetch_all_programs(),
+        fetch_all_programs(args.subclass_id),
         titles=args.program_title,
         ids=args.program_id,
         mainids=args.program_mainid,
@@ -1324,7 +1327,7 @@ def command_list_episodes(args: argparse.Namespace) -> None:
     ENRICH_MISSING_METADATA = bool(getattr(args, "enrich_metadata", False))
 
     programs = filter_programs(
-        fetch_all_programs(),
+        fetch_all_programs(args.subclass_id),
         titles=args.program_title,
         ids=args.program_id,
         mainids=args.program_mainid,
@@ -1496,7 +1499,7 @@ def command_scan(args: argparse.Namespace) -> None:
     con = connect_db(args.db)
 
     try:
-        programs = fetch_all_programs()
+        programs = fetch_all_programs(args.subclass_id)
         programs = filter_programs(
             programs,
             titles=args.program_title,
@@ -4284,7 +4287,7 @@ def command_download_program(args: argparse.Namespace) -> None:
     _STOP_EVENT.clear()
 
     programs = filter_programs(
-        fetch_all_programs(),
+        fetch_all_programs(args.subclass_id),
         titles=args.program_title,
         ids=args.program_id,
         mainids=args.program_mainid,
@@ -4687,6 +4690,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_program_filters(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--subclass-id",
+            action="append",
+            help="Kan mobile subClass id to load programs from. Can be repeated. Default: 4444",
+        )
         p.add_argument("--program-title", action="append", help="Filter by program title substring")
         p.add_argument("--program-id", action="append", help="Filter by program id")
         p.add_argument("--program-mainid", action="append", help="Filter by program mainid")
