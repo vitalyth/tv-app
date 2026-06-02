@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import useSWR from "swr";
+import useSWRInfinite from "swr/infinite";
 import { ChevronLeft, Clapperboard, Play, RefreshCw, Search, Tv } from "lucide-react";
 
 import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
-import { kanVodService, type KanVodSeries } from "@/lib/services/kan-vod-service";
+import { kanVodService, type KanVodSeries, type KanVodSeriesResponse } from "@/lib/services/kan-vod-service";
 
 const getEpisodeCountText = (count: number) => {
   if (count === 0) return "טרם נסרק";
@@ -16,45 +16,79 @@ const getEpisodeCountText = (count: number) => {
 };
 
 const getSeriesImage = (series: KanVodSeries) => series.image || "/ch/vod.jpg";
-const SEARCH_RESULT_LIMIT = 120;
+const PAGE_SIZE = 48;
 
 export default function KanVodPage() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const {
-    data: series = [],
+    data: pages,
     isLoading,
+    isValidating,
     error,
     mutate,
-  } = useSWR("kan-vod", () => kanVodService.getSeriesList(), {
+    size,
+    setSize,
+  } = useSWRInfinite<KanVodSeriesResponse>((pageIndex, previousPageData) => {
+    if (previousPageData && !previousPageData.hasMore) return null;
+
+    return {
+      query: searchQuery,
+      limit: PAGE_SIZE,
+      offset: pageIndex * PAGE_SIZE,
+    };
+  }, (params) => kanVodService.getSeries(params), {
     revalidateOnFocus: false,
     dedupingInterval: 30000,
   });
 
-  const filteredSeries = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return series;
+  const visibleSeries = useMemo(() => pages?.flatMap((page) => page.series || []) || [], [pages]);
+  const lastPage = pages?.[pages.length - 1];
+  const hasMore = Boolean(lastPage?.hasMore);
+  const isLoadingMore = Boolean(
+    isValidating && pages && pages.length > 0 && pages[pages.length - 1]?.offset === (size - 1) * PAGE_SIZE
+  );
 
-    return series.filter((item) => {
-      return (
-        item.title.toLowerCase().includes(query) ||
-        (item.description || "").toLowerCase().includes(query) ||
-        (item.program_genre || "").toLowerCase().includes(query)
-      );
-    });
-  }, [series, searchQuery]);
+  useEffect(() => {
+    setSize(1);
+  }, [searchQuery, setSize]);
 
-  const visibleSeries = useMemo(() => {
-    return searchQuery.trim() ? filteredSeries.slice(0, SEARCH_RESULT_LIMIT) : filteredSeries;
-  }, [filteredSeries, searchQuery]);
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || !hasMore || isLoadingMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setSize((currentSize) => currentSize + 1);
+        }
+      },
+      { rootMargin: "320px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, setSize, visibleSeries.length]);
 
   const refresh = async () => {
     setIsRefreshing(true);
 
     try {
-      await mutate(() => kanVodService.getSeriesList(true), { revalidate: false });
+      await setSize(1);
+      await mutate(
+        async () => [
+          await kanVodService.getSeries({
+            refresh: true,
+            query: searchQuery,
+            limit: PAGE_SIZE,
+            offset: 0,
+          }),
+        ],
+        { revalidate: false }
+      );
     } finally {
       window.setTimeout(() => setIsRefreshing(false), 250);
     }
@@ -122,7 +156,7 @@ export default function KanVodPage() {
                 נסה שוב
               </button>
             </div>
-          ) : filteredSeries.length === 0 ? (
+          ) : visibleSeries.length === 0 ? (
             <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center">
               <Search className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
               <p className="text-base font-medium text-foreground">לא נמצאו סדרות</p>
@@ -178,6 +212,17 @@ export default function KanVodPage() {
               })}
             </div>
           )}
+          {!isLoading && !error && visibleSeries.length > 0 ? (
+            <div ref={loadMoreRef} className="flex h-16 items-center justify-center">
+              {hasMore || isLoadingMore ? (
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  {lastPage?.total ? `${visibleSeries.length} מתוך ${lastPage.total}` : null}
+                </span>
+              )}
+            </div>
+          ) : null}
         </div>
       </PageMain>
     </div>

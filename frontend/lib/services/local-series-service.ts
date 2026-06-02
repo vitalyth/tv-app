@@ -83,13 +83,34 @@ export type LocalSeries = {
 export type LocalSeriesResponse = {
   root: string;
   count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  query?: string;
   series: LocalSeries[];
   error?: string;
 };
 
 export const localSeriesService = {
-  async getSeries(): Promise<LocalSeriesResponse> {
-    const response = await fetch(api("/local-series"), {
+  async getSeries({
+    refresh = false,
+    query = "",
+    limit = 60,
+    offset = 0,
+  }: {
+    refresh?: boolean;
+    query?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<LocalSeriesResponse> {
+    const params = new URLSearchParams();
+    if (refresh) params.set("refresh", "true");
+    if (query.trim()) params.set("q", query.trim());
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+
+    const response = await fetch(api(`/local-series?${params.toString()}`), {
       cache: "no-store",
     });
 
@@ -101,7 +122,7 @@ export const localSeriesService = {
   },
 
   async getSeriesList(): Promise<LocalSeries[]> {
-    const data = await this.getSeries();
+    const data = await this.getSeries({ limit: 120 });
     return data.series || [];
   },
 };

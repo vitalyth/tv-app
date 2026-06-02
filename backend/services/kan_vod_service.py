@@ -147,7 +147,12 @@ def _scan_program(
     con.commit()
 
 
-def get_kan_vod_series(refresh: bool = False) -> dict:
+def get_kan_vod_series(
+    refresh: bool = False,
+    query: str = "",
+    limit: int = 60,
+    offset: int = 0,
+) -> dict:
     con = _connect()
     error = None
     try:
@@ -157,8 +162,36 @@ def get_kan_vod_series(refresh: bool = False) -> dict:
             except Exception as ex:
                 error = str(ex)
 
+        where_clauses = []
+        params: list[object] = []
+        normalized_query = (query or "").strip()
+
+        if normalized_query:
+            like_query = f"%{normalized_query}%"
+            where_clauses.append(
+                """
+                (
+                    p.title LIKE ? COLLATE NOCASE
+                    OR COALESCE(p.description, '') LIKE ? COLLATE NOCASE
+                    OR COALESCE(p.program_genre, '') LIKE ? COLLATE NOCASE
+                    OR COALESCE(p.program_format, '') LIKE ? COLLATE NOCASE
+                )
+                """
+            )
+            params.extend([like_query, like_query, like_query, like_query])
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        limit = max(1, min(int(limit or 60), 120))
+        offset = max(0, int(offset or 0))
+
+        count_row = con.execute(
+            f"SELECT COUNT(*) AS total FROM programs p {where_sql}",
+            params,
+        ).fetchone()
+        total = int(count_row["total"] if count_row else 0)
+
         rows = con.execute(
-            """
+            f"""
             SELECT
                 p.*,
                 COUNT(DISTINCT s.season_id) AS season_count,
@@ -168,17 +201,25 @@ def get_kan_vod_series(refresh: bool = False) -> dict:
             FROM programs p
             LEFT JOIN seasons s ON s.program_id = p.id
             LEFT JOIN episodes e ON e.program_id = p.id
+            {where_sql}
             GROUP BY p.id
             ORDER BY
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
                 COALESCE(latest_kan_episode_id, 0) DESC,
                 p.title COLLATE NOCASE
-            """
+            LIMIT ? OFFSET ?
+            """,
+            [*params, limit, offset],
         ).fetchall()
 
         return {
             "db": KAN_VOD_DB_PATH,
             "count": len(rows),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "hasMore": offset + len(rows) < total,
+            "query": normalized_query,
             "series": [_program_to_dict(row) for row in rows],
             "error": error,
         }

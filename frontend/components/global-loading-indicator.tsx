@@ -148,9 +148,13 @@ export function GlobalLoadingIndicator() {
     const originalPushState = window.history.pushState;
     const originalReplaceState = window.history.replaceState;
 
+    const showAfterNavigationCommit = () => {
+      window.setTimeout(() => show(true), 0);
+    };
+
     window.history.pushState = function pushState(...args) {
       if (isDifferentInternalPath(args[2])) {
-        show(true);
+        showAfterNavigationCommit();
       }
 
       return originalPushState.apply(this, args);
@@ -158,7 +162,7 @@ export function GlobalLoadingIndicator() {
 
     window.history.replaceState = function replaceState(...args) {
       if (isDifferentInternalPath(args[2])) {
-        show(true);
+        showAfterNavigationCommit();
       }
 
       return originalReplaceState.apply(this, args);

@@ -914,6 +914,40 @@ def build_local_series_from_db(api_prefix: str = "") -> dict | None:
     }
 
 
+def filter_local_series(series: list[dict], query: str) -> list[dict]:
+    normalized_query = (query or "").strip().lower()
+    if not normalized_query:
+        return series
+
+    return [
+        item for item in series
+        if normalized_query in str(item.get("title") or "").lower()
+        or normalized_query in str((item.get("metadata") or {}).get("name") or "").lower()
+        or normalized_query in str((item.get("metadata") or {}).get("originalName") or "").lower()
+        or normalized_query in str((item.get("metadata") or {}).get("overview") or "").lower()
+    ]
+
+
+def page_local_series(data: dict, query: str = "", limit: int = 60, offset: int = 0) -> dict:
+    limit = max(1, min(int(limit or 60), 120))
+    offset = max(0, int(offset or 0))
+    normalized_query = (query or "").strip()
+    filtered_series = filter_local_series(data.get("series") or [], normalized_query)
+    total = len(filtered_series)
+    page = filtered_series[offset:offset + limit]
+
+    return {
+        **data,
+        "count": len(page),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": offset + len(page) < total,
+        "query": normalized_query,
+        "series": page,
+    }
+
+
 def update_local_series_db(api_prefix: str = "", force_refresh: bool = False) -> dict:
     init_local_series_db()
 
@@ -1018,15 +1052,23 @@ def update_local_series_db(api_prefix: str = "", force_refresh: bool = False) ->
         return data
 
 
-def scan_local_series(api_prefix: str = "", force_refresh: bool = False):
+def scan_local_series(
+    api_prefix: str = "",
+    force_refresh: bool = False,
+    query: str = "",
+    limit: int = 60,
+    offset: int = 0,
+):
     if force_refresh:
-        return update_local_series_db(api_prefix=api_prefix, force_refresh=True)
+        data = update_local_series_db(api_prefix=api_prefix, force_refresh=True)
+        return page_local_series(data, query=query, limit=limit, offset=offset)
 
     data = build_local_series_from_db(api_prefix=api_prefix)
     if data and data.get("count", 0) > 0:
-        return data
+        return page_local_series(data, query=query, limit=limit, offset=offset)
 
-    return update_local_series_db(api_prefix=api_prefix, force_refresh=True)
+    data = update_local_series_db(api_prefix=api_prefix, force_refresh=True)
+    return page_local_series(data, query=query, limit=limit, offset=offset)
 
 
 def local_series_watcher_loop() -> None:

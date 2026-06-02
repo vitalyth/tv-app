@@ -69,13 +69,34 @@ export type KanVodSeriesDetails = KanVodSeries & {
 export type KanVodSeriesResponse = {
   db: string;
   count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  query?: string;
   series: KanVodSeries[];
   error?: string | null;
 };
 
 export const kanVodService = {
-  async getSeries(refresh = false): Promise<KanVodSeriesResponse> {
-    const searchParams = refresh ? "?refresh=true" : "";
+  async getSeries({
+    refresh = false,
+    query = "",
+    limit = 60,
+    offset = 0,
+  }: {
+    refresh?: boolean;
+    query?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<KanVodSeriesResponse> {
+    const params = new URLSearchParams();
+    if (refresh) params.set("refresh", "true");
+    if (query.trim()) params.set("q", query.trim());
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+    const searchParams = `?${params.toString()}`;
+
     return fetchJson<KanVodSeriesResponse>(
       `/kan-vod${searchParams}`,
       "Failed to load Kan VOD",
@@ -88,7 +109,7 @@ export const kanVodService = {
   },
 
   async getSeriesList(refresh = false): Promise<KanVodSeries[]> {
-    const data = await this.getSeries(refresh);
+    const data = await this.getSeries({ refresh, limit: 120 });
     return data.series || [];
   },
 

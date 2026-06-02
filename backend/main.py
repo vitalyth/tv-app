@@ -331,15 +331,34 @@ def _rewrite_local_hls_playlist(request: Request, playlist_path: str) -> Respons
 
 
 @app.get("/local-series")
-def local_series(request: Request, refresh: bool = False):
+def local_series(
+    request: Request,
+    refresh: bool = False,
+    q: str = "",
+    limit: int = Query(60, ge=1, le=120),
+    offset: int = Query(0, ge=0),
+):
     return scan_local_series(
         api_prefix=get_request_api_prefix(request),
         force_refresh=refresh,
+        query=q,
+        limit=limit,
+        offset=offset,
     )
 
 @app.get("/kan-vod")
-def kan_vod(refresh: bool = False):
-    return get_kan_vod_series(refresh=refresh)
+def kan_vod(
+    refresh: bool = False,
+    q: str = "",
+    limit: int = Query(60, ge=1, le=120),
+    offset: int = Query(0, ge=0),
+):
+    return get_kan_vod_series(
+        refresh=refresh,
+        query=q,
+        limit=limit,
+        offset=offset,
+    )
 
 @app.get("/kan-vod/stream")
 def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
