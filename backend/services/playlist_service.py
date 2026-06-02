@@ -34,10 +34,11 @@ def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
         if use_api_prefix and not stream_base.endswith("/api"):
             stream_base = f"{stream_base}/api"
 
+        stream_params = {"channel_id": channel_id}
         if use_vpn_routes and channel_id.startswith("ch_11"):
-            stream_base = f"{stream_base}/v"
+            stream_params["vpn"] = "true"
 
-        proxy_url = f"{stream_base}/stream?{urlencode({'channel_id': channel_id})}"
+        proxy_url = f"{stream_base}/stream?{urlencode(stream_params)}"
 
         logo_base = remove_api_prefix(base_url)
         logo = f"{logo_base}/ch/{ch.logo}"

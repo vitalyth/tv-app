@@ -9,6 +9,7 @@ from pathlib import Path
 from config import CACHE_DIR
 
 BASE_DIR = Path(__file__).resolve().parent
+KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
 
 
 @dataclass
@@ -59,6 +60,12 @@ def log_cache_file_status() -> None:
         updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
         print(f"Cache file {cache_file} updated {updated_at}, {stat.st_size} bytes", flush=True)
 
+    db_path = BASE_DIR / KAN_VOD_DB_PATH if not os.path.isabs(KAN_VOD_DB_PATH) else Path(KAN_VOD_DB_PATH)
+    if db_path.exists():
+        stat = db_path.stat()
+        updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+        print(f"Kan VOD DB {db_path} updated {updated_at}, {stat.st_size} bytes", flush=True)
+
 
 def main() -> int:
     stop_requested = False
@@ -82,6 +89,19 @@ def main() -> int:
             name="vod_recent",
             command=[python, "refresh_vod_recent.py"],
             interval_seconds=read_interval("VOD_RECENT_INTERVAL_SECONDS", 12 * 60 * 60),
+        ),
+        ScheduledJob(
+            name="kan_vod_scan",
+            command=[
+                python,
+                "scripts/kan_db_scanner.py",
+                "scan",
+                "--db",
+                KAN_VOD_DB_PATH,
+                "--incremental",
+                "--verbose",
+            ],
+            interval_seconds=read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
         ),
     ]
 

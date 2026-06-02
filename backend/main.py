@@ -321,12 +321,10 @@ def local_series(request: Request, refresh: bool = False):
     )
 
 @app.get("/kan-vod")
-@app.get("/v/kan-vod")
 def kan_vod(refresh: bool = False):
     return get_kan_vod_series(refresh=refresh)
 
 @app.get("/kan-vod/stream")
-@app.get("/v/kan-vod/stream")
 def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
     stream_url = get_kan_vod_stream(episode_id)
     if not stream_url:
@@ -335,7 +333,6 @@ def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
     return {"stream": stream_url}
 
 @app.get("/kan-vod/{program_id}")
-@app.get("/v/kan-vod/{program_id}")
 def kan_vod_details(
     request: Request,
     program_id: str,

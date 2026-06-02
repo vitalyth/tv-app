@@ -36,13 +36,12 @@ services:
       - KAN_VOD_DB_PATH=/app/db/kan_vod.db
       - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
       - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
-      - KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS=${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ./backend/cache:/app/cache
-      - ./backend/db:/app/db
+      - kan-vod-db-dev:/app/db
       - ${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}:${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}:ro
     container_name: fastapi-dev
     restart: unless-stopped
@@ -56,13 +55,12 @@ services:
       - KAN_VOD_DB_PATH=/app/db/kan_vod.db
       - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
       - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
-      - KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS=${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ./backend/cache:/app/cache
-      - ./backend/db:/app/db
+      - kan-vod-db-dev:/app/db
       - ${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}:${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}:ro
     network_mode: "service:gluetun"
     container_name: fastapi-vod-vpn-dev
@@ -76,9 +74,12 @@ services:
     environment:
       - EPG_INTERVAL_SECONDS=${EPG_INTERVAL_SECONDS:-86400}
       - VOD_RECENT_INTERVAL_SECONDS=${VOD_RECENT_INTERVAL_SECONDS:-43200}
+      - KAN_VOD_SCAN_INTERVAL_SECONDS=${KAN_VOD_SCAN_INTERVAL_SECONDS:-28800}
       - BACKEND_CACHE_DIR=/app/cache
+      - KAN_VOD_DB_PATH=/app/db/kan_vod.db
     volumes:
       - ./backend/cache:/app/cache
+      - kan-vod-db-dev:/app/db
     container_name: fastapi-scheduler-dev
     restart: unless-stopped
     depends_on:
@@ -93,3 +94,6 @@ services:
       - frontend
       - backend
       - backend-vpn
+
+volumes:
+  kan-vod-db-dev:

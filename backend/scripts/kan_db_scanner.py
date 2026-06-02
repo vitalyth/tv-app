@@ -364,6 +364,55 @@ def fetch_cf_text(url: str, retries: int = 3, timeout: int = 30) -> str:
 
     raise RuntimeError(f"Failed to fetch {url}: {last_error}")
 
+def kan_api_get(params: dict[str, Any], retries: int = 3, timeout: int = 30) -> dict[str, Any]:
+    """
+    Fetch Kan mobile API with a browser-like TLS fingerprint when possible.
+
+    The regular requests library may get 403 from mobapi.kan.org.il even when
+    the endpoint works in a browser. curl_cffi can impersonate Chrome and is
+    already used elsewhere in this scanner for Kan/Cloudflare pages.
+    """
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            if curl_requests is not None:
+                response = curl_requests.get(
+                    API_URL,
+                    params=params,
+                    headers=HEADERS,
+                    timeout=timeout,
+                    impersonate="chrome124",
+                )
+
+                if response.status_code != 403:
+                    response.raise_for_status()
+                    return response.json()
+
+                last_error = RuntimeError(
+                    f"403 Forbidden with curl_cffi: {response.url}"
+                )
+            else:
+                response = requests.get(
+                    API_URL,
+                    params=params,
+                    headers=HEADERS,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+
+        except KeyboardInterrupt:
+            raise
+        except Exception as ex:
+            last_error = ex
+
+        if attempt < retries:
+            time.sleep(1)
+
+    raise RuntimeError(f"Failed to fetch Kan API {params}: {last_error}")
+
+
 def fetch_all_programs(subclass_ids: Optional[list[str]] = None) -> list[Program]:
     programs: list[Program] = []
     seen: set[str] = set()
@@ -373,15 +422,17 @@ def fetch_all_programs(subclass_ids: Optional[list[str]] = None) -> list[Program
         start = 1
 
         while True:
-            response = requests.get(
-                API_URL,
-                params={"from": start, "id": subclass_id},
-                headers=HEADERS,
-                timeout=30,
-            )
-            response.raise_for_status()
+            try:
+                data = kan_api_get({"from": start, "id": subclass_id})
+            except Exception as ex:
+                print(
+                    f"Failed to fetch Kan programs "
+                    f"(subclass={subclass_id}, from={start}): {ex}",
+                    file=sys.stderr,
+                )
+                break
 
-            entries = response.json().get("entry") or []
+            entries = data.get("entry") or []
 
             if not entries:
                 break
@@ -1123,6 +1174,8 @@ def init_db(db_path: str) -> None:
                 image TEXT,
                 program_format TEXT,
                 program_genre TEXT,
+                last_full_scan_at TEXT,
+                last_incremental_scan_at TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -1132,6 +1185,7 @@ def init_db(db_path: str) -> None:
                 title TEXT,
                 url TEXT NOT NULL,
                 season_number INTEGER,
+                last_scanned_at TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -1159,12 +1213,15 @@ def init_db(db_path: str) -> None:
         add_column_if_missing(con, "programs", "image", "TEXT")
         add_column_if_missing(con, "programs", "program_format", "TEXT")
         add_column_if_missing(con, "programs", "program_genre", "TEXT")
+        add_column_if_missing(con, "programs", "last_full_scan_at", "TEXT")
+        add_column_if_missing(con, "programs", "last_incremental_scan_at", "TEXT")
         add_column_if_missing(con, "programs", "updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
 
         add_column_if_missing(con, "seasons", "program_id", "TEXT")
         add_column_if_missing(con, "seasons", "title", "TEXT")
         add_column_if_missing(con, "seasons", "url", "TEXT")
         add_column_if_missing(con, "seasons", "season_number", "INTEGER")
+        add_column_if_missing(con, "seasons", "last_scanned_at", "TEXT")
         add_column_if_missing(con, "seasons", "updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
 
         add_column_if_missing(con, "episodes", "program_id", "TEXT")
@@ -1491,6 +1548,123 @@ def program_all_existing_episodes_have_streams(
     return total == with_streams
 
 
+def existing_season_ids(con: sqlite3.Connection, program_id: str) -> set[str]:
+    rows = con.execute(
+        "SELECT season_id FROM seasons WHERE program_id = ?",
+        (program_id,),
+    ).fetchall()
+    return {str(row["season_id"]) for row in rows}
+
+
+def latest_season(seasons: list[Season]) -> Optional[Season]:
+    numbered = [season for season in seasons if season.season_number is not None]
+    if numbered:
+        return max(numbered, key=lambda season: season.season_number or 0)
+    return seasons[-1] if seasons else None
+
+
+def parse_sqlite_timestamp(value: Any) -> Optional[float]:
+    text = clean_text(value)
+    if not text:
+        return None
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return time.mktime(time.strptime(text[:19], fmt))
+        except ValueError:
+            continue
+
+    return None
+
+
+def program_full_scan_due(
+    con: sqlite3.Connection,
+    program_id: str,
+    interval_hours: int,
+) -> bool:
+    if interval_hours <= 0:
+        return False
+
+    row = con.execute(
+        "SELECT last_full_scan_at FROM programs WHERE id = ?",
+        (program_id,),
+    ).fetchone()
+    if not row:
+        return True
+
+    last_scan = parse_sqlite_timestamp(row["last_full_scan_at"])
+    if last_scan is None:
+        return True
+
+    return time.time() - last_scan >= interval_hours * 60 * 60
+
+
+def mark_program_scan(
+    con: sqlite3.Connection,
+    program_id: str,
+    full_scan: bool,
+) -> None:
+    if full_scan:
+        con.execute(
+            """
+            UPDATE programs
+            SET last_full_scan_at = CURRENT_TIMESTAMP,
+                last_incremental_scan_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (program_id,),
+        )
+        return
+
+    con.execute(
+        """
+        UPDATE programs
+        SET last_incremental_scan_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (program_id,),
+    )
+
+
+def mark_season_scanned(con: sqlite3.Connection, season_id: str) -> None:
+    con.execute(
+        """
+        UPDATE seasons
+        SET last_scanned_at = CURRENT_TIMESTAMP
+        WHERE season_id = ?
+        """,
+        (season_id,),
+    )
+
+
+def choose_seasons_to_scan(
+    con: sqlite3.Connection,
+    program: Program,
+    seasons: list[Season],
+    args: argparse.Namespace,
+) -> tuple[list[Season], bool, str]:
+    if not getattr(args, "incremental", False):
+        return seasons, True, "full"
+
+    if not program_has_any_episode(con, program.id):
+        return seasons, True, "new-program"
+
+    if program_full_scan_due(con, program.id, args.full_scan_interval_hours):
+        return seasons, True, "scheduled-full"
+
+    known_season_ids = existing_season_ids(con, program.id)
+    selected: list[Season] = [
+        season for season in seasons
+        if season.season_id not in known_season_ids
+    ]
+
+    recent = latest_season(seasons)
+    if recent and all(season.season_id != recent.season_id for season in selected):
+        selected.append(recent)
+
+    return selected, False, "incremental"
+
+
 def command_scan(args: argparse.Namespace) -> None:
     global ENRICH_MISSING_METADATA
     ENRICH_MISSING_METADATA = bool(getattr(args, "enrich_metadata", False))
@@ -1540,12 +1714,25 @@ def command_scan(args: argparse.Namespace) -> None:
 
             print(f"  Seasons: {len(seasons)}")
 
+            seasons_to_scan, full_scan, scan_reason = choose_seasons_to_scan(
+                con,
+                program,
+                seasons,
+                args,
+            )
+            skipped_seasons = len(seasons) - len(seasons_to_scan)
+            if args.incremental:
+                print(
+                    f"  Scan mode: {scan_reason}; scanning {len(seasons_to_scan)}/{len(seasons)} seasons"
+                )
+
             total_program_episodes = 0
 
             for season in seasons:
                 upsert_season(con, season)
                 con.commit()
 
+            for season in seasons_to_scan:
                 print(f"    Season: {season.title} -> {season.url}")
 
                 try:
@@ -1582,8 +1769,14 @@ def command_scan(args: argparse.Namespace) -> None:
                     upsert_episode(con, episode)
                     total_program_episodes += 1
 
+                mark_season_scanned(con, season.season_id)
                 con.commit()
 
+            mark_program_scan(con, program.id, full_scan=full_scan)
+            con.commit()
+
+            if skipped_seasons > 0:
+                print(f"  Skipped seasons: {skipped_seasons}")
             print(f"  Saved episodes: {total_program_episodes}")
 
     except KeyboardInterrupt:
@@ -4705,6 +4898,17 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--limit-programs", type=int)
     scan.add_argument("--limit-episodes", type=int)
     scan.add_argument("--with-streams", action="store_true")
+    scan.add_argument(
+        "--incremental",
+        action="store_true",
+        help="For existing programs, scan new seasons and the latest season instead of every season.",
+    )
+    scan.add_argument(
+        "--full-scan-interval-hours",
+        type=int,
+        default=168,
+        help="When --incremental is set, force a full program scan after this many hours. Default: 168.",
+    )
     scan.add_argument(
         "--skip-complete-episodes",
         action="store_true",

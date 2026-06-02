@@ -10,9 +10,6 @@ KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
 KAN_VOD_RETRIES = int(os.getenv("KAN_VOD_RETRIES", "3"))
 KAN_VOD_RETRY_DELAY_SECONDS = float(os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1"))
 KAN_VOD_STREAM_BATCH_SIZE = int(os.getenv("KAN_VOD_STREAM_BATCH_SIZE", "20"))
-KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS = int(
-    os.getenv("KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS", "21600")
-)
 
 
 def _with_retries(action):
@@ -72,29 +69,6 @@ def _upsert_programs_from_api(con: sqlite3.Connection) -> None:
     for program in kan_db_scanner.fetch_all_programs():
         kan_db_scanner.upsert_program(con, program)
     con.commit()
-
-
-def _programs_need_refresh(con: sqlite3.Connection) -> bool:
-    if KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS <= 0:
-        return False
-
-    row = con.execute(
-        """
-        SELECT
-            COUNT(*) AS program_count,
-            MAX(strftime('%s', updated_at)) AS latest_update
-        FROM programs
-        """
-    ).fetchone()
-
-    if not row or int(row["program_count"] or 0) == 0:
-        return True
-
-    latest_update = row["latest_update"]
-    if latest_update is None:
-        return True
-
-    return time.time() - int(latest_update) >= KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS
 
 
 def _scan_program(
@@ -177,7 +151,7 @@ def get_kan_vod_series(refresh: bool = False) -> dict:
     con = _connect()
     error = None
     try:
-        if refresh or _programs_need_refresh(con):
+        if refresh:
             try:
                 _with_retries(lambda: _upsert_programs_from_api(con))
             except Exception as ex:
@@ -222,9 +196,7 @@ def get_kan_vod_series_details(
     con = _connect()
     error = None
     try:
-        has_existing_episodes = kan_db_scanner.program_has_any_episode(con, program_id)
-
-        if refresh or not has_existing_episodes:
+        if refresh:
             try:
                 _with_retries(
                     lambda: _scan_program(
@@ -233,19 +205,6 @@ def get_kan_vod_series_details(
                         with_streams=with_streams,
                         stream_limit=stream_limit,
                         update_existing=True,
-                    )
-                )
-            except Exception as ex:
-                error = str(ex)
-        else:
-            try:
-                _with_retries(
-                    lambda: _scan_program(
-                        con,
-                        program_id,
-                        with_streams=False,
-                        stream_limit=0,
-                        update_existing=False,
                     )
                 )
             except Exception as ex:

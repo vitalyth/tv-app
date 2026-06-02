@@ -36,7 +36,6 @@ services:
       - KAN_VOD_DB_PATH=/app/db/kan_vod.db
       - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
       - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
-      - KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS=${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
@@ -58,7 +57,6 @@ services:
       - KAN_VOD_DB_PATH=/app/db/kan_vod.db
       - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
       - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
-      - KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS=${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
@@ -78,9 +76,12 @@ services:
     environment:
       - EPG_INTERVAL_SECONDS=${EPG_INTERVAL_SECONDS:-86400}
       - VOD_RECENT_INTERVAL_SECONDS=${VOD_RECENT_INTERVAL_SECONDS:-43200}
+      - KAN_VOD_SCAN_INTERVAL_SECONDS=${KAN_VOD_SCAN_INTERVAL_SECONDS:-28800}
       - BACKEND_CACHE_DIR=/app/cache
+      - KAN_VOD_DB_PATH=/app/db/kan_vod.db
     volumes:
       - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
+      - ${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/db
     restart: unless-stopped
     depends_on:
       - backend

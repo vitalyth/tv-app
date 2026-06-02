@@ -71,6 +71,11 @@ const buildCastImageUrl = (logo: string) => {
     return resolveAbsoluteUrl(`/ch/${logo}`)
 }
 
+const shouldUseVpnProxy = (channel: Channel) => {
+    const channelId = channel.channelID || channel.id || ""
+    return channel.module === "kan-vod" || channelId.startsWith("ch_11")
+}
+
 const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
@@ -150,10 +155,10 @@ const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, chan
         return resolveAbsoluteUrl(castSourceUrl)
     }
 
-    const proxyPath = channel.module === "kan-vod" ? "/v/proxy" : "/proxy"
+    const vpnParam = shouldUseVpnProxy(channel) ? "&vpn=true" : ""
 
     return resolveAbsoluteUrl(
-        api(`${proxyPath}?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
+        api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`)
     )
 }
 
