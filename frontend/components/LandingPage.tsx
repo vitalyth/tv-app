@@ -92,6 +92,11 @@ const isSeasonNode = (name?: string) => {
   return /^עונה\b/.test(normalized) || /^Season\b/i.test(normalized);
 };
 
+const isKanVodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim();
+  return channel.id === "kan" || name === "כאן 11";
+};
+
 const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
   const channelNode = stack[0];
   const contentNodes = stack.slice(1).filter((node) => !isVodGroupingNode(node.name));
@@ -305,6 +310,11 @@ const LandingPage = () => {
 
   const handleOpenVodChannel = useCallback(
     (channel: VodChannel) => {
+      if (isKanVodChannel(channel)) {
+        router.push("/kan-vod");
+        return;
+      }
+
       const path: VodNode[] = [
         {
           name: channel.name,
