@@ -107,6 +107,23 @@ const isBrightcoveStream = (streamUrl: string) => {
     }
 }
 
+const isFmp4HlsStream = (streamUrl: string, channel?: Channel) => {
+    if (channel?.module === "kan-vod") {
+        return true
+    }
+
+    try {
+        const parsedUrl = new URL(streamUrl)
+        return (
+            parsedUrl.pathname.toLowerCase().includes("/manifest.ism/") ||
+            parsedUrl.search.toLowerCase().includes("fmp4")
+        )
+    } catch {
+        const lowerStreamUrl = streamUrl.toLowerCase()
+        return lowerStreamUrl.includes("/manifest.ism/") || lowerStreamUrl.includes("fmp4")
+    }
+}
+
 const isDashStream = (streamUrl: string, channel?: Channel) => {
     if (channel?.linkDetails?.manifest_type === "mpd") {
         return true
@@ -239,7 +256,10 @@ export function useGoogleCast({
             castContentType
         )
 
-        if (castContentType === "application/x-mpegURL" && isBrightcoveStream(streamUrl)) {
+        if (
+            castContentType === "application/x-mpegURL" &&
+            (isBrightcoveStream(streamUrl) || isFmp4HlsStream(streamUrl, channel))
+        ) {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
 

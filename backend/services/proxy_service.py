@@ -14,7 +14,7 @@ session = create_session()
 PROXY_CONNECT_TIMEOUT_SECONDS = float(os.getenv("PROXY_CONNECT_TIMEOUT_SECONDS", "10"))
 PROXY_READ_TIMEOUT_SECONDS = float(os.getenv("PROXY_READ_TIMEOUT_SECONDS", "60"))
 PROXY_REQUEST_TIMEOUT = (PROXY_CONNECT_TIMEOUT_SECONDS, PROXY_READ_TIMEOUT_SECONDS)
-KAN_VOD_PROXY_MAX_BITRATE = int(os.getenv("KAN_VOD_PROXY_MAX_BITRATE", "800000"))
+KAN_VOD_PROXY_MAX_BITRATE = int(os.getenv("KAN_VOD_PROXY_MAX_BITRATE", "0"))
 KAN_VOD_SEGMENT_RETRIES = max(0, int(os.getenv("KAN_VOD_SEGMENT_RETRIES", "2")))
 
 CORS_HEADERS = {
@@ -665,7 +665,7 @@ def handle_proxy(request, url, referer, cast=False):
 
     # Video/audio segments
     if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(url):
-        if _is_kan_vod_redge_url(url) and _is_segment_url(url):
+        if cast and _is_kan_vod_redge_url(url) and _is_segment_url(url):
             return _buffered_segment_response(
                 url,
                 headers,
