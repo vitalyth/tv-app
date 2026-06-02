@@ -3,6 +3,7 @@ import json
 import time
 import hashlib
 import requests
+import sqlite3
 import threading
 from guessit import guessit
 from urllib.parse import quote
@@ -18,10 +19,20 @@ TMDB_CACHE_FILE = os.path.join(BACKEND_CACHE_DIR, "series_metadata.json")
 TMDB_CACHE_TTL_SECONDS = 60 * 60 * 24
 LOCAL_SERIES_SCAN_CACHE_FILE = os.path.join(BACKEND_CACHE_DIR, "local_series_scan.json")
 LOCAL_SERIES_SCAN_CACHE_TTL_SECONDS = int(os.getenv("LOCAL_SERIES_SCAN_CACHE_TTL_SECONDS", "300"))
+LOCAL_SERIES_DB_PATH = os.getenv(
+    "LOCAL_SERIES_DB_PATH",
+    os.path.join(BACKEND_CACHE_DIR, "local_series.db"),
+)
+LOCAL_SERIES_WATCH_INTERVAL_SECONDS = max(
+    1,
+    int(os.getenv("LOCAL_SERIES_WATCH_INTERVAL_SECONDS", "2")),
+)
 
 _scan_cache_lock = threading.Lock()
 _scan_cache_memory: dict | None = None
 _scan_cache_memory_saved_at = 0.0
+_watcher_thread: threading.Thread | None = None
+_watcher_stop_event = threading.Event()
 
 
 def is_video_file(filename: str) -> bool:
@@ -335,6 +346,184 @@ def prefer_hls_episodes(episodes: list[dict]) -> list[dict]:
                 by_key[key] = episode
 
     return list(by_key.values())
+
+
+def connect_local_series_db() -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(os.path.abspath(LOCAL_SERIES_DB_PATH)), exist_ok=True)
+    con = sqlite3.connect(LOCAL_SERIES_DB_PATH)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA busy_timeout=5000")
+    return con
+
+
+def init_local_series_db() -> None:
+    with connect_local_series_db() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS local_series_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS local_series_files (
+                path TEXT PRIMARY KEY,
+                root TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                mtime_ns INTEGER NOT NULL,
+                series_key TEXT NOT NULL,
+                series_title TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        con.execute("CREATE INDEX IF NOT EXISTS idx_local_series_files_root ON local_series_files(root)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_local_series_files_series_key ON local_series_files(series_key)")
+
+
+def get_state(con: sqlite3.Connection, key: str) -> str | None:
+    row = con.execute(
+        "SELECT value FROM local_series_state WHERE key = ?",
+        (key,),
+    ).fetchone()
+    return row["value"] if row else None
+
+
+def set_state(con: sqlite3.Connection, key: str, value: str) -> None:
+    con.execute(
+        """
+        INSERT INTO local_series_state (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (key, value),
+    )
+
+
+def iter_local_video_files() -> list[dict]:
+    files: list[dict] = []
+    if not os.path.isdir(LOCAL_VOD_TV_DIR):
+        return files
+
+    for root, dirs, filenames in os.walk(LOCAL_VOD_TV_DIR):
+        dirs[:] = [
+            d for d in dirs
+            if not d.startswith(".")
+            and d.lower() not in {
+                "@eadir",
+                "#recycle",
+                "$recycle.bin",
+                "system volume information",
+                "__macosx",
+                "cache",
+                ".cache",
+                "transcode",
+                ".transcode",
+                "transcoded",
+                ".transcoded",
+                "tmp",
+                "temp",
+            }
+        ]
+
+        for filename in filenames:
+            if not is_video_file(filename):
+                continue
+
+            full_path = os.path.join(root, filename)
+            if should_skip_hls_variant_playlist(full_path):
+                continue
+
+            try:
+                stat = os.stat(full_path)
+            except OSError:
+                continue
+
+            files.append({
+                "path": full_path,
+                "filename": filename,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            })
+
+    return files
+
+
+def get_directory_signature(files: list[dict] | None = None) -> dict:
+    files = files if files is not None else iter_local_video_files()
+    total_size = sum(int(item["size"]) for item in files)
+    max_mtime_ns = max((int(item["mtime_ns"]) for item in files), default=0)
+
+    return {
+        "root": LOCAL_VOD_TV_DIR,
+        "fileCount": len(files),
+        "totalSize": total_size,
+        "maxMtimeNs": max_mtime_ns,
+    }
+
+
+def parse_local_episode_file(file_info: dict, season_cache: dict, series_metadata_cache: dict) -> dict:
+    full_path = file_info["path"]
+    filename = file_info["filename"]
+    parse_name = get_parse_name_for_episode(full_path, filename)
+    parsed = guessit(parse_name)
+    title = get_series_title_from_path(full_path, parsed)
+    season = first_int(parsed.get("season"))
+    episode = first_int(parsed.get("episode"))
+    series_key = title.lower().strip()
+
+    if series_key not in series_metadata_cache:
+        series_metadata_cache[series_key] = get_tmdb_details(title)
+
+    episode_metadata = get_episode_metadata(
+        series_metadata_cache.get(series_key),
+        season,
+        episode,
+        season_cache,
+    )
+
+    payload = {
+        "id": make_id(full_path),
+        "filename": parse_name if is_hls_index_file(full_path) else filename,
+        "path": full_path,
+        "season": season,
+        "episode": episode,
+        "episodeName": episode_metadata.get("episodeName"),
+        "episodeOverview": episode_metadata.get("episodeOverview"),
+        "episodeImage": episode_metadata.get("episodeImage"),
+        "airDate": episode_metadata.get("airDate"),
+        "runtime": episode_metadata.get("runtime"),
+        "episodeRating": episode_metadata.get("episodeRating"),
+        "episodeVoteCount": episode_metadata.get("episodeVoteCount"),
+        "tmdbEpisodeId": episode_metadata.get("tmdbEpisodeId"),
+        "screenSize": parsed.get("screen_size"),
+        "source": parsed.get("source"),
+        "videoCodec": parsed.get("video_codec"),
+        "audioCodec": parsed.get("audio_codec"),
+        "container": parsed.get("container"),
+        "mimetype": parsed.get("mimetype"),
+        "streamUrl": f"/stream/local-series?path={quote(full_path)}",
+        "isHls": is_hls_main_playlist(full_path),
+        "manifestType": "hls" if is_hls_main_playlist(full_path) else None,
+        "hlsPlaylistType": (
+            "master"
+            if os.path.basename(full_path).lower() == "master.m3u8"
+            else "index"
+            if is_hls_main_playlist(full_path)
+            else None
+        ),
+        "parsed": parsed,
+    }
+
+    return {
+        "series_key": series_key,
+        "series_title": title,
+        "payload": payload,
+    }
 
 
 
@@ -665,15 +854,217 @@ def build_local_series_scan(api_prefix: str = "") -> dict:
     return data
 
 
-def scan_local_series(api_prefix: str = "", force_refresh: bool = False):
-    with _scan_cache_lock:
-        if not force_refresh:
-            cached = load_scan_cache()
-            if cached and cached.get("count", 0) > 0:
-                return cached
+def build_local_series_from_db(api_prefix: str = "") -> dict | None:
+    api_prefix = (api_prefix or "").rstrip("/")
+    init_local_series_db()
 
-        data = build_local_series_scan(api_prefix=api_prefix)
+    with connect_local_series_db() as con:
+        rows = con.execute(
+            """
+            SELECT series_key, series_title, payload
+            FROM local_series_files
+            WHERE root = ?
+            ORDER BY series_title COLLATE NOCASE, path COLLATE NOCASE
+            """,
+            (LOCAL_VOD_TV_DIR,),
+        ).fetchall()
+
+    if not rows:
+        return None
+
+    series_map: dict[str, dict] = {}
+    metadata_cache: dict[str, dict | None] = {}
+
+    for row in rows:
+        series_key = row["series_key"]
+        title = row["series_title"]
+
+        if series_key not in series_map:
+            metadata_cache[series_key] = get_tmdb_details(title)
+            series_map[series_key] = {
+                "id": make_id(title),
+                "title": title,
+                "metadata": metadata_cache[series_key],
+                "episodes": [],
+            }
+
+        episode = json.loads(row["payload"])
+        if api_prefix and episode.get("streamUrl", "").startswith("/stream/"):
+            episode["streamUrl"] = f"{api_prefix}{episode['streamUrl']}"
+        series_map[series_key]["episodes"].append(episode)
+
+    series = list(series_map.values())
+
+    for item in series:
+        item["episodes"] = prefer_hls_episodes(item["episodes"])
+        item["episodes"].sort(
+            key=lambda ep: (
+                ep.get("season") or 0,
+                ep.get("episode") or 0,
+                ep.get("filename") or "",
+            )
+        )
+
+    series.sort(key=lambda item: item["title"].lower())
+
+    return {
+        "root": LOCAL_VOD_TV_DIR,
+        "count": len(series),
+        "series": series,
+    }
+
+
+def update_local_series_db(api_prefix: str = "", force_refresh: bool = False) -> dict:
+    init_local_series_db()
+
+    if not os.path.isdir(LOCAL_VOD_TV_DIR):
+        return {
+            "root": LOCAL_VOD_TV_DIR,
+            "count": 0,
+            "series": [],
+            "error": f"Directory not found: {LOCAL_VOD_TV_DIR}",
+        }
+
+    files = iter_local_video_files()
+    signature = get_directory_signature(files)
+    signature_json = json.dumps(signature, sort_keys=True)
+
+    with _scan_cache_lock:
+        with connect_local_series_db() as con:
+            previous_signature = get_state(con, "directory_signature")
+            if not force_refresh and previous_signature == signature_json:
+                data = build_local_series_from_db(api_prefix=api_prefix)
+                if data is not None:
+                    return data
+
+            existing_rows = con.execute(
+                """
+                SELECT path, size, mtime_ns
+                FROM local_series_files
+                WHERE root = ?
+                """,
+                (LOCAL_VOD_TV_DIR,),
+            ).fetchall()
+            existing = {
+                row["path"]: {
+                    "size": int(row["size"]),
+                    "mtime_ns": int(row["mtime_ns"]),
+                }
+                for row in existing_rows
+            }
+
+            current_paths = {item["path"] for item in files}
+            removed_paths = [path for path in existing if path not in current_paths]
+            changed_files = [
+                item for item in files
+                if force_refresh
+                or item["path"] not in existing
+                or int(item["size"]) != existing[item["path"]]["size"]
+                or int(item["mtime_ns"]) != existing[item["path"]]["mtime_ns"]
+            ]
+
+            if removed_paths:
+                con.executemany(
+                    "DELETE FROM local_series_files WHERE path = ?",
+                    [(path,) for path in removed_paths],
+                )
+
+            season_cache: dict = {}
+            series_metadata_cache: dict = {}
+            for item in changed_files:
+                parsed_file = parse_local_episode_file(item, season_cache, series_metadata_cache)
+                con.execute(
+                    """
+                    INSERT INTO local_series_files (
+                        path, root, size, mtime_ns, series_key, series_title, payload, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(path) DO UPDATE SET
+                        root = excluded.root,
+                        size = excluded.size,
+                        mtime_ns = excluded.mtime_ns,
+                        series_key = excluded.series_key,
+                        series_title = excluded.series_title,
+                        payload = excluded.payload,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        item["path"],
+                        LOCAL_VOD_TV_DIR,
+                        int(item["size"]),
+                        int(item["mtime_ns"]),
+                        parsed_file["series_key"],
+                        parsed_file["series_title"],
+                        json.dumps(parsed_file["payload"], ensure_ascii=False),
+                    ),
+                )
+
+            set_state(con, "directory_signature", signature_json)
+            con.commit()
+
+            print(
+                "Local series DB updated: "
+                f"{len(files)} files, {len(changed_files)} changed/new, {len(removed_paths)} removed",
+                flush=True,
+            )
+
+        data = build_local_series_from_db(api_prefix=api_prefix) or {
+            "root": LOCAL_VOD_TV_DIR,
+            "count": 0,
+            "series": [],
+        }
         if "error" not in data:
             save_scan_cache(data)
-
         return data
+
+
+def scan_local_series(api_prefix: str = "", force_refresh: bool = False):
+    if force_refresh:
+        return update_local_series_db(api_prefix=api_prefix, force_refresh=True)
+
+    data = build_local_series_from_db(api_prefix=api_prefix)
+    if data and data.get("count", 0) > 0:
+        return data
+
+    return update_local_series_db(api_prefix=api_prefix, force_refresh=True)
+
+
+def local_series_watcher_loop() -> None:
+    print(
+        f"Local series watcher started: root={LOCAL_VOD_TV_DIR}, interval={LOCAL_SERIES_WATCH_INTERVAL_SECONDS}s",
+        flush=True,
+    )
+    update_local_series_db(force_refresh=False)
+
+    while not _watcher_stop_event.wait(LOCAL_SERIES_WATCH_INTERVAL_SECONDS):
+        try:
+            files = iter_local_video_files()
+            signature = get_directory_signature(files)
+            signature_json = json.dumps(signature, sort_keys=True)
+
+            with connect_local_series_db() as con:
+                previous_signature = get_state(con, "directory_signature")
+
+            if previous_signature != signature_json:
+                update_local_series_db(force_refresh=False)
+        except Exception as exc:
+            print(f"Local series watcher failed: {exc}", flush=True)
+
+
+def start_local_series_watcher() -> None:
+    global _watcher_thread
+
+    if _watcher_thread and _watcher_thread.is_alive():
+        return
+
+    _watcher_stop_event.clear()
+    _watcher_thread = threading.Thread(
+        target=local_series_watcher_loop,
+        name="local-series-watcher",
+        daemon=True,
+    )
+    _watcher_thread.start()
+
+
+def stop_local_series_watcher() -> None:
+    _watcher_stop_event.set()

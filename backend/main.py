@@ -8,7 +8,12 @@ from services.stream_service import get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
-from services.local_series_service import LOCAL_VOD_TV_DIR, scan_local_series
+from services.local_series_service import (
+    LOCAL_VOD_TV_DIR,
+    scan_local_series,
+    start_local_series_watcher,
+    stop_local_series_watcher,
+)
 from services.kan_vod_service import get_kan_vod_series, get_kan_vod_series_details, get_kan_vod_stream
 import os
 import socket
@@ -92,6 +97,18 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
     allow_headers=["*"],  # Need all headers for streaming (Range, User-Agent, etc)
 )
+
+
+@app.on_event("startup")
+def start_background_workers():
+    if os.getenv("LOCAL_SERIES_WATCHER_ENABLED", "false").lower() in {"1", "true", "yes", "on"}:
+        start_local_series_watcher()
+
+
+@app.on_event("shutdown")
+def stop_background_workers():
+    stop_local_series_watcher()
+
 
 @app.get("/version")
 def get_version():

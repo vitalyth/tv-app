@@ -34,6 +34,9 @@ services:
       - ROOT_PATH=/api
       - BACKEND_CACHE_DIR=/app/cache
       - KAN_VOD_DB_PATH=/app/db/kan_vod.db
+      - LOCAL_SERIES_DB_PATH=/app/db/local_series.db
+      - LOCAL_SERIES_WATCHER_ENABLED=${LOCAL_SERIES_WATCHER_ENABLED:-true}
+      - LOCAL_SERIES_WATCH_INTERVAL_SECONDS=${LOCAL_SERIES_WATCH_INTERVAL_SECONDS:-2}
       - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
       - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}
@@ -53,6 +56,7 @@ services:
       - ROOT_PATH=/api
       - BACKEND_CACHE_DIR=/app/cache
       - KAN_VOD_DB_PATH=/app/db/kan_vod.db
+      - LOCAL_SERIES_DB_PATH=/app/db/local_series.db
       - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
       - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/Users/vitalythirulnikov/projects/tv-app/.docker/local-tv}
