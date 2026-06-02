@@ -160,7 +160,7 @@ export default function KanVodDetailsPage() {
 
   if (isLoading) {
     return (
-      <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
+      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background" dir="rtl">
         <PageMain className="px-4 py-5">
           <div className="mb-5 h-44 animate-pulse rounded-lg border border-border bg-card" />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -175,7 +175,7 @@ export default function KanVodDetailsPage() {
 
   if (error || !series) {
     return (
-      <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
+      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background" dir="rtl">
         <PageMain className="px-4 py-5">
           <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-6 text-center">
             <p className="text-base font-medium text-red-500">הסדרה לא נמצאה או שלא ניתן לטעון אותה</p>
@@ -193,99 +193,47 @@ export default function KanVodDetailsPage() {
     );
   }
 
-  const activeSeasonEpisodes = filteredSeasons.find(([season]) => season === activeSeason)?.[1] || [];
   const playingEpisodeId = currentChannel?.module === "kan-vod" ? currentChannel.id : null;
+  const activeSeasonEpisodes = filteredSeasons.find(([season]) => season === activeSeason)?.[1] || [];
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
-      <div className="shrink-0 px-4 pt-4">
-        <div className="mb-4 overflow-hidden rounded-lg border border-border bg-card">
-          <div className="relative min-h-48 overflow-hidden">
-            {series.image ? (
-              <img src={series.image} alt="" className="absolute inset-0 h-full w-full object-cover object-top opacity-25" />
-            ) : null}
-            <div className="absolute inset-0 bg-linear-to-t from-card via-card/85 to-card/40" />
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background" dir="rtl">
+      <PageMain className="px-4">
+        <div className="sticky top-0 z-20 -mx-4 border-b border-border bg-background px-4 py-3">
+          <div className="flex flex-col gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.push("/kan-vod")}
+                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <ArrowRight className="h-4 w-4" />
+                כאן VOD
+              </button>
+              <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">{series.title}</h1>
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={isRefreshing}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                title="רענון"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              </button>
+            </div>
 
-            <div className="relative z-10 flex flex-col gap-4 p-4 md:flex-row">
-              <div className="w-24 shrink-0 overflow-hidden rounded-lg border border-border bg-background md:w-32">
-                {series.image ? (
-                  <img src={series.image} alt="" className="aspect-[2/3] h-full w-full object-cover" />
-                ) : (
-                  <div className="flex aspect-[2/3] items-center justify-center">
-                    <Clapperboard className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="mb-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => router.push("/kan-vod")}
-                    className="inline-flex items-center gap-2 rounded-lg border border-border bg-background/70 px-3 py-2 text-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <ArrowRight className="h-4 w-4" />
-                    חזרה לכאן VOD
-                  </button>
-                  <button
-                    type="button"
-                    onClick={refresh}
-                    disabled={isRefreshing}
-                    className="inline-flex items-center gap-2 rounded-lg border border-border bg-background/70 px-3 py-2 text-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-                    רענון
-                  </button>
-                </div>
-
-                <div className="mb-2 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-                  <button
-                    type="button"
-                    onClick={() => router.push("/vod")}
-                    className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    VOD
-                  </button>
-                  <ChevronLeft className="h-3 w-3 text-muted-foreground/70" />
-                  <button
-                    type="button"
-                    onClick={() => router.push("/kan-vod")}
-                    className="rounded px-1 transition-colors hover:bg-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    כאן VOD
-                  </button>
-                  <ChevronLeft className="h-3 w-3 text-muted-foreground/70" />
-                  <span className="rounded bg-secondary px-1 font-medium text-foreground">
-                    {series.title}
-                  </span>
-                </div>
-
-                <h1 className="text-2xl font-bold text-foreground md:text-3xl">{series.title}</h1>
-                <div className="mt-2 flex flex-wrap gap-2 text-sm text-muted-foreground">
-                  <span>{series.episodeCount} פרקים</span>
-                  {series.seasonCount ? <span>{series.seasonCount} עונות</span> : null}
-                  {series.program_genre ? <span>{series.program_genre}</span> : null}
-                </div>
-                {series.description ? (
-                  <p className="mt-3 line-clamp-3 max-w-4xl text-sm leading-6 text-muted-foreground">
-                    {series.description}
-                  </p>
-                ) : null}
-              </div>
-
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <DebouncedSearchInput
                 value={searchQuery}
                 onChange={setSearchQuery}
                 placeholder="חיפוש פרקים"
-                className="relative h-10 w-full self-start md:w-80"
+                className="relative h-10 w-full md:w-80"
               />
-            </div>
-
-            {filteredSeasons.length > 0 && (
-              <div className="relative z-10 border-t border-border/70 bg-card/80 px-3 py-2">
-                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide" role="tablist" aria-label="עונות">
+              {filteredSeasons.length > 0 ? (
+                <div className="flex min-h-10 items-center gap-1.5 overflow-x-auto scrollbar-hide" role="tablist" aria-label="עונות">
                   {filteredSeasons.map(([season, episodes]) => {
                     const isActive = season === activeSeason;
+
                     return (
                       <button
                         key={season}
@@ -296,7 +244,7 @@ export default function KanVodDetailsPage() {
                         className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-primary ${
                           isActive
                             ? "border-primary bg-primary text-primary-foreground"
-                            : "border-border bg-card text-muted-foreground hover:border-primary/60 hover:bg-secondary hover:text-foreground"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/60 hover:bg-secondary hover:text-foreground"
                         }`}
                       >
                         {getSeasonTitle(season, series)} · {episodes.length}
@@ -304,13 +252,39 @@ export default function KanVodDetailsPage() {
                     );
                   })}
                 </div>
-              </div>
-            )}
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
 
-      <PageMain className="px-4">
+        <div className="mb-5 mt-4 rounded-lg border border-border bg-card p-4">
+          <div className="flex flex-col gap-4 md:flex-row">
+            <div className="w-28 shrink-0 overflow-hidden rounded-lg border border-border bg-background">
+              {series.image ? (
+                <img src={series.image} alt="" className="aspect-[2/3] h-full w-full object-cover" />
+              ) : (
+                <div className="flex aspect-[2/3] items-center justify-center">
+                  <Clapperboard className="h-8 w-8 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+                <span>{series.episodeCount} פרקים</span>
+                {series.seasonCount ? <span>{series.seasonCount} עונות</span> : null}
+                {series.program_genre ? <span>{series.program_genre}</span> : null}
+              </div>
+              {series.description ? (
+                <p className="mt-3 max-w-4xl text-sm leading-6 text-muted-foreground">
+                  {series.description}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+        </div>
+
         <div className="pb-6">
           {filteredSeasons.length === 0 ? (
             <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center">
