@@ -18,6 +18,7 @@ Features:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -1203,6 +1204,12 @@ def init_db(db_path: str) -> None:
                 published TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS scanner_state (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
 
@@ -1251,6 +1258,67 @@ def init_db(db_path: str) -> None:
         con.commit()
     finally:
         con.close()
+
+
+def get_scanner_state(con: sqlite3.Connection, key: str) -> str | None:
+    row = con.execute(
+        "SELECT value FROM scanner_state WHERE key = ?",
+        (key,),
+    ).fetchone()
+    return row["value"] if row else None
+
+
+def set_scanner_state(con: sqlite3.Connection, key: str, value: str) -> None:
+    con.execute(
+        """
+        INSERT INTO scanner_state (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (key, value),
+    )
+
+
+def program_catalog_signature(programs: list[Program]) -> str:
+    payload = [
+        {
+            "id": program.id,
+            "mainid": program.mainid,
+            "title": program.title,
+            "url": program.url,
+            "image": program.image,
+            "program_format": program.program_format,
+            "program_genre": program.program_genre,
+        }
+        for program in sorted(programs, key=lambda item: item.id)
+    ]
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(encoded.encode("utf-8")).hexdigest()
+
+
+def episode_catalog_signature(episodes: list[Episode]) -> str:
+    payload = [
+        {
+            "id": episode.id,
+            "program_id": episode.program_id,
+            "season_id": episode.season_id,
+            "title": episode.title,
+            "description": episode.description,
+            "url": episode.url,
+            "image": episode.image,
+            "play_url": episode.play_url,
+            "published": episode.published,
+        }
+        for episode in sorted(episodes, key=lambda item: item.id)
+    ]
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(encoded.encode("utf-8")).hexdigest()
+
+
+def season_signature_key(season_id: str) -> str:
+    return f"season_episode_signature:{season_id}"
 
 def upsert_program(con: sqlite3.Connection, program: Program) -> None:
     con.execute(
@@ -1684,6 +1752,14 @@ def command_scan(args: argparse.Namespace) -> None:
         if args.limit_programs:
             programs = programs[: args.limit_programs]
 
+        current_program_signature = program_catalog_signature(programs)
+        can_skip_unchanged_seasons = (
+            args.incremental
+            and not args.with_streams
+            and not args.limit_episodes
+            and not getattr(args, "enrich_metadata", False)
+        )
+
         print(f"Found {len(programs)} programs")
 
         for index, program in enumerate(programs, start=1):
@@ -1746,6 +1822,21 @@ def command_scan(args: argparse.Namespace) -> None:
 
                 print(f"    Episodes: {len(episodes)}")
 
+                current_season_signature = episode_catalog_signature(episodes)
+                previous_season_signature = get_scanner_state(
+                    con,
+                    season_signature_key(season.season_id),
+                )
+
+                if (
+                    can_skip_unchanged_seasons
+                    and previous_season_signature == current_season_signature
+                ):
+                    print("    unchanged episode catalog; skipping season")
+                    mark_season_scanned(con, season.season_id)
+                    con.commit()
+                    continue
+
                 for idx, episode in enumerate(episodes, start=1):
                     if args.verbose:
                         print(f"      [{idx}/{len(episodes)}] {episode.title}")
@@ -1769,6 +1860,11 @@ def command_scan(args: argparse.Namespace) -> None:
                     upsert_episode(con, episode)
                     total_program_episodes += 1
 
+                set_scanner_state(
+                    con,
+                    season_signature_key(season.season_id),
+                    current_season_signature,
+                )
                 mark_season_scanned(con, season.season_id)
                 con.commit()
 
@@ -1778,6 +1874,10 @@ def command_scan(args: argparse.Namespace) -> None:
             if skipped_seasons > 0:
                 print(f"  Skipped seasons: {skipped_seasons}")
             print(f"  Saved episodes: {total_program_episodes}")
+
+        set_scanner_state(con, "program_catalog_signature", current_program_signature)
+        set_scanner_state(con, "program_catalog_checked_at", str(int(time.time())))
+        con.commit()
 
     except KeyboardInterrupt:
         print("\nStopped by user. Already saved rows remain in the DB.")

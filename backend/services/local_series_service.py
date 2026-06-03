@@ -457,12 +457,25 @@ def get_directory_signature(files: list[dict] | None = None) -> dict:
     files = files if files is not None else iter_local_video_files()
     total_size = sum(int(item["size"]) for item in files)
     max_mtime_ns = max((int(item["mtime_ns"]) for item in files), default=0)
+    relative_paths = []
+
+    for item in files:
+        path = str(item["path"])
+        try:
+            relative_paths.append(os.path.relpath(path, LOCAL_VOD_TV_DIR))
+        except ValueError:
+            relative_paths.append(path)
+
+    paths_hash = hashlib.sha1(
+        "\n".join(sorted(relative_paths)).encode("utf-8")
+    ).hexdigest()
 
     return {
         "root": LOCAL_VOD_TV_DIR,
         "fileCount": len(files),
         "totalSize": total_size,
         "maxMtimeNs": max_mtime_ns,
+        "pathsHash": paths_hash,
     }
 
 
