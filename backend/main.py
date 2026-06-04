@@ -353,12 +353,14 @@ def local_series(
 def kan_vod(
     refresh: bool = False,
     q: str = "",
+    category: list[str] = Query(default=[]),
     limit: int = Query(60, ge=1, le=120),
     offset: int = Query(0, ge=0),
 ):
     return get_kan_vod_series(
         refresh=refresh,
         query=q,
+        category=category,
         limit=limit,
         offset=offset,
     )

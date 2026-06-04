@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import time
 from urllib.parse import quote
@@ -10,6 +11,7 @@ KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
 KAN_VOD_RETRIES = int(os.getenv("KAN_VOD_RETRIES", "3"))
 KAN_VOD_RETRY_DELAY_SECONDS = float(os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1"))
 KAN_VOD_STREAM_BATCH_SIZE = int(os.getenv("KAN_VOD_STREAM_BATCH_SIZE", "20"))
+CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[,;|/•·،]+)\s*")
 
 
 def _with_retries(action):
@@ -48,6 +50,64 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["latestKanEpisodeId"] = int(item.pop("latest_kan_episode_id", 0) or 0)
     return item
+
+
+def _split_program_categories(*values: object) -> list[str]:
+    # Kan stores multiple labels in a single field, so normalize them into
+    # stable single-category values for the UI and for filtering.
+    categories: list[str] = []
+    seen = set()
+
+    for value in values:
+        if not value:
+            continue
+
+        for part in CATEGORY_SPLIT_RE.split(str(value)):
+            category = " ".join(part.split())
+            key = category.casefold()
+            if category and key not in seen:
+                seen.add(key)
+                categories.append(category)
+
+    return categories
+
+
+def _get_program_categories(con: sqlite3.Connection) -> list[str]:
+    rows = con.execute(
+        """
+        SELECT program_genre, program_format
+        FROM programs
+        WHERE TRIM(COALESCE(program_genre, '')) != ''
+           OR TRIM(COALESCE(program_format, '')) != ''
+        """
+    ).fetchall()
+
+    categories_by_key: dict[str, str] = {}
+    for row in rows:
+        for category in _split_program_categories(row["program_genre"], row["program_format"]):
+            categories_by_key.setdefault(category.casefold(), category)
+
+    return sorted(categories_by_key.values(), key=str.casefold)
+
+
+def _normalize_selected_categories(category: object) -> list[str]:
+    # FastAPI can pass repeated ?category= values as a list; callers may still
+    # pass a comma-separated string, so handle both shapes in one place.
+    if isinstance(category, (list, tuple)):
+        values = category
+    else:
+        values = [category]
+
+    categories: list[str] = []
+    seen = set()
+    for value in values:
+        for item in _split_program_categories(value):
+            key = item.casefold()
+            if key not in seen:
+                seen.add(key)
+                categories.append(item)
+
+    return categories
 
 
 def _season_to_dict(row: sqlite3.Row) -> dict:
@@ -120,7 +180,8 @@ def _scan_program(
         kan_db_scanner.upsert_season(con, season)
         episodes = kan_db_scanner.parse_episodes_from_page(program, season)
 
-        for episode in episodes:
+        for display_order, episode in enumerate(episodes, start=1):
+            episode.display_order = display_order
             episode_exists = episode.id in existing_episode_ids
 
             if episode_exists and not update_existing and not with_streams:
@@ -150,6 +211,7 @@ def _scan_program(
 def get_kan_vod_series(
     refresh: bool = False,
     query: str = "",
+    category: object = "",
     limit: int = 60,
     offset: int = 0,
 ) -> dict:
@@ -165,6 +227,8 @@ def get_kan_vod_series(
         where_clauses = []
         params: list[object] = []
         normalized_query = (query or "").strip()
+        selected_categories = _normalize_selected_categories(category)
+        selected_category_keys = {item.casefold() for item in selected_categories}
 
         if normalized_query:
             like_query = f"%{normalized_query}%"
@@ -183,14 +247,9 @@ def get_kan_vod_series(
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         limit = max(1, min(int(limit or 60), 120))
         offset = max(0, int(offset or 0))
+        categories = _get_program_categories(con)
 
-        count_row = con.execute(
-            f"SELECT COUNT(*) AS total FROM programs p {where_sql}",
-            params,
-        ).fetchone()
-        total = int(count_row["total"] if count_row else 0)
-
-        rows = con.execute(
+        all_rows = con.execute(
             f"""
             SELECT
                 p.*,
@@ -207,10 +266,21 @@ def get_kan_vod_series(
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
                 COALESCE(latest_kan_episode_id, 0) DESC,
                 p.title COLLATE NOCASE
-            LIMIT ? OFFSET ?
             """,
-            [*params, limit, offset],
+            params,
         ).fetchall()
+        # Category filtering is applied after the query because categories may
+        # be packed into one DB field and need the same split rules as the UI.
+        filtered_rows = [
+            row for row in all_rows
+            if not selected_category_keys
+            or any(
+                item.casefold() in selected_category_keys
+                for item in _split_program_categories(row["program_genre"], row["program_format"])
+            )
+        ]
+        total = len(filtered_rows)
+        rows = filtered_rows[offset:offset + limit]
 
         return {
             "db": KAN_VOD_DB_PATH,
@@ -220,6 +290,9 @@ def get_kan_vod_series(
             "offset": offset,
             "hasMore": offset + len(rows) < total,
             "query": normalized_query,
+            "category": ",".join(selected_categories),
+            "selectedCategories": selected_categories,
+            "categories": categories,
             "series": [_program_to_dict(row) for row in rows],
             "error": error,
         }
@@ -287,6 +360,8 @@ def get_kan_vod_series_details(
             WHERE program_id = ?
             ORDER BY
                 season_id DESC,
+                display_order IS NULL,
+                display_order ASC,
                 CAST(id AS INTEGER) DESC,
                 title COLLATE NOCASE DESC
             """,

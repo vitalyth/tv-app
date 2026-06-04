@@ -107,6 +107,7 @@ class Episode:
     stream_url: Optional[str] = None
     kaltura_entry_id: Optional[str] = None
     published: Optional[str] = None
+    display_order: Optional[int] = None
 
 
 def clean_text(value: Any) -> str:
@@ -1241,6 +1242,7 @@ def init_db(db_path: str) -> None:
         add_column_if_missing(con, "episodes", "stream_url", "TEXT")
         add_column_if_missing(con, "episodes", "kaltura_entry_id", "TEXT")
         add_column_if_missing(con, "episodes", "published", "TEXT")
+        add_column_if_missing(con, "episodes", "display_order", "INTEGER")
         add_column_if_missing(con, "episodes", "updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
 
         # Indexes after migrations, so columns definitely exist.
@@ -1382,9 +1384,9 @@ def upsert_episode(con: sqlite3.Connection, episode: Episode) -> None:
         """
         INSERT INTO episodes (
             id, program_id, season_id, title, description, url, image,
-            play_url, stream_url, kaltura_entry_id, published, updated_at
+            play_url, stream_url, kaltura_entry_id, published, display_order, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             program_id=excluded.program_id,
             season_id=excluded.season_id,
@@ -1396,6 +1398,7 @@ def upsert_episode(con: sqlite3.Connection, episode: Episode) -> None:
             stream_url=COALESCE(excluded.stream_url, episodes.stream_url),
             kaltura_entry_id=COALESCE(excluded.kaltura_entry_id, episodes.kaltura_entry_id),
             published=excluded.published,
+            display_order=COALESCE(excluded.display_order, episodes.display_order),
             updated_at=CURRENT_TIMESTAMP
         """,
         (
@@ -1410,6 +1413,7 @@ def upsert_episode(con: sqlite3.Connection, episode: Episode) -> None:
             episode.stream_url,
             episode.kaltura_entry_id,
             episode.published,
+            episode.display_order,
         ),
     )
 
@@ -1821,6 +1825,8 @@ def command_scan(args: argparse.Namespace) -> None:
                     episodes = episodes[: args.limit_episodes]
 
                 print(f"    Episodes: {len(episodes)}")
+                for display_order, episode in enumerate(episodes, start=1):
+                    episode.display_order = display_order
 
                 current_season_signature = episode_catalog_signature(episodes)
                 previous_season_signature = get_scanner_state(
@@ -1832,6 +1838,9 @@ def command_scan(args: argparse.Namespace) -> None:
                     can_skip_unchanged_seasons
                     and previous_season_signature == current_season_signature
                 ):
+                    # Backfill display_order even when the season catalog is unchanged.
+                    for episode in episodes:
+                        upsert_episode(con, episode)
                     print("    unchanged episode catalog; skipping season")
                     mark_season_scanned(con, season.season_id)
                     con.commit()

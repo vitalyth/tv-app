@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWRInfinite from "swr/infinite";
-import { ChevronLeft, Clapperboard, Play, RefreshCw, Search, Tv } from "lucide-react";
+import { ChevronDown, ChevronLeft, Clapperboard, Play, RefreshCw, Search, Tv, X } from "lucide-react";
 
 import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { kanVodService, type KanVodSeries, type KanVodSeriesResponse } from "@/lib/services/kan-vod-service";
 
 const getEpisodeCountText = (count: number) => {
@@ -21,6 +23,9 @@ const PAGE_SIZE = 48;
 export default function KanVodPage() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [categorySearch, setCategorySearch] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
@@ -37,6 +42,7 @@ export default function KanVodPage() {
 
     return {
       query: searchQuery,
+      category: selectedCategories,
       limit: PAGE_SIZE,
       offset: pageIndex * PAGE_SIZE,
     };
@@ -46,6 +52,27 @@ export default function KanVodPage() {
   });
 
   const visibleSeries = useMemo(() => pages?.flatMap((page) => page.series || []) || [], [pages]);
+  const categories = useMemo(
+    () => pages?.find((page) => page.categories?.length)?.categories || [],
+    [pages]
+  );
+  useEffect(() => {
+    if (categories.length > 0) {
+      // Keep the menu stable while a filtered request is loading.
+      setAvailableCategories(categories);
+    }
+  }, [categories]);
+  const filteredCategories = useMemo(() => {
+    const normalizedSearch = categorySearch.trim().toLocaleLowerCase("he");
+    if (!normalizedSearch) return availableCategories;
+
+    return availableCategories.filter((category) => category.toLocaleLowerCase("he").includes(normalizedSearch));
+  }, [availableCategories, categorySearch]);
+  const categoryLabel = useMemo(() => {
+    if (selectedCategories.length === 0) return "כל הקטגוריות";
+    if (selectedCategories.length === 1) return selectedCategories[0];
+    return `${selectedCategories.length} קטגוריות`;
+  }, [selectedCategories]);
   const lastPage = pages?.[pages.length - 1];
   const hasMore = Boolean(lastPage?.hasMore);
   const isLoadingMore = Boolean(
@@ -54,7 +81,7 @@ export default function KanVodPage() {
 
   useEffect(() => {
     setSize(1);
-  }, [searchQuery, setSize]);
+  }, [searchQuery, selectedCategories, setSize]);
 
   useEffect(() => {
     const node = loadMoreRef.current;
@@ -83,6 +110,7 @@ export default function KanVodPage() {
           await kanVodService.getSeries({
             refresh: true,
             query: searchQuery,
+            category: selectedCategories,
             limit: PAGE_SIZE,
             offset: 0,
           }),
@@ -94,18 +122,26 @@ export default function KanVodPage() {
     }
   };
 
+  const toggleCategory = (category: string) => {
+    setSelectedCategories((current) => (
+      current.includes(category)
+        ? current.filter((item) => item !== category)
+        : [...current, category]
+    ));
+  };
+
   return (
     <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
-      <div className="mb-5 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
-              <Tv className="h-6 w-6 text-primary" />
+      <div className="mb-2 shrink-0 border-b border-border bg-background px-2 pb-1.5 pt-1.5 sm:mb-5 sm:px-4 sm:pb-4 sm:pt-5">
+        <div className="flex flex-col gap-1.5 sm:gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex min-w-0 items-start gap-2 sm:gap-3">
+            <div className="hidden h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card sm:flex sm:h-12 sm:w-12">
+              <Tv className="h-5 w-5 text-primary sm:h-6 sm:w-6" />
             </div>
 
             <div className="min-w-0">
-              <h1 className="truncate text-2xl font-bold text-foreground">כאן VOD</h1>
-              <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+              <h1 className="truncate text-lg font-bold leading-6 text-foreground sm:text-2xl">כאן VOD</h1>
+              <div className="mt-0.5 hidden flex-wrap items-center gap-1 text-xs text-muted-foreground sm:mt-1 sm:flex sm:text-sm">
                 <button
                   type="button"
                   onClick={() => router.push("/vod")}
@@ -121,18 +157,108 @@ export default function KanVodPage() {
             </div>
           </div>
 
-          <div className="flex w-full gap-2 lg:w-[30rem]">
+          <div className="grid w-full grid-cols-[minmax(6.25rem,0.8fr)_minmax(0,1.2fr)_2.5rem] gap-1.5 sm:flex sm:w-auto sm:flex-row sm:gap-2 lg:justify-end">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-10 min-w-0 items-center justify-between gap-1.5 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:h-[42px] sm:w-56 sm:shrink-0 sm:gap-2 sm:px-3"
+                  aria-label="סינון לפי קטגוריות"
+                >
+                  <span className="min-w-0 truncate text-right">{categoryLabel}</span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={8}
+                className="flex max-h-[min(70vh,34rem)] w-[calc(100vw-1rem)] max-w-[24rem] flex-col p-2 sm:w-80"
+                dir="rtl"
+              >
+                <div className="sticky top-0 z-10 mb-2 bg-popover pb-2">
+                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                    <span className="text-sm font-medium text-foreground">סינון קטגוריות</span>
+                    <span className="text-xs text-muted-foreground">{selectedCategories.length || "כל"}</span>
+                  </div>
+                  <div className="relative">
+                    <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      value={categorySearch}
+                      onChange={(event) => setCategorySearch(event.target.value)}
+                      placeholder="חיפוש קטגוריה"
+                      className="h-12 w-full rounded-lg border border-border bg-background pr-10 pl-3 text-base outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 sm:h-10 sm:text-sm"
+                    />
+                  </div>
+                </div>
+                {selectedCategories.length > 0 ? (
+                  <div className="mb-2 shrink-0 rounded-lg border border-border bg-background/60 p-2">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-xs text-muted-foreground">נבחרו</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCategories([])}
+                        className="inline-flex h-9 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:h-7"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        נקה
+                      </button>
+                    </div>
+                    <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+                      {selectedCategories.map((category) => (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => toggleCategory(category)}
+                          className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary"
+                          title={`הסר ${category}`}
+                        >
+                          <X className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                  {filteredCategories.length > 0 ? (
+                    filteredCategories.map((category, index) => {
+                      const checked = selectedCategories.includes(category);
+                      const categoryId = `kan-vod-category-${index}`;
+
+                      return (
+                        <div
+                          key={category}
+                          className="flex min-h-12 w-full items-center gap-3 rounded-md px-2 py-2 text-right text-base transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:min-h-10 sm:gap-2 sm:text-sm"
+                        >
+                          <Checkbox
+                            id={categoryId}
+                            checked={checked}
+                            onCheckedChange={() => toggleCategory(category)}
+                            className="size-5 sm:size-4"
+                          />
+                          <label htmlFor={categoryId} className="min-w-0 flex-1 cursor-pointer truncate">
+                            {category}
+                          </label>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="px-2 py-6 text-center text-sm text-muted-foreground">לא נמצאו קטגוריות</div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
             <DebouncedSearchInput
               value={searchQuery}
               onChange={setSearchQuery}
               placeholder="חיפוש בכאן"
-              className="relative min-w-0 flex-1"
+              className="relative min-w-0"
             />
             <button
               type="button"
               onClick={refresh}
               disabled={isRefreshing}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:h-[42px] sm:w-[42px]"
               title="רענון"
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />

@@ -74,6 +74,9 @@ export type KanVodSeriesResponse = {
   offset: number;
   hasMore: boolean;
   query?: string;
+  category?: string;
+  selectedCategories?: string[];
+  categories?: string[];
   series: KanVodSeries[];
   error?: string | null;
 };
@@ -82,17 +85,24 @@ export const kanVodService = {
   async getSeries({
     refresh = false,
     query = "",
+    category = [],
     limit = 60,
     offset = 0,
   }: {
     refresh?: boolean;
     query?: string;
+    category?: string | string[];
     limit?: number;
     offset?: number;
   } = {}): Promise<KanVodSeriesResponse> {
     const params = new URLSearchParams();
     if (refresh) params.set("refresh", "true");
     if (query.trim()) params.set("q", query.trim());
+    const categories = Array.isArray(category) ? category : [category];
+    categories
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((item) => params.append("category", item));
     params.set("limit", String(limit));
     params.set("offset", String(offset));
     const searchParams = `?${params.toString()}`;
