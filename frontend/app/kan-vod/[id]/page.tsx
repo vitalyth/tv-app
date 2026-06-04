@@ -22,8 +22,26 @@ import {
   type VodSeasonTab,
 } from "@/components/vod-series-detail";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-import { type Channel, type VodPlaybackMeta } from "@/lib/channels-data";
+import { type Channel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 import { kanVodService, type KanVodEpisode, type KanVodSeriesDetails } from "@/lib/services/kan-vod-service";
+
+const VOD_RECENT_KEY = "vod_recently_watched";
+
+type VodNode = {
+  name: string;
+  module: string;
+  mode: number;
+  url: string;
+  logo: string;
+  moreData: string;
+  description?: string;
+};
+
+type RecentVodItem = {
+  item: VodItem;
+  stack: VodNode[];
+  watchedAt: number;
+};
 
 const getSeasonTitle = (seasonId: string, series: KanVodSeriesDetails) => {
   const season = series.seasons.find((item) => item.season_id === seasonId);
@@ -45,6 +63,102 @@ const getEpisodeMetaText = (episode: KanVodEpisode) => {
 
 const getStreamReferer = () => {
   return "https://www.kan.org.il/";
+};
+
+const loadRecentVodItems = (): RecentVodItem[] => {
+  if (typeof window === "undefined") return [];
+
+  try {
+    return JSON.parse(localStorage.getItem(VOD_RECENT_KEY) || "[]") as RecentVodItem[];
+  } catch {
+    return [];
+  }
+};
+
+const episodeToVodItem = (series: KanVodSeriesDetails, episode: KanVodEpisode): VodItem => {
+  const image = getEpisodeImage(series, episode);
+
+  return {
+    id: episode.id,
+    episodeId: episode.id,
+    programId: series.id,
+    name: getEpisodeTitle(episode),
+    title: getEpisodeTitle(episode),
+    mode: 0,
+    logo: image,
+    module: "kan-vod",
+    url: episode.streamUrl || episode.playUrl || episode.url,
+    streamUrl: episode.streamUrl,
+    playUrl: episode.playUrl,
+    moreData: "",
+    description: episode.episodeOverview || "",
+    plot: episode.episodeOverview || "",
+    aired: episode.published || "",
+    season: episode.season_id ? getSeasonTitle(episode.season_id, series) : "",
+    episode: episode.id,
+    programName: series.title,
+    seasonName: episode.season_id ? getSeasonTitle(episode.season_id, series) : "",
+    channelName: "כאן VOD",
+    episodeName: getEpisodeTitle(episode),
+    episodeDescription: episode.episodeOverview || "",
+    programDescription: series.description || "",
+    programImage: series.image || "",
+    channelImage: series.image || "",
+    episodeImage: image,
+    isFolder: false,
+    isPlayable: true,
+  };
+};
+
+const episodeToVodStack = (series: KanVodSeriesDetails, episode: KanVodEpisode): VodNode[] => {
+  const image = series.image || getEpisodeImage(series, episode);
+  const seasonName = episode.season_id ? getSeasonTitle(episode.season_id, series) : "";
+
+  return [
+    {
+      name: "כאן VOD",
+      module: "kan-vod",
+      mode: 0,
+      url: "/kan-vod",
+      logo: image,
+      moreData: "",
+      description: "",
+    },
+    {
+      name: series.title,
+      module: "kan-vod",
+      mode: 0,
+      url: `/kan-vod/${encodeURIComponent(series.id)}`,
+      logo: image,
+      moreData: "",
+      description: series.description || "",
+    },
+    ...(seasonName
+      ? [{
+          name: seasonName,
+          module: "kan-vod",
+          mode: 0,
+          url: `/kan-vod/${encodeURIComponent(series.id)}`,
+          logo: image,
+          moreData: "",
+          description: "",
+        }]
+      : []),
+  ];
+};
+
+const saveRecentVodItem = (series: KanVodSeriesDetails, episode: KanVodEpisode) => {
+  if (typeof window === "undefined") return;
+
+  try {
+    const item = episodeToVodItem(series, episode);
+    const stack = episodeToVodStack(series, episode);
+    const existing = loadRecentVodItems().filter((saved) => saved.item.id !== item.id);
+    const next = [{ item, stack, watchedAt: Date.now() }, ...existing];
+    localStorage.setItem(VOD_RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore localStorage write errors
+  }
 };
 
 const buildVodMeta = (series: KanVodSeriesDetails, episode: KanVodEpisode): VodPlaybackMeta => {
@@ -171,6 +285,7 @@ export default function KanVodDetailsPage() {
 
   const playEpisode = useCallback((episode: KanVodEpisode) => {
     if (!series) return;
+    saveRecentVodItem(series, episode);
     play(episodeToChannel(series, episode));
   }, [play, series]);
 

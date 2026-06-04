@@ -146,7 +146,7 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
     ].filter(Boolean);
 
     return {
-        id: item.id,
+        id: item.module === "kan-vod" && item.episodeId ? item.episodeId : item.id,
         index: 0,
         name: vodMeta.channelName,
         logo: vodMeta.channelImage || item.logo,

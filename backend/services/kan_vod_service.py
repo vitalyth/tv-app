@@ -303,6 +303,35 @@ def get_kan_vod_series_details(
         con.close()
 
 
+def get_kan_vod_recent_episodes(limit: int = 10) -> list[dict]:
+    con = _connect()
+    try:
+        rows = con.execute(
+            """
+            SELECT
+                e.*,
+                p.title AS program_title,
+                p.description AS program_description,
+                p.image AS program_image,
+                s.title AS season_title,
+                s.season_number AS season_number
+            FROM episodes e
+            JOIN programs p ON p.id = e.program_id
+            LEFT JOIN seasons s ON s.season_id = e.season_id
+            ORDER BY
+                CASE WHEN e.published IS NULL OR e.published = '' THEN 1 ELSE 0 END,
+                e.published DESC,
+                CAST(e.id AS INTEGER) DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit or 10)),),
+        ).fetchall()
+
+        return [_row_to_dict(row) for row in rows]
+    finally:
+        con.close()
+
+
 def get_kan_vod_stream(episode_id: str) -> str | None:
     con = _connect()
     try:

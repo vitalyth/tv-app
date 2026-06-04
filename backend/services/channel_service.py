@@ -17,6 +17,7 @@ from resources.lib import cache as addon_cache
 from services.epg_service import get_now_epg
 from models.schemas import Channel
 from services.custom_channel_service import load_custom_channels
+from services.kan_vod_service import get_kan_vod_recent_episodes
 from services.vod_recent_common import VodRecentSourceContext
 from services.vod_recent_sources import fetch_direct_vod_recent_items
 
@@ -122,13 +123,13 @@ IDANPLUS_VOD_CHANNELS = [
     },
 ]
 
-VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_keshet12", "vod_reshet13", "vod_14tv"]
+VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_kan11", "vod_keshet12", "vod_reshet13", "vod_14tv"]
 VOD_RECENT_LOOKBACK_DAYS = 3
-VOD_RECENT_TOTAL_LIMIT = 30
+VOD_RECENT_TOTAL_LIMIT = 40
 VOD_SOURCE_CACHE_TTL_HOURS = 24
 VOD_ITEMS_CACHE_TTL_SECONDS = int(os.getenv("VOD_ITEMS_CACHE_TTL_SECONDS", str(7 * 24 * 60 * 60)))
 VOD_ITEMS_CACHE_DIR = CACHE_DIR / "vod_items"
-VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_keshet12", "vod_reshet13", "vod_14tv"}
+VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_kan11", "vod_keshet12", "vod_reshet13", "vod_14tv"}
 _original_addon_cache_get = addon_cache.get
 _vod_source_lock = threading.RLock()
 
@@ -801,6 +802,8 @@ def _vod_recent_item_matches_channel_window(item: dict) -> bool:
     timestamp = _item_timestamp_from_fields(item)
     channel_id = item.get("vodChannelId")
 
+    if channel_id == "vod_kan11":
+        return True
     if channel_id == "vod_reshet13":
         return _timestamp_matches_dates(timestamp, _today_and_yesterday_dates())
     if channel_id == "vod_14tv":
@@ -903,7 +906,66 @@ def _vod_recent_timestamp(item: dict) -> float:
     return _parse_aired_timestamp(item.get("aired", "") or "")
 
 
+def _fetch_kan_vod_recent_items(limit: int) -> list[dict]:
+    recent_items: list[dict] = []
+
+    for index, episode in enumerate(get_kan_vod_recent_episodes(limit)):
+        episode_id = str(episode.get("id") or "")
+        if not episode_id:
+            continue
+
+        title = clean_kodi_label(episode.get("title") or "")
+        description = clean_kodi_label(episode.get("description") or "")
+        program_name = clean_kodi_label(episode.get("program_title") or "")
+        program_description = clean_kodi_label(episode.get("program_description") or "")
+        season_title = clean_kodi_label(episode.get("season_title") or "")
+        published = episode.get("published") or ""
+        source_timestamp = _parse_aired_timestamp(published)
+        episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
+        program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
+
+        recent_items.append(
+            {
+                "id": f"kan-vod:{episode_id}",
+                "episodeId": episode_id,
+                "name": title,
+                "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
+                "streamUrl": episode.get("stream_url") or "",
+                "playUrl": episode.get("play_url") or episode.get("url") or "",
+                "mode": 0,
+                "logo": episode_image or program_image or normalize_vod_image("kan.jpg"),
+                "module": "kan-vod",
+                "moreData": "",
+                "description": description,
+                "title": title,
+                "plot": description,
+                "aired": published,
+                "season": str(episode.get("season_number") or ""),
+                "episode": episode_id,
+                "programId": episode.get("program_id") or "",
+                "programName": program_name,
+                "programDescription": program_description,
+                "programImage": program_image,
+                "seasonName": season_title,
+                "channelName": "כאן 11",
+                "channelImage": normalize_vod_image("kan.jpg"),
+                "episodeName": title,
+                "episodeDescription": description,
+                "episodeImage": episode_image,
+                "isFolder": False,
+                "isPlayable": True,
+                "sourceTimestamp": source_timestamp,
+                "sourceOrder": index,
+            }
+        )
+
+    return recent_items
+
+
 def _fetch_direct_vod_recent_items(channel: dict, limit: int, use_cache: bool) -> list[dict]:
+    if channel["id"] == "vod_kan11":
+        return _fetch_kan_vod_recent_items(limit)
+
     return fetch_direct_vod_recent_items(
         channel,
         limit,

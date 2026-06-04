@@ -173,11 +173,14 @@ def vod_stream(request: Request, item: dict):
         return {"stream": f"{base_with_prefix}/{url}"}
 
     if item.get("module") == "kan-vod":
-        episode_id = item.get("id") or item.get("episodeId") or ""
-        stream_url = item.get("streamUrl") or item.get("url") or ""
+        episode_id = item.get("episodeId") or item.get("id") or ""
+        stream_url = item.get("streamUrl") or ""
 
         if not stream_url and episode_id:
             stream_url = get_kan_vod_stream(episode_id) or ""
+
+        if not stream_url:
+            stream_url = item.get("url") or ""
 
         return {"stream": stream_url}
 
