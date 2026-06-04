@@ -17,6 +17,8 @@ import { ChevronLeft, Clapperboard, Play, RotateCcw, Tv } from "lucide-react";
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
 const QUICK_LIVE_CHANNEL_TVG_IDS = ["11", "12", "13", "14", "i24news"];
+const LIVE_NOW_LIMIT = 12;
+const RECENT_LIVE_LIMIT = 12;
 
 type EpgProgram = {
   start: number;
@@ -92,6 +94,11 @@ const isSeasonNode = (name?: string) => {
   return /^עונה\b/.test(normalized) || /^Season\b/i.test(normalized);
 };
 
+const isKanVodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim();
+  return channel.id === "kan" || name === "כאן 11";
+};
+
 const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
   const channelNode = stack[0];
   const contentNodes = stack.slice(1).filter((node) => !isVodGroupingNode(node.name));
@@ -123,7 +130,7 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
   const subtitleParts = [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean);
 
   return {
-    id: item.id,
+    id: item.module === "kan-vod" && item.episodeId ? item.episodeId : item.id,
     index: 0,
     name: vodMeta.channelName,
     logo: vodMeta.channelImage || item.logo,
@@ -248,7 +255,7 @@ const LandingPage = () => {
         const bRank = recentlyViewedRank.get(b.id) ?? Number.MAX_SAFE_INTEGER;
         return aRank - bRank;
       })
-      .slice(0, 6);
+      .slice(0, LIVE_NOW_LIMIT);
   }, [liveChannels, epg, recentlyViewed]);
 
   const quickLiveChannels = useMemo(() => {
@@ -305,6 +312,11 @@ const LandingPage = () => {
 
   const handleOpenVodChannel = useCallback(
     (channel: VodChannel) => {
+      if (isKanVodChannel(channel)) {
+        router.push("/kan-vod");
+        return;
+      }
+
       const path: VodNode[] = [
         {
           name: channel.name,
@@ -543,7 +555,7 @@ const LandingPage = () => {
                   subtitle="השידורים שחזרת אליהם לאחרונה"
                 />
                 <HorizontalCarousel itemClassName={carouselCompactCardClass}>
-                  {recentlyViewed.slice(0, 6).map((channel) => (
+                  {recentlyViewed.slice(0, RECENT_LIVE_LIMIT).map((channel) => (
                     <ChannelCard
                       key={channel.id}
                       channel={channel}

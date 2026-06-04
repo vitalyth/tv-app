@@ -18,7 +18,7 @@ const ChannelsList = () => {
     const router = useRouter();
     
     const refreshNow = useCallback(() => {
-        refresh();
+        return refresh();
     }, [refresh]);
 
     const handleSelectChannel = (channel: Channel) => {

@@ -30,6 +30,11 @@ const getPlayerImageSrc = (logo?: string) => {
   return `/ch/${logo}`;
 };
 
+const shouldUseVpnProxy = (channel: Channel) => {
+  const channelId = channel.channelID || channel.id || "";
+  return channel.module === "kan-vod" || channelId.startsWith("ch_11");
+};
+
 interface VideoPlayerProps {
   channel: Channel | null;
   onClose: () => void;
@@ -378,12 +383,13 @@ export function VideoPlayer({
       (streamUrl.toLowerCase().includes(".m3u8") ||
         channel?.linkDetails?.manifest_type === "hls");
 
+    const vpnParam = shouldUseVpnProxy(channel) ? "&vpn=true" : "";
     const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
       ? streamUrl
       : api(
           `/proxy?url=${encodeURIComponent(
             streamUrl,
-          )}&referer=${encodeURIComponent(referer)}`,
+          )}&referer=${encodeURIComponent(referer)}${vpnParam}`,
         );
 
     const sourceType = isLocalSeriesStream && !isLocalSeriesHls

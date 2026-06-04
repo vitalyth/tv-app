@@ -8,7 +8,13 @@ from services.stream_service import get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
-from services.local_series_service import LOCAL_VOD_TV_DIR, scan_local_series
+from services.local_series_service import (
+    LOCAL_VOD_TV_DIR,
+    scan_local_series,
+    start_local_series_watcher,
+    stop_local_series_watcher,
+)
+from services.kan_vod_service import get_kan_vod_series, get_kan_vod_series_details, get_kan_vod_stream
 import os
 import socket
 from models.schemas import Channel
@@ -16,6 +22,19 @@ from plugin_video_idanplus.resources import main as idan_main
 from plugin_video_idanplus.resources.lib import common, iptv, epg
 from services.custom_channel_service import get_custom_channel
 from config import APP_VERSION
+
+def get_external_base_url(request: Request) -> str:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+    cf_visitor = request.headers.get("cf-visitor", "")
+    proto = forwarded_proto or request.url.scheme
+
+    if '"scheme":"https"' in cf_visitor or request.headers.get("x-forwarded-ssl") == "on":
+        proto = "https"
+
+    host = forwarded_host or request.headers.get("host") or request.url.netloc
+
+    return f"{proto}://{host}".rstrip("/")
 
 def get_local_addresses(port: int = 8001) -> list[str]:
     """Auto-detect server's IP and hostname addresses"""
@@ -79,6 +98,18 @@ app.add_middleware(
     allow_headers=["*"],  # Need all headers for streaming (Range, User-Agent, etc)
 )
 
+
+@app.on_event("startup")
+def start_background_workers():
+    if os.getenv("LOCAL_SERIES_WATCHER_ENABLED", "false").lower() in {"1", "true", "yes", "on"}:
+        start_local_series_watcher()
+
+
+@app.on_event("shutdown")
+def stop_background_workers():
+    stop_local_series_watcher()
+
+
 @app.get("/version")
 def get_version():
     return {"version": APP_VERSION}
@@ -141,9 +172,24 @@ def vod_stream(request: Request, item: dict):
 
         return {"stream": f"{base_with_prefix}/{url}"}
 
+    if item.get("module") == "kan-vod":
+        episode_id = item.get("episodeId") or item.get("id") or ""
+        stream_url = item.get("streamUrl") or ""
+
+        if not stream_url and episode_id:
+            stream_url = get_kan_vod_stream(episode_id) or ""
+
+        if not stream_url:
+            stream_url = item.get("url") or ""
+
+        return {"stream": stream_url}
+
     return {"stream": get_vod_stream(item)}
 
 @app.get("/stream")
+@app.get("/v/stream")
+@app.head("/stream")
+@app.head("/v/stream")
 def stream(request: Request, channel_id: str = Query(..., min_length=1, max_length=50, pattern="^[a-zA-Z0-9_-]+$")):
     custom_channel = get_custom_channel(channel_id)
 
@@ -164,14 +210,20 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
     return handle_proxy(request, url, referer)
 
 @app.get("/proxy")
+@app.get("/v/proxy")
+@app.get("/vod_proxy")
 def proxy(request: Request, url: str, referer: str = None, cast: bool = False):
     return handle_proxy(request, url, referer, cast=cast)
 
 @app.head("/proxy")
+@app.head("/v/proxy")
+@app.head("/vod_proxy")
 def proxy_head(request: Request, url: str, referer: str = None, cast: bool = False):
     return handle_proxy(request, url, referer, cast=cast)
 
 @app.options("/proxy")
+@app.options("/v/proxy")
+@app.options("/vod_proxy")
 def proxy_options():
     return cors_preflight()
 
@@ -185,8 +237,16 @@ def epg_xml():
     return Response(content=xml, media_type="application/xml")
 
 @app.get("/playlist.m3u")
+@app.head("/playlist.m3u")
 def playlist(request: Request):
-    content = generate_playlist(str(request.base_url).rstrip("/"))
+    base_url = get_external_base_url(request)
+    is_direct_backend = request.url.port == 8000
+
+    content = generate_playlist(
+        base_url,
+        use_api_prefix=not is_direct_backend,
+        use_vpn_routes=not is_direct_backend,
+    )
 
     return Response(
         content=content,
@@ -274,8 +334,65 @@ def _rewrite_local_hls_playlist(request: Request, playlist_path: str) -> Respons
 
 
 @app.get("/local-series")
-def local_series(request: Request):
-    return scan_local_series(api_prefix=get_request_api_prefix(request))
+def local_series(
+    request: Request,
+    refresh: bool = False,
+    q: str = "",
+    limit: int = Query(60, ge=1, le=120),
+    offset: int = Query(0, ge=0),
+):
+    return scan_local_series(
+        api_prefix=get_request_api_prefix(request),
+        force_refresh=refresh,
+        query=q,
+        limit=limit,
+        offset=offset,
+    )
+
+@app.get("/kan-vod")
+def kan_vod(
+    refresh: bool = False,
+    q: str = "",
+    category: list[str] = Query(default=[]),
+    limit: int = Query(60, ge=1, le=120),
+    offset: int = Query(0, ge=0),
+):
+    return get_kan_vod_series(
+        refresh=refresh,
+        query=q,
+        category=category,
+        limit=limit,
+        offset=offset,
+    )
+
+@app.get("/kan-vod/stream")
+def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
+    stream_url = get_kan_vod_stream(episode_id)
+    if not stream_url:
+        return Response("Kan VOD stream not found", status_code=404)
+
+    return {"stream": stream_url}
+
+@app.get("/kan-vod/{program_id}")
+def kan_vod_details(
+    request: Request,
+    program_id: str,
+    refresh: bool = False,
+    with_streams: bool = False,
+    stream_limit: int = 20,
+):
+    details = get_kan_vod_series_details(
+        program_id,
+        api_prefix=get_request_api_prefix(request),
+        refresh=refresh,
+        with_streams=with_streams,
+        stream_limit=stream_limit,
+    )
+
+    if details is None:
+        return Response("Kan VOD program not found", status_code=404)
+
+    return details
 
 @app.get("/stream/local-series")
 @app.head("/stream/local-series")

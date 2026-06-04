@@ -7,7 +7,7 @@ from services.custom_channel_service import load_custom_channels
 def remove_api_prefix(url: str) -> str:
     return url.replace("/api", "", 1)
 
-def generate_playlist(base_url):
+def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
     channels = idan_main.GetUserChannels(type='tv') + load_custom_channels()
     lines = ["#EXTM3U"]
 
@@ -29,7 +29,16 @@ def generate_playlist(base_url):
 
         channel_id = ch.channelID
 
-        proxy_url = f"{base_url}/stream?{urlencode({'channel_id': channel_id})}"
+        stream_base = base_url.rstrip("/")
+
+        if use_api_prefix and not stream_base.endswith("/api"):
+            stream_base = f"{stream_base}/api"
+
+        stream_params = {"channel_id": channel_id}
+        if use_vpn_routes and channel_id.startswith("ch_11"):
+            stream_params["vpn"] = "true"
+
+        proxy_url = f"{stream_base}/stream?{urlencode(stream_params)}"
 
         logo_base = remove_api_prefix(base_url)
         logo = f"{logo_base}/ch/{ch.logo}"

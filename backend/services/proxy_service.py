@@ -1,4 +1,4 @@
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, parse_qsl, unquote, urlencode, urljoin, urlparse
 from pathlib import Path
 import os
 import mimetypes
@@ -10,6 +10,12 @@ import html
 import json
 
 session = create_session()
+
+PROXY_CONNECT_TIMEOUT_SECONDS = float(os.getenv("PROXY_CONNECT_TIMEOUT_SECONDS", "10"))
+PROXY_READ_TIMEOUT_SECONDS = float(os.getenv("PROXY_READ_TIMEOUT_SECONDS", "60"))
+PROXY_REQUEST_TIMEOUT = (PROXY_CONNECT_TIMEOUT_SECONDS, PROXY_READ_TIMEOUT_SECONDS)
+KAN_VOD_PROXY_MAX_BITRATE = int(os.getenv("KAN_VOD_PROXY_MAX_BITRATE", "0"))
+KAN_VOD_SEGMENT_RETRIES = max(0, int(os.getenv("KAN_VOD_SEGMENT_RETRIES", "2")))
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -37,13 +43,18 @@ def _is_public_host(host: str) -> bool:
     return True
 
 
-def _request_public_base_proxy(request):
+def _request_public_proxy_url(request):
     root_path = request.scope.get("root_path", "") or request.headers.get("x-forwarded-prefix", "")
 
     if not root_path and request.url.path.endswith("/proxy"):
         root_path = request.url.path[:-len("/proxy")]
 
     root_path = root_path or ""
+    current_endpoint = request.url.path.strip("/").split("/")[-1] or "proxy"
+    proxy_endpoint = (
+        request.headers.get("x-forwarded-proxy-endpoint")
+        or current_endpoint
+    ).strip("/") or "proxy"
 
     proto = request.headers.get("x-forwarded-proto")
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
@@ -60,7 +71,7 @@ def _request_public_base_proxy(request):
     if proto == "http" and host and _is_public_host(host):
         proto = "https"
 
-    return f"{proto}://{host}{root_path}"
+    return f"{proto}://{host}{root_path}/{proxy_endpoint}"
 
 
 def cors_preflight():
@@ -123,7 +134,10 @@ def _is_segment_url(url):
 
 def _is_local_proxy_url(uri):
     parsed = urlparse(uri)
-    return parsed.path.endswith("/proxy") and "url" in parse_qs(parsed.query)
+    return (
+        parsed.path.endswith("/proxy")
+        or parsed.path.endswith("/vod_proxy")
+    ) and "url" in parse_qs(parsed.query)
 
 
 def _origin_for_url(url):
@@ -131,11 +145,67 @@ def _origin_for_url(url):
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def _split_kodi_url_props(url):
+    for separator in ("|", "%7C", "%7c"):
+        if separator in url:
+            clean_url, raw_props = url.split(separator, 1)
+            break
+    else:
+        return url, {}
+
+    headers = {}
+    for key, value in parse_qsl(unquote(raw_props), keep_blank_values=True):
+        normalized_key = key.strip().lower()
+        if normalized_key == "user-agent":
+            headers["User-Agent"] = value
+        elif normalized_key in ("referer", "referrer"):
+            headers["Referer"] = value
+        elif normalized_key == "accept":
+            headers["Accept"] = value
+
+    return clean_url, headers
+
+
 def _default_referer(url, referer):
     return referer or _origin_for_url(url) + "/"
 
 
-def _proxied_url(base_proxy, full_url, referer, cast, preserve_dash_tokens=False):
+def _query_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _proxy_query_max_bitrate(request):
+    value = _query_int(request.query_params.get("max_bitrate"))
+    return value if value and value > 0 else None
+
+
+def _is_kan_vod_redge_url(url):
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+
+    return (
+        "redge.media" in host
+        and "/kancdn/vod/" in path
+        and "/manifest.ism/" in path
+    )
+
+
+def _default_max_bitrate_for_request(request, url):
+    requested_max_bitrate = _proxy_query_max_bitrate(request)
+    if requested_max_bitrate:
+        return requested_max_bitrate
+
+    if KAN_VOD_PROXY_MAX_BITRATE > 0 and _is_kan_vod_redge_url(url):
+        return KAN_VOD_PROXY_MAX_BITRATE
+
+    return None
+
+
+def _proxied_url(proxy_url, full_url, referer, cast, preserve_dash_tokens=False, max_bitrate=None):
     if _is_local_proxy_url(full_url):
         return full_url
 
@@ -147,8 +217,11 @@ def _proxied_url(base_proxy, full_url, referer, cast, preserve_dash_tokens=False
     if cast:
         params["cast"] = "1"
 
+    if max_bitrate:
+        params["max_bitrate"] = str(max_bitrate)
+
     safe_chars = "$" if preserve_dash_tokens else ""
-    return f"{base_proxy}/proxy?{urlencode(params, safe=safe_chars)}"
+    return f"{proxy_url}?{urlencode(params, safe=safe_chars)}"
 
 
 def _response_metadata_headers(upstream):
@@ -191,7 +264,51 @@ def _stream_response(upstream, content_type, cast=False):
     )
 
 
-def _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast):
+def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
+    max_attempts = retries + 1
+
+    for attempt in range(max_attempts):
+        current = upstream
+
+        if attempt > 0:
+            try:
+                current = session.get(url, headers=headers, stream=True, timeout=PROXY_REQUEST_TIMEOUT)
+            except requests.exceptions.RequestException as exc:
+                print(f"Buffered segment retry open failed ({attempt}/{retries}) for url={url}: {exc}", flush=True)
+                if attempt >= retries:
+                    return Response(status_code=502, headers=CORS_HEADERS)
+                continue
+
+        try:
+            content = current.content
+            response_headers = _response_metadata_headers(current)
+            response_headers["Content-Length"] = str(len(content))
+            status_code = current.status_code
+            current.close()
+
+            return Response(
+                content=content,
+                status_code=status_code,
+                media_type=content_type,
+                headers=_response_headers(response_headers),
+            )
+        except requests.exceptions.RequestException as exc:
+            try:
+                current.close()
+            except Exception:
+                pass
+
+            if attempt < retries:
+                print(f"Retrying buffered segment ({attempt + 1}/{retries}) for url={url}: {exc}", flush=True)
+                continue
+
+            print(f"Buffered segment failed for url={url}: {exc}", flush=True)
+            return Response(status_code=502, headers=CORS_HEADERS)
+
+    return Response(status_code=502, headers=CORS_HEADERS)
+
+
+def _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=None):
     if not uri or uri.startswith(("data:", "blob:")):
         return uri
 
@@ -201,19 +318,18 @@ def _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast):
         if parsed.netloc:
             return uri
 
-        base_path = urlparse(base_proxy).path.rstrip("/")
-        uri_path = parsed.path
+        query = parsed.query
+        if max_bitrate and "max_bitrate=" not in query:
+            separator = "&" if query else ""
+            query = f"{query}{separator}max_bitrate={max_bitrate}"
 
-        if base_path and uri_path.startswith(base_path + "/"):
-            uri_path = uri_path[len(base_path):]
-
-        return f"{base_proxy}{uri_path}?{parsed.query}"
+        return f"{proxy_url}?{query}"
 
     full_url = urljoin(manifest_base, uri)
-    return _proxied_url(base_proxy, full_url, _default_referer(source_url, referer), cast)
+    return _proxied_url(proxy_url, full_url, _default_referer(source_url, referer), cast, max_bitrate=max_bitrate)
 
 
-def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
+def _rewrite_hls_manifest(text, source_url, referer, proxy_url, cast, max_bitrate=None):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     rewritten_lines = []
 
@@ -227,17 +343,60 @@ def _rewrite_hls_manifest(text, source_url, referer, base_proxy, cast):
         if stripped.startswith("#"):
             def replace_uri(match):
                 uri = match.group(1)
-                proxied = _rewrite_hls_uri(uri, manifest_base, source_url, referer, base_proxy, cast)
+                proxied = _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=max_bitrate)
                 return f'URI="{proxied}"'
 
             rewritten_lines.append(re.sub(r'URI="([^"]+)"', replace_uri, line))
             continue
 
         rewritten_lines.append(
-            _rewrite_hls_uri(stripped, manifest_base, source_url, referer, base_proxy, cast)
+            _rewrite_hls_uri(stripped, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=max_bitrate)
         )
 
     return "\n".join(rewritten_lines)
+
+
+def _filter_hls_master_by_max_bitrate(text, max_bitrate):
+    if not max_bitrate or "#EXT-X-STREAM-INF" not in text:
+        return text
+
+    lines = text.splitlines()
+    output = []
+    kept_streams = 0
+    removed_streams = 0
+    pending_stream_line = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("#EXT-X-STREAM-INF"):
+            match = re.search(r"\bBANDWIDTH=(\d+)", stripped)
+            bandwidth = int(match.group(1)) if match else None
+
+            if bandwidth and bandwidth > max_bitrate:
+                pending_stream_line = None
+                removed_streams += 1
+                continue
+
+            pending_stream_line = line
+            continue
+
+        if pending_stream_line is not None:
+            output.append(pending_stream_line)
+            pending_stream_line = None
+            output.append(line)
+            kept_streams += 1
+            continue
+
+        output.append(line)
+
+    if pending_stream_line is not None:
+        output.append(pending_stream_line)
+
+    if kept_streams == 0 and removed_streams > 0:
+        return text
+
+    return "\n".join(output)
 
 
 def _is_live_hls_media_playlist(text):
@@ -317,7 +476,7 @@ def _looks_like_html_response(text, content_type):
     )
 
 
-def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
+def _rewrite_mpd_for_cast(text, source_url, referer, proxy_url):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
     segment_base = html.unescape(base_url_match.group(1)) if base_url_match else manifest_base
@@ -328,7 +487,7 @@ def _rewrite_mpd_for_cast(text, source_url, referer, base_proxy):
         uri = html.unescape(match.group(2))
         full_url = urljoin(segment_base, uri)
         proxied = _proxied_url(
-            base_proxy,
+            proxy_url,
             full_url,
             request_referer,
             True,
@@ -461,7 +620,9 @@ def handle_local_file_proxy(request, file_path: str, root_dir: str):
     )
 
 def handle_proxy(request, url, referer, cast=False):
+    url, kodi_headers = _split_kodi_url_props(url)
     origin = _origin_for_url(url)
+    max_bitrate = _default_max_bitrate_for_request(request, url)
 
     headers = {
         "User-Agent": request.headers.get("user-agent", "Mozilla/5.0"),
@@ -469,12 +630,13 @@ def handle_proxy(request, url, referer, cast=False):
         "Origin": origin,
         "Referer": referer or origin + "/",
     }
+    headers.update(kodi_headers)
 
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
     try:
-        r = session.get(url, headers=headers, stream=True, timeout=10)
+        r = session.get(url, headers=headers, stream=True, timeout=PROXY_REQUEST_TIMEOUT)
     except requests.exceptions.RequestException as e:
         print("Proxy request failed:", e)
         return Response(status_code=502, headers=CORS_HEADERS)
@@ -482,6 +644,16 @@ def handle_proxy(request, url, referer, cast=False):
     content_type = _content_type_for_url(url, r.headers.get("content-type", ""))
     clean_content_type = content_type.lower()
     is_head = request.method == "HEAD"
+
+    if r.status_code >= 400:
+        content = r.content
+        r.close()
+        return Response(
+            content=content,
+            status_code=r.status_code,
+            media_type=content_type,
+            headers=_response_headers()
+        )
 
     if is_head:
         r.close()
@@ -493,6 +665,15 @@ def handle_proxy(request, url, referer, cast=False):
 
     # Video/audio segments
     if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(url):
+        if cast and _is_kan_vod_redge_url(url) and _is_segment_url(url):
+            return _buffered_segment_response(
+                url,
+                headers,
+                r,
+                content_type,
+                retries=KAN_VOD_SEGMENT_RETRIES,
+            )
+
         return _stream_response(r, content_type, cast=cast)
 
     # Text content (m3u8, mpd, etc.)
@@ -508,8 +689,8 @@ def handle_proxy(request, url, referer, cast=False):
     )
 
     if is_mpd:
-        base_proxy = _request_public_base_proxy(request)
-        content = _rewrite_mpd_for_cast(text, url, referer, base_proxy).encode("utf-8") if cast else r.content
+        proxy_url = _request_public_proxy_url(request)
+        content = _rewrite_mpd_for_cast(text, url, referer, proxy_url).encode("utf-8") if cast else r.content
         return Response(
             content=content,
             media_type="application/dash+xml",
@@ -538,9 +719,21 @@ def handle_proxy(request, url, referer, cast=False):
         )
 
     # Always use public base so URLs are absolute — required for cast and external players
-    base_proxy = _request_public_base_proxy(request)
-    source_text = _prepare_hls_media_playlist(text, cast=cast)
-    content = _rewrite_hls_manifest(source_text, url, referer, base_proxy, cast)
+    proxy_url = _request_public_proxy_url(request)
+    try:
+        source_text = _filter_hls_master_by_max_bitrate(text, max_bitrate)
+        source_text = _prepare_hls_media_playlist(source_text, cast=cast)
+        content = _rewrite_hls_manifest(
+            source_text,
+            url,
+            referer,
+            proxy_url,
+            cast,
+            max_bitrate=max_bitrate,
+        )
+    except Exception as exc:
+        print(f"Proxy HLS rewrite failed for url={url}: {exc}", flush=True)
+        return Response(status_code=502, headers=CORS_HEADERS)
 
     return Response(
         content=content,

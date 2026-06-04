@@ -1,4 +1,4 @@
-type ManifestType = "hls" | "mpd"
+type ManifestType = "hls" | "mpd" | "mp4"
 
 export interface LinkDetails {
   link: string
@@ -74,6 +74,10 @@ export interface VodItem {
   aired?: string
   season?: string
   episode?: string
+  episodeId?: string
+  programId?: string
+  streamUrl?: string
+  playUrl?: string
   programName?: string
   seasonName?: string
   channelName?: string

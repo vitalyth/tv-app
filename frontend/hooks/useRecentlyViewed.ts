@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Channel } from "@/lib/channels-data";
 
 const RECENTLY_VIEWED_KEY = "recently_viewed_channels";
@@ -46,7 +46,7 @@ export const addRecentlyViewedChannel = (channelId: string) => {
 export function useRecentlyViewed(channels: Channel[]) {
   const [recentlyViewed, setRecentlyViewed] = useState<Channel[]>([]);
 
-  const loadRecentlyViewed = () => {
+  const loadRecentlyViewed = useCallback(() => {
     if (typeof window === "undefined") return;
 
     const items = loadRecentlyViewedItems()
@@ -58,8 +58,17 @@ export function useRecentlyViewed(channels: Channel[]) {
       .map((item) => channels.find((ch) => ch.id === item.id))
       .filter((channel): channel is Channel => Boolean(channel));
 
-    setRecentlyViewed(viewed);
-  };
+    setRecentlyViewed((current) => {
+      if (
+        current.length === viewed.length &&
+        current.every((channel, index) => channel.id === viewed[index]?.id)
+      ) {
+        return current;
+      }
+
+      return viewed;
+    });
+  }, [channels]);
 
   useEffect(() => {
     loadRecentlyViewed();
@@ -68,7 +77,7 @@ export function useRecentlyViewed(channels: Channel[]) {
 
     window.addEventListener("recently-viewed-updated", loadRecentlyViewed);
     return () => window.removeEventListener("recently-viewed-updated", loadRecentlyViewed);
-  }, [channels]);
+  }, [loadRecentlyViewed]);
 
   const addToRecentlyViewed = (channel: Channel) => {
     if (typeof window === "undefined") return;

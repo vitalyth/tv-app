@@ -71,6 +71,11 @@ const buildCastImageUrl = (logo: string) => {
     return resolveAbsoluteUrl(`/ch/${logo}`)
 }
 
+const shouldUseVpnProxy = (channel: Channel) => {
+    const channelId = channel.channelID || channel.id || ""
+    return channel.module === "kan-vod" || channelId.startsWith("ch_11")
+}
+
 const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
@@ -99,6 +104,23 @@ const isBrightcoveStream = (streamUrl: string) => {
         return new URL(streamUrl).hostname.endsWith("brightcove.com")
     } catch {
         return false
+    }
+}
+
+const isFmp4HlsStream = (streamUrl: string, channel?: Channel) => {
+    if (channel?.module === "kan-vod") {
+        return true
+    }
+
+    try {
+        const parsedUrl = new URL(streamUrl)
+        return (
+            parsedUrl.pathname.toLowerCase().includes("/manifest.ism/") ||
+            parsedUrl.search.toLowerCase().includes("fmp4")
+        )
+    } catch {
+        const lowerStreamUrl = streamUrl.toLowerCase()
+        return lowerStreamUrl.includes("/manifest.ism/") || lowerStreamUrl.includes("fmp4")
     }
 }
 
@@ -143,15 +165,17 @@ const getCastContentType = (castSourceUrl: string, channel: Channel) => {
         : "application/x-mpegURL"
 }
 
-const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, referer = "") => {
+const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, channel: Channel, referer = "") => {
     console.log("Original stream URL:", castSourceUrl)
 
     if (isLocalSeriesStream(castSourceUrl) && castContentType !== "application/x-mpegURL") {
         return resolveAbsoluteUrl(castSourceUrl)
     }
 
+    const vpnParam = shouldUseVpnProxy(channel) ? "&vpn=true" : ""
+
     return resolveAbsoluteUrl(
-        api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`)
+        api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`)
     )
 }
 
@@ -228,11 +252,14 @@ export function useGoogleCast({
         const castContentType = getCastContentType(castSourceUrl, channel)
 
         const mediaInfo = new chromeCast.media.MediaInfo(
-            buildCastStreamUrl(castSourceUrl, castContentType, channel.linkDetails?.referer),
+            buildCastStreamUrl(castSourceUrl, castContentType, channel, channel.linkDetails?.referer),
             castContentType
         )
 
-        if (castContentType === "application/x-mpegURL" && isBrightcoveStream(streamUrl)) {
+        if (
+            castContentType === "application/x-mpegURL" &&
+            (isBrightcoveStream(streamUrl) || isFmp4HlsStream(streamUrl, channel))
+        ) {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
 

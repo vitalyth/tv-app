@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import useSWR from "swr";
+import useSWRInfinite from "swr/infinite";
 import { ChevronLeft, Clapperboard, Play, Search, Star, Tv } from "lucide-react";
 
+import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
-import { localSeriesService, type LocalSeries } from "@/lib/services/local-series-service";
+import { localSeriesService, type LocalSeries, type LocalSeriesResponse } from "@/lib/services/local-series-service";
 
 const getSeriesTitle = (series: LocalSeries) => {
   return series.metadata?.name || series.title || "ללא שם";
@@ -21,31 +22,61 @@ const getEpisodeCountText = (count: number) => {
   return `${count} פרקים`;
 };
 
+const PAGE_SIZE = 48;
+
 export default function LocalSeriesPage() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const {
-    data: series = [],
+    data: pages,
     isLoading,
+    isValidating,
     error,
     mutate,
-  } = useSWR("local-series", () => localSeriesService.getSeriesList(), {
+    size,
+    setSize,
+  } = useSWRInfinite<LocalSeriesResponse>((pageIndex, previousPageData) => {
+    if (previousPageData && !previousPageData.hasMore) return null;
+
+    return {
+      query: searchQuery,
+      limit: PAGE_SIZE,
+      offset: pageIndex * PAGE_SIZE,
+    };
+  }, (params) => localSeriesService.getSeries(params), {
     revalidateOnFocus: false,
     dedupingInterval: 30000,
   });
 
-  const filteredSeries = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return series;
+  const visibleSeries = useMemo(() => pages?.flatMap((page) => page.series || []) || [], [pages]);
+  const lastPage = pages?.[pages.length - 1];
+  const hasMore = Boolean(lastPage?.hasMore);
+  const isLoadingMore = Boolean(
+    isValidating && pages && pages.length > 0 && pages[pages.length - 1]?.offset === (size - 1) * PAGE_SIZE
+  );
 
-    return series.filter((item) => {
-      const title = getSeriesTitle(item).toLowerCase();
-      const originalName = (item.metadata?.originalName || "").toLowerCase();
-      const overview = (item.metadata?.overview || "").toLowerCase();
-      return title.includes(query) || originalName.includes(query) || overview.includes(query);
-    });
-  }, [series, searchQuery]);
+  useEffect(() => {
+    setSize(1);
+  }, [searchQuery, setSize]);
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || !hasMore || isLoadingMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setSize((currentSize) => currentSize + 1);
+        }
+      },
+      { rootMargin: "320px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, setSize, visibleSeries.length]);
 
   const openSeries = (item: LocalSeries) => {
     router.push(`/local-series/${encodeURIComponent(item.id)}`);
@@ -68,15 +99,11 @@ export default function LocalSeriesPage() {
             </div>
           </div>
 
-          <div className="relative w-full lg:w-96">
-            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="חיפוש סדרות"
-              className="w-full rounded-lg border border-border bg-card py-2.5 pr-9 pl-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
+          <DebouncedSearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="חיפוש סדרות"
+          />
         </div>
       </div>
 
@@ -95,7 +122,7 @@ export default function LocalSeriesPage() {
                 נסה שוב
               </button>
             </div>
-          ) : filteredSeries.length === 0 ? (
+          ) : visibleSeries.length === 0 ? (
             <div className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center">
               <Search className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
               <p className="text-base font-medium text-foreground">לא נמצאו סדרות</p>
@@ -103,10 +130,11 @@ export default function LocalSeriesPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {filteredSeries.map((item) => {
+              {visibleSeries.map((item) => {
                 const title = getSeriesTitle(item);
                 const image = getSeriesImage(item);
                 const genres = item.metadata?.genres?.slice(0, 2) || [];
+                const episodeCount = item.episodes?.length || 0;
 
                 return (
                   <button
@@ -129,7 +157,7 @@ export default function LocalSeriesPage() {
                       <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/10 to-transparent" />
                       <div className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-xs text-white">
                         <Play className="h-3.5 w-3.5" />
-                        {getEpisodeCountText(item.episodes.length)}
+                        {getEpisodeCountText(episodeCount)}
                       </div>
                     </div>
 
@@ -168,6 +196,17 @@ export default function LocalSeriesPage() {
               })}
             </div>
           )}
+          {!isLoading && !error && visibleSeries.length > 0 ? (
+            <div ref={loadMoreRef} className="flex h-16 items-center justify-center">
+              {hasMore || isLoadingMore ? (
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  {lastPage?.total ? `${visibleSeries.length} מתוך ${lastPage.total}` : null}
+                </span>
+              )}
+            </div>
+          ) : null}
         </div>
       </PageMain>
     </div>
