@@ -12,7 +12,7 @@ import { HorizontalCarousel } from "@/components/horizontal-carousel";
 import { PageMain } from "@/components/page-main";
 import { Button } from "@/components/ui/button";
 import { getVodProgressPercent } from "@/lib/vod-progress";
-import { ChevronLeft, Clapperboard, Home, Play, RotateCcw, Tv } from "lucide-react";
+import { ChevronLeft, Clapperboard, Play, RotateCcw } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
@@ -176,6 +176,17 @@ const normalizeProgram = (program: Program | EpgProgram): Program => ({
   description: program.description || "",
 });
 
+const getCurrentProgram = (channel: Channel) => {
+  const now = Math.floor(Date.now() / 1000);
+  return channel.programs?.find((program) => program.start <= now && now < program.end);
+};
+
+const getProgramProgress = (program?: Program) => {
+  if (!program || program.end <= program.start) return 0;
+  const now = Math.floor(Date.now() / 1000);
+  return Math.max(0, Math.min(100, ((now - program.start) / (program.end - program.start)) * 100));
+};
+
 const carouselCompactCardClass =
   "w-[72vw] max-w-[17rem] shrink-0 sm:w-[15rem] lg:w-[16rem]";
 
@@ -183,6 +194,7 @@ const LandingPage = () => {
   const router = useRouter();
   const { play } = useFloatingPlayer();
   const [recentVodItems, setRecentVodItems] = useState<RecentVodItem[]>([]);
+  const [heroIndex, setHeroIndex] = useState(0);
 
   const {
     data: liveChannels = [],
@@ -277,6 +289,18 @@ const LandingPage = () => {
     () => vodRecentItems,
     [vodRecentItems]
   );
+  const heroItems = useMemo(() => recentlyAddedVodItems.slice(0, 5), [recentlyAddedVodItems]);
+
+  useEffect(() => {
+    setHeroIndex(0);
+    if (heroItems.length <= 1) return;
+
+    const interval = window.setInterval(() => {
+      setHeroIndex((current) => (current + 1) % heroItems.length);
+    }, 10000);
+
+    return () => window.clearInterval(interval);
+  }, [heroItems.length]);
 
   const isLoading = isLiveLoading || isEpgLoading || isVodLoading || isVodRecentLoading;
   const hasLiveError = Boolean(liveError || epgError);
@@ -434,46 +458,137 @@ const LandingPage = () => {
     );
   };
 
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
-      <section className="mb-3 shrink-0 border-b border-border bg-background px-3 pb-2 pt-3 md:px-6 md:pt-5 lg:px-8">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
-                <Home className="h-6 w-6 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="truncate text-2xl font-bold text-foreground lg:text-3xl">ברוכים הבאים</h1>
-                <p className="text-sm text-muted-foreground">
-                  תוכן ישראלי במקום אחד
-                </p>
-              </div>
-            </div>
-          </div>
+  const LiveNowCard = ({ channel }: { channel: Channel }) => {
+    const program = getCurrentProgram(channel);
+    const progress = getProgramProgress(program);
 
-          <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 scrollbar-hide lg:overflow-visible lg:pb-0">
-            {quickLiveChannels.map((channel) => (
-              <button
-                key={channel.tvgID}
-                type="button"
-                aria-label={`פתח ${channel.name}`}
-                onClick={() => handlePlayLiveChannel(channel)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted transition hover:border-primary/70 hover:bg-primary/10 sm:h-11 sm:w-11 lg:h-14 lg:w-14"
-              >
-                <img
-                  src={`/ch/${channel.logo}`}
-                  alt={channel.name}
-                  className="h-7 w-7 rounded-full object-contain sm:h-8 sm:w-8 lg:h-10 lg:w-10"
-                />
-              </button>
-            ))}
+    return (
+      <button
+        type="button"
+        onClick={() => handlePlayLiveChannel(channel)}
+        className="group flex h-full min-h-40 w-full flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        <div className="flex flex-1 items-start gap-4 p-4">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background p-2">
+            <img src={`/ch/${channel.logo}`} alt="" className="h-full w-full object-contain" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-500">
+                <span className="h-2 w-2 rounded-full bg-red-500" />
+                LIVE
+              </span>
+              <span className="truncate text-xs text-muted-foreground">{channel.name}</span>
+            </div>
+            <h3 className="mt-3 line-clamp-2 text-base font-semibold text-foreground">
+              {program?.name || "שידור חי"}
+            </h3>
+            {program && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {new Date(program.start * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}
+                {" - "}
+                {new Date(program.end * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}
+              </p>
+            )}
           </div>
         </div>
-      </section>
+        <div className="h-1 bg-muted">
+          <div className="h-full bg-red-500" style={{ width: `${progress}%` }} />
+        </div>
+      </button>
+    );
+  };
 
+  const heroItem = heroItems[heroIndex];
+  const heroStack: VodNode[] = heroItem
+    ? [{
+        name: heroItem.channelName || heroItem.title || heroItem.name,
+        module: heroItem.module,
+        mode: heroItem.mode,
+        url: heroItem.url,
+        logo: heroItem.logo,
+        moreData: heroItem.moreData,
+        description: heroItem.description,
+      }]
+    : [];
+  const heroVodMeta = heroItem ? buildVodMeta(heroItem, heroStack) : null;
+  const heroImage = heroVodMeta
+    ? getVodImageSrc(heroVodMeta.episodeImage || heroVodMeta.programImage || heroItem?.logo || "")
+    : "/ch/vod.jpg";
+  const heroTitle = heroVodMeta?.programName || heroItem?.name || "תוכן ישראלי במקום אחד";
+  const heroSubtitle = heroVodMeta
+    ? [heroVodMeta.channelName, heroVodMeta.seasonName, heroVodMeta.episodeName].filter(Boolean).join(" · ")
+    : "שידורים חיים, VOD וסדרות";
+  const handleHeroPlay = () => {
+    if (heroItem) {
+      handlePlayVodItem(heroItem, heroStack);
+    } else {
+      handleBrowseVod();
+    }
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
       <PageMain>
-        <div className="flex-1 px-3 pb-6 md:px-6 lg:px-8">
+        <section className="relative min-h-64 overflow-hidden border-b border-border md:min-h-80">
+          <img src={heroImage} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
+          <div className="absolute inset-0 bg-black/55" />
+          <div className="absolute inset-0 bg-linear-to-l from-black/90 via-black/55 to-black/15" />
+          <div className="relative flex min-h-64 max-w-3xl flex-col justify-end px-4 py-6 text-white md:min-h-80 md:px-8 md:py-8">
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold">
+              <span className="rounded bg-white/15 px-2 py-1 backdrop-blur-sm">
+                {heroItem ? "חדש ב-VOD" : "TV App"}
+              </span>
+            </div>
+            <h1 className="line-clamp-2 text-2xl font-bold sm:text-3xl lg:text-4xl">{heroTitle}</h1>
+            <p className="mt-2 line-clamp-2 max-w-xl text-sm text-white/75 sm:text-base">{heroSubtitle}</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button onClick={handleHeroPlay} className="gap-2 bg-white text-black hover:bg-white/90">
+                <Play className="h-4 w-4 fill-current" />
+                צפה עכשיו
+              </Button>
+              <Button variant="outline" onClick={handleBrowseVod} className="border-white/35 bg-black/25 text-white hover:bg-white/15 hover:text-white">
+                לכל התכנים
+              </Button>
+            </div>
+
+            {heroItems.length > 1 && (
+              <div className="mt-5 flex items-center gap-2" aria-label="בחירת תוכן בבאנר">
+                {heroItems.map((item, index) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setHeroIndex(index)}
+                    className={`h-1.5 rounded-full transition-all ${index === heroIndex ? "w-8 bg-white" : "w-4 bg-white/40 hover:bg-white/70"}`}
+                    aria-label={`הצג פריט ${index + 1}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {quickLiveChannels.length > 0 && (
+            <div className="absolute left-1 top-1 z-10 flex max-w-[calc(100%-0.5rem)] items-center gap-2 overflow-x-auto p-2 scrollbar-hide md:left-2 md:top-2">
+              {quickLiveChannels.map((channel) => (
+                <button
+                  key={channel.tvgID}
+                  type="button"
+                  aria-label={`פתח ${channel.name}`}
+                  onClick={() => handlePlayLiveChannel(channel)}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/35 transition hover:border-white/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white sm:h-12 sm:w-12"
+                >
+                  <img
+                    src={`/ch/${channel.logo}`}
+                    alt={channel.name}
+                    className="h-8 w-8 rounded-full object-contain sm:h-9 sm:w-9"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <div className="flex-1 px-3 pb-8 pt-5 md:px-6 lg:px-8">
           {isLoading ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 9 }).map((_, index) => (
@@ -482,23 +597,6 @@ const LandingPage = () => {
             </div>
           ) : (
           <div className="space-y-8">
-            {recommendedVodChannels.length > 0 && (
-              <section className="space-y-4">
-                <SectionHeader
-                  title="VOD"
-                />
-                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
-                  {recommendedVodChannels.map((channel) => (
-                    <VodCard
-                      key={channel.id}
-                      channel={channel}
-                      onClick={() => handleOpenVodChannel(channel)}
-                    />
-                  ))}
-                </HorizontalCarousel>
-              </section>
-            )}
-
             {recentVodItems.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
@@ -519,28 +617,20 @@ const LandingPage = () => {
               </section>
             )}
 
-            {recentlyAddedVodItems.length > 0 && (
+            {liveNowChannels.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
-                  title="חדשים"
+                  title="משודר עכשיו"
+                  action={
+                    <Button variant="outline" size="sm" onClick={handleOpenGuide} className="shrink-0">
+                      כל השידורים
+                    </Button>
+                  }
                 />
-                <HorizontalCarousel>
-                  {recentlyAddedVodItems.map((item) => {
-                    const itemStack: VodNode[] = [
-                      {
-                        name: item.channelName || item.title || item.name,
-                        module: item.module,
-                        mode: item.mode,
-                        url: item.url,
-                        logo: item.logo,
-                        moreData: item.moreData,
-                        description: item.description,
-                      },
-                    ];
-                    return (
-                      <VodItemCard key={item.id} item={item} stack={itemStack} label="נגן" />
-                    );
-                  })}
+                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
+                  {liveNowChannels.map((channel) => (
+                    <LiveNowCard key={channel.id} channel={channel} />
+                  ))}
                 </HorizontalCarousel>
               </section>
             )}
@@ -563,24 +653,34 @@ const LandingPage = () => {
               </section>
             )}
 
-            {liveNowChannels.length > 0 && (
+            {recentlyAddedVodItems.length > 0 && (
               <section className="space-y-4">
-                <SectionHeader
-                  title="משודר עכשיו"
-                  action={
-                    <Button variant="outline" size="sm" onClick={handleOpenGuide} className="shrink-0">
-                      כל השידורים
-                    </Button>
-                  }
-                />
+                <SectionHeader title="חדשים" />
+                <HorizontalCarousel>
+                  {recentlyAddedVodItems.map((item) => {
+                    const itemStack: VodNode[] = [
+                      {
+                        name: item.channelName || item.title || item.name,
+                        module: item.module,
+                        mode: item.mode,
+                        url: item.url,
+                        logo: item.logo,
+                        moreData: item.moreData,
+                        description: item.description,
+                      },
+                    ];
+                    return <VodItemCard key={item.id} item={item} stack={itemStack} label="נגן" />;
+                  })}
+                </HorizontalCarousel>
+              </section>
+            )}
+
+            {recommendedVodChannels.length > 0 && (
+              <section className="space-y-4">
+                <SectionHeader title="ספריות VOD" />
                 <HorizontalCarousel itemClassName={carouselCompactCardClass}>
-                  {liveNowChannels.map((channel) => (
-                    <ChannelCard
-                      key={channel.id}
-                      channel={channel}
-                      isActive={false}
-                      onClick={() => handlePlayLiveChannel(channel)}
-                    />
+                  {recommendedVodChannels.map((channel) => (
+                    <VodCard key={channel.id} channel={channel} onClick={() => handleOpenVodChannel(channel)} />
                   ))}
                 </HorizontalCarousel>
               </section>
@@ -605,7 +705,7 @@ const LandingPage = () => {
             )}
           </div>
         )}
-      </div>
+        </div>
       </PageMain>
     </div>
   );

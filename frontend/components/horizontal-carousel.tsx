@@ -72,7 +72,7 @@ export function HorizontalCarousel({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
 
     const container = scrollRef.current;
     if (!container) return;
@@ -84,8 +84,6 @@ export function HorizontalCarousel({
       startX: event.clientX,
       startScrollLeft: container.scrollLeft,
     };
-
-    container.setPointerCapture(event.pointerId);
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -99,6 +97,7 @@ export function HorizontalCarousel({
     if (!dragState.isDragging) {
       dragState.isDragging = true;
       setIsDragging(true);
+      container.setPointerCapture(event.pointerId);
     }
 
     event.preventDefault();
@@ -117,6 +116,11 @@ export function HorizontalCarousel({
     }
 
     suppressClickRef.current = dragState.isDragging;
+    if (dragState.isDragging) {
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
     dragStateRef.current = {
       isPointerDown: false,
       isDragging: false,
