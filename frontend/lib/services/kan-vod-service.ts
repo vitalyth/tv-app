@@ -31,6 +31,7 @@ export type KanVodSeries = {
   seasonCount: number;
   streamCount: number;
   latestKanEpisodeId?: number;
+  latestEpisodePublished?: string | null;
 };
 
 export type KanVodSeason = {

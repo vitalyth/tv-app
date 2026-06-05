@@ -9,6 +9,7 @@ import { Channel, Program } from "@/lib/channels-data";
 import { channelService } from "@/lib/services/channel-service";
 import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 import { useFloatingPlayer } from "@/context/floating-player-context";
+import { Tv } from "lucide-react";
 
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
@@ -88,15 +89,32 @@ export default function GuidePage() {
 
     return (
         <div className="h-full flex flex-col bg-background">
-            <main className="flex-1 flex flex-col w-full px-4 py-4 overflow-hidden">
-                <ChannelsFilters
-                    searchQuery={searchQuery}
-                    setSearchQuery={setSearchQuery}
-                    selectedCategory={selectedCategory}
-                    setSelectedCategory={setSelectedCategory}
-                    onRefresh={refreshNow}
-                />
+            <div className="mb-4 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
+                            <Tv className="h-6 w-6 text-primary" />
+                        </div>
 
+                        <div className="min-w-0">
+                            <h1 className="truncate text-2xl font-bold text-foreground">שידורים חיים</h1>
+                            <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                                <span>לוח שידורים וערוצים חיים</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <ChannelsFilters
+                        searchQuery={searchQuery}
+                        setSearchQuery={setSearchQuery}
+                        selectedCategory={selectedCategory}
+                        setSelectedCategory={setSelectedCategory}
+                        onRefresh={refreshNow}
+                    />
+                </div>
+            </div>
+
+            <main className="flex-1 flex flex-col w-full px-4 pb-4 overflow-hidden">
                 <div dir="ltr" className="relative flex-1 flex flex-col w-full overflow-hidden">
                     <ProgramGuide
                         channels={filteredChannels}

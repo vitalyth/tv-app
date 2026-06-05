@@ -7,7 +7,7 @@ import { Clapperboard, Home, Library, Tv, type LucideIcon } from "lucide-react"
 
 export const NAV_ITEMS: Array<{ href: string; label: string; icon: LucideIcon }> = [
     { href: "/", label: "בית", icon: Home },
-    { href: "/guide", label: "מדריך שידורים", icon: Tv },
+    { href: "/guide", label: "שידורים חיים", icon: Tv },
     { href: "/vod", label: "VOD", icon: Clapperboard },
     { href: "/local-series", label: "סדרות", icon: Library },
 ]

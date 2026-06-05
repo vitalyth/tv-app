@@ -1,11 +1,12 @@
 "use client";
 
-import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Children, useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const carouselCardClass = "w-[78vw] max-w-[20rem] shrink-0 sm:w-[18rem] lg:w-[19rem]";
 const carouselScrollTolerance = 12;
+const dragClickTolerance = 6;
 
 export function HorizontalCarousel({
   children,
@@ -15,8 +16,17 @@ export function HorizontalCarousel({
   itemClassName?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef({
+    isPointerDown: false,
+    isDragging: false,
+    pointerId: -1,
+    startX: 0,
+    startScrollLeft: 0,
+  });
+  const suppressClickRef = useRef(false);
   const [canScrollBack, setCanScrollBack] = useState(false);
   const [canScrollForward, setCanScrollForward] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const items = Children.toArray(children);
 
   const updateScrollButtons = useCallback(() => {
@@ -61,6 +71,70 @@ export function HorizontalCarousel({
     });
   };
 
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    dragStateRef.current = {
+      isPointerDown: true,
+      isDragging: false,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: container.scrollLeft,
+    };
+
+    container.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const container = scrollRef.current;
+    const dragState = dragStateRef.current;
+    if (!container || !dragState.isPointerDown || dragState.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - dragState.startX;
+    if (!dragState.isDragging && Math.abs(deltaX) < dragClickTolerance) return;
+
+    if (!dragState.isDragging) {
+      dragState.isDragging = true;
+      setIsDragging(true);
+    }
+
+    event.preventDefault();
+
+    container.scrollLeft = dragState.startScrollLeft - deltaX;
+    updateScrollButtons();
+  };
+
+  const finishDrag = (event: PointerEvent<HTMLDivElement>) => {
+    const container = scrollRef.current;
+    const dragState = dragStateRef.current;
+    if (!dragState.isPointerDown || dragState.pointerId !== event.pointerId) return;
+
+    if (container?.hasPointerCapture(event.pointerId)) {
+      container.releasePointerCapture(event.pointerId);
+    }
+
+    suppressClickRef.current = dragState.isDragging;
+    dragStateRef.current = {
+      isPointerDown: false,
+      isDragging: false,
+      pointerId: -1,
+      startX: 0,
+      startScrollLeft: 0,
+    };
+    setIsDragging(false);
+  };
+
+  const handleClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+    if (!suppressClickRef.current) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClickRef.current = false;
+  };
+
   return (
     <div className="relative">
       {canScrollBack && (
@@ -98,7 +172,12 @@ export function HorizontalCarousel({
       <div
         ref={scrollRef}
         onScroll={updateScrollButtons}
-        className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth pb-2 pl-1 pr-1 scrollbar-hide sm:gap-4"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        onClickCapture={handleClickCapture}
+        className={`flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 pl-1 pr-1 scrollbar-hide sm:gap-4 ${isDragging ? "cursor-grabbing snap-none select-none" : "cursor-grab scroll-smooth"}`}
       >
         {items.map((child, index) => (
           <div key={index} className={`${itemClassName} snap-start *:w-full`}>

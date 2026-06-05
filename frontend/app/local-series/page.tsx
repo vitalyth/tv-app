@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWRInfinite from "swr/infinite";
-import { ChevronLeft, Clapperboard, Play, Search, Star, Tv } from "lucide-react";
+import { ChevronLeft, Clapperboard, Library, Play, Search, Star } from "lucide-react";
 
 import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
@@ -88,7 +88,7 @@ export default function LocalSeriesPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
-              <Tv className="h-6 w-6 text-primary" />
+              <Library className="h-6 w-6 text-primary" />
             </div>
 
             <div className="min-w-0">

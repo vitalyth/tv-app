@@ -1,0 +1,211 @@
+name: tv_app
+
+services:
+  gluetun:
+    cpu_shares: 90
+    image: qmcgaw/gluetun:latest
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      VPN_SERVICE_PROVIDER: surfshark
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES}
+      SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES:-Israel}
+      TZ: ${TZ:-Asia/Jerusalem}
+      HTTP_CONTROL_SERVER: "off"
+    labels:
+      icon: http://192.168.86.75:8001/icon.svg
+    networks:
+      tv-network:
+        aliases:
+          - gluetun
+    restart: unless-stopped
+
+  frontend:
+    cpu_shares: 90
+    image: vitalyth/tv-app-frontend:latest
+    environment:
+      NEXT_PUBLIC_API_BASE: /api
+    labels:
+      icon: http://192.168.86.75:8001/icon.svg
+    networks:
+      tv-network:
+        aliases:
+          - frontend
+    restart: unless-stopped
+
+  backend:
+    cpu_shares: 90
+    image: vitalyth/tv-app-backend:latest
+    environment:
+      ROOT_PATH: /api
+      BACKEND_CACHE_DIR: /app/cache
+      KAN_VOD_DB_PATH: /app/db/kan_vod.db
+      LOCAL_SERIES_DB_PATH: /app/db/local_series.db
+      LOCAL_SERIES_WATCHER_ENABLED: ${LOCAL_SERIES_WATCHER_ENABLED:-true}
+      LOCAL_SERIES_WATCH_INTERVAL_SECONDS: ${LOCAL_SERIES_WATCH_INTERVAL_SECONDS:-2}
+      KAN_VOD_RETRIES: ${KAN_VOD_RETRIES:-3}
+      KAN_VOD_STREAM_BATCH_SIZE: ${KAN_VOD_STREAM_BATCH_SIZE:-20}
+      KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS: ${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
+      LOCAL_VOD_TV_DIR: /app/media/tv
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      TMDB_LANGUAGE: ${TMDB_LANGUAGE:-he-IL}
+    labels:
+      icon: http://192.168.86.75:8001/icon.svg
+    networks:
+      tv-network:
+        aliases:
+          - backend
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /DATA/AppData/tv-app/backend-cache
+        target: /app/cache
+      - type: bind
+        source: /DATA/AppData/tv-app/db
+        target: /app/db
+      - type: bind
+        source: /srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv
+        target: /app/media/tv
+        read_only: true
+
+  backend-vpn:
+    cpu_shares: 90
+    image: vitalyth/tv-app-backend:latest
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+    depends_on:
+      gluetun:
+        condition: service_started
+        required: true
+    environment:
+      ROOT_PATH: /api
+      BACKEND_CACHE_DIR: /app/cache
+      KAN_VOD_DB_PATH: /app/db/kan_vod.db
+      LOCAL_SERIES_DB_PATH: /app/db/local_series.db
+      LOCAL_SERIES_WATCHER_ENABLED: "false"
+      KAN_VOD_RETRIES: ${KAN_VOD_RETRIES:-3}
+      KAN_VOD_STREAM_BATCH_SIZE: ${KAN_VOD_STREAM_BATCH_SIZE:-20}
+      KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS: ${KAN_VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
+      LOCAL_VOD_TV_DIR: /app/media/tv
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      TMDB_LANGUAGE: ${TMDB_LANGUAGE:-he-IL}
+    labels:
+      icon: http://192.168.86.75:8001/icon.svg
+    network_mode: service:gluetun
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /DATA/AppData/tv-app/backend-cache
+        target: /app/cache
+      - type: bind
+        source: /DATA/AppData/tv-app/db
+        target: /app/db
+      - type: bind
+        source: /srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv
+        target: /app/media/tv
+        read_only: true
+
+  backend-scheduler:
+    cpu_shares: 90
+    image: vitalyth/tv-app-backend:latest
+    command:
+      - python
+      - /app/run_scheduler.py
+    depends_on:
+      backend:
+        condition: service_started
+        required: true
+    environment:
+      BACKEND_CACHE_DIR: /app/cache
+      KAN_VOD_DB_PATH: /app/db/kan_vod.db
+      EPG_INTERVAL_SECONDS: ${EPG_INTERVAL_SECONDS:-86400}
+      VOD_RECENT_INTERVAL_SECONDS: ${VOD_RECENT_INTERVAL_SECONDS:-43200}
+      KAN_VOD_SCAN_INTERVAL_SECONDS: ${KAN_VOD_SCAN_INTERVAL_SECONDS:-28800}
+    labels:
+      icon: http://192.168.86.75:8001/icon.svg
+    networks:
+      tv-network: null
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /DATA/AppData/tv-app/backend-cache
+        target: /app/cache
+      - type: bind
+        source: /DATA/AppData/tv-app/db
+        target: /app/db
+
+  nginx:
+    cpu_shares: 90
+    image: vitalyth/tv-app-nginx:latest
+    depends_on:
+      frontend:
+        condition: service_started
+        required: true
+      backend:
+        condition: service_started
+        required: true
+      backend-vpn:
+        condition: service_started
+        required: true
+    labels:
+      icon: http://192.168.86.75:8001/icon.svg
+    networks:
+      tv-network: null
+    ports:
+      - target: 80
+        published: "8001"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /DATA/AppData/tv-app/nginx-cache
+        target: /var/cache/nginx
+
+  cloudflared:
+    cpu_shares: 90
+    image: cloudflare/cloudflared:latest
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${TUNNEL_TOKEN}
+    depends_on:
+      nginx:
+        condition: service_started
+        required: true
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    labels:
+      icon: http://192.168.86.75:8001/icon.svg
+    networks:
+      tv-network: null
+    restart: unless-stopped
+
+networks:
+  tv-network:
+    name: tv_app_tv-network
+    driver: bridge
+
+x-casaos:
+  author: self
+  category: self
+  hostname: ""
+  icon: http://192.168.86.75:8001/icon.svg
+  index: /
+  is_uncontrolled: false
+  port_map: "8001"
+  scheme: http
+  store_app_id: tv_app
+  title:
+    custom: TV App
+    en_us: TV App

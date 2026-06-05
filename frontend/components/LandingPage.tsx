@@ -12,7 +12,7 @@ import { HorizontalCarousel } from "@/components/horizontal-carousel";
 import { PageMain } from "@/components/page-main";
 import { Button } from "@/components/ui/button";
 import { getVodProgressPercent } from "@/lib/vod-progress";
-import { ChevronLeft, Clapperboard, Play, RotateCcw, Tv } from "lucide-react";
+import { ChevronLeft, Clapperboard, Home, Play, RotateCcw, Tv } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
@@ -438,15 +438,15 @@ const LandingPage = () => {
     <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
       <section className="mb-3 shrink-0 border-b border-border bg-background px-3 pb-2 pt-3 md:px-6 md:pt-5 lg:px-8">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div className="hidden min-w-0 lg:block">
+          <div className="min-w-0">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-card">
-                <Tv className="h-6 w-6 text-primary" />
+                <Home className="h-6 w-6 text-primary" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-3xl font-bold text-foreground">ברוכים הבאים</h1>
+                <h1 className="truncate text-2xl font-bold text-foreground lg:text-3xl">ברוכים הבאים</h1>
                 <p className="text-sm text-muted-foreground">
-                  המשך צפייה, VOD ושידורים חיים במקום אחד.
+                  תוכן ישראלי במקום אחד
                 </p>
               </div>
             </div>
@@ -486,7 +486,6 @@ const LandingPage = () => {
               <section className="space-y-4">
                 <SectionHeader
                   title="VOD"
-                  subtitle="כניסה לתוכן ספריות VOD"
                 />
                 <HorizontalCarousel itemClassName={carouselCompactCardClass}>
                   {recommendedVodChannels.map((channel) => (
@@ -503,8 +502,7 @@ const LandingPage = () => {
             {recentVodItems.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
-                  title="המשך צפייה ב-VOD"
-                  subtitle="חזרה מהירה לפרקים ולתוכניות האחרונות"
+                  title="המשך צפייה"
                   action={
                     <Button variant="outline" size="sm" onClick={handleBrowseVod} className="shrink-0 gap-2">
                       <RotateCcw className="h-4 w-4" />
@@ -524,8 +522,7 @@ const LandingPage = () => {
             {recentlyAddedVodItems.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
-                  title="חדש ב-VOD"
-                  subtitle="תכנים שנוספו לאחרונה"
+                  title="חדשים"
                 />
                 <HorizontalCarousel>
                   {recentlyAddedVodItems.map((item) => {
@@ -551,8 +548,7 @@ const LandingPage = () => {
             {recentlyViewed.length > 0 && (
               <section className="space-y-4">
                 <SectionHeader
-                  title="Live נצפו לאחרונה"
-                  subtitle="השידורים שחזרת אליהם לאחרונה"
+                  title="הערוצים שלי"
                 />
                 <HorizontalCarousel itemClassName={carouselCompactCardClass}>
                   {recentlyViewed.slice(0, RECENT_LIVE_LIMIT).map((channel) => (
@@ -571,7 +567,6 @@ const LandingPage = () => {
               <section className="space-y-4">
                 <SectionHeader
                   title="משודר עכשיו"
-                  subtitle="שידורים חיים פעילים כרגע"
                   action={
                     <Button variant="outline" size="sm" onClick={handleOpenGuide} className="shrink-0">
                       כל השידורים

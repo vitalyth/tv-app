@@ -9,8 +9,8 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'ערוצי טלוויזיה - צפייה בשידור חי',
-  description: 'צפו בערוצי טלוויזיה ישראליים בשידור חי',
+  title: 'TV App',
+  description: 'TV App לצפייה בשידורים חיים, VOD וסדרות',
   generator: 'v0.app',
   robots: {
     index: false,
