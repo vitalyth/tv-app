@@ -19,7 +19,10 @@ import { ChannelCard } from "@/components/channel-card";
 import { HorizontalCarousel } from "@/components/horizontal-carousel";
 import { PageMain } from "@/components/page-main";
 import { Button } from "@/components/ui/button";
-import { getVodProgressPercent } from "@/lib/vod-progress";
+import {
+  ContinueWatchingVodCarousel,
+  NewVodCarousel,
+} from "@/components/vod-content-carousels";
 import { ChevronLeft, Clapperboard, Play, RotateCcw } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
@@ -299,6 +302,21 @@ const LandingPage = () => {
     () => vodRecentItems,
     [vodRecentItems]
   );
+  const recentlyAddedCarouselItems = useMemo(
+    () => recentlyAddedVodItems.map((item) => ({
+      item,
+      stack: [{
+        name: item.channelName || item.title || item.name,
+        module: item.module,
+        mode: item.mode,
+        url: item.url,
+        logo: item.logo,
+        moreData: item.moreData,
+        description: item.description,
+      }],
+    })),
+    [recentlyAddedVodItems],
+  );
   const heroItems = useMemo(() => recentlyAddedVodItems.slice(0, 5), [recentlyAddedVodItems]);
 
   useEffect(() => {
@@ -441,60 +459,6 @@ const LandingPage = () => {
     </button>
   );
 
-  const VodItemCard = ({
-    item,
-    stack,
-    label,
-    onClick,
-  }: {
-    item: VodItem;
-    stack: VodNode[];
-    label: string;
-    onClick?: () => void;
-  }) => {
-    const meta = buildVodMeta(item, stack);
-    const title = meta.episodeName || item.name;
-    const subtitle = [meta.channelName, meta.programName !== title ? meta.programName : null, meta.seasonName]
-      .filter(Boolean)
-      .join(" · ");
-    const progressPercent = label === "המשך" ? getVodProgressPercent(item.id) : 0;
-
-    return (
-      <button
-        type="button"
-        onClick={onClick ?? (() => handlePlayVodItem(item, stack))}
-        className="group flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
-      >
-        <div className="relative aspect-video overflow-hidden bg-background">
-          <img
-            src={getVodImageSrc(meta.episodeImage || meta.programImage || item.logo)}
-            alt=""
-            className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
-          />
-          <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/15 to-transparent" />
-          <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-xs text-white">
-            <Play className="h-3.5 w-3.5 fill-current" />
-            {label}
-          </span>
-          {progressPercent > 0 && (
-            <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20" aria-hidden="true">
-              <div className="h-full bg-primary" style={{ width: `${progressPercent}%` }} />
-            </div>
-          )}
-        </div>
-        <div className="min-w-0 p-4">
-          {subtitle && <p className="line-clamp-1 text-xs text-muted-foreground">{subtitle}</p>}
-          <h3 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">{title}</h3>
-          {meta.episodeDescription && (
-            <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
-              {meta.episodeDescription}
-            </p>
-          )}
-        </div>
-      </button>
-    );
-  };
-
   const LiveNowCard = ({ channel }: { channel: Channel }) => {
     const program = getCurrentProgram(channel);
     const progress = getProgramProgress(program);
@@ -569,7 +533,7 @@ const LandingPage = () => {
     : "שידורים חיים, VOD וסדרות";
   const handleHeroPlay = () => {
     if (heroItem) {
-      handlePlayVodItem(heroItem, heroStack);
+      handleContinueVodItem(heroItem, heroStack);
     } else {
       handleBrowseVod();
     }
@@ -682,31 +646,18 @@ const LandingPage = () => {
             </div>
           ) : (
           <div className="space-y-8">
-            {recentVodItems.length > 0 && (
-              <section className="space-y-4">
-                <SectionHeader
-                  title="המשך צפייה"
-                  action={
-                    <Button variant="outline" size="sm" onClick={handleBrowseVod} className="shrink-0 gap-2">
-                      <RotateCcw className="h-4 w-4" />
-                      עוד VOD
-                    </Button>
-                  }
-                />
-
-                <HorizontalCarousel>
-                  {recentVodItems.map(({ item, stack }) => (
-                    <VodItemCard
-                      key={item.id}
-                      item={item}
-                      stack={stack}
-                      label="המשך"
-                      onClick={() => handleContinueVodItem(item, stack)}
-                    />
-                  ))}
-                </HorizontalCarousel>
-              </section>
-            )}
+            <ContinueWatchingVodCarousel
+              items={recentVodItems}
+              buildMeta={buildVodMeta}
+              getImageSrc={getVodImageSrc}
+              onPlay={handleContinueVodItem}
+              action={
+                <Button variant="outline" size="sm" onClick={handleBrowseVod} className="shrink-0 gap-2">
+                  <RotateCcw className="h-4 w-4" />
+                  עוד VOD
+                </Button>
+              }
+            />
 
             {liveNowChannels.length > 0 && (
               <section className="space-y-4">
@@ -744,27 +695,12 @@ const LandingPage = () => {
               </section>
             )}
 
-            {recentlyAddedVodItems.length > 0 && (
-              <section className="space-y-4">
-                <SectionHeader title="חדשים" />
-                <HorizontalCarousel>
-                  {recentlyAddedVodItems.map((item) => {
-                    const itemStack: VodNode[] = [
-                      {
-                        name: item.channelName || item.title || item.name,
-                        module: item.module,
-                        mode: item.mode,
-                        url: item.url,
-                        logo: item.logo,
-                        moreData: item.moreData,
-                        description: item.description,
-                      },
-                    ];
-                    return <VodItemCard key={item.id} item={item} stack={itemStack} label="נגן" />;
-                  })}
-                </HorizontalCarousel>
-              </section>
-            )}
+            <NewVodCarousel
+              items={recentlyAddedCarouselItems}
+              buildMeta={buildVodMeta}
+              getImageSrc={getVodImageSrc}
+              onPlay={handleContinueVodItem}
+            />
 
             {recommendedVodChannels.length > 0 && (
               <section className="space-y-4">
