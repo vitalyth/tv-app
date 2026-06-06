@@ -203,6 +203,8 @@ const episodeToChannel = (series: KanVodSeriesDetails, episode: KanVodEpisode): 
     playerLogo: image,
     playerTitle: series.title,
     playerSubtitle: [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean).join(" · "),
+    vodProgramId: series.id,
+    vodSeasonId: episode.season_id || undefined,
     vodMeta,
   } as Channel;
 };
@@ -279,12 +281,30 @@ export default function KanVodDetailsPage() {
     setActiveSeason(filteredSeasons[0]?.[0] || null);
   }, [activeSeason, filteredSeasons]);
 
+  useEffect(() => {
+    if (
+      !series ||
+      currentChannel?.module !== "kan-vod" ||
+      (currentChannel.vodProgramId && currentChannel.vodProgramId !== programId)
+    ) {
+      return;
+    }
+
+    const playingEpisode = series.episodes.find((episode) => episode.id === currentChannel.id);
+    const playingSeason = playingEpisode?.season_id || currentChannel.vodSeasonId;
+    if (!playingSeason || !episodesBySeason[playingSeason]) return;
+
+    setSearchQuery("");
+    setActiveSeason(playingSeason);
+  }, [currentChannel, episodesBySeason, programId, series]);
+
   const handleBack = () => {
     router.push("/kan-vod");
   };
 
   const playEpisode = useCallback((episode: KanVodEpisode) => {
     if (!series) return;
+
     saveRecentVodItem(series, episode);
     play(episodeToChannel(series, episode));
   }, [play, series]);

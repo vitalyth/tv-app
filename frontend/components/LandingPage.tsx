@@ -6,7 +6,15 @@ import useSWR from "swr";
 import { channelService } from "@/lib/services/channel-service";
 import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-import { Channel, Program, VodChannel, VodItem, VodPlaybackMeta } from "@/lib/channels-data";
+import {
+  Channel,
+  Program,
+  VodChannel,
+  VodItem,
+  VodPlaybackMeta,
+  getKanVodEpisodeId,
+  getKanVodProgramId,
+} from "@/lib/channels-data";
 import { ChannelCard } from "@/components/channel-card";
 import { HorizontalCarousel } from "@/components/horizontal-carousel";
 import { PageMain } from "@/components/page-main";
@@ -128,9 +136,10 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
   const vodMeta = buildVodMeta(item, stack);
   const titleParts = [vodMeta.channelName, vodMeta.programName].filter(Boolean);
   const subtitleParts = [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean);
+  const stackUrls = stack.map((node) => node.url);
 
   return {
-    id: item.module === "kan-vod" && item.episodeId ? item.episodeId : item.id,
+    id: getKanVodEpisodeId(item.module, item.episodeId, item.id),
     index: 0,
     name: vodMeta.channelName,
     logo: vodMeta.channelImage || item.logo,
@@ -149,6 +158,7 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
     playerLogo: vodMeta.channelImage || item.logo,
     playerTitle: titleParts.join(" · "),
     playerSubtitle: subtitleParts.join(" · "),
+    vodProgramId: getKanVodProgramId(item.module, item.programId, stackUrls),
     vodMeta,
   };
 };
@@ -330,6 +340,31 @@ const LandingPage = () => {
     [play]
   );
 
+  const handleContinueVodItem = useCallback(
+    (item: VodItem, stack: VodNode[]) => {
+      handlePlayVodItem(item, stack);
+
+      const programId = getKanVodProgramId(
+        item.module,
+        item.programId,
+        stack.map((node) => node.url),
+      );
+
+      if (item.module === "kan-vod" && programId) {
+        router.push(`/kan-vod/${encodeURIComponent(programId)}`);
+        return;
+      }
+
+      if (stack.length > 0) {
+        const params = new URLSearchParams({
+          [VOD_PATH_PARAM]: JSON.stringify(stack),
+        });
+        router.push(`/vod?${params.toString()}`);
+      }
+    },
+    [handlePlayVodItem, router]
+  );
+
   const handleBrowseVod = useCallback(() => {
     router.push("/vod");
   }, [router]);
@@ -410,10 +445,12 @@ const LandingPage = () => {
     item,
     stack,
     label,
+    onClick,
   }: {
     item: VodItem;
     stack: VodNode[];
     label: string;
+    onClick?: () => void;
   }) => {
     const meta = buildVodMeta(item, stack);
     const title = meta.episodeName || item.name;
@@ -425,7 +462,7 @@ const LandingPage = () => {
     return (
       <button
         type="button"
-        onClick={() => handlePlayVodItem(item, stack)}
+        onClick={onClick ?? (() => handlePlayVodItem(item, stack))}
         className="group flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
       >
         <div className="relative aspect-video overflow-hidden bg-background">
@@ -515,6 +552,17 @@ const LandingPage = () => {
   const heroImage = heroVodMeta
     ? getVodImageSrc(heroVodMeta.episodeImage || heroVodMeta.programImage || heroItem?.logo || "")
     : "/ch/vod.jpg";
+  const getHeroSlideOffset = (index: number) => {
+    if (heroItems.length <= 1) return 0;
+
+    let offset = index - heroIndex;
+    const halfway = heroItems.length / 2;
+
+    if (offset > halfway) offset -= heroItems.length;
+    if (offset < -halfway) offset += heroItems.length;
+
+    return offset;
+  };
   const heroTitle = heroVodMeta?.programName || heroItem?.name || "תוכן ישראלי במקום אחד";
   const heroSubtitle = heroVodMeta
     ? [heroVodMeta.channelName, heroVodMeta.seasonName, heroVodMeta.episodeName].filter(Boolean).join(" · ")
@@ -531,9 +579,46 @@ const LandingPage = () => {
     <div className="flex h-full min-h-0 flex-col bg-background" dir="rtl">
       <PageMain>
         <section className="relative min-h-64 overflow-hidden border-b border-border md:min-h-80">
-          <img src={heroImage} alt="" className="absolute inset-0 h-full w-full object-cover object-top" />
-          <div className="absolute inset-0 bg-black/55" />
-          <div className="absolute inset-0 bg-linear-to-l from-black/90 via-black/55 to-black/15" />
+          {heroItems.length > 0 ? (
+            heroItems.map((item, index) => {
+              const slideOffset = getHeroSlideOffset(index);
+              const itemStack: VodNode[] = [{
+                name: item.channelName || item.title || item.name,
+                module: item.module,
+                mode: item.mode,
+                url: item.url,
+                logo: item.logo,
+                moreData: item.moreData,
+                description: item.description,
+              }];
+              const itemMeta = buildVodMeta(item, itemStack);
+              const image = getVodImageSrc(
+                itemMeta.episodeImage || itemMeta.programImage || item.logo,
+              );
+
+              return (
+                <img
+                  key={item.id}
+                  src={image}
+                  alt=""
+                  aria-hidden={index !== heroIndex}
+                  className="absolute -top-[44%] h-[152%] w-full object-cover object-top transition-[transform,opacity] duration-700 ease-in-out"
+                  style={{
+                    opacity: Math.abs(slideOffset) <= 1 ? 1 : 0,
+                    transform: `translateX(${slideOffset * 100}%)`,
+                  }}
+                />
+              );
+            })
+          ) : (
+            <img
+              src={heroImage}
+              alt=""
+              className="absolute -top-[44%] h-[152%] w-full object-cover object-top"
+            />
+          )}
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(0,0,0,0.98)_0%,rgba(0,0,0,0.72)_12%,rgba(0,0,0,0.04)_32%,rgba(0,0,0,0.04)_68%,rgba(0,0,0,0.78)_88%,rgba(0,0,0,1)_100%)]" />
+          <div className="absolute inset-0 bg-linear-to-t from-black/55 via-transparent to-black/20" />
           <div className="relative flex min-h-64 max-w-3xl flex-col justify-end px-4 py-6 text-white md:min-h-80 md:px-8 md:py-8">
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold">
               <span className="rounded bg-white/15 px-2 py-1 backdrop-blur-sm">
@@ -611,7 +696,13 @@ const LandingPage = () => {
 
                 <HorizontalCarousel>
                   {recentVodItems.map(({ item, stack }) => (
-                    <VodItemCard key={item.id} item={item} stack={stack} label="המשך" />
+                    <VodItemCard
+                      key={item.id}
+                      item={item}
+                      stack={stack}
+                      label="המשך"
+                      onClick={() => handleContinueVodItem(item, stack)}
+                    />
                   ))}
                 </HorizontalCarousel>
               </section>

@@ -67,6 +67,11 @@ export type KanVodSeriesDetails = KanVodSeries & {
   error?: string | null;
 };
 
+export type KanVodNextEpisode = {
+  programId: string;
+  episode: KanVodEpisode;
+};
+
 export type KanVodSeriesResponse = {
   db: string;
   count: number;
@@ -135,5 +140,19 @@ export const kanVodService = {
         }
       }
     );
+  },
+
+  async getNextEpisode(episodeId: string): Promise<KanVodNextEpisode | null> {
+    const response = await fetch(
+      api(`/kan-vod/next?episode_id=${encodeURIComponent(episodeId)}`),
+      { cache: "no-store" },
+    );
+
+    if (response.status === 204 || response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`Failed to load next Kan VOD episode (${response.status})`);
+    }
+
+    return await response.json() as KanVodNextEpisode;
   },
 };

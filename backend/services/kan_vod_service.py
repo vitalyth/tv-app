@@ -117,6 +117,7 @@ def _season_to_dict(row: sqlite3.Row) -> dict:
 
 def _episode_to_dict(row: sqlite3.Row, api_prefix: str = "") -> dict:
     item = _row_to_dict(row)
+    item.pop("playback_season_number", None)
     item["streamUrl"] = item.get("stream_url") or ""
     item["playUrl"] = item.get("play_url") or item.get("url") or ""
     item["episodeName"] = item.get("title") or ""
@@ -124,6 +125,26 @@ def _episode_to_dict(row: sqlite3.Row, api_prefix: str = "") -> dict:
     item["episodeImage"] = item.get("image") or ""
     item["streamEndpoint"] = f"{api_prefix}/kan-vod/stream?episode_id={quote(item['id'])}"
     return item
+
+
+def _normalize_numbered_season_order(
+    episodes: list[sqlite3.Row],
+    newest_first: bool,
+) -> list[sqlite3.Row]:
+    explicit_numbers = [
+        kan_db_scanner.extract_episode_number_from_title(episode["title"] or "")
+        for episode in episodes
+    ]
+    explicit_numbers = [number for number in explicit_numbers if number is not None]
+
+    if len(explicit_numbers) < 2:
+        return episodes
+
+    source_is_newest_first = explicit_numbers[0] > explicit_numbers[-1]
+    if source_is_newest_first == newest_first:
+        return episodes
+
+    return list(reversed(episodes))
 
 
 def _upsert_programs_from_api(con: sqlite3.Connection) -> None:
@@ -372,10 +393,32 @@ def get_kan_vod_series_details(
             (program_id,),
         ).fetchall()
 
+        display_episodes: list[sqlite3.Row] = []
+        season_episodes: list[sqlite3.Row] = []
+        active_season_id: str | None = None
+        has_active_season = False
+
+        for episode in episodes:
+            season_id = episode["season_id"]
+            if has_active_season and season_id != active_season_id:
+                display_episodes.extend(
+                    _normalize_numbered_season_order(season_episodes, newest_first=True)
+                )
+                season_episodes = []
+
+            active_season_id = season_id
+            has_active_season = True
+            season_episodes.append(episode)
+
+        if season_episodes:
+            display_episodes.extend(
+                _normalize_numbered_season_order(season_episodes, newest_first=True)
+            )
+
         return {
             **_program_to_dict(program),
             "seasons": [_season_to_dict(row) for row in seasons],
-            "episodes": [_episode_to_dict(row, api_prefix=api_prefix) for row in episodes],
+            "episodes": [_episode_to_dict(row, api_prefix=api_prefix) for row in display_episodes],
             "error": error,
         }
     finally:
@@ -407,6 +450,81 @@ def get_kan_vod_recent_episodes(limit: int = 10) -> list[dict]:
         ).fetchall()
 
         return [_row_to_dict(row) for row in rows]
+    finally:
+        con.close()
+
+
+def get_kan_vod_next_episode(episode_id: str, api_prefix: str = "") -> dict | None:
+    con = _connect()
+    try:
+        current = con.execute(
+            "SELECT id, program_id FROM episodes WHERE id = ?",
+            (episode_id,),
+        ).fetchone()
+        if not current:
+            return None
+
+        episodes = con.execute(
+            """
+            SELECT e.*, s.season_number AS playback_season_number
+            FROM episodes e
+            LEFT JOIN seasons s ON s.season_id = e.season_id
+            WHERE e.program_id = ?
+            ORDER BY
+                s.season_number IS NULL,
+                s.season_number ASC,
+                e.season_id ASC,
+                e.display_order IS NULL,
+                e.display_order ASC,
+                CAST(e.id AS INTEGER) DESC,
+                e.title COLLATE NOCASE DESC
+            """,
+            (current["program_id"],),
+        ).fetchall()
+
+        # Kan pages are inconsistent: some seasons list episode 1 first while
+        # others list the newest episode first. Preserve Kan's source order for
+        # unnumbered collections, and reverse only seasons whose explicit
+        # "episode X" titles show that the source order is descending.
+        playback_episodes: list[sqlite3.Row] = []
+        season_episodes: list[sqlite3.Row] = []
+        active_season_key: tuple[object, object] | None = None
+
+        def append_season(items: list[sqlite3.Row]) -> None:
+            playback_episodes.extend(
+                _normalize_numbered_season_order(items, newest_first=False)
+            )
+
+        for episode in episodes:
+            season_key = (episode["playback_season_number"], episode["season_id"])
+            if active_season_key is not None and season_key != active_season_key:
+                append_season(season_episodes)
+                season_episodes = []
+
+            active_season_key = season_key
+            season_episodes.append(episode)
+
+        if season_episodes:
+            append_season(season_episodes)
+
+        current_index = next(
+            (
+                index
+                for index, episode in enumerate(playback_episodes)
+                if episode["id"] == episode_id
+            ),
+            -1,
+        )
+        if current_index < 0 or current_index + 1 >= len(playback_episodes):
+            return None
+
+        return {
+            "programId": current["program_id"],
+            "episode": _episode_to_dict(
+                playback_episodes[current_index + 1],
+                api_prefix=api_prefix,
+            ),
+        }
     finally:
         con.close()
 

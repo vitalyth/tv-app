@@ -5,7 +5,14 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
-import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
+import {
+    type Channel,
+    type VodChannel,
+    type VodItem,
+    type VodPlaybackMeta,
+    getKanVodEpisodeId,
+    getKanVodProgramId,
+} from "@/lib/channels-data";
 import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { useFloatingPlayer } from "@/context/floating-player-context";
@@ -144,9 +151,10 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
         vodMeta.seasonName,
         vodMeta.episodeName,
     ].filter(Boolean);
+    const stackUrls = stack.map((node) => node.url);
 
     return {
-        id: item.module === "kan-vod" && item.episodeId ? item.episodeId : item.id,
+        id: getKanVodEpisodeId(item.module, item.episodeId, item.id),
         index: 0,
         name: vodMeta.channelName,
         logo: vodMeta.channelImage || item.logo,
@@ -165,6 +173,7 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
         playerLogo: vodMeta.channelImage || item.logo,
         playerTitle: titleParts.join(" · "),
         playerSubtitle: subtitleParts.join(" · "),
+        vodProgramId: getKanVodProgramId(item.module, item.programId, stackUrls),
         vodMeta,
     };
 };
@@ -386,6 +395,22 @@ export default function VodPage() {
         });
     }, [play, updateUrl]);
 
+    const continueRecentItem = useCallback((item: VodItem, stack: VodNode[]) => {
+        const programId = getKanVodProgramId(
+            item.module,
+            item.programId,
+            stack.map((node) => node.url),
+        );
+
+        if (item.module === "kan-vod" && programId) {
+            play(itemToChannel(item, stack));
+            router.push(`/kan-vod/${encodeURIComponent(programId)}`);
+            return;
+        }
+
+        playRecentItem(item, stack);
+    }, [play, playRecentItem, router]);
+
     return (
         <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
             <div className="mb-5 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
@@ -537,7 +562,7 @@ export default function VodPage() {
                                         description="חזרה מהירה לפרקים ולתוכניות שהתחלת לראות."
                                         buildMeta={buildVodMeta}
                                         getImageSrc={getImageSrc}
-                                        onPlay={playRecentItem}
+                                        onPlay={continueRecentItem}
                                     />
                                 </>
                             ) : isItemsLoading ? (
