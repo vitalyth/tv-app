@@ -131,6 +131,9 @@ VOD_ITEMS_CACHE_TTL_SECONDS = int(os.getenv("VOD_ITEMS_CACHE_TTL_SECONDS", str(7
 VOD_ITEMS_CACHE_DIR = CACHE_DIR / "vod_items"
 VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_kan11", "vod_keshet12", "vod_reshet13", "vod_14tv"}
 _original_addon_cache_get = addon_cache.get
+_original_addon_cache_clear = addon_cache.clear
+_original_addon_cache_database = addon_cache.database
+_addon_cache_connection_scopes = threading.local()
 _vod_source_lock = threading.RLock()
 
 VOD_RECENT_TTL = 30 * 60
@@ -591,6 +594,38 @@ def _kan_fallback_vod_items(url: str, iconimage: str = "") -> list[dict]:
 
     return items
 
+class _TrackedAddonCacheDatabase:
+    def connect(self, *args, **kwargs):
+        connection = _original_addon_cache_database.connect(*args, **kwargs)
+        scopes = getattr(_addon_cache_connection_scopes, "connections", [])
+        if scopes:
+            scopes[-1].append(connection)
+        return connection
+
+    def __getattr__(self, name):
+        return getattr(_original_addon_cache_database, name)
+
+
+@contextmanager
+def _close_addon_cache_connections():
+    scopes = getattr(_addon_cache_connection_scopes, "connections", None)
+    if scopes is None:
+        scopes = []
+        _addon_cache_connection_scopes.connections = scopes
+
+    connections = []
+    scopes.append(connections)
+    try:
+        yield
+    finally:
+        scopes.pop()
+        for connection in reversed(connections):
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+
 def _bounded_addon_cache_get(function, timeout, *args, **table):
     effective_timeout = timeout
     try:
@@ -599,14 +634,22 @@ def _bounded_addon_cache_get(function, timeout, *args, **table):
     except Exception:
         pass
 
-    return _original_addon_cache_get(function, effective_timeout, *args, **table)
+    with _close_addon_cache_connections():
+        return _original_addon_cache_get(function, effective_timeout, *args, **table)
+
+
+def _safe_addon_cache_clear(*args, **kwargs):
+    with _close_addon_cache_connections():
+        return _original_addon_cache_clear(*args, **kwargs)
 
 
 def _direct_addon_cache_get(function, timeout, *args, **table):
     return function(*args)
 
 
+addon_cache.database = _TrackedAddonCacheDatabase()
 addon_cache.get = _bounded_addon_cache_get
+addon_cache.clear = _safe_addon_cache_clear
 
 
 @contextmanager
