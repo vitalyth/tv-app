@@ -14,7 +14,12 @@ from services.local_series_service import (
     start_local_series_watcher,
     stop_local_series_watcher,
 )
-from services.kan_vod_service import get_kan_vod_series, get_kan_vod_series_details, get_kan_vod_stream
+from services.kan_vod_service import (
+    get_kan_vod_next_episode,
+    get_kan_vod_series,
+    get_kan_vod_series_details,
+    get_kan_vod_stream,
+)
 import os
 import socket
 from models.schemas import Channel
@@ -372,6 +377,17 @@ def kan_vod_stream(episode_id: str = Query(..., min_length=1)):
         return Response("Kan VOD stream not found", status_code=404)
 
     return {"stream": stream_url}
+
+@app.get("/kan-vod/next")
+def kan_vod_next(request: Request, episode_id: str = Query(..., min_length=1)):
+    result = get_kan_vod_next_episode(
+        episode_id,
+        api_prefix=get_request_api_prefix(request),
+    )
+    if not result:
+        return Response(status_code=204)
+
+    return result
 
 @app.get("/kan-vod/{program_id}")
 def kan_vod_details(

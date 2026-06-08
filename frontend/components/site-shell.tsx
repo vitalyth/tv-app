@@ -7,10 +7,19 @@ import { APP_VERSION } from "@/lib/version";
 import { FloatingPlayerProvider } from "@/context/floating-player-context";
 import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 
+const getPageTitle = (pathname: string) => {
+    if (pathname === "/") return "בית";
+    if (pathname.startsWith("/vod")) return "VOD";
+    if (pathname.startsWith("/local-series")) return "סדרות";
+    if (pathname.startsWith("/kan-vod")) return "כאן VOD";
+    if (pathname.startsWith("/guide")) return "שידורים חיים";
+    return "שידורים חיים";
+};
+
 export default function SiteShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const isLiveRoute = pathname === "/live" || pathname.startsWith("/live/");
-    const title = pathname === "/" ? "בית" : pathname.startsWith("/vod") ? "VOD" : "מדריך שידורים";
+    const title = getPageTitle(pathname);
 
     useEffect(() => {
         if (isLiveRoute) return;
@@ -51,7 +60,7 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
                 </div>
 
                 <footer className="shrink-0 border-t border-border bg-card px-4 py-3 text-center text-xs text-muted-foreground">
-                    ערוצי טלוויזיה · v{APP_VERSION}
+                    TV App · v{APP_VERSION}
                 </footer>
             </div>
         </FloatingPlayerProvider>

@@ -49,7 +49,7 @@ export default function Header({ title = 'שידורים חיים', onClose, onT
                         </div>
                     </Link>
                     <div className="min-w-0 flex-1">
-                        <h1 className="truncate text-base font-bold text-foreground sm:text-xl">ערוצי טלוויזיה</h1>
+                        <h1 className="truncate text-base font-bold text-foreground sm:text-xl">TV App</h1>
                         <p className="truncate text-xs text-muted-foreground">
                             {title} · v{APP_VERSION}
                         </p>

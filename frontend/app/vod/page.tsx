@@ -3,13 +3,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Archive, ChevronLeft, Clapperboard, ExternalLink, FolderOpen, Play, Search } from "lucide-react";
+import { Archive, ChevronLeft, Clapperboard, FolderOpen, Play, Search } from "lucide-react";
 import { channelService } from "@/lib/services/channel-service";
-import { type Channel, type VodChannel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
+import {
+    type Channel,
+    type VodChannel,
+    type VodItem,
+    type VodPlaybackMeta,
+    getKanVodEpisodeId,
+    getKanVodProgramId,
+} from "@/lib/channels-data";
 import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-import { VodRecentCarousel } from "./vod-recent-carousel";
+import {
+    ContinueWatchingVodCarousel,
+    NewVodCarousel,
+} from "@/components/vod-content-carousels";
 
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
@@ -144,9 +154,10 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
         vodMeta.seasonName,
         vodMeta.episodeName,
     ].filter(Boolean);
+    const stackUrls = stack.map((node) => node.url);
 
     return {
-        id: item.module === "kan-vod" && item.episodeId ? item.episodeId : item.id,
+        id: getKanVodEpisodeId(item.module, item.episodeId, item.id),
         index: 0,
         name: vodMeta.channelName,
         logo: vodMeta.channelImage || item.logo,
@@ -165,6 +176,7 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
         playerLogo: vodMeta.channelImage || item.logo,
         playerTitle: titleParts.join(" · "),
         playerSubtitle: subtitleParts.join(" · "),
+        vodProgramId: getKanVodProgramId(item.module, item.programId, stackUrls),
         vodMeta,
     };
 };
@@ -386,6 +398,22 @@ export default function VodPage() {
         });
     }, [play, updateUrl]);
 
+    const continueRecentItem = useCallback((item: VodItem, stack: VodNode[]) => {
+        const programId = getKanVodProgramId(
+            item.module,
+            item.programId,
+            stack.map((node) => node.url),
+        );
+
+        if (item.module === "kan-vod" && programId) {
+            play(itemToChannel(item, stack));
+            router.push(`/kan-vod/${encodeURIComponent(programId)}`);
+            return;
+        }
+
+        playRecentItem(item, stack);
+    }, [play, playRecentItem, router]);
+
     return (
         <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
             <div className="mb-5 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
@@ -474,43 +502,46 @@ export default function VodPage() {
                             {!currentNode ? (
                                 <>
                                     <section className="mb-8 space-y-4">
-                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                                             {filteredChannels.map((channel) => (
                                                 <button
                                                     key={channel.id}
                                                     onClick={() => openChannel(channel)}
-                                                    className="group flex min-h-44 w-full items-center gap-6 rounded-lg border border-border bg-card p-6 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+                                                    className="group relative flex min-h-48 min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-right shadow-sm transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-1 hover:border-primary/70 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary"
                                                 >
-                                                    <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
+                                                    <div className="absolute inset-x-0 top-0 h-0.5 bg-primary/0 transition-colors duration-300 group-hover:bg-primary" />
+                                                    <div className="flex h-28 w-full items-center justify-center border-b border-border bg-background/70 p-5">
                                                         <img
                                                             src={getImageSrc(channel.logo)}
-                                                            alt=""
-                                                            className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
+                                                            alt={channel.name}
+                                                            className="h-20 w-20 object-contain transition-transform duration-300 group-hover:scale-110"
                                                         />
                                                     </div>
 
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="flex items-start justify-between gap-3">
+                                                    <div className="flex min-w-0 flex-1 flex-col justify-between gap-3 p-3">
+                                                        <div className="flex items-start justify-between gap-2">
                                                             <div className="min-w-0">
-                                                                <h3 className="truncate text-xl font-semibold text-foreground">{channel.name}</h3>
-                                                                <p className="mt-1.5 text-sm text-muted-foreground">{channel.module}</p>
+                                                                <p className="mb-1 text-[10px] font-semibold text-primary">ספריית VOD</p>
+                                                                <h3 className="truncate text-sm font-bold text-foreground transition-colors group-hover:text-primary sm:text-base">
+                                                                    {channel.name}
+                                                                </h3>
+                                                                <p className="mt-1 truncate text-[10px] text-muted-foreground sm:text-xs">
+                                                                    {channel.module}
+                                                                </p>
                                                             </div>
-                                                            <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
+                                                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-[transform,border-color,color] group-hover:-translate-x-1 group-hover:border-primary/60 group-hover:text-primary">
+                                                                <ChevronLeft className="h-3.5 w-3.5" />
+                                                            </span>
                                                         </div>
 
-                                                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                                                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                                <Clapperboard className="h-3.5 w-3.5" />
+                                                        <div className="flex items-center gap-1 text-[10px]">
+                                                            <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                                                                <Clapperboard className="h-3 w-3" />
                                                                 VOD
                                                             </span>
-                                                            {channel.url ? (
-                                                                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                                    <ExternalLink className="h-3.5 w-3.5" />
-                                                                    אתר
-                                                                </span>
-                                                            ) : (
-                                                                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-muted-foreground">
-                                                                    <Archive className="h-3.5 w-3.5" />
+                                                            {!channel.url && (
+                                                                <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                                                                    <Archive className="h-3 w-3" />
                                                                     פנימי
                                                                 </span>
                                                             )}
@@ -521,23 +552,20 @@ export default function VodPage() {
                                         </div>
                                     </section>
 
-                                    <VodRecentCarousel
+                                    <NewVodCarousel
                                         items={recentlyAddedItems}
-                                        title="VOD אחרונים"
-                                        description="פרקים ותוכניות שעלו לאחרונה בספריות ה-VOD."
-                                        actionLabel="נגן"
+                                        compact
                                         buildMeta={buildVodMeta}
                                         getImageSrc={getImageSrc}
-                                        onPlay={playRecentItem}
+                                        onPlay={continueRecentItem}
                                     />
 
-                                    <VodRecentCarousel
+                                    <ContinueWatchingVodCarousel
                                         items={recentItems}
-                                        title="המשך צפייה ב-VOD"
-                                        description="חזרה מהירה לפרקים ולתוכניות שהתחלת לראות."
+                                        compact
                                         buildMeta={buildVodMeta}
                                         getImageSrc={getImageSrc}
-                                        onPlay={playRecentItem}
+                                        onPlay={continueRecentItem}
                                     />
                                 </>
                             ) : isItemsLoading ? (

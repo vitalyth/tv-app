@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useEffect, useState } from "react";
-import { Cast, Radio, AlertCircle } from "lucide-react";
+import { Cast, Radio, AlertCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import videojs from "video.js";
 import "videojs-contrib-dash";
@@ -23,6 +23,13 @@ if (!(videojs as any).getPlugin?.("qualityLevels")) {
 const OVERLAY_HIDE_DELAY = 3000; // ms
 const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000;
 const VOD_PROGRESS_END_THRESHOLD_SECONDS = 30;
+const PLAYBACK_RECOVERY_DELAY_MS = 8000;
+const PLAYBACK_RELOAD_AFTER_ATTEMPTS = 2;
+const VOD_BUFFER_WATCH_INTERVAL_MS = 2000;
+const VOD_LOW_BUFFER_SECONDS = 12;
+const VOD_BUFFER_STALL_MS = 8000;
+const VOD_AUTO_NEXT_THRESHOLD_SECONDS = 2;
+const VOD_AUTO_NEXT_NOTICE_SECONDS = 20;
 
 const getPlayerImageSrc = (logo?: string) => {
   if (!logo) return "/ch/vod.jpg";
@@ -38,6 +45,9 @@ const shouldUseVpnProxy = (channel: Channel) => {
 interface VideoPlayerProps {
   channel: Channel | null;
   onClose: () => void;
+  onEnded?: () => void;
+  autoNextLabel?: string | null;
+  onCancelAutoNext?: () => void;
   onResize?: () => void;
   className?: string;
 }
@@ -45,6 +55,9 @@ interface VideoPlayerProps {
 export function VideoPlayer({
   channel,
   onClose,
+  onEnded,
+  autoNextLabel,
+  onCancelAutoNext,
   onResize,
   className,
 }: VideoPlayerProps) {
@@ -56,6 +69,8 @@ export function VideoPlayer({
   const lastVodProgressSaveRef = useRef(0);
   const preCastMutedRef = useRef(false);
   const preCastVolumeRef = useRef(1);
+  const onEndedRef = useRef(onEnded);
+  const autoNextLabelRef = useRef(autoNextLabel);
 
   const suppressCastVolumeSyncRef = useRef(false);
   const isCastingRef = useRef(false);
@@ -70,6 +85,10 @@ export function VideoPlayer({
   const [showOverlay, setShowOverlay] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [autoNextCountdown, setAutoNextCountdown] = useState<number | null>(null);
+
+  onEndedRef.current = onEnded;
+  autoNextLabelRef.current = autoNextLabel;
 
   const { isMobileDevice, isPhoneLike, isTouchDevice } = useMobileDevice();
   const currentProgram = useCurrentProgram(channel?.programs);
@@ -225,7 +244,7 @@ export function VideoPlayer({
         player.currentTime(resumeTime);
       }
     } else {
-      player.liveTracker?.seekToLiveEdge?.();
+      (player as any).liveTracker?.seekToLiveEdge?.();
 
       try {
         const seekable = player.seekable?.();
@@ -315,6 +334,7 @@ export function VideoPlayer({
     restoreExpandedAfterFullscreenRef.current = false;
     lastVodProgressSaveRef.current = 0;
     setIsExpanded(false);
+    setAutoNextCountdown(null);
     showControls();
 
     const streamRequest =
@@ -409,6 +429,9 @@ export function VideoPlayer({
         vhs: {
           overrideNative: !isSafari,
           withCredentials: false,
+          enableLowInitialPlaylist: true,
+          useBandwidthFromLocalStorage: true,
+          useNetworkInformationApi: true,
         },
         nativeAudioTracks: false,
         nativeVideoTracks: false,
@@ -420,6 +443,166 @@ export function VideoPlayer({
         },
       ],
     });
+
+    (player as any).reloadSourceOnError?.({
+      errorInterval: 15,
+    });
+
+    let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    let recoveryAttempts = 0;
+    let lastBufferedEnd = 0;
+    let lastBufferGrowthAt = Date.now();
+
+    const clearRecoveryTimer = () => {
+      if (!recoveryTimer) return;
+      clearTimeout(recoveryTimer);
+      recoveryTimer = null;
+    };
+
+    const reloadCurrentSource = () => {
+      const source = (player as any).currentSource?.();
+      if (!source?.src) return;
+
+      const resumeTime = channel.type === "vod" ? player.currentTime?.() ?? 0 : 0;
+
+      player.one("loadedmetadata", () => {
+        if (channel.type === "vod" && resumeTime > 0) {
+          player.currentTime(resumeTime);
+        } else {
+          (player as any).liveTracker?.seekToLiveEdge?.();
+        }
+
+        player.play()?.catch?.(() => undefined);
+      });
+      player.src(source);
+    };
+
+    const recoverPlayback = () => {
+      recoveryTimer = null;
+
+      if (
+        player.isDisposed?.() ||
+        isCastingRef.current ||
+        player.paused?.() ||
+        player.ended?.()
+      ) {
+        return;
+      }
+
+      recoveryAttempts += 1;
+
+      if (channel.type !== "vod") {
+        (player as any).liveTracker?.seekToLiveEdge?.();
+      }
+
+      player.play()?.catch?.(() => undefined);
+
+      if (recoveryAttempts >= PLAYBACK_RELOAD_AFTER_ATTEMPTS) {
+        recoveryAttempts = 0;
+        reloadCurrentSource();
+        return;
+      }
+
+      recoveryTimer = setTimeout(recoverPlayback, PLAYBACK_RECOVERY_DELAY_MS);
+    };
+
+    const schedulePlaybackRecovery = () => {
+      if (recoveryTimer || player.paused?.() || isCastingRef.current) return;
+      recoveryTimer = setTimeout(recoverPlayback, PLAYBACK_RECOVERY_DELAY_MS);
+    };
+
+    const getBufferedEnd = () => {
+      const currentTime = player.currentTime?.() ?? 0;
+      const buffered = player.buffered?.();
+
+      if (!buffered?.length) return currentTime;
+
+      for (let index = 0; index < buffered.length; index += 1) {
+        if (
+          currentTime >= buffered.start(index) - 0.25 &&
+          currentTime <= buffered.end(index) + 0.25
+        ) {
+          return buffered.end(index);
+        }
+      }
+
+      return currentTime;
+    };
+
+    const getPlaybackEnd = () => {
+      const duration = player.duration?.() ?? 0;
+
+      if (Number.isFinite(duration) && duration > 0) {
+        return duration;
+      }
+
+      const seekable = player.seekable?.();
+      if (seekable?.length) {
+        const seekableEnd = seekable.end(seekable.length - 1);
+        return Number.isFinite(seekableEnd) ? seekableEnd : 0;
+      }
+
+      return 0;
+    };
+
+    const isNearVodEnd = () => {
+      const currentTime = player.currentTime?.() ?? 0;
+      const playbackEnd = getPlaybackEnd();
+
+      return (
+        channel.type === "vod" &&
+        playbackEnd > 0 &&
+        currentTime > 0 &&
+        playbackEnd - currentTime <= VOD_AUTO_NEXT_THRESHOLD_SECONDS
+      );
+    };
+
+    const monitorVodBuffer = () => {
+      if (
+        channel.type !== "vod" ||
+        player.isDisposed?.() ||
+        player.paused?.() ||
+        player.ended?.() ||
+        player.seeking?.() ||
+        isCastingRef.current
+      ) {
+        lastBufferedEnd = getBufferedEnd();
+        lastBufferGrowthAt = Date.now();
+        return;
+      }
+
+      const now = Date.now();
+      const currentTime = player.currentTime?.() ?? 0;
+      const duration = player.duration?.() ?? 0;
+      const bufferedEnd = getBufferedEnd();
+      const bufferAhead = Math.max(0, bufferedEnd - currentTime);
+      const nearEnd =
+        Number.isFinite(duration) &&
+        duration > 0 &&
+        duration - currentTime <= VOD_PROGRESS_END_THRESHOLD_SECONDS;
+
+      if (bufferedEnd > lastBufferedEnd + 0.25) {
+        lastBufferedEnd = bufferedEnd;
+        lastBufferGrowthAt = now;
+        clearRecoveryTimer();
+        recoveryAttempts = 0;
+        return;
+      }
+
+      if (
+        !nearEnd &&
+        bufferAhead <= VOD_LOW_BUFFER_SECONDS &&
+        now - lastBufferGrowthAt >= VOD_BUFFER_STALL_MS
+      ) {
+        lastBufferGrowthAt = now;
+        recoverPlayback();
+      }
+    };
+
+    const vodBufferWatchdog = setInterval(
+      monitorVodBuffer,
+      VOD_BUFFER_WATCH_INTERVAL_MS,
+    );
 
     player.ready(() => {
       resetViewMode();
@@ -462,6 +645,9 @@ export function VideoPlayer({
     });
 
     player.on("playing", () => {
+      clearRecoveryTimer();
+      recoveryAttempts = 0;
+
       if (isCastingRef.current) {
         pauseLocalPlayerForCasting(player);
         return;
@@ -478,9 +664,19 @@ export function VideoPlayer({
       setIsExpanded(false);
     });
 
-    player.on("waiting", () => {
+    const handlePlaybackInterruption = () => {
+      if (onEndedRef.current && isNearVodEnd()) {
+        completeVodPlayback();
+        return;
+      }
+
       setIsLoading(true);
-    });
+      schedulePlaybackRecovery();
+    };
+
+    player.on("waiting", handlePlaybackInterruption);
+    player.on("stalled", handlePlaybackInterruption);
+    player.on("pause", clearRecoveryTimer);
 
     player.on("volumechange", () => {
       if (!isCastingRef.current || suppressCastVolumeSyncRef.current) return;
@@ -493,6 +689,15 @@ export function VideoPlayer({
       saveVodProgress(channel.id, player.currentTime?.() ?? 0, player.duration?.() ?? 0);
     };
 
+    let playbackCompletionTriggered = false;
+
+    const completeVodPlayback = () => {
+      if (playbackCompletionTriggered || channel.type !== "vod") return;
+      playbackCompletionTriggered = true;
+      saveCurrentVodProgress();
+      onEndedRef.current?.();
+    };
+
     const throttledVodProgressSave = () => {
       const now = Date.now();
       if (now - lastVodProgressSaveRef.current < VOD_PROGRESS_SAVE_INTERVAL_MS) return;
@@ -500,14 +705,43 @@ export function VideoPlayer({
       saveCurrentVodProgress();
     };
 
-    player.on("timeupdate", throttledVodProgressSave);
+    const handleVodTimeUpdate = () => {
+      throttledVodProgressSave();
+
+      if (!onEndedRef.current || player.paused?.() || player.seeking?.() || isCastingRef.current) return;
+
+      const remainingSeconds = getPlaybackEnd() - (player.currentTime?.() ?? 0);
+      if (
+        autoNextLabelRef.current &&
+        remainingSeconds > 0 &&
+        remainingSeconds <= VOD_AUTO_NEXT_NOTICE_SECONDS
+      ) {
+        setAutoNextCountdown(
+          Math.min(
+            VOD_AUTO_NEXT_NOTICE_SECONDS,
+            Math.max(1, Math.ceil(remainingSeconds)),
+          ),
+        );
+      } else {
+        setAutoNextCountdown(null);
+      }
+
+      if (isNearVodEnd()) {
+        completeVodPlayback();
+      }
+    };
+
+    player.on("timeupdate", handleVodTimeUpdate);
     player.on("pause", saveCurrentVodProgress);
-    player.on("ended", saveCurrentVodProgress);
+    player.on("ended", completeVodPlayback);
 
     playerRef.current = player;
     setPlayerInstance(player);
 
     return () => {
+      clearRecoveryTimer();
+      clearInterval(vodBufferWatchdog);
+
       if (playerRef.current && !playerRef.current.isDisposed()) {
         saveCurrentVodProgress();
         playerRef.current.dispose();
@@ -754,6 +988,35 @@ export function VideoPlayer({
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {autoNextCountdown !== null && autoNextLabel && !isCasting && (
+        <div
+          dir="rtl"
+          className="absolute bottom-16 left-3 right-3 z-50 flex items-center gap-3 rounded-lg border border-white/20 bg-black/90 p-3 text-white shadow-xl sm:left-4 sm:right-auto sm:w-80"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-primary-foreground">
+            {autoNextCountdown}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-white/65">הפרק הבא מתחיל בעוד</p>
+            <p className="truncate text-sm font-semibold">{autoNextLabel}</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setAutoNextCountdown(null);
+              onCancelAutoNext?.();
+            }}
+            className="shrink-0 gap-1 border-white/25 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+            ביטול
+          </Button>
         </div>
       )}
 

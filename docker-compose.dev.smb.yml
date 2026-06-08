@@ -1,0 +1,33 @@
+# Mount the local-series SMB share directly inside Docker Desktop.
+# Required .env values:
+#   SMB_USERNAME=...
+#   SMB_PASSWORD=...
+# Optional:
+#   SMB_SERVER=192.168.86.75
+#   SMB_SHARE=Data
+
+services:
+  backend:
+    environment:
+      - LOCAL_VOD_TV_DIR=/app/media/tv
+      - LOCAL_SERIES_WATCH_INTERVAL_SECONDS=60
+    volumes: !override
+      - ./backend/cache:/app/cache
+      - kan-vod-db-dev:/app/db
+      - local-tv-smb:/app/media:ro
+
+  backend-vpn:
+    environment:
+      - LOCAL_VOD_TV_DIR=/app/media/tv
+    volumes: !override
+      - ./backend/cache:/app/cache
+      - kan-vod-db-dev:/app/db
+      - local-tv-smb:/app/media:ro
+
+volumes:
+  local-tv-smb:
+    driver: local
+    driver_opts:
+      type: cifs
+      device: //${SMB_SERVER:-192.168.86.75}/${SMB_SHARE:-Data}
+      o: username=${SMB_USERNAME},password=${SMB_PASSWORD},vers=3.0,iocharset=utf8,ro

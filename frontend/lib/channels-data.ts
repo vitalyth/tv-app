@@ -34,6 +34,8 @@ export interface Channel {
   playerLogo?: string
   playerTitle?: string
   playerSubtitle?: string
+  vodProgramId?: string
+  vodSeasonId?: string
   resumeTime?: number
   vodMeta?: VodPlaybackMeta
 }
@@ -89,6 +91,37 @@ export interface VodItem {
   episodeImage?: string
   isFolder: boolean
   isPlayable: boolean
+}
+
+export const getKanVodEpisodeId = (
+  module: string,
+  episodeId?: string,
+  itemId?: string,
+) => {
+  if (module !== "kan-vod") return itemId || episodeId || ""
+  return episodeId || (itemId || "").replace(/^kan-vod:/, "")
+}
+
+export const getKanVodProgramId = (
+  module: string,
+  programId?: string,
+  urls: string[] = [],
+) => {
+  if (module !== "kan-vod") return programId
+  if (programId) return programId
+
+  for (const url of urls) {
+    const match = url.match(/\/kan-vod\/([^/?#]+)/)
+    if (!match?.[1]) continue
+
+    try {
+      return decodeURIComponent(match[1])
+    } catch {
+      return match[1]
+    }
+  }
+
+  return undefined
 }
 
 export const categories = [

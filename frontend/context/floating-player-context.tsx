@@ -15,6 +15,11 @@ import {
 import { type Channel } from "@/lib/channels-data";
 import { addRecentlyViewedChannel } from "@/hooks/useRecentlyViewed";
 import { useDraggable } from "@/hooks/useDraggable";
+import {
+    kanVodService,
+    type KanVodEpisode,
+    type KanVodSeriesDetails,
+} from "@/lib/services/kan-vod-service";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then((m) => m.VideoPlayer),
@@ -24,6 +29,7 @@ const VideoPlayer = dynamic(
 type PlayOptions = {
     fullscreen?: boolean;
     onClose?: () => void;
+    onEnded?: () => void;
 };
 
 type FloatingPlayerContextValue = {
@@ -33,22 +39,81 @@ type FloatingPlayerContextValue = {
     setCloseHandler: (handler: (() => void) | null) => void;
 };
 
+type KanNextEpisodePreview = {
+    series: KanVodSeriesDetails;
+    episode: KanVodEpisode;
+};
+
 const FloatingPlayerContext = createContext<FloatingPlayerContextValue | null>(null);
+
+const getKanSeasonTitle = (series: KanVodSeriesDetails, seasonId?: string | null) => {
+    return series.seasons.find((season) => season.season_id === seasonId)?.title || "פרקים";
+};
+
+const kanEpisodeToChannel = (
+    series: KanVodSeriesDetails,
+    episode: KanVodEpisode,
+): Channel => {
+    const image = episode.episodeImage || episode.image || series.image || "/ch/vod.jpg";
+    const episodeName = episode.episodeName || episode.title || `פרק ${episode.id}`;
+    const seasonName = getKanSeasonTitle(series, episode.season_id);
+
+    return {
+        id: episode.id,
+        index: 0,
+        name: series.title,
+        logo: image,
+        category: "kan-vod",
+        channelID: episode.streamUrl || episode.playUrl || episode.url,
+        module: "kan-vod",
+        mode: 0,
+        linkDetails: {
+            link: episode.streamUrl || episode.playUrl || episode.url,
+            referer: "https://www.kan.org.il/",
+            manifest_type: "hls",
+        },
+        type: "vod",
+        programs: [],
+        tvgID: "",
+        url: episode.streamUrl,
+        moreData: "",
+        playerLogo: image,
+        playerTitle: series.title,
+        playerSubtitle: [seasonName, episodeName].filter(Boolean).join(" · "),
+        vodProgramId: series.id,
+        vodSeasonId: episode.season_id || undefined,
+        vodMeta: {
+            programName: series.title,
+            seasonName,
+            channelName: "כאן VOD",
+            episodeName,
+            episodeDescription: episode.episodeOverview || "",
+            programDescription: series.description || "",
+            programImage: series.image || "",
+            channelImage: series.image || "",
+            episodeImage: image,
+        },
+    };
+};
 
 export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     const playerRef = useRef<HTMLDivElement>(null);
     const closeHandlerRef = useRef<(() => void) | null>(null);
+    const endedHandlerRef = useRef<(() => void) | null>(null);
     const viewportStateRef = useRef({
         isMobile: false,
         isMobileLandscape: false,
     });
     const orientationFrameRef = useRef<number | null>(null);
     const currentChannelRef = useRef<Channel | null>(null);
+    const autoNextInProgressRef = useRef(false);
 
     const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
     const [isMobileLandscape, setIsMobileLandscape] = useState(false);
+    const [nextEpisodePreview, setNextEpisodePreview] = useState<KanNextEpisodePreview | null>(null);
+    const [isAutoNextCancelled, setIsAutoNextCancelled] = useState(false);
 
     currentChannelRef.current = currentChannel;
 
@@ -63,6 +128,9 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         }
 
         closeHandlerRef.current = options?.onClose ?? null;
+        endedHandlerRef.current = options?.onEnded ?? null;
+        setIsAutoNextCancelled(false);
+        setNextEpisodePreview(null);
         setCurrentChannel(channel);
         setIsFullscreen(options?.fullscreen ?? isMobileLandscape);
     }, [isMobileLandscape]);
@@ -70,6 +138,9 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     const close = useCallback(() => {
         closeHandlerRef.current?.();
         closeHandlerRef.current = null;
+        endedHandlerRef.current = null;
+        setIsAutoNextCancelled(false);
+        setNextEpisodePreview(null);
         setCurrentChannel(null);
         setIsFullscreen(false);
         restorePosition(true);
@@ -78,6 +149,73 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     const setCloseHandler = useCallback((handler: (() => void) | null) => {
         closeHandlerRef.current = handler;
     }, []);
+
+    useEffect(() => {
+        if (currentChannel?.module !== "kan-vod" || endedHandlerRef.current) {
+            setNextEpisodePreview(null);
+            return;
+        }
+
+        let isCurrent = true;
+        setNextEpisodePreview(null);
+        setIsAutoNextCancelled(false);
+
+        kanVodService.getNextEpisode(currentChannel.id)
+            .then(async (next) => {
+                if (!next || !isCurrent) return;
+                const series = await kanVodService.getSeriesDetails(next.programId);
+                if (isCurrent) {
+                    setNextEpisodePreview({ series, episode: next.episode });
+                }
+            })
+            .catch((error) => {
+                console.error("Failed to prepare next Kan VOD episode:", error);
+            });
+
+        return () => {
+            isCurrent = false;
+        };
+    }, [currentChannel]);
+
+    const handleEnded = useCallback(async () => {
+        const customHandler = endedHandlerRef.current;
+        if (customHandler) {
+            customHandler();
+            return;
+        }
+
+        const channel = currentChannelRef.current;
+        if (
+            autoNextInProgressRef.current ||
+            isAutoNextCancelled ||
+            channel?.module !== "kan-vod"
+        ) {
+            return;
+        }
+
+        autoNextInProgressRef.current = true;
+
+        try {
+            if (nextEpisodePreview) {
+                play(kanEpisodeToChannel(nextEpisodePreview.series, nextEpisodePreview.episode), {
+                    fullscreen: isFullscreen,
+                });
+                return;
+            }
+
+            const next = await kanVodService.getNextEpisode(channel.id);
+            if (next) {
+                const series = await kanVodService.getSeriesDetails(next.programId);
+                play(kanEpisodeToChannel(series, next.episode), {
+                    fullscreen: isFullscreen,
+                });
+            }
+        } catch (error) {
+            console.error("Failed to start next Kan VOD episode:", error);
+        } finally {
+            autoNextInProgressRef.current = false;
+        }
+    }, [isAutoNextCancelled, isFullscreen, nextEpisodePreview, play]);
 
     const onResize = useCallback(() => {
         if (isMobileLandscape) {
@@ -277,6 +415,15 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                         className="h-full w-full"
                         channel={currentChannel}
                         onClose={close}
+                        onEnded={handleEnded}
+                        autoNextLabel={
+                            !isAutoNextCancelled
+                                ? nextEpisodePreview?.episode.episodeName ||
+                                  nextEpisodePreview?.episode.title ||
+                                  null
+                                : null
+                        }
+                        onCancelAutoNext={() => setIsAutoNextCancelled(true)}
                         onResize={onResize}
                     />
                 </div>

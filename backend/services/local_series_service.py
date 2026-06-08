@@ -5,7 +5,9 @@ import hashlib
 import requests
 import sqlite3
 import threading
+from contextlib import contextmanager
 from guessit import guessit
+from typing import Iterator
 from urllib.parse import quote
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts", ".webm", ".m3u8"}
@@ -348,13 +350,18 @@ def prefer_hls_episodes(episodes: list[dict]) -> list[dict]:
     return list(by_key.values())
 
 
-def connect_local_series_db() -> sqlite3.Connection:
+@contextmanager
+def connect_local_series_db() -> Iterator[sqlite3.Connection]:
     os.makedirs(os.path.dirname(os.path.abspath(LOCAL_SERIES_DB_PATH)), exist_ok=True)
     con = sqlite3.connect(LOCAL_SERIES_DB_PATH)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA busy_timeout=5000")
-    return con
+    try:
+        with con:
+            yield con
+    finally:
+        con.close()
 
 
 def init_local_series_db() -> None:
