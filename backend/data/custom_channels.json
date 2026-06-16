@@ -1,5 +1,26 @@
 [
   {
+    "id": "kan_worldcup",
+    "channelID": "kan_worldcup",
+    "name": "כאן מונדיאל",
+    "title": "כאן מונדיאל",
+    "label": "כאן מונדיאל",
+    "index": 50,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "kan.jpg",
+    "logo": "kan.jpg",
+    "tvgID": "11",
+    "sourceUrl": "https://www.kan.org.il/content/worldcup/games/irnvsnzl/",
+    "streamUrl": "https://r.il.cdn-redge.media/livehls/oil/kancdn-live/live/popup3_sports_music/live.livx/playlist.m3u8",
+    "linkDetails": {
+      "referer": "https://www.kan.org.il/content/worldcup/games/irnvsnzl/",
+      "manifest_type": "hls",
+      "vpn": true
+    }
+  },
+  {
     "id": "iltv",
     "channelID": "iltv",
     "name": "ILTV",

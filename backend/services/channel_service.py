@@ -228,6 +228,7 @@ CHANNELS_BY_CATEGORY = {
     ],
 
     "sports": [
+        "kan_worldcup",
         "ch_sport5",
         "rd_sport5"
     ],

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from urllib.parse import quote
 from services.channel_service import get_live_channels, get_vod_channels, get_vod_items, get_vod_recent_items
 from services.epg_service import get_now_epg
-from services.stream_service import get_stream, get_vod_stream
+from services.stream_service import get_custom_channel_stream, get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
@@ -143,8 +143,13 @@ def vod_recent():
     return get_vod_recent_items()
 
 @app.post('/live_channel')
+@app.post('/v/live_channel')
 def live_channel(channel: Channel):
-    return {"stream": get_stream(channel)}
+    stream_url = get_stream(channel)
+    if not stream_url:
+        return Response("Live channel stream not found", status_code=404)
+
+    return {"stream": stream_url}
 
 @app.post('/vod_stream')
 def vod_stream(request: Request, item: dict):
@@ -199,9 +204,13 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
     custom_channel = get_custom_channel(channel_id)
 
     if custom_channel:
+        url = get_custom_channel_stream(custom_channel)
+        if not url:
+            return Response("Custom channel stream not found", status_code=404)
+
         return handle_proxy(
             request,
-            custom_channel["streamUrl"],
+            url,
             (custom_channel.get("linkDetails") or {}).get("referer", "")
         )
 

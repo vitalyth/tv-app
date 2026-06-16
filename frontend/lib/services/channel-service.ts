@@ -48,7 +48,9 @@ export const channelService = {
   },
 
   getLiveChannel(channel: any) {
-    return apiFetch("/live_channel", {
+    const endpoint = channel?.linkDetails?.vpn ? "/v/live_channel" : "/live_channel";
+
+    return apiFetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

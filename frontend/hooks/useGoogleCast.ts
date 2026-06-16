@@ -73,7 +73,7 @@ const buildCastImageUrl = (logo: string) => {
 
 const shouldUseVpnProxy = (channel: Channel) => {
     const channelId = channel.channelID || channel.id || ""
-    return channel.module === "kan-vod" || channelId.startsWith("ch_11")
+    return channel.linkDetails?.vpn || channel.module === "kan-vod" || channelId.startsWith("ch_11")
 }
 
 const getCastSourceUrl = (streamUrl: string) => {

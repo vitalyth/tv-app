@@ -1,6 +1,11 @@
 import xbmcplugin
 from services.custom_channel_service import get_custom_channel
 
+
+def get_custom_channel_stream(custom_channel):
+    return custom_channel.get("streamUrl")
+
+
 def _prepare_keshet_module(module_script):
     uuid_str = str(module_script.uuid.uuid1()).upper()
     module_script.sortBy = int(module_script.common.GetAddonSetting("makoSortBy"))
@@ -33,7 +38,7 @@ def get_stream(channel):
 
     custom_channel = get_custom_channel(channel_id)
     if custom_channel:
-        return custom_channel["streamUrl"]
+        return get_custom_channel_stream(custom_channel)
     
     xbmcplugin.clearStream()
 
