@@ -35,7 +35,8 @@ def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
             stream_base = f"{stream_base}/api"
 
         stream_params = {"channel_id": channel_id}
-        if use_vpn_routes and channel_id.startswith("ch_11"):
+        link_details = channel.get("linkDetails") or {}
+        if use_vpn_routes and (channel_id.startswith("ch_11") or link_details.get("vpn")):
             stream_params["vpn"] = "true"
 
         proxy_url = f"{stream_base}/stream?{urlencode(stream_params)}"
