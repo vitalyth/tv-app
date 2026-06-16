@@ -1,23 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
-  <title id="title">כאן 26</title>
-  <desc id="desc">לוגו כאן 26 למונדיאל</desc>
+  <title id="title">כאן מונדיאל</title>
+  <desc id="desc">סמל גביע העולם לערוץ כאן מונדיאל</desc>
   <defs>
-    <radialGradient id="bg" cx="49%" cy="34%" r="72%">
-      <stop offset="0" stop-color="#2b2b2b"/>
-      <stop offset=".54" stop-color="#161616"/>
-      <stop offset="1" stop-color="#060606"/>
+    <radialGradient id="bg" cx="50%" cy="34%" r="72%">
+      <stop offset="0" stop-color="#2f2f2f"/>
+      <stop offset=".52" stop-color="#151515"/>
+      <stop offset="1" stop-color="#050505"/>
     </radialGradient>
-    <linearGradient id="cup" x1="42" y1="25" x2="56" y2="81">
-      <stop offset="0" stop-color="#fff2b8"/>
-      <stop offset=".22" stop-color="#caa44c"/>
-      <stop offset=".48" stop-color="#8e671e"/>
-      <stop offset=".76" stop-color="#d7af4b"/>
-      <stop offset="1" stop-color="#5b3d12"/>
+    <linearGradient id="gold" x1="42" y1="12" x2="82" y2="114">
+      <stop offset="0" stop-color="#fff3bc"/>
+      <stop offset=".19" stop-color="#d7b25b"/>
+      <stop offset=".38" stop-color="#8a641f"/>
+      <stop offset=".58" stop-color="#f0cc64"/>
+      <stop offset=".78" stop-color="#a07824"/>
+      <stop offset="1" stop-color="#49310f"/>
     </linearGradient>
-    <linearGradient id="cupShade" x1="44" y1="30" x2="59" y2="72">
-      <stop offset="0" stop-color="#f6df82" stop-opacity=".92"/>
-      <stop offset=".5" stop-color="#7d5518" stop-opacity=".82"/>
-      <stop offset="1" stop-color="#f1c85a" stop-opacity=".85"/>
+    <linearGradient id="shine" x1="50" y1="18" x2="80" y2="92">
+      <stop offset="0" stop-color="#fff7ca" stop-opacity=".92"/>
+      <stop offset=".42" stop-color="#f0c95d" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#6a4614" stop-opacity=".25"/>
     </linearGradient>
     <clipPath id="round">
       <circle cx="64" cy="64" r="62"/>
@@ -26,33 +27,19 @@
 
   <g clip-path="url(#round)">
     <rect width="128" height="128" fill="url(#bg)"/>
-    <path d="M0 61h128v25H0z" fill="#0c0c0c" opacity=".64"/>
-    <path d="M0 85h128v43H0z" fill="#030303" opacity=".78"/>
-    <path d="M63 9h2.7v110H63z" fill="#f7f7f7" opacity=".9"/>
+    <path d="M0 70h128v58H0z" fill="#030303" opacity=".76"/>
+    <path d="M0 58h128v23H0z" fill="#0d0d0d" opacity=".62"/>
 
-    <g fill="#fff">
-      <path d="M10 20c2-9 9.3-14 20.8-14h21.7c11.7 0 18.6 6 18.6 15.4 0 8.7-5.1 14.6-15.1 17.8L37.6 45h28.9v20H8.2V48.8l37.1-12.4c6.1-2.1 8.6-4.7 8.6-8.8 0-4.7-3.8-7.7-10.4-7.7H10z"/>
-      <path d="M11.3 71.7h55.1v19.6H28.7c-.4 6.2 3.8 10.3 11.4 10.3h10.5c12.2 0 20.6 7.2 20.6 18.5H30.8c-12 0-20.1-7-20.1-17.7V71.7z"/>
-    </g>
-
-    <g transform="translate(37 24)">
-      <path d="M11.4 15.5c-7 2.8-9.6 8.5-7.8 16.6 1.7 7.8 5.7 13.4 8.6 18.1 2.2 3.6 2.8 8.5.4 13.6h16.1c-2.4-5.1-1.8-10 .4-13.6 2.9-4.7 6.9-10.3 8.6-18.1 1.8-8.1-.8-13.8-7.8-16.6-3.7-1.5-5.7-4.5-7-8.7-.5-1.6-1.1-2.9-2.3-2.9s-1.8 1.3-2.3 2.9c-1.3 4.2-3.3 7.2-6.9 8.7z" fill="url(#cup)"/>
-      <path d="M20.7 8.9c-2.7 8.2-8.2 11.4-9.2 20.9-.6 5.2 2 11.2 6.1 16.4 3.8 4.8 4.2 10.9 1.4 17.6h9.7c-2.4-5.1-1.8-10 .4-13.6 2.9-4.7 6.9-10.3 8.6-18.1 1.8-8.1-.8-13.8-7.8-16.6-4.5-1.8-6.6-5.7-7.8-11.2-.3 1.3-.7 2.8-1.4 4.6z" fill="url(#cupShade)" opacity=".78"/>
-      <path d="M12.9 65.1h15.3l4.2 5.2H8.7z" fill="#9b7426"/>
-      <path d="M5.4 71.2h30.3v4.5H5.4z" fill="#d6b048"/>
-      <path d="M9.2 75.8h22.5v3.8H9.2z" fill="#433014"/>
-      <path d="M14.8 28.4c1.3-4.7 4.2-9.2 7.9-13.4-3.7 7.9-3.2 14.8 1.4 20.9-4.6-1.2-7.7-3.7-9.3-7.5z" fill="#f6dc83" opacity=".66"/>
-      <path d="M26.8 20.3c4.3 3.8 5.8 8.8 4.1 15.2-1.1-5.4-3.7-9.9-7.8-13.7z" fill="#5a3911" opacity=".45"/>
-    </g>
-
-    <text x="31.7" y="109.5" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="17" font-weight="900" fill="#fff">FIFA</text>
-
-    <g transform="translate(76 47)" fill="#fff">
-      <path d="M5 0h8.3v35H5z"/>
-      <path d="M19.8 10.2h8.3V35h-8.3z"/>
-      <path d="M31.4 10.2h8.4c10.9 0 18.8 7 18.8 17.2 0 4.8-1.7 9-4.8 12.2-3.4 3.5-8.3 5.4-14 5.4h-8.4v-7.8h8.2c6.1 0 10.5-3.9 10.5-9.8s-4.4-9.9-10.5-9.9h-8.2z" transform="translate(-1 -10)"/>
+    <g transform="translate(24 9)">
+      <path d="M38.8 5.2c-1.8 0-2.9 2.1-3.9 5.9-2.2 8.4-6.3 14.2-13.8 17.5C8.2 34.1 3.2 44.3 6.3 58.5c2.5 11.7 9 20.1 14.5 27.7 4.5 6.2 5 13.1 1.6 21.2h33.1c-3.4-8.1-2.9-15 1.6-21.2 5.5-7.6 12-16 14.5-27.7 3.1-14.2-1.9-24.4-14.8-29.9-7.5-3.3-11.6-9.1-13.8-17.5-1.1-3.8-2.2-5.9-4.2-5.9z" fill="url(#gold)"/>
+      <path d="M39 10.5c-3.9 12.4-12.7 18.9-14.6 34.8-1.2 9.9 3.2 20.4 11.3 30.4 6.6 8.2 6.8 19 1.2 31.7h18.6c-3.4-8.1-2.9-15 1.6-21.2 5.5-7.6 12-16 14.5-27.7 3.1-14.2-1.9-24.4-14.8-29.9-9.1-4-13.4-11.6-15.4-22.3-.6 1.6-1.3 3-2.4 4.2z" fill="url(#shine)"/>
+      <path d="M25.4 40.3c2.2-8.1 7.5-15.7 15.4-22.9-6.9 13.8-5.9 26.1 3.1 36.8-9.2-2.1-15.4-6.8-18.5-13.9z" fill="#fff0a5" opacity=".58"/>
+      <path d="M49.5 26.8c8.4 6.9 11.3 15.9 8.7 26.9-2.2-9.3-7.2-17.1-15-23.4z" fill="#4d3110" opacity=".38"/>
+      <path d="M23.3 99.9h31.4l8.2 9.2H15.1z" fill="#9d7425"/>
+      <path d="M10.6 108.7h56.8v8.9H10.6z" fill="#d6ad43"/>
+      <path d="M18.6 117.6h40.8v6.9H18.6z" fill="#3c2810"/>
     </g>
   </g>
 
-  <circle cx="64" cy="64" r="62" fill="none" stroke="#101010" stroke-width="4"/>
+  <circle cx="64" cy="64" r="62" fill="none" stroke="#111" stroke-width="4"/>
 </svg>
