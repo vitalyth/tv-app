@@ -61,7 +61,14 @@ export function useRecentlyViewed(channels: Channel[]) {
     setRecentlyViewed((current) => {
       if (
         current.length === viewed.length &&
-        current.every((channel, index) => channel.id === viewed[index]?.id)
+        current.every((channel, index) => {
+          const next = viewed[index];
+          return (
+            channel.id === next?.id &&
+            channel.name === next.name &&
+            channel.logo === next.logo
+          );
+        })
       ) {
         return current;
       }

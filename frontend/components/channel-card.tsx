@@ -38,7 +38,11 @@ export function ChannelCard({ channel, isActive, onClick }: ChannelCardProps) {
 
             {/* Channel logo */}
             <div className="w-20 h-20 rounded-full bg-secondary flex items-center justify-center overflow-hidden border-2 border-border group-hover:border-primary/50 transition-colors">
-                <span className="text-3xl font-bold text-foreground"><img src={`/ch/${channel.logo}`} /></span>
+                <img
+                    src={`/ch/${channel.logo}`}
+                    alt={channel.name}
+                    className="h-full w-full object-contain p-3"
+                />
             </div>
 
             {/* Channel name */}
