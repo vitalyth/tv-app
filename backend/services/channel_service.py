@@ -257,7 +257,8 @@ CHANNELS_BY_CATEGORY = {
     ],
 
     "lifestyle": [
-        "ch_13nofesh"
+        "ch_13nofesh",
+        "ftv"
     ],
 
     "talk": [

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">FashionTV</title>
+  <desc id="desc">FashionTV channel logo</desc>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="34%" r="72%">
+      <stop offset="0" stop-color="#333"/>
+      <stop offset=".56" stop-color="#121212"/>
+      <stop offset="1" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="shine" x1="24" y1="16" x2="104" y2="108">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".42" stop-color="#b8b8b8"/>
+      <stop offset="1" stop-color="#fff"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="62" fill="url(#bg)"/>
+  <circle cx="64" cy="64" r="58" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="2"/>
+  <path d="M31 28h55v15H50v14h31v14H50v29H31z" fill="url(#shine)"/>
+  <path d="M82 71h15l-18 29H64L46 71h16l9.5 16z" fill="#fff"/>
+  <text x="64" y="115" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" fill="#fff" letter-spacing="1.2">FASHIONTV</text>
+</svg>
