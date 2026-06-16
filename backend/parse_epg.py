@@ -11,6 +11,7 @@ from epg_parsers.knesset import parse_knesset_epg
 from epg_parsers.walla33 import parse_walla33_epg
 from epg_parsers.kabbalah import parse_kabbalah_epg
 from epg_parsers.hidabroot import parse_hidabroot_epg
+from epg_parsers.kan_worldcup import parse_kan_worldcup_epg
 from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
@@ -157,6 +158,9 @@ def main():
 
         elif args.channel == "i24news":
             programs = parse_i24_epg()
+
+        elif args.channel == "kan_worldcup":
+            programs = parse_kan_worldcup_epg()
 
         else:
             first_html = fetch_html(args.url)
@@ -342,6 +346,24 @@ def main():
                 output_path = output_dir / "i24news.json"
                 write_json(i24_programs, output_path)
                 print(f"Wrote {len(i24_programs)} programs to {output_path}")
+
+        print("\nParsing Kan World Cup from official calendar")
+        try:
+            kan_worldcup_programs = parse_kan_worldcup_epg()
+        except Exception as ex:
+            failed_channels.append("kan_worldcup")
+            print(f"Failed parsing Kan World Cup: {ex}")
+            traceback.print_exc()
+            kan_worldcup_programs = read_existing_channel_programs(output_dir, "kan_worldcup")
+            if not kan_worldcup_programs:
+                kan_worldcup_programs = []
+
+        kan_worldcup_programs = merge_with_existing_channel(output_dir, "kan_worldcup", kan_worldcup_programs)
+        combined_epg["kan_worldcup"] = kan_worldcup_programs
+        if kan_worldcup_programs:
+            output_path = output_dir / "kan_worldcup.json"
+            write_json(kan_worldcup_programs, output_path)
+            print(f"Wrote {len(kan_worldcup_programs)} programs to {output_path}")
 
         write_json(combined_epg, combined_output)
         print(f"\nWrote {len(combined_epg)} channels to {combined_output}")
