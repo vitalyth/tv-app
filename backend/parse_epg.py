@@ -13,6 +13,7 @@ from epg_parsers.kabbalah import parse_kabbalah_epg
 from epg_parsers.hidabroot import parse_hidabroot_epg
 from epg_parsers.kan_worldcup import parse_kan_worldcup_epg
 from epg_parsers.radio100fm import parse_100fm_epg
+from epg_parsers.ftv import parse_ftv_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
     ISRAMEDIA_TVGID_MAP,
@@ -162,6 +163,9 @@ def main():
         elif args.channel == "kan_worldcup":
             programs = parse_kan_worldcup_epg()
 
+        elif args.channel == "ftv":
+            programs = parse_ftv_epg()
+
         else:
             first_html = fetch_html(args.url)
             channels = parse_channel_options(first_html, args.url)
@@ -180,7 +184,10 @@ def main():
 
             programs = parse_channel_epg(channel["url"], args.days, args.available_days)
 
-        programs = merge_with_existing_channel(output_dir, args.channel, programs)
+        if args.channel == "ftv" and not programs:
+            programs = []
+        else:
+            programs = merge_with_existing_channel(output_dir, args.channel, programs)
         write_json(programs, output_path)
         print(f"Wrote {len(programs)} programs to {output_path}")
 
@@ -346,6 +353,25 @@ def main():
                 output_path = output_dir / "i24news.json"
                 write_json(i24_programs, output_path)
                 print(f"Wrote {len(i24_programs)} programs to {output_path}")
+
+        print("\nParsing FashionTV from TV guide")
+        try:
+            ftv_programs = parse_ftv_epg()
+        except Exception as ex:
+            failed_channels.append("ftv")
+            print(f"Failed parsing FashionTV: {ex}")
+            traceback.print_exc()
+            ftv_programs = read_existing_channel_programs(output_dir, "ftv")
+            if not ftv_programs:
+                ftv_programs = []
+
+        if ftv_programs:
+            ftv_programs = merge_with_existing_channel(output_dir, "ftv", ftv_programs)
+        combined_epg["ftv"] = ftv_programs
+        if ftv_programs:
+            output_path = output_dir / "ftv.json"
+            write_json(ftv_programs, output_path)
+            print(f"Wrote {len(ftv_programs)} programs to {output_path}")
 
         print("\nParsing Kan World Cup from official calendar")
         try:

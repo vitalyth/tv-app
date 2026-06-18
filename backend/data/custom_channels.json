@@ -33,9 +33,11 @@
     "image": "iltv.png",
     "logo": "iltv.png",
     "tvgID": "iltv",
-    "streamUrl": "https://edge-g3.evrideo.tv/77d13a3d-2fdd-11f0-807c-0200170b3b47_1000027872_HLS/video_10801920_p_0.m3u8",
+    "sourceUrl": "https://iltv.tv/programs/live-6vrdxorpogu",
+    "streamUrl": "https://edge-a3.evrideo.tv/77d13a3d-2fdd-11f0-807c-0200170b3b47_1000027872_HLS/manifest.m3u8",
     "linkDetails": {
-      "referer": ""
+      "referer": "https://iltv.tv/programs/live-6vrdxorpogu",
+      "manifest_type": "hls"
     }
   },
   {
