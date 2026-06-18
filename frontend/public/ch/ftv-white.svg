@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">FashionTV</title>
+  <desc id="desc">FashionTV logo on a white background</desc>
+  <rect width="512" height="512" rx="64" fill="#fff"/>
+  <path d="M256 35 477 256 256 477 35 256z" fill="none" stroke="#231f20" stroke-width="34" stroke-linejoin="miter"/>
+  <path fill="#231f20" d="M244 374h-99v-14h32V236h-31v-14h31v-31c0-30 7-55 21-75 15-22 35-33 61-33 19 0 36 5 48 15 12 9 18 21 18 36 0 11-4 20-11 27-7 6-16 10-27 10-10 0-18-3-25-9-6-6-9-14-9-24 0-8 3-16 8-22-13 0-23 7-30 22-7 14-10 34-10 59v29h53l-8 14h-45v124h33z"/>
+  <circle cx="350" cy="221" r="26" fill="#231f20"/>
+</svg>
