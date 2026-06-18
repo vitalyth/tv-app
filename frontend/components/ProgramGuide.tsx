@@ -123,14 +123,32 @@ const ProgramCell = memo(function ProgramCell({
     didDrag: React.MutableRefObject<boolean>;
 }) {
     const [hovered, setHovered] = useState(false);
-    const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [tooltipPlacement, setTooltipPlacement] = useState<{
+        horizontal: "right" | "left";
+        vertical: "down" | "up";
+    }>({ horizontal: "right", vertical: "down" });
+    const cellRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        return () => {
-            if (hoverTimerRef.current) {
-                clearTimeout(hoverTimerRef.current);
-            }
-        };
+    const updateTooltipSide = useCallback(() => {
+        if (!cellRef.current || typeof window === "undefined") {
+            return;
+        }
+
+        const rect = cellRef.current.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const margin = 12;
+        const tooltipWidth = Math.min(288, viewportWidth * 0.8);
+        const tooltipHeight = 220;
+        const spaceLeft = rect.left - margin;
+        const spaceRight = viewportWidth - rect.right - margin;
+        const hasSpaceWhenTopAligned = viewportHeight - rect.top - margin >= tooltipHeight;
+        const hasSpaceWhenBottomAligned = rect.bottom - margin >= tooltipHeight;
+
+        setTooltipPlacement({
+            horizontal: spaceRight >= tooltipWidth || spaceRight >= spaceLeft ? "right" : "left",
+            vertical: !hasSpaceWhenTopAligned && hasSpaceWhenBottomAligned ? "up" : "down",
+        });
     }, []);
 
     // Clamp to visible window
@@ -148,6 +166,7 @@ const ProgramCell = memo(function ProgramCell({
 
     return (
         <div
+            ref={cellRef}
             className={`
         absolute top-1.5 rounded-lg border px-2 py-1 cursor-pointer select-none
         transition-all duration-150
@@ -158,18 +177,20 @@ const ProgramCell = memo(function ProgramCell({
                         : "bg-zinc-800/90 border-zinc-700/50"
                 }
         ${hovered ? "brightness-125 z-50 shadow-xl" : ""}
-      `}
+            `}
             style={{ right: right + 2, width, height: CELL_H - 12 }}
             onMouseEnter={() => {
-                hoverTimerRef.current = setTimeout(() => setHovered(true), 1000);
+                updateTooltipSide();
+                setHovered(true);
+            }}
+            onFocus={() => {
+                updateTooltipSide();
+                setHovered(true);
             }}
             onMouseLeave={() => {
-                if (hoverTimerRef.current) {
-                    clearTimeout(hoverTimerRef.current);
-                    hoverTimerRef.current = null;
-                }
                 setHovered(false);
             }}
+            onBlur={() => setHovered(false)}
             onClick={(e) => {
                 if (didDrag.current) {
                     e.preventDefault();
@@ -199,7 +220,7 @@ const ProgramCell = memo(function ProgramCell({
             {hovered && (
                 <div
                     dir="rtl"
-                    className="pointer-events-none absolute right-0 top-full z-[200] mt-2 w-72 max-w-[min(18rem,80vw)] rounded-lg border border-primary/35 bg-popover/98 p-3 text-right shadow-2xl shadow-black/35 ring-1 ring-white/5"
+                    className={`pointer-events-none absolute ${tooltipPlacement.horizontal === "right" ? "left-full ml-2" : "right-full mr-2"} ${tooltipPlacement.vertical === "up" ? "bottom-0" : "top-0"} z-[200] w-72 max-w-[min(18rem,80vw)] rounded-lg border border-primary/35 bg-popover/98 p-3 text-right shadow-2xl shadow-black/35 ring-1 ring-white/5`}
                     role="tooltip"
                 >
                     <div className="mb-2 flex items-start justify-between gap-3 border-b border-border/70 pb-2">
