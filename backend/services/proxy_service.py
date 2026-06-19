@@ -51,6 +51,7 @@ def _request_public_proxy_url(request):
 
     root_path = root_path or ""
     current_endpoint = request.url.path.strip("/").split("/")[-1] or "proxy"
+    current_endpoint = "proxy" if current_endpoint in {"stream", "live_channel"} else current_endpoint
     proxy_endpoint = (
         request.headers.get("x-forwarded-proxy-endpoint")
         or current_endpoint
@@ -182,6 +183,14 @@ def _proxy_query_max_bitrate(request):
     return value if value and value > 0 else None
 
 
+def _query_bool(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _proxy_query_vpn(request):
+    return _query_bool(request.query_params.get("vpn")) or _query_bool(request.query_params.get("v"))
+
+
 def _is_kan_vod_redge_url(url):
     parsed = urlparse(url)
     host = parsed.netloc.lower()
@@ -205,7 +214,7 @@ def _default_max_bitrate_for_request(request, url):
     return None
 
 
-def _proxied_url(proxy_url, full_url, referer, cast, preserve_dash_tokens=False, max_bitrate=None):
+def _proxied_url(proxy_url, full_url, referer, cast, preserve_dash_tokens=False, max_bitrate=None, vpn=False):
     if _is_local_proxy_url(full_url):
         return full_url
 
@@ -219,6 +228,9 @@ def _proxied_url(proxy_url, full_url, referer, cast, preserve_dash_tokens=False,
 
     if max_bitrate:
         params["max_bitrate"] = str(max_bitrate)
+
+    if vpn:
+        params["vpn"] = "true"
 
     safe_chars = "$" if preserve_dash_tokens else ""
     return f"{proxy_url}?{urlencode(params, safe=safe_chars)}"
@@ -308,7 +320,7 @@ def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
     return Response(status_code=502, headers=CORS_HEADERS)
 
 
-def _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=None):
+def _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=None, vpn=False):
     if not uri or uri.startswith(("data:", "blob:")):
         return uri
 
@@ -323,13 +335,17 @@ def _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, m
             separator = "&" if query else ""
             query = f"{query}{separator}max_bitrate={max_bitrate}"
 
+        if vpn and "vpn=" not in query and "v=" not in query:
+            separator = "&" if query else ""
+            query = f"{query}{separator}vpn=true"
+
         return f"{proxy_url}?{query}"
 
     full_url = urljoin(manifest_base, uri)
-    return _proxied_url(proxy_url, full_url, _default_referer(source_url, referer), cast, max_bitrate=max_bitrate)
+    return _proxied_url(proxy_url, full_url, _default_referer(source_url, referer), cast, max_bitrate=max_bitrate, vpn=vpn)
 
 
-def _rewrite_hls_manifest(text, source_url, referer, proxy_url, cast, max_bitrate=None):
+def _rewrite_hls_manifest(text, source_url, referer, proxy_url, cast, max_bitrate=None, vpn=False):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     rewritten_lines = []
 
@@ -343,14 +359,14 @@ def _rewrite_hls_manifest(text, source_url, referer, proxy_url, cast, max_bitrat
         if stripped.startswith("#"):
             def replace_uri(match):
                 uri = match.group(1)
-                proxied = _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=max_bitrate)
+                proxied = _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=max_bitrate, vpn=vpn)
                 return f'URI="{proxied}"'
 
             rewritten_lines.append(re.sub(r'URI="([^"]+)"', replace_uri, line))
             continue
 
         rewritten_lines.append(
-            _rewrite_hls_uri(stripped, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=max_bitrate)
+            _rewrite_hls_uri(stripped, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=max_bitrate, vpn=vpn)
         )
 
     return "\n".join(rewritten_lines)
@@ -476,7 +492,7 @@ def _looks_like_html_response(text, content_type):
     )
 
 
-def _rewrite_mpd_for_cast(text, source_url, referer, proxy_url):
+def _rewrite_mpd_for_cast(text, source_url, referer, proxy_url, vpn=False):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
     segment_base = html.unescape(base_url_match.group(1)) if base_url_match else manifest_base
@@ -492,6 +508,7 @@ def _rewrite_mpd_for_cast(text, source_url, referer, proxy_url):
             request_referer,
             True,
             preserve_dash_tokens=True,
+            vpn=vpn,
         )
         return f'{attr}="{html.escape(proxied, quote=True)}"'
 
@@ -623,6 +640,7 @@ def handle_proxy(request, url, referer, cast=False):
     url, kodi_headers = _split_kodi_url_props(url)
     origin = _origin_for_url(url)
     max_bitrate = _default_max_bitrate_for_request(request, url)
+    vpn = _proxy_query_vpn(request)
 
     headers = {
         "User-Agent": request.headers.get("user-agent", "Mozilla/5.0"),
@@ -691,7 +709,7 @@ def handle_proxy(request, url, referer, cast=False):
 
     if is_mpd:
         proxy_url = _request_public_proxy_url(request)
-        content = _rewrite_mpd_for_cast(text, effective_url, referer, proxy_url).encode("utf-8") if cast else r.content
+        content = _rewrite_mpd_for_cast(text, effective_url, referer, proxy_url, vpn=vpn).encode("utf-8") if cast else r.content
         return Response(
             content=content,
             media_type="application/dash+xml",
@@ -731,6 +749,7 @@ def handle_proxy(request, url, referer, cast=False):
             proxy_url,
             cast,
             max_bitrate=max_bitrate,
+            vpn=vpn,
         )
     except Exception as exc:
         print(f"Proxy HLS rewrite failed for url={url}: {exc}", flush=True)
