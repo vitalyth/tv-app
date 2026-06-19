@@ -25,7 +25,7 @@ import socket
 from models.schemas import Channel
 from plugin_video_idanplus.resources import main as idan_main
 from plugin_video_idanplus.resources.lib import common, iptv, epg
-from services.custom_channel_service import get_custom_channel
+from services.custom_channel_service import get_custom_channel, merge_custom_channels
 from config import APP_VERSION
 
 def get_external_base_url(request: Request) -> str:
@@ -242,8 +242,8 @@ def proxy_options():
     return cors_preflight()
 
 @app.get("/epg")
-def epg():
-    return get_now_epg()
+def epg(start: int | None = Query(default=None), end: int | None = Query(default=None)):
+    return get_now_epg(start=start, end=end)
 
 @app.get("/epg.xml")
 def epg_xml():
@@ -269,7 +269,7 @@ def playlist(request: Request):
 
 @app.get("/iptv")
 def iptv_list(request: Request):
-    channels = idan_main.GetUserChannels(type='tv')
+    channels = merge_custom_channels(idan_main.GetUserChannels(type='tv'))
     iptv.MakeIPTVlist(channels)
 
     return Response(content='IPTV playlist generated', media_type="text/plain")

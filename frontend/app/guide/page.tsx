@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChannelsContext } from "@/context/channels-context";
 import ProgramGuide from "@/components/ProgramGuide";
 import { ChannelsFilters } from "@/components/channels-filters";
@@ -11,18 +11,57 @@ import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 import { useFloatingPlayer } from "@/context/floating-player-context";
 import { Tv } from "lucide-react";
 
+const SECS_PER_HOUR = 3600;
+const INITIAL_HOURS_BACK = 1;
+const INITIAL_HOURS_FORWARD = 12;
+
+function dedupeAndSortPrograms(programs: Program[]): Program[] {
+    const byKey = new Map<string, Program>();
+
+    programs.forEach((program) => {
+        byKey.set(`${program.start}:${program.end}:${program.name}`, program);
+    });
+
+    return Array.from(byKey.values()).sort((a, b) => a.start - b.start);
+}
+
+function mergeEpg(
+    current: Record<string, Program[]>,
+    next: Record<string, Program[]>
+): Record<string, Program[]> {
+    const merged = { ...current };
+
+    Object.entries(next).forEach(([channelId, programs]) => {
+        merged[channelId] = dedupeAndSortPrograms([...(merged[channelId] ?? []), ...programs]);
+    });
+
+    return merged;
+}
+
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
     const { currentChannel, play } = useFloatingPlayer();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [epgByChannel, setEpgByChannel] = useState<Record<string, Program[]>>({});
+    const initialNowRef = useRef(Math.floor(Date.now() / 1000));
+    const [guideRange, setGuideRange] = useState(() => {
+        const start = Math.floor(
+            (initialNowRef.current - INITIAL_HOURS_BACK * SECS_PER_HOUR) / SECS_PER_HOUR
+        ) * SECS_PER_HOUR;
+        const end = start + (INITIAL_HOURS_BACK + INITIAL_HOURS_FORWARD) * SECS_PER_HOUR;
 
-    const loadEpg = useCallback(() => {
-        return channelService.getEpg()
+        return { start, end };
+    });
+    const loadedRangeRef = useRef<{ start: number; end: number } | null>(null);
+
+    const loadEpg = useCallback((range: { start: number; end: number }, replace = false) => {
+        return channelService.getEpg(range)
             .then((epg) => {
                 if (epg && typeof epg === "object") {
-                    setEpgByChannel(epg as Record<string, Program[]>);
+                    const epgMap = epg as Record<string, Program[]>;
+                    setEpgByChannel((current) => replace ? epgMap : mergeEpg(current, epgMap));
+                    loadedRangeRef.current = range;
                 }
             })
             .catch(() => undefined);
@@ -31,10 +70,19 @@ export default function GuidePage() {
     useEffect(() => {
         let cancelled = false;
 
-        channelService.getEpg()
+        const loadedRange = loadedRangeRef.current;
+        if (loadedRange && guideRange.start >= loadedRange.start && guideRange.end <= loadedRange.end) {
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        channelService.getEpg(guideRange)
             .then((epg) => {
                 if (!cancelled && epg && typeof epg === "object") {
-                    setEpgByChannel(epg as Record<string, Program[]>);
+                    const epgMap = epg as Record<string, Program[]>;
+                    setEpgByChannel((current) => loadedRange ? mergeEpg(current, epgMap) : epgMap);
+                    loadedRangeRef.current = guideRange;
                 }
             })
             .catch(() => undefined);
@@ -42,6 +90,10 @@ export default function GuidePage() {
         return () => {
             cancelled = true;
         };
+    }, [guideRange]);
+
+    const handleGuideRangeChange = useCallback((range: { start: number; end: number }) => {
+        setGuideRange(range);
     }, []);
 
     const channelsWithEpg = useMemo(
@@ -84,8 +136,8 @@ export default function GuidePage() {
 
     const refreshNow = useCallback(() => {
         refresh();
-        loadEpg();
-    }, [loadEpg, refresh]);
+        loadEpg(guideRange, true);
+    }, [guideRange, loadEpg, refresh]);
 
     return (
         <div className="h-full flex flex-col bg-background">
@@ -124,6 +176,9 @@ export default function GuidePage() {
                         playingChannelIndex={currentChannel?.type === "vod" ? undefined : currentChannel?.index}
                         onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
+                        guideStartSec={guideRange.start}
+                        guideEndSec={guideRange.end}
+                        onGuideRangeChange={handleGuideRangeChange}
                     />
                 </div>
             </main>

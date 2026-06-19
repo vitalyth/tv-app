@@ -2,13 +2,13 @@
 from urllib.parse import urlencode
 from plugin_video_idanplus.resources import main as idan_main
 from models.schemas import Channel
-from services.custom_channel_service import load_custom_channels
+from services.custom_channel_service import merge_custom_channels
 
 def remove_api_prefix(url: str) -> str:
     return url.replace("/api", "", 1)
 
 def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
-    channels = idan_main.GetUserChannels(type='tv') + load_custom_channels()
+    channels = merge_custom_channels(idan_main.GetUserChannels(type='tv'))
     lines = ["#EXTM3U"]
 
     for channel in channels:

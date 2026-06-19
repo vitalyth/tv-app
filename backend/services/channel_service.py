@@ -16,7 +16,7 @@ from plugin_video_idanplus.resources import main as idan_main
 from resources.lib import cache as addon_cache
 from services.epg_service import get_now_epg
 from models.schemas import Channel
-from services.custom_channel_service import load_custom_channels
+from services.custom_channel_service import merge_custom_channels
 from services.kan_vod_service import get_kan_vod_recent_episodes
 from services.vod_recent_common import VodRecentSourceContext
 from services.vod_recent_sources import fetch_direct_vod_recent_items
@@ -278,7 +278,7 @@ def get_category_from_reverse(channel_id):
 
 def get_live_channels():
     nowEPG = get_now_epg()
-    channels = idan_main.GetUserChannels(type='tv') + load_custom_channels()
+    channels = merge_custom_channels(idan_main.GetUserChannels(type='tv'))
 
     results = []
 

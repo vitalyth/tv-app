@@ -81,12 +81,12 @@ def _get_fallback_epg_mtime():
         return 0
     return FALLBACK_EPG_FILE.stat().st_mtime
 
-def get_now_epg():
+def get_now_epg(start: int | None = None, end: int | None = None):
     global _epg_cache, _last_update, _epg_cache_fallback_mtime
 
     now = int(time.time())
-    window_start = now - WINDOW_BACK
-    window_end = now + WINDOW_FORWARD
+    window_start = start if start is not None else now - WINDOW_BACK
+    window_end = end if end is not None else now + WINDOW_FORWARD
     fallback_mtime = _get_fallback_epg_mtime()
 
     # use in-memory cache if valid

@@ -1,5 +1,45 @@
 [
   {
+    "id": "ch_bb",
+    "channelID": "ch_bb",
+    "name": "האח הגדול 26",
+    "title": "האח הגדול 26",
+    "label": "האח הגדול 26",
+    "index": 8,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "bb.jpg",
+    "logo": "bb.jpg",
+    "tvgID": "",
+    "sourceUrl": "https://13tv.co.il/allshows/2010268/?pid=7&refc=live26",
+    "streamUrl": "https://cdnapisec.kaltura.com/p/5031/sp/503100/playManifest/entryId/1_6fr5xbw2/format/applehttp/protocol/https/a.m3u8",
+    "linkDetails": {
+      "referer": "https://13tv.co.il/allshows/2010268/?pid=7&refc=live26",
+      "manifest_type": "hls"
+    }
+  },
+  {
+    "id": "ch_bbb",
+    "channelID": "ch_bbb",
+    "name": "האח הגדול 26 - גיבוי",
+    "title": "האח הגדול 26 - גיבוי",
+    "label": "האח הגדול 26 - גיבוי",
+    "index": 8,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "bb.jpg",
+    "logo": "bb.jpg",
+    "tvgID": "",
+    "sourceUrl": "https://13tv.co.il/allshows/2010268/?pid=7&refc=live26",
+    "streamUrl": "https://cdnapisec.kaltura.com/p/5031/sp/503100/playManifest/entryId/1_6fr5xbw2/format/applehttp/protocol/https/a.m3u8",
+    "linkDetails": {
+      "referer": "https://13tv.co.il/allshows/2010268/?pid=7&refc=live26",
+      "manifest_type": "hls"
+    }
+  },
+  {
     "id": "kan_worldcup",
     "channelID": "kan_worldcup",
     "name": "כאן מונדיאל",

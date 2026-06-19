@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Clock3, ListVideo, Play } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { useNowSec } from "@/hooks/use-now-sec";
@@ -20,6 +21,9 @@ interface ProgramGuideProps {
     playingChannelIndex?: number | null;
     onChannelClick?: (channel: Channel) => void;
     onProgramClick?: (program: Program, channel: Channel, isLive: boolean) => void;
+    guideStartSec?: number;
+    guideEndSec?: number;
+    onGuideRangeChange?: (range: { start: number; end: number }) => void;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -33,6 +37,10 @@ const PX_PER_SEC = CELL_W / SECS_PER_HOUR;
 const HOURS_BACK = 1;
 const HOURS_FORWARD = 12;
 const DEFAULT_CHANNEL_W = 130;
+const LAZY_EDGE_THRESHOLD = 260;
+const LAZY_EXPAND_HOURS = 12;
+const MAX_HOURS_BACK = 24;
+const MAX_HOURS_FORWARD = 48;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -97,6 +105,14 @@ function getGuideChannelWidth(): number {
     return Number.isFinite(parsed) ? parsed : DEFAULT_CHANNEL_W;
 }
 
+function formatGuideDate(ts: number): string {
+    return new Date(ts * 1000).toLocaleDateString("he-IL", {
+        weekday: "long",
+        day: "2-digit",
+        month: "2-digit",
+    });
+}
+
 // ─── Program Cell ─────────────────────────────────────────────────────────────
 
 function isProgramLive(program: Program, nowSec: number): boolean {
@@ -123,33 +139,37 @@ const ProgramCell = memo(function ProgramCell({
     didDrag: React.MutableRefObject<boolean>;
 }) {
     const [hovered, setHovered] = useState(false);
-    const [tooltipPlacement, setTooltipPlacement] = useState<{
-        horizontal: "right" | "left";
-        vertical: "down" | "up";
-    }>({ horizontal: "right", vertical: "down" });
+    const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
     const cellRef = useRef<HTMLDivElement>(null);
 
-    const updateTooltipSide = useCallback(() => {
-        if (!cellRef.current || typeof window === "undefined") {
+    const updateTooltipPosition = useCallback((clientX: number, clientY: number) => {
+        if (typeof window === "undefined") {
             return;
         }
 
-        const rect = cellRef.current.getBoundingClientRect();
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
         const margin = 12;
         const tooltipWidth = Math.min(288, viewportWidth * 0.8);
         const tooltipHeight = 220;
-        const spaceLeft = rect.left - margin;
-        const spaceRight = viewportWidth - rect.right - margin;
-        const hasSpaceWhenTopAligned = viewportHeight - rect.top - margin >= tooltipHeight;
-        const hasSpaceWhenBottomAligned = rect.bottom - margin >= tooltipHeight;
+        const offset = 8;
+        const preferredLeft = clientX + offset;
+        const preferredTop = clientY + offset;
 
-        setTooltipPlacement({
-            horizontal: spaceRight >= tooltipWidth || spaceRight >= spaceLeft ? "right" : "left",
-            vertical: !hasSpaceWhenTopAligned && hasSpaceWhenBottomAligned ? "up" : "down",
+        setTooltipPosition({
+            left: Math.max(margin, Math.min(preferredLeft, viewportWidth - tooltipWidth - margin)),
+            top: Math.max(margin, Math.min(preferredTop, viewportHeight - tooltipHeight - margin)),
         });
     }, []);
+
+    const updateTooltipFromCell = useCallback(() => {
+        if (!cellRef.current) {
+            return;
+        }
+
+        const rect = cellRef.current.getBoundingClientRect();
+        updateTooltipPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }, [updateTooltipPosition]);
 
     // Clamp to visible window
     const visStart = Math.max(program.start, guideStart);
@@ -179,12 +199,13 @@ const ProgramCell = memo(function ProgramCell({
         ${hovered ? "brightness-125 z-50 shadow-xl" : ""}
             `}
             style={{ right: right + 2, width, height: CELL_H - 12 }}
-            onMouseEnter={() => {
-                updateTooltipSide();
+            onMouseEnter={(event) => {
+                updateTooltipPosition(event.clientX, event.clientY);
                 setHovered(true);
             }}
+            onMouseMove={(event) => updateTooltipPosition(event.clientX, event.clientY)}
             onFocus={() => {
-                updateTooltipSide();
+                updateTooltipFromCell();
                 setHovered(true);
             }}
             onMouseLeave={() => {
@@ -217,10 +238,11 @@ const ProgramCell = memo(function ProgramCell({
                 </div>
             </div>
 
-            {hovered && (
+            {hovered && typeof document !== "undefined" && createPortal(
                 <div
                     dir="rtl"
-                    className={`pointer-events-none absolute ${tooltipPlacement.horizontal === "right" ? "left-full ml-2" : "right-full mr-2"} ${tooltipPlacement.vertical === "up" ? "bottom-0" : "top-0"} z-[200] w-72 max-w-[min(18rem,80vw)] rounded-lg border border-primary/35 bg-popover/98 p-3 text-right shadow-2xl shadow-black/35 ring-1 ring-white/5`}
+                    className="pointer-events-none fixed z-[200] w-72 max-w-[min(18rem,80vw)] rounded-lg border border-primary/35 bg-popover/98 p-3 text-right shadow-2xl shadow-black/35 ring-1 ring-white/5"
+                    style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
                     role="tooltip"
                 >
                     <div className="mb-2 flex items-start justify-between gap-3 border-b border-border/70 pb-2">
@@ -239,7 +261,8 @@ const ProgramCell = memo(function ProgramCell({
                     <p className="line-clamp-5 text-xs leading-5 text-muted-foreground">
                         {program.description || "אין תיאור זמין לתוכנית הזו."}
                     </p>
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );
@@ -266,6 +289,9 @@ function ProgramGuide({
     playingChannelIndex,
     onChannelClick,
     onProgramClick,
+    guideStartSec,
+    guideEndSec,
+    onGuideRangeChange,
 }: ProgramGuideProps) {
     // const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
     const mainRef = useRef<HTMLDivElement>(null);
@@ -276,6 +302,9 @@ function ProgramGuide({
     const startY = useRef(0);
     const scrollLeftStart = useRef(0);
     const scrollTopStart = useRef(0);
+    const previousGuideStartRef = useRef<number | null>(null);
+    const lastRangeRequestRef = useRef<string | null>(null);
+    const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
 
     /*
     useEffect(() => {
@@ -345,30 +374,33 @@ function ProgramGuide({
 
     // All timestamps in unix seconds
     const { guideStart, guideEnd, totalGridW, totalGridH, totalContentH, hourLabels, nowRight } = useMemo(() => {
-        // const nowSec = Math.floor(Date.now() / 1000);
-
-        // Snap guideStart to the beginning of the hour that is HOURS_BACK ago
-        const startRaw = nowSec - HOURS_BACK * SECS_PER_HOUR;
-        // Snap to whole hour
-        const start = Math.floor(startRaw / SECS_PER_HOUR) * SECS_PER_HOUR;
-        const end = start + (HOURS_BACK + HOURS_FORWARD) * SECS_PER_HOUR;
+        const fallbackStart = Math.floor(
+            (nowSec - HOURS_BACK * SECS_PER_HOUR) / SECS_PER_HOUR
+        ) * SECS_PER_HOUR;
+        const fallbackEnd = fallbackStart + (HOURS_BACK + HOURS_FORWARD) * SECS_PER_HOUR;
+        const start = guideStartSec ?? fallbackStart;
+        const end = guideEndSec ?? fallbackEnd;
 
         const w = (end - start) * PX_PER_SEC;
         const h = visibleChannels.length * CELL_H;
 
         // Hour labels: every whole hour between start and end
         const labels: { ts: number; label: string }[] = [];
-        for (let ts = start; ts <= end; ts += SECS_PER_HOUR) {
-            if (labels.length < (HOURS_BACK + HOURS_FORWARD)) {
-                labels.push({
-                    ts,
-                    label: new Date(ts * 1000).toLocaleTimeString("he-IL", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false,
-                    }),
-                });
-            }
+        for (let ts = start; ts < end; ts += SECS_PER_HOUR) {
+            const date = new Date(ts * 1000);
+            const timeLabel = date.toLocaleTimeString("he-IL", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+            });
+            const isMidnight = date.getHours() === 0;
+
+            labels.push({
+                ts,
+                label: isMidnight
+                    ? `${date.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" })} ${timeLabel}`
+                    : timeLabel,
+            });
         }
 
         // nowRight: px from right edge of grid to now line
@@ -383,7 +415,81 @@ function ProgramGuide({
             hourLabels: labels,
             nowRight,
         };
-    }, [visibleChannels.length, nowSec]);
+    }, [guideEndSec, guideStartSec, visibleChannels.length, nowSec]);
+
+    const updateVisibleDateLabel = useCallback(() => {
+        if (!mainRef.current) {
+            setVisibleDateLabel(formatGuideDate(guideStart));
+            return;
+        }
+
+        const channelW = getGuideChannelWidth();
+        const visibleProgramLeft = Math.max(0, mainRef.current.scrollLeft - channelW);
+        const visibleTs = guideStart + Math.round(visibleProgramLeft / PX_PER_SEC);
+
+        setVisibleDateLabel(formatGuideDate(visibleTs));
+    }, [guideStart]);
+
+    useEffect(() => {
+        const previousGuideStart = previousGuideStartRef.current;
+
+        if (previousGuideStart !== null && guideStart < previousGuideStart && mainRef.current) {
+            const addedWidth = (previousGuideStart - guideStart) * PX_PER_SEC;
+            mainRef.current.scrollLeft += addedWidth;
+        }
+
+        previousGuideStartRef.current = guideStart;
+        lastRangeRequestRef.current = `${guideStart}:${guideEnd}`;
+        requestAnimationFrame(updateVisibleDateLabel);
+    }, [guideEnd, guideStart, updateVisibleDateLabel]);
+
+    const requestGuideRange = useCallback(
+        (range: { start: number; end: number }) => {
+            if (!onGuideRangeChange) return;
+
+            const key = `${range.start}:${range.end}`;
+            if (lastRangeRequestRef.current === key) return;
+
+            lastRangeRequestRef.current = key;
+            onGuideRangeChange(range);
+        },
+        [onGuideRangeChange]
+    );
+
+    const maybeLoadMoreForScroll = useCallback(() => {
+        if (!mainRef.current || !onGuideRangeChange) return;
+
+        const node = mainRef.current;
+        const minStart = Math.floor(
+            (nowSec - MAX_HOURS_BACK * SECS_PER_HOUR) / SECS_PER_HOUR
+        ) * SECS_PER_HOUR;
+        const maxEnd = Math.ceil(
+            (nowSec + MAX_HOURS_FORWARD * SECS_PER_HOUR) / SECS_PER_HOUR
+        ) * SECS_PER_HOUR;
+        const expandBy = LAZY_EXPAND_HOURS * SECS_PER_HOUR;
+        const nearLeft = node.scrollLeft <= LAZY_EDGE_THRESHOLD;
+        const nearRight = node.scrollLeft + node.clientWidth >= node.scrollWidth - LAZY_EDGE_THRESHOLD;
+
+        if (nearLeft && guideStart > minStart) {
+            requestGuideRange({
+                start: Math.max(minStart, guideStart - expandBy),
+                end: guideEnd,
+            });
+            return;
+        }
+
+        if (nearRight && guideEnd < maxEnd) {
+            requestGuideRange({
+                start: guideStart,
+                end: Math.min(maxEnd, guideEnd + expandBy),
+            });
+        }
+    }, [guideEnd, guideStart, nowSec, onGuideRangeChange, requestGuideRange]);
+
+    const handleGuideScroll = useCallback(() => {
+        updateVisibleDateLabel();
+        maybeLoadMoreForScroll();
+    }, [maybeLoadMoreForScroll, updateVisibleDateLabel]);
 
     // Auto-scroll: position "now" at ~30% from the right on load
     const didScrollRef = useRef(false);
@@ -410,9 +516,8 @@ function ProgramGuide({
         if (!mainRef.current) return;
         const visibleW = mainRef.current.clientWidth;
         const channelW = getGuideChannelWidth();
-        const visibleProgramW = Math.max(0, visibleW - channelW);
         const nowX = totalGridW - nowRight;
-        const target = nowX - visibleProgramW * 0.7;
+        const target = nowX - CELL_W;
         const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
         const clamped = Math.max(0, Math.min(target, maxScrollLeft));
         mainRef.current.scrollTo({ left: clamped, behavior: "smooth" });
@@ -423,6 +528,7 @@ function ProgramGuide({
             <div
                 ref={mainCallbackRef}
                 onMouseDown={onMouseDown}
+                onScroll={handleGuideScroll}
                 className="flex-1 overflow-scroll cursor-grab active:cursor-grabbing"
                 style={{ scrollbarWidth: "thin", scrollbarColor: "var(--primary) transparent" }}
             >
@@ -445,14 +551,21 @@ function ProgramGuide({
                             className="absolute top-0 z-20 border-b border-zinc-700 bg-zinc-900"
                             style={{ left: CHAN_W, width: totalGridW, height: HEAD_H }}
                         >
+                            <div
+                                dir="rtl"
+                                className="sticky left-0 top-0 z-20 flex h-5 w-screen items-center justify-center border-b border-zinc-800 bg-zinc-900/95 text-[11px] font-bold text-zinc-200"
+                                aria-live="polite"
+                            >
+                                {visibleDateLabel}
+                            </div>
                             {hourLabels.map(({ ts, label }) => {
                                 const left = (ts - guideStart) * PX_PER_SEC;
 
                                 return (
                                     <div
                                         key={ts}
-                                        className="absolute top-0 flex items-center pr-2 px-2 text-xs font-bold text-zinc-300 tracking-wider border-r border-zinc-800"
-                                        style={{ left, width: CELL_W, height: HEAD_H }}
+                                        className="absolute top-5 flex items-center pr-2 px-2 text-xs font-bold text-zinc-300 tracking-wider border-r border-zinc-800"
+                                        style={{ left, width: CELL_W, height: HEAD_H - 20 }}
                                     >
                                         {label}
                                     </div>

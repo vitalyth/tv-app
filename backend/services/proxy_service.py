@@ -641,7 +641,8 @@ def handle_proxy(request, url, referer, cast=False):
         print("Proxy request failed:", e)
         return Response(status_code=502, headers=CORS_HEADERS)
 
-    content_type = _content_type_for_url(url, r.headers.get("content-type", ""))
+    effective_url = r.url or url
+    content_type = _content_type_for_url(effective_url, r.headers.get("content-type", ""))
     clean_content_type = content_type.lower()
     is_head = request.method == "HEAD"
 
@@ -664,10 +665,10 @@ def handle_proxy(request, url, referer, cast=False):
         )
 
     # Video/audio segments
-    if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(url):
-        if cast and _is_kan_vod_redge_url(url) and _is_segment_url(url):
+    if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(effective_url):
+        if cast and _is_kan_vod_redge_url(effective_url) and _is_segment_url(effective_url):
             return _buffered_segment_response(
-                url,
+                effective_url,
                 headers,
                 r,
                 content_type,
@@ -684,13 +685,13 @@ def handle_proxy(request, url, referer, cast=False):
 
     is_mpd = (
         "dash+xml" in clean_content_type
-        or _url_path(url).endswith((".mpd", ".livx"))
+        or _url_path(effective_url).endswith((".mpd", ".livx"))
         or "<MPD" in text[:500]
     )
 
     if is_mpd:
         proxy_url = _request_public_proxy_url(request)
-        content = _rewrite_mpd_for_cast(text, url, referer, proxy_url).encode("utf-8") if cast else r.content
+        content = _rewrite_mpd_for_cast(text, effective_url, referer, proxy_url).encode("utf-8") if cast else r.content
         return Response(
             content=content,
             media_type="application/dash+xml",
@@ -699,7 +700,7 @@ def handle_proxy(request, url, referer, cast=False):
 
     is_m3u8 = (
         "mpegurl" in clean_content_type
-        or _url_path(url).endswith(".m3u8")
+        or _url_path(effective_url).endswith(".m3u8")
         or "#EXTM3U" in text
     )
 
@@ -725,7 +726,7 @@ def handle_proxy(request, url, referer, cast=False):
         source_text = _prepare_hls_media_playlist(source_text, cast=cast)
         content = _rewrite_hls_manifest(
             source_text,
-            url,
+            effective_url,
             referer,
             proxy_url,
             cast,
