@@ -426,6 +426,25 @@ def _filter_hls_master_by_max_bitrate(text, max_bitrate):
     return "\n".join(output)
 
 
+def _strip_hls_subtitle_tracks(text):
+    if "TYPE=SUBTITLES" not in text and "SUBTITLES=" not in text:
+        return text
+
+    output = []
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        if stripped.startswith("#EXT-X-MEDIA") and "TYPE=SUBTITLES" in stripped:
+            continue
+
+        if stripped.startswith("#EXT-X-STREAM-INF"):
+            line = re.sub(r',?SUBTITLES="[^"]*"', "", line)
+
+        output.append(line)
+
+    return "\n".join(output)
+
+
 def _is_live_hls_media_playlist(text):
     return (
         "#EXTINF" in text
@@ -752,6 +771,7 @@ def handle_proxy(request, url, referer, cast=False):
     proxy_url = _request_public_proxy_url(request)
     try:
         source_text = _filter_hls_master_by_max_bitrate(text, max_bitrate)
+        source_text = _strip_hls_subtitle_tracks(source_text)
         source_text = _prepare_hls_media_playlist(source_text, effective_url, cast=cast)
         content = _rewrite_hls_manifest(
             source_text,

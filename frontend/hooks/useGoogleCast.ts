@@ -42,10 +42,6 @@ interface CastLoadOptions {
     programName?: string
 }
 
-interface QueuedCastLoadOptions extends CastLoadOptions {
-    loadSequence: number
-}
-
 const getCast = () => {
     if (typeof window === "undefined") return null
     return window.cast || null
@@ -248,8 +244,6 @@ export function useGoogleCast({
     const channelRef = useRef(channel)
     const streamUrlRef = useRef(streamUrl)
     const programNameRef = useRef(programName)
-    const pendingLoadRef = useRef<QueuedCastLoadOptions | null>(null)
-    const loadQueuePromiseRef = useRef<Promise<boolean> | null>(null)
 
     useEffect(() => {
         channelRef.current = channel
@@ -262,12 +256,7 @@ export function useGoogleCast({
         mediaStatusUnsubscribeRef.current = null
     }, [])
 
-    const loadLiveMediaNow = useCallback(async ({
-        channel,
-        streamUrl,
-        programName,
-        loadSequence,
-    }: QueuedCastLoadOptions) => {
+    const loadLiveMedia = useCallback(async ({ channel, streamUrl, programName }: CastLoadOptions) => {
         const castApi = getCast()
         const chromeCast = getChromeCast()
         const session = castApi?.framework.CastContext.getInstance().getCurrentSession()
@@ -277,6 +266,8 @@ export function useGoogleCast({
         const loadKey = `${channel.id}:${streamUrl}`
         if (lastLoadKeyRef.current === loadKey) return true
 
+        const loadSequence = loadSequenceRef.current + 1
+        loadSequenceRef.current = loadSequence
         lastLoadKeyRef.current = loadKey
 
         const castSourceUrl = getCastSourceUrl(streamUrl)
@@ -287,16 +278,18 @@ export function useGoogleCast({
             castContentType
         )
 
-        if (
-            castContentType === "application/x-mpegURL" &&
-            (isBrightcoveStream(streamUrl) || isFmp4HlsStream(streamUrl, channel))
-        ) {
+        if (castContentType === "application/x-mpegURL") {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
+            const tsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.TS
+            const tsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.MPEG2_TS
 
-            if (hlsSegmentFormat && hlsVideoSegmentFormat) {
+            if ((isBrightcoveStream(streamUrl) || isFmp4HlsStream(streamUrl, channel)) && hlsSegmentFormat && hlsVideoSegmentFormat) {
                 mediaInfo.hlsSegmentFormat = hlsSegmentFormat
                 mediaInfo.hlsVideoSegmentFormat = hlsVideoSegmentFormat
+            } else if (tsSegmentFormat && tsVideoSegmentFormat) {
+                mediaInfo.hlsSegmentFormat = tsSegmentFormat
+                mediaInfo.hlsVideoSegmentFormat = tsVideoSegmentFormat
             }
         }
 
@@ -390,48 +383,6 @@ export function useGoogleCast({
         }
     }, [clearMediaStatusListener])
 
-    const drainLoadQueue = useCallback(() => {
-        if (loadQueuePromiseRef.current) return loadQueuePromiseRef.current
-
-        const queuePromise = (async () => {
-            let loaded = false
-
-            while (pendingLoadRef.current) {
-                const nextLoad = pendingLoadRef.current
-                pendingLoadRef.current = null
-                loaded = await loadLiveMediaNow(nextLoad)
-            }
-
-            return loaded
-        })()
-
-        loadQueuePromiseRef.current = queuePromise
-
-        queuePromise.finally(() => {
-            loadQueuePromiseRef.current = null
-
-            if (pendingLoadRef.current) {
-                void drainLoadQueue()
-            }
-        })
-
-        return queuePromise
-    }, [loadLiveMediaNow])
-
-    const loadLiveMedia = useCallback(async (options: CastLoadOptions) => {
-        const loadKey = `${options.channel.id}:${options.streamUrl}`
-        if (!pendingLoadRef.current && lastLoadKeyRef.current === loadKey) return true
-
-        const loadSequence = loadSequenceRef.current + 1
-        loadSequenceRef.current = loadSequence
-        pendingLoadRef.current = {
-            ...options,
-            loadSequence,
-        }
-
-        return drainLoadQueue()
-    }, [drainLoadQueue])
-
     const loadCurrentMedia = useCallback(async () => {
         const currentChannel = channelRef.current
         const currentStreamUrl = streamUrlRef.current
@@ -472,7 +423,6 @@ export function useGoogleCast({
         setHasDvr(false)
         loadSequenceRef.current += 1
         lastLoadKeyRef.current = null
-        pendingLoadRef.current = null
         clearMediaStatusListener()
         clearCastChannelId()
         onCastEnded?.()
@@ -556,7 +506,6 @@ export function useGoogleCast({
                     setDeviceName(null)
                     loadSequenceRef.current += 1
                     lastLoadKeyRef.current = null
-                    pendingLoadRef.current = null
                     clearMediaStatusListener()
                     clearCastChannelId()
                     onCastEnded?.()
