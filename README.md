@@ -109,6 +109,13 @@ Create file:
 NEXT_PUBLIC_API_BASE=http://localhost:8000
 ```
 
+For Google Cast, use an API URL that the TV can reach from the network. This is
+especially important for VPN-routed channels:
+
+```
+NEXT_PUBLIC_CAST_API_BASE=http://<your-computer-lan-ip>:8001/api
+```
+
 ---
 
 ## 🐳 Run with Docker (Development)

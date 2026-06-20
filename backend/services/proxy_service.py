@@ -206,6 +206,14 @@ def _is_kan_vod_redge_url(url):
     )
 
 
+def _is_redge_live_hls_url(url):
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+
+    return "redge.media" in host and ("/livehls/" in path or ".livx/" in path)
+
+
 def _default_max_bitrate_for_request(request, url):
     requested_max_bitrate = _proxy_query_max_bitrate(request)
     if requested_max_bitrate:
@@ -437,7 +445,7 @@ def _is_fmp4_hls_media_playlist(lines):
     )
 
 
-def _prepare_hls_media_playlist(text, cast=False):
+def _prepare_hls_media_playlist(text, source_url, cast=False):
     """
     Upgrade VERSION to 6 and add EXT-X-START for all players.
     For cast only: add DISCONTINUITY before MPEG-TS segments to reset PTS —
@@ -451,7 +459,7 @@ def _prepare_hls_media_playlist(text, cast=False):
     lines = text.splitlines()
     has_start = any(line.strip().startswith("#EXT-X-START:") for line in lines)
     is_fmp4_playlist = _is_fmp4_hls_media_playlist(lines)
-    should_reset_pts_for_cast = cast and not is_fmp4_playlist
+    should_reset_pts_for_cast = cast and not is_fmp4_playlist and _is_redge_live_hls_url(source_url)
 
     output = []
     inserted = False
@@ -744,7 +752,7 @@ def handle_proxy(request, url, referer, cast=False):
     proxy_url = _request_public_proxy_url(request)
     try:
         source_text = _filter_hls_master_by_max_bitrate(text, max_bitrate)
-        source_text = _prepare_hls_media_playlist(source_text, cast=cast)
+        source_text = _prepare_hls_media_playlist(source_text, effective_url, cast=cast)
         content = _rewrite_hls_manifest(
             source_text,
             effective_url,
