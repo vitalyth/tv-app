@@ -172,10 +172,12 @@ const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, chan
         return resolveAbsoluteUrl(castSourceUrl)
     }
 
-    const vpnParam = shouldUseVpnProxy(channel) ? "&vpn=true" : ""
+    const useVpnProxy = shouldUseVpnProxy(channel)
+    const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy"
+    const vpnParam = useVpnProxy ? "&vpn=true" : ""
 
     return resolveAbsoluteUrl(
-        api(`/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`)
+        api(`${proxyEndpoint}?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`)
     )
 }
 

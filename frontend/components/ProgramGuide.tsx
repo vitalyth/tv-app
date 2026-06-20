@@ -4,6 +4,7 @@ import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Clock3, ListVideo, Play } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
+import { CHANNEL_REGION_SECTIONS, getChannelRegion } from "@/lib/channel-regions";
 import { useNowSec } from "@/hooks/use-now-sec";
 import {
     DropdownMenu,
@@ -26,10 +27,20 @@ interface ProgramGuideProps {
     onGuideRangeChange?: (range: { start: number; end: number }) => void;
 }
 
+type GuideRow =
+    | { type: "section"; key: string; label: string; count: number }
+    | { type: "channel"; key: string; channel: Channel };
+
+type PositionedGuideRow = GuideRow & {
+    top: number;
+    height: number;
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CELL_W = 200;       // px per hour
 const CELL_H = 60;        // px per channel row
+const SECTION_H = 34;     // px per channel group header
 const CHAN_W = "var(--guide-channel-width, 130px)"; // channel column width
 const HEAD_H = 48;        // header height
 const SECS_PER_HOUR = 3600;
@@ -371,6 +382,43 @@ function ProgramGuide({
 
     const visibleChannels = useMemo(() => uniqueChannelsByIndex(channels), [channels]);
     const channelsByIndex = useMemo(() => groupChannelsByIndex(sourceChannels), [sourceChannels]);
+    const guideRows = useMemo<PositionedGuideRow[]>(() => {
+        let top = 0;
+        const rows: PositionedGuideRow[] = [];
+
+        CHANNEL_REGION_SECTIONS.forEach((section) => {
+            const sectionChannels = visibleChannels.filter(
+                (channel) => getChannelRegion(channel) === section.value
+            );
+
+            if (sectionChannels.length === 0) {
+                return;
+            }
+
+            rows.push({
+                type: "section",
+                key: `section-${section.value}`,
+                label: section.label,
+                count: sectionChannels.length,
+                top,
+                height: SECTION_H,
+            });
+            top += SECTION_H;
+
+            sectionChannels.forEach((channel) => {
+                rows.push({
+                    type: "channel",
+                    key: channel.id,
+                    channel,
+                    top,
+                    height: CELL_H,
+                });
+                top += CELL_H;
+            });
+        });
+
+        return rows;
+    }, [visibleChannels]);
 
     // All timestamps in unix seconds
     const { guideStart, guideEnd, totalGridW, totalGridH, totalContentH, hourLabels, nowRight } = useMemo(() => {
@@ -382,7 +430,7 @@ function ProgramGuide({
         const end = guideEndSec ?? fallbackEnd;
 
         const w = (end - start) * PX_PER_SEC;
-        const h = visibleChannels.length * CELL_H;
+        const h = guideRows.reduce((height, row) => height + row.height, 0);
 
         // Hour labels: every whole hour between start and end
         const labels: { ts: number; label: string }[] = [];
@@ -415,7 +463,7 @@ function ProgramGuide({
             hourLabels: labels,
             nowRight,
         };
-    }, [guideEndSec, guideStartSec, visibleChannels.length, nowSec]);
+    }, [guideEndSec, guideRows, guideStartSec, nowSec]);
 
     const updateVisibleDateLabel = useCallback(() => {
         if (!mainRef.current) {
@@ -608,7 +656,23 @@ function ProgramGuide({
                         className="sticky left-0 z-[70] border-r border-zinc-800 bg-zinc-900"
                         style={{ width: CHAN_W, height: totalGridH }}
                     >
-                        {visibleChannels.map((ch) => {
+                        {guideRows.map((row) => {
+                            if (row.type === "section") {
+                                return (
+                                    <div
+                                        key={row.key}
+                                        className="guide-section-row flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-3"
+                                        style={{ height: row.height }}
+                                    >
+                                        <span className="truncate text-xs font-bold text-zinc-200">{row.label}</span>
+                                        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-bold text-zinc-400">
+                                            {row.count}
+                                        </span>
+                                    </div>
+                                );
+                            }
+
+                            const ch = row.channel;
                             const isPlayingChannel =
                                 ch.id === playingChannelId ||
                                 ch.index === playingChannelIndex;
@@ -627,7 +691,7 @@ function ProgramGuide({
                                             : "hover:bg-zinc-800"
                                         }
                                     `}
-                                    style={{ height: CELL_H }}
+                                    style={{ height: row.height }}
                                     onClick={() => onChannelClick?.(ch)}
                                     aria-current={isPlayingChannel ? "true" : undefined}
                                 >
@@ -718,12 +782,22 @@ function ProgramGuide({
                             />
                         ))}
 
-                        {visibleChannels.map((_, ri) => (
-                            <div
-                                key={ri}
-                                className="absolute left-0 right-0 border-b border-zinc-800/50"
-                                style={{ top: ri * CELL_H, height: CELL_H }}
-                            />
+                        {guideRows.map((row) => (
+                            row.type === "section" ? (
+                                <div
+                                    key={row.key}
+                                    className="absolute left-0 right-0 z-10 flex items-center border-b border-zinc-800 bg-zinc-950/85 px-4"
+                                    style={{ top: row.top, height: row.height }}
+                                >
+                                    <span className="text-xs font-bold text-zinc-300">{row.label}</span>
+                                </div>
+                            ) : (
+                                <div
+                                    key={row.key}
+                                    className="absolute left-0 right-0 border-b border-zinc-800/50"
+                                    style={{ top: row.top, height: row.height }}
+                                />
+                            )
                         ))}
 
                         <div
@@ -731,7 +805,12 @@ function ProgramGuide({
                             style={{ right: `${nowRight}px` }}
                         />
 
-                        {visibleChannels.map((ch, ri) => {
+                        {guideRows.map((row) => {
+                            if (row.type === "section") {
+                                return null;
+                            }
+
+                            const ch = row.channel;
                             const isPlayingChannel =
                                 ch.id === playingChannelId ||
                                 ch.index === playingChannelIndex;
@@ -740,7 +819,7 @@ function ProgramGuide({
                                 <div
                                     key={ch.id}
                                     className="absolute left-0 right-0"
-                                    style={{ top: ri * CELL_H, height: CELL_H }}
+                                    style={{ top: row.top, height: row.height }}
                                 >
                                     {isPlayingChannel && (
                                         <div

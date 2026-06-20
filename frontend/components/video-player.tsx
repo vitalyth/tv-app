@@ -403,11 +403,13 @@ export function VideoPlayer({
       (streamUrl.toLowerCase().includes(".m3u8") ||
         channel?.linkDetails?.manifest_type === "hls");
 
-    const vpnParam = shouldUseVpnProxy(channel) ? "&vpn=true" : "";
+    const useVpnProxy = shouldUseVpnProxy(channel);
+    const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy";
+    const vpnParam = useVpnProxy ? "&vpn=true" : "";
     const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
       ? streamUrl
       : api(
-          `/proxy?url=${encodeURIComponent(
+          `${proxyEndpoint}?url=${encodeURIComponent(
             streamUrl,
           )}&referer=${encodeURIComponent(referer)}${vpnParam}`,
         );

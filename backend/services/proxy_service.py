@@ -101,6 +101,9 @@ def _content_type_for_url(url, content_type):
     clean_content_type = (content_type or "").split(";", 1)[0].strip().lower()
     path = urlparse(url).path.lower()
 
+    if path.endswith(".key"):
+        return "application/octet-stream"
+
     if path.endswith((".mp4", ".m4s")) and "audio" in path:
         return "audio/mp4"
 
@@ -130,7 +133,7 @@ def _url_path(url):
 
 
 def _is_segment_url(url):
-    return _url_path(url).endswith((".ts", ".m4s", ".mp4", ".m4a", ".aac", ".vtt"))
+    return _url_path(url).endswith((".ts", ".m4s", ".mp4", ".m4a", ".aac", ".vtt", ".key"))
 
 
 def _is_local_proxy_url(uri):

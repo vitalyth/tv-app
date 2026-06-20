@@ -201,6 +201,8 @@ CHANNELS_BY_CATEGORY = {
         "ch_99", "ch_99c",
         "ch_ynet",
         "ch_i24news", "ch_i24newsen", "ch_i24newsfr", "ch_i24newsar",
+        "cnn",
+        "cbs_news_boston", "nbc10_boston", "wcvb_boston", "boston25", "gbh_boston",
         "rd_bet", "rd_reka", "rd_makan", "rd_gly"
     ],
 

@@ -63,6 +63,126 @@
     }
   },
   {
+    "id": "cnn",
+    "channelID": "cnn",
+    "name": "CNN Headlines",
+    "title": "CNN Headlines",
+    "label": "CNN Headlines",
+    "index": 9997,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "cnn.svg",
+    "logo": "cnn.svg",
+    "tvgID": "cnn",
+    "sourceUrl": "https://pluto.tv/",
+    "streamUrl": "https://jmp2.uk/plu-66c45c274f25dd00092739ee.m3u8",
+    "linkDetails": {
+      "referer": "https://pluto.tv/",
+      "manifest_type": "hls"
+    }
+  },
+  {
+    "id": "cbs_news_boston",
+    "channelID": "cbs_news_boston",
+    "name": "CBS News Boston",
+    "title": "CBS News Boston",
+    "label": "CBS News Boston",
+    "index": 9996,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "cbs-news-boston.png",
+    "logo": "cbs-news-boston.png",
+    "tvgID": "CBSNewsBoston.us",
+    "sourceUrl": "https://www.cbsnews.com/boston/",
+    "streamUrl": "https://dai.google.com/linear/hls/event/dHA193vxQ_WqZNVoC-W5MA/master.m3u8",
+    "linkDetails": {
+      "referer": "https://www.cbsnews.com/boston/",
+      "manifest_type": "hls"
+    }
+  },
+  {
+    "id": "nbc10_boston",
+    "channelID": "nbc10_boston",
+    "name": "NBC10 Boston",
+    "title": "NBC10 Boston",
+    "label": "NBC10 Boston",
+    "index": 9995,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "nbc10-boston.png",
+    "logo": "nbc10-boston.png",
+    "tvgID": "WBTSCD151.us",
+    "sourceUrl": "https://www.nbcboston.com/watch/",
+    "streamUrl": "https://d368vp0qqzvkid.cloudfront.net/11603/88889713/hls/master.m3u8?ads.xumo_channelId=88889713a&ads.xumo_ifaType=&ads.xumo_providerId=3820&ads.xumo_providerName=NBCNBOS",
+    "linkDetails": {
+      "referer": "https://www.nbcboston.com/watch/",
+      "manifest_type": "hls"
+    }
+  },
+  {
+    "id": "wcvb_boston",
+    "channelID": "wcvb_boston",
+    "name": "WCVB Boston",
+    "title": "WCVB Boston",
+    "label": "WCVB Boston",
+    "index": 9994,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "wcvb.svg",
+    "logo": "wcvb.svg",
+    "tvgID": "WCVBTV501.us",
+    "sourceUrl": "https://www.wcvb.com/",
+    "streamUrl": "https://aegis-cloudfront-1.tubi.video/c2e3094d-ad56-4c5f-9655-cd80df71fbab/playlist.m3u8",
+    "linkDetails": {
+      "referer": "https://www.wcvb.com/",
+      "manifest_type": "hls"
+    }
+  },
+  {
+    "id": "boston25",
+    "channelID": "boston25",
+    "name": "Boston 25",
+    "title": "Boston 25",
+    "label": "Boston 25",
+    "index": 9993,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "boston25.png",
+    "logo": "boston25.png",
+    "tvgID": "WFXT251.us",
+    "sourceUrl": "https://www.boston25news.com/video/",
+    "streamUrl": "https://pubads.g.doubleclick.net/ssai/event/1kItNgwtQUe54NjjBiiTGg/master.m3u8",
+    "linkDetails": {
+      "referer": "https://www.boston25news.com/video/",
+      "manifest_type": "hls"
+    }
+  },
+  {
+    "id": "gbh_boston",
+    "channelID": "gbh_boston",
+    "name": "GBH World",
+    "title": "GBH World",
+    "label": "GBH World",
+    "index": 9992,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "gbh.png",
+    "logo": "gbh.png",
+    "tvgID": "WGBHDT2.us",
+    "sourceUrl": "https://www.wgbh.org/tv-shows/watch-world-channel-live",
+    "streamUrl": "https://world.lls.pbs.org/index.m3u8",
+    "linkDetails": {
+      "referer": "https://www.wgbh.org/tv-shows/watch-world-channel-live",
+      "manifest_type": "hls"
+    }
+  },
+  {
     "id": "iltv",
     "channelID": "iltv",
     "name": "ILTV",

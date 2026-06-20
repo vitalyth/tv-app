@@ -14,6 +14,7 @@ from epg_parsers.hidabroot import parse_hidabroot_epg
 from epg_parsers.kan_worldcup import parse_kan_worldcup_epg
 from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.ftv import parse_ftv_epg
+from epg_parsers.local_us import LOCAL_US_CHANNEL_IDS, parse_local_us_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
     ISRAMEDIA_TVGID_MAP,
@@ -165,6 +166,9 @@ def main():
 
         elif args.channel == "ftv":
             programs = parse_ftv_epg()
+
+        elif args.channel in LOCAL_US_CHANNEL_IDS:
+            programs = parse_local_us_epg(args.channel)
 
         else:
             first_html = fetch_html(args.url)
@@ -390,6 +394,26 @@ def main():
             output_path = output_dir / "kan_worldcup.json"
             write_json(kan_worldcup_programs, output_path)
             print(f"Wrote {len(kan_worldcup_programs)} programs to {output_path}")
+
+        print("\nParsing local US channels from public TV guides")
+        for channel_id in LOCAL_US_CHANNEL_IDS:
+            try:
+                local_programs = parse_local_us_epg(channel_id)
+            except Exception as ex:
+                failed_channels.append(channel_id)
+                print(f"Failed parsing {channel_id}: {ex}")
+                traceback.print_exc()
+                local_programs = read_existing_channel_programs(output_dir, channel_id)
+                if not local_programs:
+                    continue
+                print(f"Using existing cached programs for {channel_id}")
+
+            local_programs = merge_with_existing_channel(output_dir, channel_id, local_programs)
+            combined_epg[channel_id] = local_programs
+            if local_programs:
+                output_path = output_dir / f"{channel_id}.json"
+                write_json(local_programs, output_path)
+                print(f"Wrote {len(local_programs)} programs to {output_path}")
 
         write_json(combined_epg, combined_output)
         print(f"\nWrote {len(combined_epg)} channels to {combined_output}")
