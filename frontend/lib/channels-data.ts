@@ -7,6 +7,7 @@ export interface LinkDetails {
   manifest_type?: ManifestType
   ch?: string
   regex?: string
+  vpn?: boolean
 }
 
 export interface Program {

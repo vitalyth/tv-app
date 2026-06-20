@@ -23,3 +23,35 @@ def get_custom_channel(channel_id: str):
             return channel
 
     return None
+
+
+def merge_custom_channels(channels):
+    custom_channels = load_custom_channels()
+    channels_by_id = {
+        channel.get("channelID") or channel.get("id"): index
+        for index, channel in enumerate(channels)
+    }
+    merged_channels = list(channels)
+
+    for custom_channel in custom_channels:
+        channel_id = custom_channel.get("channelID") or custom_channel.get("id")
+
+        if channel_id in channels_by_id:
+            index = channels_by_id[channel_id]
+            current_channel = merged_channels[index]
+            link_details = {
+                **(current_channel.get("linkDetails") or {}),
+                **(custom_channel.get("linkDetails") or {}),
+            }
+            merged_channels[index] = {
+                **current_channel,
+                **custom_channel,
+                "channelID": channel_id,
+                "linkDetails": link_details,
+            }
+            continue
+
+        channels_by_id[channel_id] = len(merged_channels)
+        merged_channels.append(custom_channel)
+
+    return merged_channels

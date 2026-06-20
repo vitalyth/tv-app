@@ -27,7 +27,7 @@ import { ChevronLeft, Clapperboard, Play, RotateCcw } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
-const QUICK_LIVE_CHANNEL_TVG_IDS = ["11", "12", "13", "14", "i24news"];
+const QUICK_LIVE_CHANNEL_KEYS = ["11", "kan_worldcup", "12", "13", "14", "i24news"];
 const LIVE_NOW_LIMIT = 12;
 const RECENT_LIVE_LIMIT = 12;
 
@@ -284,17 +284,22 @@ const LandingPage = () => {
   }, [liveChannels, epg, recentlyViewed]);
 
   const quickLiveChannels = useMemo(() => {
-    const order = new Map(QUICK_LIVE_CHANNEL_TVG_IDS.map((id, index) => [id, index]));
+    const order = new Map(QUICK_LIVE_CHANNEL_KEYS.map((id, index) => [id, index]));
     const seen = new Set<string>();
 
     return liveChannels
-      .filter((channel) => channel.tvgID && order.has(channel.tvgID))
+      .map((channel) => {
+        const key = order.has(channel.id) ? channel.id : channel.tvgID;
+        return key && order.has(key) ? { channel, key } : null;
+      })
+      .filter((item): item is { channel: Channel; key: string } => Boolean(item))
       .filter((channel) => {
-        if (seen.has(channel.tvgID!)) return false;
-        seen.add(channel.tvgID!);
+        if (seen.has(channel.key)) return false;
+        seen.add(channel.key);
         return true;
       })
-      .sort((a, b) => (order.get(a.tvgID!) ?? 0) - (order.get(b.tvgID!) ?? 0));
+      .sort((a, b) => (order.get(a.key) ?? 0) - (order.get(b.key) ?? 0))
+      .map(({ channel }) => channel);
   }, [liveChannels]);
 
   const recommendedVodChannels = useMemo(() => vodChannels.slice(0, 20), [vodChannels]);
@@ -620,7 +625,7 @@ const LandingPage = () => {
             <div className="absolute left-1 top-1 z-10 flex max-w-[calc(100%-0.5rem)] items-center gap-2 overflow-x-auto p-2 scrollbar-hide md:left-2 md:top-2">
               {quickLiveChannels.map((channel) => (
                 <button
-                  key={channel.tvgID}
+                  key={channel.id}
                   type="button"
                   aria-label={`פתח ${channel.name}`}
                   onClick={() => handlePlayLiveChannel(channel)}

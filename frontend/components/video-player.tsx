@@ -39,7 +39,7 @@ const getPlayerImageSrc = (logo?: string) => {
 
 const shouldUseVpnProxy = (channel: Channel) => {
   const channelId = channel.channelID || channel.id || "";
-  return channel.module === "kan-vod" || channelId.startsWith("ch_11");
+  return channel.linkDetails?.vpn || channel.module === "kan-vod" || channelId.startsWith("ch_11");
 };
 
 interface VideoPlayerProps {
@@ -403,11 +403,13 @@ export function VideoPlayer({
       (streamUrl.toLowerCase().includes(".m3u8") ||
         channel?.linkDetails?.manifest_type === "hls");
 
-    const vpnParam = shouldUseVpnProxy(channel) ? "&vpn=true" : "";
+    const useVpnProxy = shouldUseVpnProxy(channel);
+    const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy";
+    const vpnParam = useVpnProxy ? "&vpn=true" : "";
     const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
       ? streamUrl
       : api(
-          `/proxy?url=${encodeURIComponent(
+          `${proxyEndpoint}?url=${encodeURIComponent(
             streamUrl,
           )}&referer=${encodeURIComponent(referer)}${vpnParam}`,
         );

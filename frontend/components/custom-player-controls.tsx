@@ -100,7 +100,7 @@ export default function CustomPlayerControls({
   const [qualityLabel, setQualityLabel] = useState("SD");
   const [autoLabel, setAutoLabel] = useState("Auto");
   const [autoMode, setAutoMode] = useState(true);
-  const [selectedHeight, setSelectedHeight] = useState<number | null>(null);
+  const [selectedQualityKey, setSelectedQualityKey] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [seekStart, setSeekStart] = useState(0);
@@ -213,10 +213,24 @@ export default function CustomPlayerControls({
     return true;
   };
 
-  const getCurrentHeight = (qLevels: any): number | null => {
+  const getLevelBitrate = (level: any): number | null => {
+    const bitrate = Number(level?.bitrate || level?.bandwidth || level?.attributes?.BANDWIDTH);
+    return Number.isFinite(bitrate) && bitrate > 0 ? bitrate : null;
+  };
+
+  const getLevelKey = (level: any) => {
+    if (level?.height) return `height:${level.height}`;
+
+    const bitrate = getLevelBitrate(level);
+    if (bitrate) return `bitrate:${bitrate}`;
+
+    return null;
+  };
+
+  const getCurrentLevel = (qLevels: any): any | null => {
     const index = qLevels.selectedIndex;
     if (index === -1) return null;
-    return qLevels[index]?.height || null;
+    return qLevels[index] || null;
   };
 
   const getQualityLabel = (height: number | null) => {
@@ -227,17 +241,52 @@ export default function CustomPlayerControls({
     return "SD";
   };
 
+  const formatBitrate = (bitrate: number) => {
+    if (bitrate >= 1_000_000) {
+      const mbps = bitrate / 1_000_000;
+      return `${mbps >= 10 ? Math.round(mbps) : mbps.toFixed(1)}M`;
+    }
+
+    return `${Math.round(bitrate / 1000)}K`;
+  };
+
+  const getLevelLabel = (level: any) => {
+    if (level?.height) return `${level.height}p`;
+
+    const bitrate = getLevelBitrate(level);
+    if (bitrate) return formatBitrate(bitrate);
+
+    return "Unknown";
+  };
+
+  const getButtonQualityLabel = (level: any | null) => {
+    if (!level) return "SD";
+    if (level.height) return getQualityLabel(level.height);
+
+    const bitrate = getLevelBitrate(level);
+    return bitrate ? formatBitrate(bitrate) : "SD";
+  };
+
   const getUniqueLevels = (qLevels: any) => {
-    const map = new Map<number, any>();
+    const map = new Map<string, any>();
 
     for (let i = 0; i < qLevels.length; i++) {
       const level = qLevels[i];
-      if (level.height && !map.has(level.height)) {
-        map.set(level.height, level);
+      const key = getLevelKey(level);
+
+      if (key && !map.has(key)) {
+        map.set(key, level);
       }
     }
 
-    return Array.from(map.values()).sort((a, b) => b.height - a.height);
+    return Array.from(map.values()).sort((a, b) => {
+      const aHeight = a.height || 0;
+      const bHeight = b.height || 0;
+
+      if (aHeight || bHeight) return bHeight - aHeight;
+
+      return (getLevelBitrate(b) || 0) - (getLevelBitrate(a) || 0);
+    });
   };
 
   const isFiniteVodDuration = (value: number) => {
@@ -436,14 +485,14 @@ export default function CustomPlayerControls({
       if (!qLevels || !qLevels.length) return;
 
       const currentAutoMode = isAuto(qLevels);
-      const currentHeight = getCurrentHeight(qLevels);
-      const label = getQualityLabel(currentHeight);
+      const currentLevel = getCurrentLevel(qLevels);
+      const currentKey = currentLevel ? getLevelKey(currentLevel) : null;
 
       setLevels(getUniqueLevels(qLevels));
-      setQualityLabel(label);
+      setQualityLabel(getButtonQualityLabel(currentLevel));
       setAutoMode(currentAutoMode);
-      setSelectedHeight(currentAutoMode ? null : currentHeight);
-      setAutoLabel(currentHeight ? `Auto (${currentHeight}p)` : "Auto");
+      setSelectedQualityKey(currentAutoMode ? null : currentKey);
+      setAutoLabel(currentLevel ? `Auto (${getLevelLabel(currentLevel)})` : "Auto");
     };
 
     const updateState = () => {
@@ -580,12 +629,12 @@ export default function CustomPlayerControls({
     setQualityOpen(false);
   };
 
-  const setManualQuality = (height: number) => {
+  const setManualQuality = (qualityKey: string) => {
     const qLevels = player?.qualityLevels?.();
     if (!qLevels) return;
 
     for (let i = 0; i < qLevels.length; i++) {
-      qLevels[i].enabled = qLevels[i].height === height;
+      qLevels[i].enabled = getLevelKey(qLevels[i]) === qualityKey;
     }
 
     setQualityOpen(false);
@@ -1043,25 +1092,30 @@ export default function CustomPlayerControls({
                       {autoLabel}
                     </div>
 
-                    {levels.map((level) => (
-                      <div
-                        key={level.height}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setManualQuality(level.height);
-                        }}
-                        className={`
-                      px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
-                      ${level.height === selectedHeight
-                            ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]"
-                            : ""
-                          }
-                    `}
-                      >
-                        {level.height}p
-                      </div>
-                    ))}
+                    {levels.map((level) => {
+                      const qualityKey = getLevelKey(level);
+                      if (!qualityKey) return null;
+
+                      return (
+                        <div
+                          key={qualityKey}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setManualQuality(qualityKey);
+                          }}
+                          className={`
+                        px-2 py-1 sm:py-0.5 cursor-pointer hover:bg-white/10
+                        ${qualityKey === selectedQualityKey
+                              ? "bg-white text-[#272727] hover:bg-[#bbbbbbd6]"
+                              : ""
+                            }
+                      `}
+                        >
+                          {getLevelLabel(level)}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

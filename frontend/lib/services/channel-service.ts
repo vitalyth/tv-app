@@ -5,8 +5,20 @@ export const channelService = {
     return apiFetch("/live_channels");
   },
 
-  getEpg() {
-    return apiFetch("/epg");
+  getEpg(params?: { start?: number; end?: number }) {
+    if (params?.start === undefined && params?.end === undefined) {
+      return apiFetch("/epg");
+    }
+
+    const searchParams = new URLSearchParams();
+    if (params.start !== undefined) {
+      searchParams.set("start", String(params.start));
+    }
+    if (params.end !== undefined) {
+      searchParams.set("end", String(params.end));
+    }
+
+    return apiFetch(`/epg?${searchParams.toString()}`);
   },
 
   getVodChannels() {
@@ -48,7 +60,9 @@ export const channelService = {
   },
 
   getLiveChannel(channel: any) {
-    return apiFetch("/live_channel", {
+    const endpoint = channel?.linkDetails?.vpn ? "/v/live_channel" : "/live_channel";
+
+    return apiFetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
