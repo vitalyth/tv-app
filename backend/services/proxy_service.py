@@ -470,6 +470,27 @@ def _normalize_hls_codecs_value(value):
     return f'"{codecs}"'
 
 
+def _cast_default_resolution_for_bandwidth(bandwidth):
+    bandwidth = _query_int(bandwidth)
+
+    if not bandwidth:
+        return "854x480"
+
+    if bandwidth >= 4_000_000:
+        return "1920x1080"
+
+    if bandwidth >= 2_000_000:
+        return "1280x720"
+
+    if bandwidth >= 1_000_000:
+        return "854x480"
+
+    if bandwidth >= 700_000:
+        return "640x360"
+
+    return "426x240"
+
+
 def _prepare_hls_master_for_cast(text):
     if "#EXT-X-STREAM-INF" not in text:
         return text
@@ -491,6 +512,8 @@ def _prepare_hls_master_for_cast(text):
         prefix, raw_attributes = line.split(":", 1)
         attributes = []
         has_codecs = False
+        has_resolution = False
+        bandwidth = None
 
         for attribute in _split_hls_attribute_list(raw_attributes):
             if "=" not in attribute:
@@ -506,8 +529,15 @@ def _prepare_hls_master_for_cast(text):
             if key == "CODECS":
                 has_codecs = True
                 value = _normalize_hls_codecs_value(value.strip())
+            elif key == "RESOLUTION":
+                has_resolution = True
+            elif key == "BANDWIDTH":
+                bandwidth = value.strip()
 
             attributes.append(f"{key}={value.strip()}")
+
+        if not has_resolution:
+            attributes.append(f"RESOLUTION={_cast_default_resolution_for_bandwidth(bandwidth)}")
 
         if not has_codecs:
             attributes.append('CODECS="avc1.4d401f,mp4a.40.2"')

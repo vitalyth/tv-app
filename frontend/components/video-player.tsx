@@ -82,6 +82,7 @@ export function VideoPlayer({
   const [hasError, setHasError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [streamChannelId, setStreamChannelId] = useState<string | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -92,6 +93,7 @@ export function VideoPlayer({
 
   const { isMobileDevice, isPhoneLike, isTouchDevice } = useMobileDevice();
   const currentProgram = useCurrentProgram(channel?.programs);
+  const activeStreamUrl = channel && streamChannelId === channel.id ? streamUrl : null;
   const loadingImage =
     channel?.type === "vod"
       ? channel.vodMeta?.programImage || channel.vodMeta?.episodeImage || channel.playerLogo || channel.logo
@@ -276,7 +278,7 @@ export function VideoPlayer({
     stopCasting,
   } = useGoogleCast({
     channel,
-    streamUrl,
+    streamUrl: activeStreamUrl,
     programName: currentProgram?.name,
     onCastStarted: handleCastStarted,
     onCastEnded: handleCastEnded,
@@ -330,6 +332,7 @@ export function VideoPlayer({
     setIsLoading(true);
     setHasError(false);
     setStreamUrl(null);
+    setStreamChannelId(null);
     setPlayerInstance(null);
     restoreExpandedAfterFullscreenRef.current = false;
     lastVodProgressSaveRef.current = 0;
@@ -345,6 +348,7 @@ export function VideoPlayer({
     streamRequest
       .then((data: { stream: string }) => {
         if (!isMounted) return;
+        setStreamChannelId(channel.id);
         setStreamUrl(data.stream);
       })
       .catch((err) => {
@@ -362,7 +366,7 @@ export function VideoPlayer({
   }, [channel]);
 
   useEffect(() => {
-    if (!streamUrl) return;
+    if (!activeStreamUrl) return;
     if (!channel || !videoRef.current) return;
 
     setHasError(false);
@@ -389,28 +393,28 @@ export function VideoPlayer({
 
     const isDash =
       manifestType === "mpd" ||
-      streamUrl.includes("/livedash/") ||
-      streamUrl.endsWith(".mpd");
+      activeStreamUrl.includes("/livedash/") ||
+      activeStreamUrl.endsWith(".mpd");
 
     const isSafari =
       typeof navigator !== "undefined" &&
       /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
     const keepLocalPaused = isCastingRef.current;
-    const isLocalSeriesStream = streamUrl.includes("/stream/local-series");
+    const isLocalSeriesStream = activeStreamUrl.includes("/stream/local-series");
     const isLocalSeriesHls =
       isLocalSeriesStream &&
-      (streamUrl.toLowerCase().includes(".m3u8") ||
+      (activeStreamUrl.toLowerCase().includes(".m3u8") ||
         channel?.linkDetails?.manifest_type === "hls");
 
     const useVpnProxy = shouldUseVpnProxy(channel);
     const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy";
     const vpnParam = useVpnProxy ? "&vpn=true" : "";
     const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
-      ? streamUrl
+      ? activeStreamUrl
       : api(
           `${proxyEndpoint}?url=${encodeURIComponent(
-            streamUrl,
+            activeStreamUrl,
           )}&referer=${encodeURIComponent(referer)}${vpnParam}`,
         );
 
@@ -752,7 +756,7 @@ export function VideoPlayer({
       }
     };
   }, [
-    streamUrl,
+    activeStreamUrl,
     channel,
     pauseLocalPlayerForCasting,
     resetViewMode,
@@ -925,7 +929,7 @@ export function VideoPlayer({
             isFullscreen={isFullscreen}
             isCasting={isCasting}
             isCastAvailable={isCastAvailable}
-            canCast={!!streamUrl}
+            canCast={!!activeStreamUrl}
             isCastConnecting={isCastConnecting}
             isMobileDevice={isMobileDevice}
             onCast={isCasting ? stopCasting : requestCastSession}

@@ -233,15 +233,6 @@ export function useGoogleCast({
     const remoteControllerRef = useRef<cast.framework.RemotePlayerController | null>(null)
     const mediaStatusUnsubscribeRef = useRef<(() => void) | null>(null)
     const lastVodProgressSaveRef = useRef(0)
-    const channelRef = useRef(channel)
-    const streamUrlRef = useRef(streamUrl)
-    const programNameRef = useRef(programName)
-
-    useEffect(() => {
-        channelRef.current = channel
-        streamUrlRef.current = streamUrl
-        programNameRef.current = programName
-    }, [channel, streamUrl, programName])
 
     const clearMediaStatusListener = useCallback(() => {
         mediaStatusUnsubscribeRef.current?.()
@@ -382,19 +373,6 @@ export function useGoogleCast({
         }
     }, [clearMediaStatusListener, onCastEnded])
 
-    const loadCurrentMedia = useCallback(async () => {
-        const currentChannel = channelRef.current
-        const currentStreamUrl = streamUrlRef.current
-
-        if (!currentChannel || !currentStreamUrl) return false
-
-        return loadLiveMedia({
-            channel: currentChannel,
-            streamUrl: currentStreamUrl,
-            programName: programNameRef.current,
-        })
-    }, [loadLiveMedia])
-
     const requestCastSession = useCallback(async () => {
         const castApi = getCast()
         if (!castApi?.framework || !channel || !streamUrl) return
@@ -404,13 +382,12 @@ export function useGoogleCast({
 
         try {
             await castApi.framework.CastContext.getInstance().requestSession()
-            await loadCurrentMedia()
         } catch (err) {
             console.warn("Cast session request failed:", err)
             setError("cast-session-failed")
             setSessionState("disconnected")
         }
-    }, [channel, loadCurrentMedia, streamUrl])
+    }, [channel, streamUrl])
 
     const stopCasting = useCallback(async () => {
         const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
@@ -485,9 +462,8 @@ export function useGoogleCast({
                     const session = castApi.framework.CastContext.getInstance().getCurrentSession()
                     const name = session?.getCastDevice?.()?.friendlyName ?? null
                     setDeviceName(name)
-                    if (channelRef.current?.id) saveCastChannelId(channelRef.current.id)
+                    if (channel?.id) saveCastChannelId(channel.id)
                     onCastStarted?.()
-                    void loadCurrentMedia()
                     return
                 }
 
@@ -534,7 +510,7 @@ export function useGoogleCast({
 
             clearMediaStatusListener()
         }
-    }, [clearMediaStatusListener, loadCurrentMedia, onCastEnded, onCastStarted])
+    }, [channel, clearMediaStatusListener, onCastEnded, onCastStarted])
 
     useEffect(() => {
         if (sessionState !== "connected" || !channel || !streamUrl) return
@@ -542,7 +518,11 @@ export function useGoogleCast({
         const loadKey = `${channel.id}:${streamUrl}`
         if (lastLoadKeyRef.current === loadKey) return
 
-        void loadLiveMedia({ channel, streamUrl, programName })
+        const loadTimer = window.setTimeout(() => {
+            void loadLiveMedia({ channel, streamUrl, programName })
+        }, 100)
+
+        return () => window.clearTimeout(loadTimer)
     }, [channel, loadLiveMedia, programName, sessionState, streamUrl])
 
     return {
