@@ -374,6 +374,16 @@ export function VideoPlayer({
     setIsExpanded(false);
     showControls();
 
+    if (isCasting) {
+      if (playerRef.current) {
+        playerRef.current.dispose();
+        playerRef.current = null;
+        setPlayerInstance(null);
+      }
+      setIsLoading(false);
+      return;
+    }
+
     if (playerRef.current) {
       playerRef.current.dispose();
       playerRef.current = null;
@@ -757,6 +767,7 @@ export function VideoPlayer({
     };
   }, [
     activeStreamUrl,
+    isCasting,
     channel,
     pauseLocalPlayerForCasting,
     resetViewMode,

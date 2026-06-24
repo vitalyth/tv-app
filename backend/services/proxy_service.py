@@ -16,6 +16,7 @@ PROXY_READ_TIMEOUT_SECONDS = float(os.getenv("PROXY_READ_TIMEOUT_SECONDS", "60")
 PROXY_REQUEST_TIMEOUT = (PROXY_CONNECT_TIMEOUT_SECONDS, PROXY_READ_TIMEOUT_SECONDS)
 KAN_VOD_PROXY_MAX_BITRATE = int(os.getenv("KAN_VOD_PROXY_MAX_BITRATE", "0"))
 KAN_VOD_SEGMENT_RETRIES = max(0, int(os.getenv("KAN_VOD_SEGMENT_RETRIES", "2")))
+PLUTO_SEGMENT_RETRIES = max(0, int(os.getenv("PLUTO_SEGMENT_RETRIES", "2")))
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -149,6 +150,21 @@ def _origin_for_url(url):
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def _origin_for_referer(referer):
+    if not referer:
+        return None
+
+    try:
+        parsed = urlparse(referer)
+    except ValueError:
+        return None
+
+    if not parsed.scheme or not parsed.netloc:
+        return None
+
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def _split_kodi_url_props(url):
     for separator in ("|", "%7C", "%7c"):
         if separator in url:
@@ -217,6 +233,13 @@ def _is_redge_live_hls_url(url):
 def _is_pluto_hls_url(url):
     host = urlparse(url).netloc.lower()
     return "pluto.tv" in host or "plutotv.net" in host
+
+
+def _apply_pluto_headers(headers, referer):
+    origin = _origin_for_referer(referer) or "https://pluto.tv"
+    headers["Origin"] = origin
+    headers["Referer"] = referer or f"{origin}/"
+    headers["User-Agent"] = "Mozilla/5.0"
 
 
 def _default_max_bitrate_for_request(request, url):
@@ -321,6 +344,30 @@ def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
             return Response(status_code=502, headers=CORS_HEADERS)
 
     return Response(status_code=502, headers=CORS_HEADERS)
+
+
+def _retry_upstream_if_needed(url, headers, upstream, retries=0):
+    if retries <= 0 or upstream.status_code < 500:
+        return upstream
+
+    current = upstream
+
+    for attempt in range(retries):
+        try:
+            current.close()
+        except Exception:
+            pass
+
+        try:
+            current = session.get(url, headers=headers, stream=True, timeout=PROXY_REQUEST_TIMEOUT)
+        except requests.exceptions.RequestException as exc:
+            print(f"Proxy retry open failed ({attempt + 1}/{retries}) for url={url}: {exc}", flush=True)
+            continue
+
+        if current.status_code < 500:
+            return current
+
+    return current
 
 
 def _rewrite_hls_uri(uri, manifest_base, source_url, referer, proxy_url, cast, max_bitrate=None, vpn=False):
@@ -782,6 +829,9 @@ def handle_proxy(request, url, referer, cast=False):
     }
     headers.update(kodi_headers)
 
+    if _is_pluto_hls_url(url):
+        _apply_pluto_headers(headers, referer)
+
     if "range" in request.headers:
         headers["Range"] = request.headers["range"]
 
@@ -792,6 +842,10 @@ def handle_proxy(request, url, referer, cast=False):
         return Response(status_code=502, headers=CORS_HEADERS)
 
     effective_url = r.url or url
+    if _is_pluto_hls_url(effective_url) and _is_segment_url(effective_url):
+        r = _retry_upstream_if_needed(effective_url, headers, r, retries=PLUTO_SEGMENT_RETRIES)
+        effective_url = r.url or effective_url
+
     content_type = _content_type_for_url(effective_url, r.headers.get("content-type", ""))
     clean_content_type = content_type.lower()
     is_head = request.method == "HEAD"

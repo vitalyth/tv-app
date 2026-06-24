@@ -189,6 +189,23 @@ const hasDvrWindow = (media?: chrome.cast.media.Media | null) => {
     return typeof duration === "number" && Number.isFinite(duration) && duration > 0
 }
 
+const stopCurrentCastMedia = (session: cast.framework.CastSession) => {
+    const media = session.getMediaSession()
+    const stop = (media as any)?.stop
+
+    if (!media || typeof stop !== "function") {
+        return Promise.resolve()
+    }
+
+    return new Promise<void>((resolve) => {
+        try {
+            stop.call(media, null, resolve, resolve)
+        } catch {
+            resolve()
+        }
+    })
+}
+
 const ensureCastSenderScript = () => {
     if (typeof window === "undefined") return Promise.resolve(false)
 
@@ -233,6 +250,7 @@ export function useGoogleCast({
     const remoteControllerRef = useRef<cast.framework.RemotePlayerController | null>(null)
     const mediaStatusUnsubscribeRef = useRef<(() => void) | null>(null)
     const lastVodProgressSaveRef = useRef(0)
+    const desiredLoadKeyRef = useRef<string | null>(null)
 
     const clearMediaStatusListener = useCallback(() => {
         mediaStatusUnsubscribeRef.current?.()
@@ -248,9 +266,11 @@ export function useGoogleCast({
 
         const loadKey = `${channel.id}:${streamUrl}`
         if (lastLoadKeyRef.current === loadKey) return true
+        if (desiredLoadKeyRef.current && desiredLoadKeyRef.current !== loadKey) return false
 
         const loadSequence = loadSequenceRef.current + 1
         loadSequenceRef.current = loadSequence
+        const isSwitchingMedia = Boolean(lastLoadKeyRef.current && lastLoadKeyRef.current !== loadKey)
         lastLoadKeyRef.current = loadKey
 
         const castSourceUrl = getCastSourceUrl(streamUrl)
@@ -307,9 +327,18 @@ export function useGoogleCast({
 
         try {
             clearMediaStatusListener()
+
+            if (isSwitchingMedia) {
+                await stopCurrentCastMedia(session)
+
+                if (loadSequenceRef.current !== loadSequence || desiredLoadKeyRef.current !== loadKey) {
+                    return true
+                }
+            }
+
             await session.loadMedia(request)
 
-            if (loadSequenceRef.current !== loadSequence) {
+            if (loadSequenceRef.current !== loadSequence || desiredLoadKeyRef.current !== loadKey) {
                 return true
             }
 
@@ -348,7 +377,7 @@ export function useGoogleCast({
             setError(null)
             return true
         } catch (err) {
-            if (loadSequenceRef.current === loadSequence) {
+            if (loadSequenceRef.current === loadSequence && desiredLoadKeyRef.current === loadKey) {
                 if (lastLoadKeyRef.current === loadKey) {
                     lastLoadKeyRef.current = null
                 }
@@ -399,6 +428,7 @@ export function useGoogleCast({
         setHasDvr(false)
         loadSequenceRef.current += 1
         lastLoadKeyRef.current = null
+        desiredLoadKeyRef.current = null
         clearMediaStatusListener()
         clearCastChannelId()
         onCastEnded?.()
@@ -481,6 +511,7 @@ export function useGoogleCast({
                     setDeviceName(null)
                     loadSequenceRef.current += 1
                     lastLoadKeyRef.current = null
+                    desiredLoadKeyRef.current = null
                     clearMediaStatusListener()
                     clearCastChannelId()
                     onCastEnded?.()
@@ -516,13 +547,18 @@ export function useGoogleCast({
         if (sessionState !== "connected" || !channel || !streamUrl) return
 
         const loadKey = `${channel.id}:${streamUrl}`
+        desiredLoadKeyRef.current = loadKey
         if (lastLoadKeyRef.current === loadKey) return
 
         const loadTimer = window.setTimeout(() => {
-            void loadLiveMedia({ channel, streamUrl, programName })
+            if (desiredLoadKeyRef.current === loadKey) {
+                void loadLiveMedia({ channel, streamUrl, programName })
+            }
         }, 100)
 
-        return () => window.clearTimeout(loadTimer)
+        return () => {
+            window.clearTimeout(loadTimer)
+        }
     }, [channel, loadLiveMedia, programName, sessionState, streamUrl])
 
     return {
