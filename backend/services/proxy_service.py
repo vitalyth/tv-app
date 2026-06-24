@@ -437,6 +437,86 @@ def _strip_hls_subtitle_tracks(text):
     return "\n".join(output)
 
 
+def _split_hls_attribute_list(text):
+    attributes = []
+    current = []
+    in_quotes = False
+
+    for char in text:
+        if char == '"':
+            in_quotes = not in_quotes
+
+        if char == "," and not in_quotes:
+            part = "".join(current).strip()
+            if part:
+                attributes.append(part)
+            current = []
+            continue
+
+        current.append(char)
+
+    part = "".join(current).strip()
+    if part:
+        attributes.append(part)
+
+    return attributes
+
+
+def _normalize_hls_codecs_value(value):
+    if len(value) < 2 or not value.startswith('"') or not value.endswith('"'):
+        return value
+
+    codecs = ",".join(codec.strip() for codec in value[1:-1].split(",") if codec.strip())
+    return f'"{codecs}"'
+
+
+def _prepare_hls_master_for_cast(text):
+    if "#EXT-X-STREAM-INF" not in text:
+        return text
+
+    output = []
+
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        if stripped.startswith("#EXT-X-MEDIA") and (
+            "TYPE=CLOSED-CAPTIONS" in stripped or "TYPE=SUBTITLES" in stripped
+        ):
+            continue
+
+        if not stripped.startswith("#EXT-X-STREAM-INF:"):
+            output.append(line)
+            continue
+
+        prefix, raw_attributes = line.split(":", 1)
+        attributes = []
+        has_codecs = False
+
+        for attribute in _split_hls_attribute_list(raw_attributes):
+            if "=" not in attribute:
+                attributes.append(attribute)
+                continue
+
+            key, value = attribute.split("=", 1)
+            key = key.strip()
+
+            if key in {"PROGRAM-ID", "CLOSED-CAPTIONS", "SUBTITLES"}:
+                continue
+
+            if key == "CODECS":
+                has_codecs = True
+                value = _normalize_hls_codecs_value(value.strip())
+
+            attributes.append(f"{key}={value.strip()}")
+
+        if not has_codecs:
+            attributes.append('CODECS="avc1.4d401f,mp4a.40.2"')
+
+        output.append(f"{prefix}:{','.join(attributes)}")
+
+    return "\n".join(output)
+
+
 def _is_live_hls_media_playlist(text):
     return (
         "#EXTINF" in text
@@ -765,6 +845,8 @@ def handle_proxy(request, url, referer, cast=False):
         source_text = _filter_hls_master_by_max_bitrate(text, max_bitrate)
         if _is_pluto_hls_url(effective_url):
             source_text = _strip_hls_subtitle_tracks(source_text)
+        if cast:
+            source_text = _prepare_hls_master_for_cast(source_text)
         source_text = _prepare_hls_media_playlist(source_text, effective_url, cast=cast)
         content = _rewrite_hls_manifest(
             source_text,

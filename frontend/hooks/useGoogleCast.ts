@@ -229,6 +229,8 @@ export function useGoogleCast({
     const [deviceName, setDeviceName] = useState<string | null>(null)
     const lastLoadKeyRef = useRef<string | null>(null)
     const loadSequenceRef = useRef(0)
+    const pendingCastLoadRef = useRef<CastLoadOptions | null>(null)
+    const castLoadLoopRef = useRef<Promise<boolean> | null>(null)
     const remotePlayerRef = useRef<cast.framework.RemotePlayer | null>(null)
     const remoteControllerRef = useRef<cast.framework.RemotePlayerController | null>(null)
     const mediaStatusUnsubscribeRef = useRef<(() => void) | null>(null)
@@ -248,7 +250,7 @@ export function useGoogleCast({
         mediaStatusUnsubscribeRef.current = null
     }, [])
 
-    const loadLiveMedia = useCallback(async ({ channel, streamUrl, programName }: CastLoadOptions) => {
+    const performCastMediaLoad = useCallback(async ({ channel, streamUrl, programName }: CastLoadOptions) => {
         const castApi = getCast()
         const chromeCast = getChromeCast()
         const session = castApi?.framework.CastContext.getInstance().getCurrentSession()
@@ -363,12 +365,52 @@ export function useGoogleCast({
                 }
                 console.error("Failed to load Cast media:", err)
                 setError("cast-load-failed")
+                setSessionState("disconnected")
+                setHasDvr(false)
+                setDeviceName(null)
+                clearMediaStatusListener()
+                clearCastChannelId()
+                onCastEnded?.()
+
+                try {
+                    await session.endSession(true)
+                } catch (stopErr) {
+                    console.warn("Failed to stop Cast session after media load failure:", stopErr)
+                }
             } else {
                 console.debug("Ignored stale Cast media load failure:", err)
             }
             return false
         }
-    }, [clearMediaStatusListener])
+    }, [clearMediaStatusListener, onCastEnded])
+
+    const loadLiveMedia = useCallback(async (options: CastLoadOptions) => {
+        pendingCastLoadRef.current = options
+
+        if (castLoadLoopRef.current) {
+            return castLoadLoopRef.current
+        }
+
+        const loadLoop = (async () => {
+            let result = false
+
+            while (pendingCastLoadRef.current) {
+                const nextLoad = pendingCastLoadRef.current
+                pendingCastLoadRef.current = null
+                result = await performCastMediaLoad(nextLoad)
+            }
+
+            return result
+        })()
+
+        castLoadLoopRef.current = loadLoop
+
+        try {
+            return await loadLoop
+        } finally {
+            castLoadLoopRef.current = null
+        }
+    }, [performCastMediaLoad])
 
     const loadCurrentMedia = useCallback(async () => {
         const currentChannel = channelRef.current
@@ -410,6 +452,8 @@ export function useGoogleCast({
         setHasDvr(false)
         loadSequenceRef.current += 1
         lastLoadKeyRef.current = null
+        pendingCastLoadRef.current = null
+        castLoadLoopRef.current = null
         clearMediaStatusListener()
         clearCastChannelId()
         onCastEnded?.()
@@ -493,6 +537,8 @@ export function useGoogleCast({
                     setDeviceName(null)
                     loadSequenceRef.current += 1
                     lastLoadKeyRef.current = null
+                    pendingCastLoadRef.current = null
+                    castLoadLoopRef.current = null
                     clearMediaStatusListener()
                     clearCastChannelId()
                     onCastEnded?.()
