@@ -83,11 +83,6 @@ const buildCastImageUrl = (logo: string) => {
     return resolveAbsoluteUrl(`/ch/${logo}`)
 }
 
-const shouldUseVpnProxy = (channel: Channel) => {
-    const channelId = channel.channelID || channel.id || ""
-    return channel.linkDetails?.vpn || channel.module === "kan-vod" || channelId.startsWith("ch_11")
-}
-
 const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
@@ -184,10 +179,7 @@ const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, chan
         return resolveAbsoluteUrl(castSourceUrl)
     }
 
-    const useVpnProxy = shouldUseVpnProxy(channel)
-    const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy"
-    const vpnParam = useVpnProxy ? "&vpn=true" : ""
-    const proxyPath = `${proxyEndpoint}?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`
+    const proxyPath = `/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`
 
     return resolveCastApiUrl(proxyPath)
 }
@@ -281,15 +273,10 @@ export function useGoogleCast({
         if (castContentType === "application/x-mpegURL") {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
-            const tsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.TS
-            const tsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.MPEG2_TS
 
             if ((isBrightcoveStream(streamUrl) || isFmp4HlsStream(streamUrl, channel)) && hlsSegmentFormat && hlsVideoSegmentFormat) {
                 mediaInfo.hlsSegmentFormat = hlsSegmentFormat
                 mediaInfo.hlsVideoSegmentFormat = hlsVideoSegmentFormat
-            } else if (tsSegmentFormat && tsVideoSegmentFormat) {
-                mediaInfo.hlsSegmentFormat = tsSegmentFormat
-                mediaInfo.hlsVideoSegmentFormat = tsVideoSegmentFormat
             }
         }
 

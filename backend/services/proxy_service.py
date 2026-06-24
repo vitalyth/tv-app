@@ -214,6 +214,11 @@ def _is_redge_live_hls_url(url):
     return "redge.media" in host and ("/livehls/" in path or ".livx/" in path)
 
 
+def _is_pluto_hls_url(url):
+    host = urlparse(url).netloc.lower()
+    return "pluto.tv" in host or "plutotv.net" in host
+
+
 def _default_max_bitrate_for_request(request, url):
     requested_max_bitrate = _proxy_query_max_bitrate(request)
     if requested_max_bitrate:
@@ -256,19 +261,6 @@ def _response_metadata_headers(upstream):
 
 
 def _stream_response(upstream, content_type, cast=False):
-    # Cast requires full buffered response with known Content-Length
-    if cast:
-        content = upstream.content
-        headers = _response_metadata_headers(upstream)
-        headers["Content-Length"] = str(len(content))
-        upstream.close()
-        return Response(
-            content=content,
-            status_code=upstream.status_code,
-            media_type=content_type,
-            headers=_response_headers(headers)
-        )
-
     def generate():
         try:
             for chunk in upstream.iter_content(chunk_size=1024 * 64):
@@ -771,7 +763,8 @@ def handle_proxy(request, url, referer, cast=False):
     proxy_url = _request_public_proxy_url(request)
     try:
         source_text = _filter_hls_master_by_max_bitrate(text, max_bitrate)
-        source_text = _strip_hls_subtitle_tracks(source_text)
+        if _is_pluto_hls_url(effective_url):
+            source_text = _strip_hls_subtitle_tracks(source_text)
         source_text = _prepare_hls_media_playlist(source_text, effective_url, cast=cast)
         content = _rewrite_hls_manifest(
             source_text,
