@@ -13,7 +13,7 @@ import { Tv } from "lucide-react";
 
 const SECS_PER_HOUR = 3600;
 const INITIAL_HOURS_BACK = 1;
-const INITIAL_HOURS_FORWARD = 12;
+const INITIAL_HOURS_FORWARD = 5;
 
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
     const byKey = new Map<string, Program>();

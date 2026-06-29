@@ -15,6 +15,7 @@ export interface Program {
   end: number
   name: string
   description: string
+  image?: string
 }
 
 export interface Channel {

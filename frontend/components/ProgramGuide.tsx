@@ -38,7 +38,7 @@ type PositionedGuideRow = GuideRow & {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CELL_W = 200;       // px per hour
+const CELL_W = 300;       // px per hour
 const CELL_H = 60;        // px per channel row
 const SECTION_H = 34;     // px per channel group header
 const CHAN_W = "var(--guide-channel-width, 130px)"; // channel column width
@@ -46,7 +46,7 @@ const HEAD_H = 48;        // header height
 const SECS_PER_HOUR = 3600;
 const PX_PER_SEC = CELL_W / SECS_PER_HOUR;
 const HOURS_BACK = 1;
-const HOURS_FORWARD = 12;
+const HOURS_FORWARD = 5;
 const DEFAULT_CHANNEL_W = 130;
 const LAZY_EDGE_THRESHOLD = 260;
 const LAZY_EXPAND_HOURS = 12;
@@ -124,6 +124,28 @@ function formatGuideDate(ts: number): string {
     });
 }
 
+function resolveProgramImage(program: Program): string {
+    const image = program.image || "";
+
+    if (!image) {
+        return "";
+    }
+
+    if (image.startsWith("http://") || image.startsWith("https://")) {
+        return image;
+    }
+
+    if (image.startsWith("//")) {
+        return `https:${image}`;
+    }
+
+    if (image.startsWith("/")) {
+        return image;
+    }
+
+    return image;
+}
+
 // ─── Program Cell ─────────────────────────────────────────────────────────────
 
 function isProgramLive(program: Program, nowSec: number): boolean {
@@ -136,6 +158,7 @@ const ProgramCell = memo(function ProgramCell({
     guideStart,  // unix seconds
     guideEnd,    // unix seconds
     nowSec,
+    pxPerSec,
     isPlayingProgram,
     onClick,
     didDrag,
@@ -145,6 +168,7 @@ const ProgramCell = memo(function ProgramCell({
     guideStart: number;
     guideEnd: number;
     nowSec: number;
+    pxPerSec: number;
     isPlayingProgram: boolean;
     onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
     didDrag: React.MutableRefObject<boolean>;
@@ -162,7 +186,7 @@ const ProgramCell = memo(function ProgramCell({
         const viewportHeight = window.innerHeight;
         const margin = 12;
         const tooltipWidth = Math.min(288, viewportWidth * 0.8);
-        const tooltipHeight = 220;
+        const tooltipHeight = 360;
         const offset = 8;
         const preferredLeft = clientX + offset;
         const preferredTop = clientY + offset;
@@ -187,19 +211,22 @@ const ProgramCell = memo(function ProgramCell({
     const visEnd = Math.min(program.end, guideEnd);
     if (visEnd <= visStart) return null;
 
-    const width = Math.max((visEnd - visStart) * PX_PER_SEC - 3, 20);
+    const width = Math.max((visEnd - visStart) * pxPerSec - 3, 20);
     // RTL: right = distance from right edge of grid
-    const right = (guideEnd - visEnd) * PX_PER_SEC;
+    const right = (guideEnd - visEnd) * pxPerSec;
 
     //const now = Math.floor(Date.now() / 1000);
     //const isLive = now >= program.start && now < program.end;
     const isLive = isProgramLive(program, nowSec);
+    const programImage = resolveProgramImage(program);
+    const showInlineImage = Boolean(programImage && width >= 76);
+    const leadingOffsetClass = showInlineImage ? "pl-16" : "";
 
     return (
         <div
             ref={cellRef}
             className={`
-        absolute top-1.5 rounded-lg border px-2 py-1 cursor-pointer select-none
+        absolute top-1.5 rounded-lg border cursor-pointer select-none overflow-hidden
         transition-all duration-150
         ${isPlayingProgram
                     ? "bg-emerald-900/95 border-emerald-300/80 ring-2 ring-emerald-300/70 shadow-lg shadow-emerald-950/60"
@@ -233,7 +260,22 @@ const ProgramCell = memo(function ProgramCell({
             }}
             aria-current={isPlayingProgram ? "true" : undefined}
         >
-            <div className="flex items-start gap-1 h-full overflow-hidden">
+            {showInlineImage && (
+                <div className="absolute left-0 top-0 h-full w-20 overflow-hidden" aria-hidden="true">
+                    <img
+                        src={programImage}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                        style={{
+                            WebkitMaskImage: "linear-gradient(to right, black 0%, black 50%, rgb(0 0 0 / 0.55) 72%, rgb(0 0 0 / 0.12) 90%, transparent 100%)",
+                            maskImage: "linear-gradient(to right, black 0%, black 50%, rgb(0 0 0 / 0.55) 72%, rgb(0 0 0 / 0.12) 90%, transparent 100%)",
+                        }}
+                        onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
+                    />
+                </div>
+            )}
+            <div className={`flex h-full flex-row-reverse items-start gap-1.5 overflow-hidden px-2 py-1 text-right ${leadingOffsetClass}`}>
                 {isPlayingProgram ? (
                     <span className="shrink-0 mt-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400 text-emerald-950">
                         <Play className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
@@ -241,7 +283,7 @@ const ProgramCell = memo(function ProgramCell({
                 ) : isLive && (
                     <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
                 )}
-                <div className="overflow-hidden">
+                <div className="min-w-0 flex-1 overflow-hidden" dir="rtl">
                     <p className="text-xs font-semibold text-white truncate leading-tight">{program.name}</p>
                     <p className="text-[10px] text-zinc-400 mt-0.5 truncate">
                         {formatTime(program.start)} – {formatTime(program.end)}
@@ -256,6 +298,15 @@ const ProgramCell = memo(function ProgramCell({
                     style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
                     role="tooltip"
                 >
+                    {programImage && (
+                        <img
+                            src={programImage}
+                            alt=""
+                            className="mb-2 h-28 w-full rounded-md bg-muted object-cover"
+                            loading="lazy"
+                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
+                        />
+                    )}
                     <div className="mb-2 flex items-start justify-between gap-3 border-b border-border/70 pb-2">
                         <div className="min-w-0">
                             <p className="line-clamp-2 text-sm font-bold leading-5 text-foreground">{program.name}</p>
@@ -283,6 +334,7 @@ const ProgramCell = memo(function ProgramCell({
         prev.channel === next.channel &&
         prev.guideStart === next.guideStart &&
         prev.guideEnd === next.guideEnd &&
+        prev.pxPerSec === next.pxPerSec &&
         prev.isPlayingProgram === next.isPlayingProgram &&
         prev.onClick === next.onClick &&
         prev.didDrag === next.didDrag &&
@@ -315,6 +367,7 @@ function ProgramGuide({
     const scrollTopStart = useRef(0);
     const previousGuideStartRef = useRef<number | null>(null);
     const lastRangeRequestRef = useRef<string | null>(null);
+    const initialScrollMetricsRef = useRef({ nowRight: 0, totalGridW: 0 });
     const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
 
     /*
@@ -379,6 +432,8 @@ function ProgramGuide({
     }, []);
 
     const nowSec = useNowSec();
+    const cellW = CELL_W;
+    const pxPerSec = PX_PER_SEC;
 
     const visibleChannels = useMemo(() => uniqueChannelsByIndex(channels), [channels]);
     const channelsByIndex = useMemo(() => groupChannelsByIndex(sourceChannels), [sourceChannels]);
@@ -429,7 +484,7 @@ function ProgramGuide({
         const start = guideStartSec ?? fallbackStart;
         const end = guideEndSec ?? fallbackEnd;
 
-        const w = (end - start) * PX_PER_SEC;
+        const w = (end - start) * pxPerSec;
         const h = guideRows.reduce((height, row) => height + row.height, 0);
 
         // Hour labels: every whole hour between start and end
@@ -441,18 +496,15 @@ function ProgramGuide({
                 minute: "2-digit",
                 hour12: false,
             });
-            const isMidnight = date.getHours() === 0;
 
             labels.push({
                 ts,
-                label: isMidnight
-                    ? `${date.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" })} ${timeLabel}`
-                    : timeLabel,
+                label: timeLabel,
             });
         }
 
         // nowRight: px from right edge of grid to now line
-        const nowRight = Math.round((end - nowSec) * PX_PER_SEC);
+        const nowRight = Math.round((end - nowSec) * pxPerSec);
 
         return {
             guideStart: start,
@@ -463,7 +515,11 @@ function ProgramGuide({
             hourLabels: labels,
             nowRight,
         };
-    }, [guideEndSec, guideRows, guideStartSec, nowSec]);
+    }, [guideEndSec, guideRows, guideStartSec, nowSec, pxPerSec]);
+
+    useEffect(() => {
+        initialScrollMetricsRef.current = { nowRight, totalGridW };
+    }, [nowRight, totalGridW]);
 
     const updateVisibleDateLabel = useCallback(() => {
         if (!mainRef.current) {
@@ -473,23 +529,23 @@ function ProgramGuide({
 
         const channelW = getGuideChannelWidth();
         const visibleProgramLeft = Math.max(0, mainRef.current.scrollLeft - channelW);
-        const visibleTs = guideStart + Math.round(visibleProgramLeft / PX_PER_SEC);
+        const visibleTs = guideStart + Math.round(visibleProgramLeft / pxPerSec);
 
         setVisibleDateLabel(formatGuideDate(visibleTs));
-    }, [guideStart]);
+    }, [guideStart, pxPerSec]);
 
     useEffect(() => {
         const previousGuideStart = previousGuideStartRef.current;
 
         if (previousGuideStart !== null && guideStart < previousGuideStart && mainRef.current) {
-            const addedWidth = (previousGuideStart - guideStart) * PX_PER_SEC;
+            const addedWidth = (previousGuideStart - guideStart) * pxPerSec;
             mainRef.current.scrollLeft += addedWidth;
         }
 
         previousGuideStartRef.current = guideStart;
         lastRangeRequestRef.current = `${guideStart}:${guideEnd}`;
         requestAnimationFrame(updateVisibleDateLabel);
-    }, [guideEnd, guideStart, updateVisibleDateLabel]);
+    }, [guideEnd, guideStart, pxPerSec, updateVisibleDateLabel]);
 
     const requestGuideRange = useCallback(
         (range: { start: number; end: number }) => {
@@ -544,20 +600,22 @@ function ProgramGuide({
     const mainCallbackRef = useCallback(
         (node: HTMLDivElement | null) => {
             (mainRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+
             if (node && !didScrollRef.current) {
                 requestAnimationFrame(() => {
                     const visibleW = node.clientWidth;
                     const channelW = getGuideChannelWidth();
                     const visibleProgramW = Math.max(0, visibleW - channelW);
-                    const nowX = totalGridW - nowRight;
+                    const { nowRight: initialNowRight, totalGridW: initialTotalGridW } = initialScrollMetricsRef.current;
+                    const nowX = initialTotalGridW - initialNowRight;
                     const target = nowX - visibleProgramW * 0.7;
-                    const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
+                    const maxScrollLeft = Math.max(0, channelW + initialTotalGridW - visibleW);
                     node.scrollLeft = Math.max(0, Math.min(target, maxScrollLeft));
                     didScrollRef.current = true;
                 });
             }
         },
-        [nowRight, totalGridW]
+        []
     );
 
     const scrollToNow = useCallback(() => {
@@ -565,11 +623,11 @@ function ProgramGuide({
         const visibleW = mainRef.current.clientWidth;
         const channelW = getGuideChannelWidth();
         const nowX = totalGridW - nowRight;
-        const target = nowX - CELL_W;
+        const target = nowX - cellW;
         const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
         const clamped = Math.max(0, Math.min(target, maxScrollLeft));
         mainRef.current.scrollTo({ left: clamped, behavior: "smooth" });
-    }, [nowRight, totalGridW]);
+    }, [cellW, nowRight, totalGridW]);
 
     return (
         <div className="h-full w-full bg-background flex flex-col font-sans overflow-hidden">
@@ -607,13 +665,13 @@ function ProgramGuide({
                                 {visibleDateLabel}
                             </div>
                             {hourLabels.map(({ ts, label }) => {
-                                const left = (ts - guideStart) * PX_PER_SEC;
+                                const left = (ts - guideStart) * pxPerSec;
 
                                 return (
                                     <div
                                         key={ts}
                                         className="absolute top-5 flex items-center pr-2 px-2 text-xs font-bold text-zinc-300 tracking-wider border-r border-zinc-800"
-                                        style={{ left, width: CELL_W, height: HEAD_H - 20 }}
+                                        style={{ left, width: cellW, height: HEAD_H - 20 }}
                                     >
                                         {label}
                                     </div>
@@ -778,7 +836,7 @@ function ProgramGuide({
                             <div
                                 key={ts}
                                 className="absolute top-0 bottom-0 border-r border-zinc-800/40"
-                                style={{ right: (guideEnd - ts) * PX_PER_SEC }}
+                                style={{ right: (guideEnd - ts) * pxPerSec }}
                             />
                         ))}
 
@@ -844,6 +902,7 @@ function ProgramGuide({
                                                 guideStart={guideStart}
                                                 guideEnd={guideEnd}
                                                 nowSec={nowSec}
+                                                pxPerSec={pxPerSec}
                                                 isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
                                                 onClick={onProgramClick}
                                                 didDrag={didDrag}

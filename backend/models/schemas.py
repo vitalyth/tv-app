@@ -6,6 +6,7 @@ class Program(BaseModel):
     end: int
     name: str
     description: str
+    image: Optional[str] = None
 
 class Channel(BaseModel):
     id: Optional[str] = None

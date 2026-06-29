@@ -4,6 +4,7 @@ import os
 import traceback
 from pathlib import Path
 
+from epg_parsers.c14 import parse_c14_epg
 from epg_parsers.common import dedupe_and_sort_programs, merge_existing_with_new_programs, write_json
 from epg_parsers.i24 import parse_i24_epg
 from epg_parsers.tv10 import parse_tv10_epg
@@ -11,8 +12,11 @@ from epg_parsers.knesset import parse_knesset_epg
 from epg_parsers.walla33 import parse_walla33_epg
 from epg_parsers.kabbalah import parse_kabbalah_epg
 from epg_parsers.hidabroot import parse_hidabroot_epg
+from epg_parsers.kan33 import enrich_program_images_from_vod, parse_kan11_epg, parse_kan23_epg, parse_kan33_epg
 from epg_parsers.kan_worldcup import parse_kan_worldcup_epg
+from epg_parsers.mako12 import parse_mako12_epg
 from epg_parsers.radio100fm import parse_100fm_epg
+from epg_parsers.reshet13 import parse_reshet13_epg
 from epg_parsers.ftv import parse_ftv_epg
 from epg_parsers.local_us import LOCAL_US_CHANNEL_IDS, parse_local_us_epg
 from epg_parsers.isramedia import (
@@ -25,6 +29,11 @@ from epg_parsers.isramedia import (
     parse_channel_id,
     parse_channel_options,
 )
+
+KAN_MIN_PROGRAMS = 10
+MAKO12_MIN_PROGRAMS = 10
+RESHET13_MIN_PROGRAMS = 10
+C14_MIN_PROGRAMS = 10
 
 
 def combine_epg_directory(output_dir: Path) -> dict:
@@ -58,6 +67,47 @@ def read_existing_channel_programs(output_dir: Path, channel_id: str) -> list[di
 def merge_with_existing_channel(output_dir: Path, channel_id: str, new_programs: list[dict]) -> list[dict]:
     existing_programs = read_existing_channel_programs(output_dir, channel_id)
     return merge_existing_with_new_programs(existing_programs, new_programs)
+
+
+def parse_isramedia_channel(
+    channel_id: str,
+    url: str,
+    days: str,
+    available_days: bool,
+    filename_mode: str,
+) -> list[dict]:
+    first_html = fetch_html(url)
+    channels = parse_channel_options(first_html, url)
+    channel = next(
+        (
+            item
+            for item in channels
+            if get_output_channel_id(item["id"], filename_mode) == channel_id
+            or item["id"] == channel_id
+        ),
+        None,
+    )
+
+    if not channel:
+        return []
+
+    return parse_channel_epg(channel["url"], days, available_days)
+
+
+def has_reliable_kan_schedule(programs: list[dict]) -> bool:
+    return len(programs) >= KAN_MIN_PROGRAMS
+
+
+def has_reliable_mako12_schedule(programs: list[dict]) -> bool:
+    return len(programs) >= MAKO12_MIN_PROGRAMS
+
+
+def has_reliable_reshet13_schedule(programs: list[dict]) -> bool:
+    return len(programs) >= RESHET13_MIN_PROGRAMS
+
+
+def has_reliable_c14_schedule(programs: list[dict]) -> bool:
+    return len(programs) >= C14_MIN_PROGRAMS
 
 
 def main():
@@ -139,12 +189,116 @@ def main():
 
     if args.channel:
         output_path = output_dir / f"{args.channel}.json"
+        replace_existing_programs = False
 
         if args.channel == "10":
             programs = parse_tv10_epg()
 
+        elif args.channel == "12":
+            try:
+                programs = parse_mako12_epg()
+            except Exception as ex:
+                print(f"Failed parsing Keshet 12 official schedule: {ex}")
+                programs = []
+
+            if not has_reliable_mako12_schedule(programs):
+                print(
+                    f"Keshet 12 official schedule returned only {len(programs)} programs; "
+                    "using fallback EPG source"
+                )
+                programs = parse_isramedia_channel(
+                    "12",
+                    args.url,
+                    args.days,
+                    args.available_days,
+                    args.filename_mode,
+                )
+            else:
+                replace_existing_programs = True
+
+        elif args.channel == "13":
+            try:
+                programs = parse_reshet13_epg()
+            except Exception as ex:
+                print(f"Failed parsing Reshet 13 official schedule: {ex}")
+                programs = []
+
+            if not has_reliable_reshet13_schedule(programs):
+                print(
+                    f"Reshet 13 official schedule returned only {len(programs)} programs; "
+                    "using fallback EPG source"
+                )
+                programs = parse_isramedia_channel(
+                    "13",
+                    args.url,
+                    args.days,
+                    args.available_days,
+                    args.filename_mode,
+                )
+            else:
+                replace_existing_programs = True
+
+        elif args.channel == "14":
+            try:
+                programs = parse_c14_epg()
+            except Exception as ex:
+                print(f"Failed parsing Channel 14 official schedule: {ex}")
+                programs = []
+
+            if not has_reliable_c14_schedule(programs):
+                print(
+                    f"Channel 14 official schedule returned only {len(programs)} programs; "
+                    "using fallback EPG source"
+                )
+                programs = parse_isramedia_channel(
+                    "14",
+                    args.url,
+                    args.days,
+                    args.available_days,
+                    args.filename_mode,
+                )
+            else:
+                replace_existing_programs = True
+
         elif args.channel == "33":
-            programs = parse_walla33_epg()
+            try:
+                programs = parse_kan33_epg()
+            except Exception as ex:
+                print(f"Failed parsing Kan 33 official schedule: {ex}")
+                programs = []
+
+            if not has_reliable_kan_schedule(programs):
+                print(
+                    f"Kan 33 official schedule returned only {len(programs)} programs; "
+                    "using Walla fallback EPG source"
+                )
+                programs = parse_walla33_epg()
+                replace_existing_programs = True
+            else:
+                replace_existing_programs = True
+
+        elif args.channel == "23":
+            try:
+                programs = parse_kan23_epg()
+            except Exception as ex:
+                print(f"Failed parsing Kan 23 official schedule: {ex}")
+                programs = []
+
+            if not has_reliable_kan_schedule(programs):
+                print(
+                    f"Kan 23 official schedule returned only {len(programs)} programs; "
+                    "using fallback EPG source"
+                )
+                programs = parse_isramedia_channel(
+                    "23",
+                    args.url,
+                    args.days,
+                    args.available_days,
+                    args.filename_mode,
+                )
+                replace_existing_programs = True
+            else:
+                replace_existing_programs = True
 
         elif args.channel == "66":
             programs = parse_kabbalah_epg()
@@ -160,6 +314,30 @@ def main():
 
         elif args.channel == "i24news":
             programs = parse_i24_epg()
+
+        elif args.channel == "11":
+            try:
+                programs = parse_kan11_epg()
+            except Exception as ex:
+                print(f"Failed parsing Kan 11 official schedule: {ex}")
+                programs = []
+
+            if not has_reliable_kan_schedule(programs):
+                print(
+                    f"Kan 11 official schedule returned only {len(programs)} programs; "
+                    "using fallback EPG source"
+                )
+                programs = parse_isramedia_channel(
+                    "11",
+                    args.url,
+                    args.days,
+                    args.available_days,
+                    args.filename_mode,
+                )
+                replace_existing_programs = True
+            else:
+                replace_existing_programs = True
+            programs = enrich_program_images_from_vod(programs)
 
         elif args.channel == "kan_worldcup":
             programs = parse_kan_worldcup_epg()
@@ -191,7 +369,10 @@ def main():
         if args.channel == "ftv" and not programs:
             programs = []
         else:
-            programs = merge_with_existing_channel(output_dir, args.channel, programs)
+            if not replace_existing_programs:
+                programs = merge_with_existing_channel(output_dir, args.channel, programs)
+            if args.channel == "11":
+                programs = enrich_program_images_from_vod(programs)
         write_json(programs, output_path)
         print(f"Wrote {len(programs)} programs to {output_path}")
 
@@ -249,6 +430,97 @@ def main():
             write_json(tv10_programs, output_path)
             print(f"Wrote {len(tv10_programs)} programs to {output_path}")
 
+        print("\nParsing Keshet 12 from official Mako schedule")
+        try:
+            mako12_programs = parse_mako12_epg()
+        except Exception as ex:
+            failed_channels.append("12")
+            print(f"Failed parsing Keshet 12: {ex}")
+            traceback.print_exc()
+            mako12_programs = combined_epg.get("12", []) or read_existing_channel_programs(output_dir, "12")
+
+        if not has_reliable_mako12_schedule(mako12_programs):
+            print(
+                f"Keshet 12 official schedule returned only {len(mako12_programs)} programs; "
+                "keeping existing parsed programs"
+            )
+            mako12_programs = combined_epg.get("12", []) or read_existing_channel_programs(output_dir, "12")
+
+        combined_epg["12"] = mako12_programs
+        if mako12_programs:
+            output_path = output_dir / "12.json"
+            write_json(mako12_programs, output_path)
+            print(f"Wrote {len(mako12_programs)} programs to {output_path}")
+
+        print("\nParsing Reshet 13 from official schedule")
+        try:
+            reshet13_programs = parse_reshet13_epg()
+        except Exception as ex:
+            failed_channels.append("13")
+            print(f"Failed parsing Reshet 13: {ex}")
+            traceback.print_exc()
+            reshet13_programs = combined_epg.get("13", []) or read_existing_channel_programs(output_dir, "13")
+
+        if not has_reliable_reshet13_schedule(reshet13_programs):
+            print(
+                f"Reshet 13 official schedule returned only {len(reshet13_programs)} programs; "
+                "keeping existing parsed programs"
+            )
+            reshet13_programs = combined_epg.get("13", []) or read_existing_channel_programs(output_dir, "13")
+
+        combined_epg["13"] = reshet13_programs
+        if reshet13_programs:
+            output_path = output_dir / "13.json"
+            write_json(reshet13_programs, output_path)
+            print(f"Wrote {len(reshet13_programs)} programs to {output_path}")
+
+        print("\nParsing Channel 14 from official schedule")
+        try:
+            c14_programs = parse_c14_epg()
+        except Exception as ex:
+            failed_channels.append("14")
+            print(f"Failed parsing Channel 14: {ex}")
+            traceback.print_exc()
+            c14_programs = combined_epg.get("14", []) or read_existing_channel_programs(output_dir, "14")
+
+        if not has_reliable_c14_schedule(c14_programs):
+            print(
+                f"Channel 14 official schedule returned only {len(c14_programs)} programs; "
+                "keeping existing parsed programs"
+            )
+            c14_programs = combined_epg.get("14", []) or read_existing_channel_programs(output_dir, "14")
+
+        combined_epg["14"] = c14_programs
+        if c14_programs:
+            output_path = output_dir / "14.json"
+            write_json(c14_programs, output_path)
+            print(f"Wrote {len(c14_programs)} programs to {output_path}")
+
+        print("\nParsing Kan 11 from official schedule")
+        try:
+            kan11_programs = parse_kan11_epg()
+        except Exception as ex:
+            failed_channels.append("11")
+            print(f"Failed parsing Kan 11: {ex}")
+            traceback.print_exc()
+            kan11_programs = read_existing_channel_programs(output_dir, "11")
+            if not kan11_programs:
+                kan11_programs = combined_epg.get("11", [])
+
+        if not has_reliable_kan_schedule(kan11_programs):
+            print(
+                f"Kan 11 official schedule returned only {len(kan11_programs)} programs; "
+                "keeping existing parsed programs"
+            )
+            kan11_programs = combined_epg.get("11", []) or read_existing_channel_programs(output_dir, "11")
+
+        kan11_programs = enrich_program_images_from_vod(kan11_programs)
+        combined_epg["11"] = kan11_programs
+        if kan11_programs:
+            output_path = output_dir / "11.json"
+            write_json(kan11_programs, output_path)
+            print(f"Wrote {len(kan11_programs)} programs to {output_path}")
+
         print("\nParsing Knesset from official site")
         try:
             knesset_programs = parse_knesset_epg()
@@ -267,23 +539,58 @@ def main():
             write_json(knesset_programs, output_path)
             print(f"Wrote {len(knesset_programs)} programs to {output_path}")
 
-        print("\nParsing Walla 33 from TV Guide")
+        print("\nParsing Kan 33 from official schedule")
         try:
-            walla33_programs = parse_walla33_epg()
+            kan33_programs = parse_kan33_epg()
         except Exception as ex:
             failed_channels.append("33")
-            print(f"Failed parsing Walla 33: {ex}")
+            print(f"Failed parsing Kan 33: {ex}")
             traceback.print_exc()
-            walla33_programs = read_existing_channel_programs(output_dir, "33")
-            if not walla33_programs:
-                walla33_programs = []
+            kan33_programs = read_existing_channel_programs(output_dir, "33")
+            if not kan33_programs:
+                kan33_programs = combined_epg.get("33", [])
 
-        walla33_programs = merge_with_existing_channel(output_dir, "33", walla33_programs)
-        combined_epg["33"] = walla33_programs
-        if walla33_programs:
+        if not has_reliable_kan_schedule(kan33_programs):
+            print(
+                f"Kan 33 official schedule returned only {len(kan33_programs)} programs; "
+                "using Walla fallback EPG source"
+            )
+            try:
+                kan33_programs = parse_walla33_epg()
+            except Exception as ex:
+                print(f"Failed parsing Walla 33 fallback: {ex}")
+                traceback.print_exc()
+                kan33_programs = combined_epg.get("33", []) or read_existing_channel_programs(output_dir, "33")
+
+        combined_epg["33"] = kan33_programs
+        if kan33_programs:
             output_path = output_dir / "33.json"
-            write_json(walla33_programs, output_path)
-            print(f"Wrote {len(walla33_programs)} programs to {output_path}")
+            write_json(kan33_programs, output_path)
+            print(f"Wrote {len(kan33_programs)} programs to {output_path}")
+
+        print("\nParsing Kan 23 from official schedule")
+        try:
+            kan23_programs = parse_kan23_epg()
+        except Exception as ex:
+            failed_channels.append("23")
+            print(f"Failed parsing Kan 23: {ex}")
+            traceback.print_exc()
+            kan23_programs = read_existing_channel_programs(output_dir, "23")
+            if not kan23_programs:
+                kan23_programs = combined_epg.get("23", [])
+
+        if not has_reliable_kan_schedule(kan23_programs):
+            print(
+                f"Kan 23 official schedule returned only {len(kan23_programs)} programs; "
+                "keeping existing parsed programs"
+            )
+            kan23_programs = combined_epg.get("23", []) or read_existing_channel_programs(output_dir, "23")
+
+        combined_epg["23"] = kan23_programs
+        if kan23_programs:
+            output_path = output_dir / "23.json"
+            write_json(kan23_programs, output_path)
+            print(f"Wrote {len(kan23_programs)} programs to {output_path}")
 
         print("\nParsing Kabbalah from Walla TV Guide")
         try:

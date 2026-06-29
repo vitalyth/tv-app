@@ -79,6 +79,31 @@ def extract_items(data):
     return data.get("items") or data.get("programmes") or data.get("data") or []
 
 
+def first_image_url(item: dict) -> str:
+    images = item.get("images") or {}
+    if not isinstance(images, dict):
+        return ""
+
+    for image_group in images.values():
+        if not isinstance(image_group, list):
+            continue
+
+        for image in image_group:
+            if not isinstance(image, dict):
+                continue
+
+            url = image.get("url") or image.get("templateUrl") or ""
+            if not url:
+                continue
+
+            url = url.replace("{height:393}", "393").replace("{width:704}", "704")
+            if url.startswith("//"):
+                return f"https:{url}"
+            return url
+
+    return ""
+
+
 def parse_tv10_epg(today: datetime | None = None, days: int = DEFAULT_DAYS) -> list[dict]:
     now = today or datetime.now(APP_TZ)
     first_day_start = get_current_schedule_day_start(now)
@@ -108,6 +133,7 @@ def parse_tv10_epg(today: datetime | None = None, days: int = DEFAULT_DAYS) -> l
                     "end": parse_dt(end_time),
                     "name": title,
                     "description": item.get("description") or item.get("summary") or "",
+                    "image": first_image_url(item),
                 }
             )
 
