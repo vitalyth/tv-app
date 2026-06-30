@@ -7,7 +7,9 @@ from pathlib import Path
 from epg_parsers.c14 import parse_c14_epg
 from epg_parsers.common import dedupe_and_sort_programs, merge_existing_with_new_programs, write_json
 from epg_parsers.i24 import parse_i24_epg
+from epg_parsers.keshet_thematic import KESHET_THEMATIC_CHANNELS, parse_keshet_thematic_epg
 from epg_parsers.tv10 import parse_tv10_epg
+from epg_parsers.nine_tv import parse_9tv_epg
 from epg_parsers.knesset import parse_knesset_epg
 from epg_parsers.walla33 import parse_walla33_epg
 from epg_parsers.kabbalah import parse_kabbalah_epg
@@ -18,6 +20,12 @@ from epg_parsers.mako12 import parse_mako12_epg
 from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.reshet13 import parse_reshet13_epg
 from epg_parsers.ftv import parse_ftv_epg
+from epg_parsers.fishenzon import (
+    FISHENZON_CHANNEL_IDS,
+    fetch_fishenzon_epg,
+    fetch_reshet_program_image_map,
+    parse_fishenzon_channel_epg,
+)
 from epg_parsers.local_us import LOCAL_US_CHANNEL_IDS, parse_local_us_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
@@ -34,6 +42,7 @@ KAN_MIN_PROGRAMS = 10
 MAKO12_MIN_PROGRAMS = 10
 RESHET13_MIN_PROGRAMS = 10
 C14_MIN_PROGRAMS = 10
+NINE_TV_MIN_PROGRAMS = 10
 
 
 def combine_epg_directory(output_dir: Path) -> dict:
@@ -110,6 +119,10 @@ def has_reliable_c14_schedule(programs: list[dict]) -> bool:
     return len(programs) >= C14_MIN_PROGRAMS
 
 
+def has_reliable_9tv_schedule(programs: list[dict]) -> bool:
+    return len(programs) >= NINE_TV_MIN_PROGRAMS
+
+
 def main():
     parser = argparse.ArgumentParser(description="Parse EPG sources into JSON.")
     parser.add_argument("--url", default=DEFAULT_URL, help="IsraMedia EPG page URL")
@@ -157,7 +170,7 @@ def main():
     )
     parser.add_argument(
         "--channel",
-        help="Parse only one specific channel id, for example: 33, 10, 66, 99, i24news, i24newsen, i24newsfr, i24newsar, 11.",
+        help="Parse only one specific channel id, for example: 33, 10, 66, 99, i24news, i24newsen, i24newsfr, i24newsar, 11, 24, 13comedy, erets.",
     )
     args = parser.parse_args()
 
@@ -193,6 +206,28 @@ def main():
 
         if args.channel == "10":
             programs = parse_tv10_epg()
+
+        elif args.channel == "9":
+            try:
+                programs = parse_9tv_epg()
+            except Exception as ex:
+                print(f"Failed parsing 9TV official schedule: {ex}")
+                programs = []
+
+            if not has_reliable_9tv_schedule(programs):
+                print(
+                    f"9TV official schedule returned only {len(programs)} programs; "
+                    "using fallback EPG source"
+                )
+                programs = parse_isramedia_channel(
+                    "9",
+                    args.url,
+                    args.days,
+                    args.available_days,
+                    args.filename_mode,
+                )
+            else:
+                replace_existing_programs = True
 
         elif args.channel == "12":
             try:
@@ -354,6 +389,14 @@ def main():
         elif args.channel == "ftv":
             programs = parse_ftv_epg()
 
+        elif args.channel in FISHENZON_CHANNEL_IDS:
+            programs = parse_fishenzon_channel_epg(args.channel)
+            replace_existing_programs = True
+
+        elif args.channel in KESHET_THEMATIC_CHANNELS:
+            programs = parse_keshet_thematic_epg(args.channel)
+            replace_existing_programs = True
+
         elif args.channel in LOCAL_US_CHANNEL_IDS:
             programs = parse_local_us_epg(args.channel)
 
@@ -483,6 +526,56 @@ def main():
             write_json(reshet13_programs, output_path)
             print(f"Wrote {len(reshet13_programs)} programs to {output_path}")
 
+        print("\nParsing Fishenzon channels")
+        try:
+            fishenzon_epg = fetch_fishenzon_epg()
+        except Exception as ex:
+            fishenzon_epg = {}
+            print(f"Failed fetching Fishenzon EPG: {ex}")
+            traceback.print_exc()
+
+        try:
+            reshet_image_map = fetch_reshet_program_image_map()
+        except Exception as ex:
+            reshet_image_map = {}
+            print(f"Failed fetching Reshet 13 program images: {ex}")
+            traceback.print_exc()
+
+        for fishenzon_channel_id in FISHENZON_CHANNEL_IDS:
+            try:
+                channel_programs = parse_fishenzon_channel_epg(
+                    fishenzon_channel_id,
+                    fishenzon_epg,
+                    reshet_image_map,
+                )
+            except Exception as ex:
+                failed_channels.append(fishenzon_channel_id)
+                print(f"Failed parsing {fishenzon_channel_id}: {ex}")
+                traceback.print_exc()
+                channel_programs = read_existing_channel_programs(output_dir, fishenzon_channel_id)
+
+            combined_epg[fishenzon_channel_id] = channel_programs
+            if channel_programs:
+                output_path = output_dir / f"{fishenzon_channel_id}.json"
+                write_json(channel_programs, output_path)
+                print(f"Wrote {len(channel_programs)} programs to {output_path}")
+
+        print("\nParsing Keshet thematic live channels")
+        for keshet_channel_id in KESHET_THEMATIC_CHANNELS:
+            try:
+                channel_programs = parse_keshet_thematic_epg(keshet_channel_id)
+            except Exception as ex:
+                failed_channels.append(keshet_channel_id)
+                print(f"Failed parsing {keshet_channel_id}: {ex}")
+                traceback.print_exc()
+                channel_programs = read_existing_channel_programs(output_dir, keshet_channel_id)
+
+            combined_epg[keshet_channel_id] = channel_programs
+            if channel_programs:
+                output_path = output_dir / f"{keshet_channel_id}.json"
+                write_json(channel_programs, output_path)
+                print(f"Wrote {len(channel_programs)} programs to {output_path}")
+
         print("\nParsing Channel 14 from official schedule")
         try:
             c14_programs = parse_c14_epg()
@@ -504,6 +597,28 @@ def main():
             output_path = output_dir / "14.json"
             write_json(c14_programs, output_path)
             print(f"Wrote {len(c14_programs)} programs to {output_path}")
+
+        print("\nParsing 9TV from official schedule")
+        try:
+            nine_tv_programs = parse_9tv_epg()
+        except Exception as ex:
+            failed_channels.append("9")
+            print(f"Failed parsing 9TV: {ex}")
+            traceback.print_exc()
+            nine_tv_programs = combined_epg.get("9", []) or read_existing_channel_programs(output_dir, "9")
+
+        if not has_reliable_9tv_schedule(nine_tv_programs):
+            print(
+                f"9TV official schedule returned only {len(nine_tv_programs)} programs; "
+                "keeping existing parsed programs"
+            )
+            nine_tv_programs = combined_epg.get("9", []) or read_existing_channel_programs(output_dir, "9")
+
+        combined_epg["9"] = nine_tv_programs
+        if nine_tv_programs:
+            output_path = output_dir / "9.json"
+            write_json(nine_tv_programs, output_path)
+            print(f"Wrote {len(nine_tv_programs)} programs to {output_path}")
 
         print("\nParsing Kan 11 from official schedule")
         try:

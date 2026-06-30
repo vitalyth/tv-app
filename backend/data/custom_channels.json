@@ -57,6 +57,16 @@
     "tvgID": "i24newsar"
   },
   {
+    "id": "ch_erets",
+    "channelID": "ch_erets",
+    "tvgID": "erets"
+  },
+  {
+    "id": "ch_savri",
+    "channelID": "ch_savri",
+    "tvgID": "savri"
+  },
+  {
     "id": "kan_worldcup",
     "channelID": "kan_worldcup",
     "name": "כאן מונדיאל",
