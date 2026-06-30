@@ -86,23 +86,23 @@ export const ChannelsFilters = ({
     }, [updateScrollHint]);
 
     return (
-        <div className="flex flex-col sm:flex-row gap-4 mb-2">
-            <div className="relative min-w-60 flex-1 max-w-md">
+        <div className="flex min-h-0 flex-row items-center justify-between gap-2">
+            <div className="relative w-36 shrink-0 sm:min-w-60 sm:flex-1 sm:max-w-md">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                     placeholder="חפש ערוץ..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pr-10 bg-card border-border"
+                    className="h-8 pr-10 text-xs bg-card border-border sm:h-9 sm:text-sm"
                 />
             </div>
 
-            <div className="flex min-w-0 flex-1 gap-2 pb-2">
+            <div className="flex min-w-0 flex-1 gap-2 sm:justify-start">
                 <Button
                     onClick={handleRefresh}
                     size="sm"
                     disabled={isRefreshing}
-                    className="shrink-0 whitespace-nowrap bg-emerald-600 text-white hover:bg-emerald-500"
+                    className="h-8 shrink-0 whitespace-nowrap px-2 text-xs bg-emerald-600 text-white hover:bg-emerald-500 sm:h-9 sm:px-3 sm:text-sm"
                 >
                     <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                     רענן
@@ -137,7 +137,7 @@ export const ChannelsFilters = ({
                                 }
                                 size="sm"
                                 onClick={() => setSelectedCategory("")}
-                                className="whitespace-nowrap"
+                                className="h-8 whitespace-nowrap px-2 text-xs sm:h-9 sm:px-3 sm:text-sm"
                             >
                                 הכל
                             </Button>
@@ -149,7 +149,7 @@ export const ChannelsFilters = ({
                                     }
                                     size="sm"
                                     onClick={() => setSelectedCategory(key)}
-                                    className="whitespace-nowrap"
+                                    className="h-8 whitespace-nowrap px-2 text-xs sm:h-9 sm:px-3 sm:text-sm"
                                 >
                                     {label}
                                 </Button>

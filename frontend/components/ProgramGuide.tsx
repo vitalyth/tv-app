@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
-import { createPortal } from "react-dom";
 import { Clock3, ListVideo, Play } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { CHANNEL_REGION_SECTIONS, getChannelRegion } from "@/lib/channel-regions";
@@ -39,7 +38,7 @@ type PositionedGuideRow = GuideRow & {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CELL_W = 300;       // px per hour
-const CELL_H = 60;        // px per channel row
+const CELL_H = 72;        // px per channel row
 const SECTION_H = 34;     // px per channel group header
 const CHAN_W = "var(--guide-channel-width, 130px)"; // channel column width
 const HEAD_H = 48;        // header height
@@ -59,7 +58,7 @@ function formatTime(ts: number): string {
     return new Date(ts * 1000).toLocaleTimeString("he-IL", {
         hour: "2-digit",
         minute: "2-digit",
-        hour12: false,
+        hourCycle: "h23",
     });
 }
 
@@ -173,39 +172,6 @@ const ProgramCell = memo(function ProgramCell({
     onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
     didDrag: React.MutableRefObject<boolean>;
 }) {
-    const [hovered, setHovered] = useState(false);
-    const [tooltipPosition, setTooltipPosition] = useState({ left: 0, top: 0 });
-    const cellRef = useRef<HTMLDivElement>(null);
-
-    const updateTooltipPosition = useCallback((clientX: number, clientY: number) => {
-        if (typeof window === "undefined") {
-            return;
-        }
-
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        const margin = 12;
-        const tooltipWidth = Math.min(288, viewportWidth * 0.8);
-        const tooltipHeight = 360;
-        const offset = 8;
-        const preferredLeft = clientX + offset;
-        const preferredTop = clientY + offset;
-
-        setTooltipPosition({
-            left: Math.max(margin, Math.min(preferredLeft, viewportWidth - tooltipWidth - margin)),
-            top: Math.max(margin, Math.min(preferredTop, viewportHeight - tooltipHeight - margin)),
-        });
-    }, []);
-
-    const updateTooltipFromCell = useCallback(() => {
-        if (!cellRef.current) {
-            return;
-        }
-
-        const rect = cellRef.current.getBoundingClientRect();
-        updateTooltipPosition(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    }, [updateTooltipPosition]);
-
     // Clamp to visible window
     const visStart = Math.max(program.start, guideStart);
     const visEnd = Math.min(program.end, guideEnd);
@@ -224,32 +190,17 @@ const ProgramCell = memo(function ProgramCell({
 
     return (
         <div
-            ref={cellRef}
             className={`
         absolute top-1.5 rounded-lg border cursor-pointer select-none overflow-hidden
-        transition-all duration-150
+        transition-all duration-150 hover:brightness-125 hover:z-50 hover:shadow-xl focus-visible:brightness-125 focus-visible:z-50 focus-visible:shadow-xl
         ${isPlayingProgram
                     ? "bg-emerald-900/95 border-emerald-300/80 ring-2 ring-emerald-300/70 shadow-lg shadow-emerald-950/60"
                     : isLive
                         ? "bg-primary/20 border-primary/60 shadow-lg shadow-primary/10"
                         : "bg-zinc-800/90 border-zinc-700/50"
                 }
-        ${hovered ? "brightness-125 z-50 shadow-xl" : ""}
             `}
             style={{ right: right + 2, width, height: CELL_H - 12 }}
-            onMouseEnter={(event) => {
-                updateTooltipPosition(event.clientX, event.clientY);
-                setHovered(true);
-            }}
-            onMouseMove={(event) => updateTooltipPosition(event.clientX, event.clientY)}
-            onFocus={() => {
-                updateTooltipFromCell();
-                setHovered(true);
-            }}
-            onMouseLeave={() => {
-                setHovered(false);
-            }}
-            onBlur={() => setHovered(false)}
             onClick={(e) => {
                 if (didDrag.current) {
                     e.preventDefault();
@@ -259,6 +210,15 @@ const ProgramCell = memo(function ProgramCell({
                 onClick?.(program, channel, isLive)
             }}
             aria-current={isPlayingProgram ? "true" : undefined}
+            tabIndex={0}
+            onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") {
+                    return;
+                }
+
+                event.preventDefault();
+                onClick?.(program, channel, isLive);
+            }}
         >
             {showInlineImage && (
                 <div className="absolute left-0 top-0 h-full w-20 overflow-hidden" aria-hidden="true">
@@ -290,42 +250,6 @@ const ProgramCell = memo(function ProgramCell({
                     </p>
                 </div>
             </div>
-
-            {hovered && typeof document !== "undefined" && createPortal(
-                <div
-                    dir="rtl"
-                    className="pointer-events-none fixed z-[200] w-72 max-w-[min(18rem,80vw)] rounded-lg border border-primary/35 bg-popover/98 p-3 text-right shadow-2xl shadow-black/35 ring-1 ring-white/5"
-                    style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
-                    role="tooltip"
-                >
-                    {programImage && (
-                        <img
-                            src={programImage}
-                            alt=""
-                            className="mb-2 h-28 w-full rounded-md bg-muted object-cover"
-                            loading="lazy"
-                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
-                        />
-                    )}
-                    <div className="mb-2 flex items-start justify-between gap-3 border-b border-border/70 pb-2">
-                        <div className="min-w-0">
-                            <p className="line-clamp-2 text-sm font-bold leading-5 text-foreground">{program.name}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                                {formatTime(program.start)} - {formatTime(program.end)}
-                            </p>
-                        </div>
-                        {isLive && (
-                            <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                                עכשיו
-                            </span>
-                        )}
-                    </div>
-                    <p className="line-clamp-5 text-xs leading-5 text-muted-foreground">
-                        {program.description || "אין תיאור זמין לתוכנית הזו."}
-                    </p>
-                </div>,
-                document.body
-            )}
         </div>
     );
 }, (prev, next) => {
@@ -494,7 +418,7 @@ function ProgramGuide({
             const timeLabel = date.toLocaleTimeString("he-IL", {
                 hour: "2-digit",
                 minute: "2-digit",
-                hour12: false,
+                hourCycle: "h23",
             });
 
             labels.push({

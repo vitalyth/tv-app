@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 from epg_parsers.common import dedupe_and_sort_programs, fill_short_gaps
 
 
-I24_SCHEDULES_URL = "https://api.i24news.tv/v2/he/schedules"
+I24_SCHEDULES_URL_TEMPLATE = "https://api.i24news.tv/v2/{language}/schedules"
+I24_SCHEDULES_URL = I24_SCHEDULES_URL_TEMPLATE.format(language="he")
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 APP_TZ = ZoneInfo("America/New_York")
 
@@ -37,8 +38,27 @@ def program_description(show: dict) -> str:
     return "\n".join(text.strip() for text in texts if text.strip())
 
 
-def parse_i24_epg(url: str = I24_SCHEDULES_URL, today: datetime | None = None) -> list[dict]:
-    schedules = fetch_json(url)
+def program_image(show: dict) -> str:
+    image = show.get("image") or {}
+    if not isinstance(image, dict):
+        return ""
+
+    href = image.get("href") or ""
+    if not isinstance(href, str):
+        return ""
+
+    if href.startswith("//"):
+        return f"https:{href}"
+
+    return href
+
+
+def parse_i24_epg(
+    url: str | None = None,
+    today: datetime | None = None,
+    language: str = "he",
+) -> list[dict]:
+    schedules = fetch_json(url or I24_SCHEDULES_URL_TEMPLATE.format(language=language))
     today = today or datetime.now(APP_TZ)
     week_start = today.date() - timedelta(days=(today.weekday() + 1) % 7)
 
@@ -61,6 +81,7 @@ def parse_i24_epg(url: str = I24_SCHEDULES_URL, today: datetime | None = None) -
                 "end": int(end_dt.timestamp()),
                 "name": title,
                 "description": program_description(show),
+                "image": program_image(show),
             }
         )
 

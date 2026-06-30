@@ -22,11 +22,13 @@ export default function ProgramDisplay({
   const start = startDate.toLocaleTimeString("he-IL", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   })
 
   const end = endDate.toLocaleTimeString("he-IL", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
   })
 
   return (

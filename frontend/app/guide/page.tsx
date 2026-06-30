@@ -9,11 +9,19 @@ import { Channel, Program } from "@/lib/channels-data";
 import { channelService } from "@/lib/services/channel-service";
 import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-import { Tv } from "lucide-react";
+import { X } from "lucide-react";
 
 const SECS_PER_HOUR = 3600;
 const INITIAL_HOURS_BACK = 1;
 const INITIAL_HOURS_FORWARD = 5;
+
+function formatProgramTime(ts: number): string {
+    return new Date(ts * 1000).toLocaleTimeString("he-IL", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+    });
+}
 
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
     const byKey = new Map<string, Program>();
@@ -40,10 +48,14 @@ function mergeEpg(
 
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
-    const { currentChannel, play } = useFloatingPlayer();
+    const { currentChannel, play, close } = useFloatingPlayer();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [epgByChannel, setEpgByChannel] = useState<Record<string, Program[]>>({});
+    const [selectedProgram, setSelectedProgram] = useState<{
+        program: Program;
+        channel: Channel;
+    } | null>(null);
     const initialNowRef = useRef(Math.floor(Date.now() / 1000));
     const [guideRange, setGuideRange] = useState(() => {
         const start = Math.floor(
@@ -106,6 +118,19 @@ export default function GuidePage() {
 
     const filteredChannels = useFilteredChannels(channelsWithEpg, searchQuery, selectedCategory);
 
+    useEffect(() => {
+        const className = "floating-player-mobile-portrait-active";
+        const isProgramDetailsOpen = Boolean(selectedProgram);
+
+        document.documentElement.classList.toggle(className, isProgramDetailsOpen);
+
+        return () => {
+            if (isProgramDetailsOpen) {
+                document.documentElement.classList.remove(className);
+            }
+        };
+    }, [selectedProgram]);
+
     // Restore Cast session after page refresh:
     // When channels finish loading, check if there was an active Cast session
     // before the refresh. If so, reselect the channel so the Cast SDK can
@@ -126,11 +151,19 @@ export default function GuidePage() {
         play(ch);
     }, [play]);
 
-    const handleProgramClick = useCallback((_program: Program, ch: Channel) => {
-        playChannel(ch);
-    }, [playChannel]);
+    const handleProgramClick = useCallback((program: Program, ch: Channel, isLive: boolean) => {
+        if (isLive) {
+            setSelectedProgram(null);
+            playChannel(ch);
+            return;
+        }
+
+        close();
+        setSelectedProgram({ program, channel: ch });
+    }, [close, playChannel]);
 
     const handleChannelClick = useCallback((ch: Channel) => {
+        setSelectedProgram(null);
         playChannel(ch);
     }, [playChannel]);
 
@@ -141,29 +174,14 @@ export default function GuidePage() {
 
     return (
         <div className="h-full flex flex-col bg-background">
-            <div className="mb-4 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                    <div className="flex min-w-0 items-start gap-3">
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
-                            <Tv className="h-6 w-6 text-primary" />
-                        </div>
-
-                        <div className="min-w-0">
-                            <h1 className="truncate text-2xl font-bold text-foreground">שידורים חיים</h1>
-                            <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-                                <span>לוח שידורים וערוצים חיים</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <ChannelsFilters
-                        searchQuery={searchQuery}
-                        setSearchQuery={setSearchQuery}
-                        selectedCategory={selectedCategory}
-                        setSelectedCategory={setSelectedCategory}
-                        onRefresh={refreshNow}
-                    />
-                </div>
+            <div className="mb-2 shrink-0 border-b border-border bg-background px-4 py-2">
+                <ChannelsFilters
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    selectedCategory={selectedCategory}
+                    setSelectedCategory={setSelectedCategory}
+                    onRefresh={refreshNow}
+                />
             </div>
 
             <main className="flex-1 flex flex-col w-full px-4 pb-4 overflow-hidden">
@@ -182,6 +200,39 @@ export default function GuidePage() {
                     />
                 </div>
             </main>
+            {selectedProgram && (
+                <div dir="rtl" className="player-overlay program-details-overlay border border-border bg-background">
+                    <button
+                        type="button"
+                        onClick={() => setSelectedProgram(null)}
+                        className="absolute left-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white transition-colors hover:bg-black/65"
+                        aria-label="סגור פרטי תוכנית"
+                    >
+                        <X className="h-4 w-4" aria-hidden="true" />
+                    </button>
+
+                    {selectedProgram.program.image && (
+                        <img
+                            src={selectedProgram.program.image}
+                            alt=""
+                            className="h-1/2 w-full bg-muted object-cover"
+                            loading="lazy"
+                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
+                        />
+                    )}
+                    <div className={`${selectedProgram.program.image ? "h-1/2" : "h-full"} overflow-y-auto p-4 text-right`}>
+                        <h2 className="text-base font-bold leading-6 text-foreground sm:text-xl sm:leading-7">
+                            {selectedProgram.program.name}
+                        </h2>
+                        <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+                            {selectedProgram.channel.name} · {formatProgramTime(selectedProgram.program.start)} - {formatProgramTime(selectedProgram.program.end)}
+                        </p>
+                        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">
+                            {selectedProgram.program.description || "אין תיאור זמין לתוכנית הזו."}
+                        </p>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

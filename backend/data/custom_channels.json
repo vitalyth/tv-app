@@ -42,6 +42,21 @@
     }
   },
   {
+    "id": "ch_i24newsen",
+    "channelID": "ch_i24newsen",
+    "tvgID": "i24newsen"
+  },
+  {
+    "id": "ch_i24newsfr",
+    "channelID": "ch_i24newsfr",
+    "tvgID": "i24newsfr"
+  },
+  {
+    "id": "ch_i24newsar",
+    "channelID": "ch_i24newsar",
+    "tvgID": "i24newsar"
+  },
+  {
     "id": "kan_worldcup",
     "channelID": "kan_worldcup",
     "name": "כאן מונדיאל",

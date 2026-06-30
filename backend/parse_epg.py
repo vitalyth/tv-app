@@ -157,7 +157,7 @@ def main():
     )
     parser.add_argument(
         "--channel",
-        help="Parse only one specific channel id, for example: 33, 10, 66, 99, i24news, 11.",
+        help="Parse only one specific channel id, for example: 33, 10, 66, 99, i24news, i24newsen, i24newsfr, i24newsar, 11.",
     )
     args = parser.parse_args()
 
@@ -314,6 +314,15 @@ def main():
 
         elif args.channel == "i24news":
             programs = parse_i24_epg()
+
+        elif args.channel == "i24newsen":
+            programs = parse_i24_epg(language="en")
+
+        elif args.channel == "i24newsfr":
+            programs = parse_i24_epg(language="fr")
+
+        elif args.channel == "i24newsar":
+            programs = parse_i24_epg(language="ar")
 
         elif args.channel == "11":
             try:
@@ -647,7 +656,7 @@ def main():
             print(f"Wrote {len(radio100fm_programs)} programs to {output_path}")
 
         if not args.skip_i24:
-            print("\nParsing i24news from official schedule API")
+            print("\nParsing i24news Hebrew from official schedule API")
             try:
                 i24_programs = parse_i24_epg()
             except Exception as ex:
@@ -664,6 +673,60 @@ def main():
                 output_path = output_dir / "i24news.json"
                 write_json(i24_programs, output_path)
                 print(f"Wrote {len(i24_programs)} programs to {output_path}")
+
+            print("\nParsing i24news English from official schedule API")
+            try:
+                i24_en_programs = parse_i24_epg(language="en")
+            except Exception as ex:
+                failed_channels.append("i24newsen")
+                print(f"Failed parsing i24news English: {ex}")
+                traceback.print_exc()
+                i24_en_programs = read_existing_channel_programs(output_dir, "i24newsen")
+                if not i24_en_programs:
+                    i24_en_programs = []
+
+            i24_en_programs = merge_with_existing_channel(output_dir, "i24newsen", i24_en_programs)
+            combined_epg["i24newsen"] = i24_en_programs
+            if i24_en_programs:
+                output_path = output_dir / "i24newsen.json"
+                write_json(i24_en_programs, output_path)
+                print(f"Wrote {len(i24_en_programs)} programs to {output_path}")
+
+            print("\nParsing i24news French from official schedule API")
+            try:
+                i24_fr_programs = parse_i24_epg(language="fr")
+            except Exception as ex:
+                failed_channels.append("i24newsfr")
+                print(f"Failed parsing i24news French: {ex}")
+                traceback.print_exc()
+                i24_fr_programs = read_existing_channel_programs(output_dir, "i24newsfr")
+                if not i24_fr_programs:
+                    i24_fr_programs = []
+
+            i24_fr_programs = merge_with_existing_channel(output_dir, "i24newsfr", i24_fr_programs)
+            combined_epg["i24newsfr"] = i24_fr_programs
+            if i24_fr_programs:
+                output_path = output_dir / "i24newsfr.json"
+                write_json(i24_fr_programs, output_path)
+                print(f"Wrote {len(i24_fr_programs)} programs to {output_path}")
+
+            print("\nParsing i24news Arabic from official schedule API")
+            try:
+                i24_ar_programs = parse_i24_epg(language="ar")
+            except Exception as ex:
+                failed_channels.append("i24newsar")
+                print(f"Failed parsing i24news Arabic: {ex}")
+                traceback.print_exc()
+                i24_ar_programs = read_existing_channel_programs(output_dir, "i24newsar")
+                if not i24_ar_programs:
+                    i24_ar_programs = []
+
+            i24_ar_programs = merge_with_existing_channel(output_dir, "i24newsar", i24_ar_programs)
+            combined_epg["i24newsar"] = i24_ar_programs
+            if i24_ar_programs:
+                output_path = output_dir / "i24newsar.json"
+                write_json(i24_ar_programs, output_path)
+                print(f"Wrote {len(i24_ar_programs)} programs to {output_path}")
 
         print("\nParsing FashionTV from TV guide")
         try:

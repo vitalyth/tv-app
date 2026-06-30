@@ -491,9 +491,9 @@ const LandingPage = () => {
             </h3>
             {program && (
               <p className="mt-1 text-xs text-muted-foreground">
-                {new Date(program.start * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}
+                {new Date(program.start * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}
                 {" - "}
-                {new Date(program.end * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}
+                {new Date(program.end * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}
               </p>
             )}
           </div>
