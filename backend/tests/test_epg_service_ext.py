@@ -17,6 +17,7 @@ class EPGServiceTests(unittest.TestCase):
                         "end": 1_700_001_800,
                         "name": 'News & "Updates"',
                         "description": "Guide <source>",
+                        "image": "https://example.com/program.jpg",
                     }
                 ]
             }
@@ -35,6 +36,7 @@ class EPGServiceTests(unittest.TestCase):
         self.assertEqual("20231114221320 +0000", programme.attrib["start"])
         self.assertEqual("News & \"Updates\"", programme.findtext("./title"))
         self.assertEqual("Guide <source>", programme.findtext("./desc"))
+        self.assertEqual("https://example.com/program.jpg", programme.find("./icon").attrib["src"])
 
 
 if __name__ == "__main__":

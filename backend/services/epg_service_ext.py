@@ -48,6 +48,9 @@ class EPGService:
                 )
                 ElementTree.SubElement(programme, "title").text = str(p.get("name") or "")
                 ElementTree.SubElement(programme, "desc").text = str(p.get("description") or "")
+                image = p.get("image")
+                if isinstance(image, str) and image.strip():
+                    ElementTree.SubElement(programme, "icon", {"src": image.strip()})
 
         return ElementTree.tostring(tv, encoding="utf-8", xml_declaration=True).decode("utf-8")
 
