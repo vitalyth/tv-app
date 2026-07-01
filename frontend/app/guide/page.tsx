@@ -26,6 +26,33 @@ import { useFloatingPlayer } from "@/context/floating-player-context";
 const SECS_PER_HOUR = 3600;
 const INITIAL_HOURS_BACK = 3;
 const INITIAL_HOURS_FORWARD = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MATCH_STOP_WORDS = new Set([
+    "של",
+    "עם",
+    "את",
+    "על",
+    "כל",
+    "לא",
+    "גם",
+    "או",
+    "זה",
+    "זו",
+    "הוא",
+    "היא",
+    "הם",
+    "הן",
+    "יש",
+    "אין",
+    "עוד",
+    "פרק",
+    "עונה",
+    "חדשות",
+    "שידור",
+    "ישיר",
+    "live",
+    "vod",
+]);
 
 function normalizeProgramName(value?: string): string {
     return (value || "")
@@ -36,6 +63,115 @@ function normalizeProgramName(value?: string): string {
         .replace(/\s+/g, " ")
         .trim()
         .toLowerCase();
+}
+
+function tokenizeMatchText(value?: string): string[] {
+    const normalized = normalizeProgramName(value);
+    if (!normalized) return [];
+
+    return Array.from(new Set(
+        normalized
+            .split(" ")
+            .map((token) => token.trim())
+            .filter((token) => token.length >= 2)
+            .filter((token) => !MATCH_STOP_WORDS.has(token))
+            .filter((token) => !/^\d+$/.test(token))
+    ));
+}
+
+function tokenOverlapScore(sourceTokens: string[], targetTokens: string[], maxScore: number): number {
+    if (!sourceTokens.length || !targetTokens.length) return 0;
+
+    const targetSet = new Set(targetTokens);
+    const shared = sourceTokens.filter((token) => targetSet.has(token)).length;
+    if (!shared) return 0;
+
+    const sourceRatio = shared / sourceTokens.length;
+    const targetRatio = shared / targetTokens.length;
+
+    return Math.round(Math.max(sourceRatio, targetRatio) * maxScore);
+}
+
+function parseVodDate(value?: string): Date | null {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric) && numeric > 0) {
+        const timestamp = numeric > 10_000_000_000 ? numeric : numeric * 1000;
+        const date = new Date(timestamp);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const dateMatch = trimmed.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+    if (dateMatch) {
+        const day = Number(dateMatch[1]);
+        const month = Number(dateMatch[2]);
+        const year = Number(dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3]);
+        const date = new Date(year, month - 1, day);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function startOfLocalDay(date: Date): number {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function dateDistanceDaysForValue(program: Program, value?: string): number | null {
+    const vodDate = parseVodDate(value);
+    if (!vodDate) return null;
+
+    const programDate = new Date(program.start * 1000);
+    return Math.abs(startOfLocalDay(programDate) - startOfLocalDay(vodDate)) / DAY_MS;
+}
+
+function programDateKey(program: Program): string {
+    return new Date(program.start * 1000).toLocaleDateString("sv-SE");
+}
+
+function vodMatchCacheKey(program: Program, queries: string[]): string {
+    return [
+        programDateKey(program),
+        normalizeProgramName(program.name),
+        normalizeProgramName(queries.join("|")),
+    ].filter(Boolean).join("::");
+}
+
+function dateDistanceDays(program: Program, item: VodItem): number | null {
+    const sourceTimestamp = (item as VodItem & { sourceTimestamp?: number }).sourceTimestamp;
+    return dateDistanceDaysForValue(program, item.aired || (sourceTimestamp ? String(sourceTimestamp) : ""));
+}
+
+function scoreTextMatch(
+    sourceText: string,
+    targetTexts: string[],
+    exactScore: number,
+    partialScore: number,
+    overlapScore: number
+): number {
+    const source = normalizeProgramName(sourceText);
+    if (!source) return 0;
+
+    const sourceTokens = tokenizeMatchText(source);
+
+    return Math.max(
+        0,
+        ...targetTexts.map((targetText) => {
+            const target = normalizeProgramName(targetText);
+            if (!target) return 0;
+
+            if (target === source) return exactScore;
+            if (source.length >= 8 && target.length >= 8 && (target.includes(source) || source.includes(target))) {
+                return partialScore;
+            }
+
+            return tokenOverlapScore(sourceTokens, tokenizeMatchText(target), overlapScore);
+        })
+    );
 }
 
 function getChannelMatchKeysFromText(value?: string): Set<string> {
@@ -168,29 +304,47 @@ function vodItemToChannel(item: VodItem): Channel {
 function findVodMatchForProgram(program: Program, channel: Channel, vodItems: VodItem[]): VodItem | null {
     const programName = normalizeProgramName(program.name);
     if (!programName) return null;
+    const programDescription = normalizeProgramName(program.description);
 
     const scored = vodItems
         .filter((item) => item.isPlayable && isSameVodChannel(channel, item))
         .map((item) => {
-            const names = [
+            const itemNames = [
                 item.programName,
                 item.episodeName,
                 item.title,
                 item.name,
-            ].map(normalizeProgramName).filter(Boolean);
+            ].filter(Boolean) as string[];
+            const itemDescriptions = [
+                item.episodeDescription,
+                item.programDescription,
+                item.description,
+                item.plot,
+            ].filter(Boolean) as string[];
+            const titleScore = scoreTextMatch(program.name, itemNames, 42, 30, 26);
+            const descriptionScore = programDescription
+                ? scoreTextMatch(program.description, itemDescriptions, 22, 18, 22)
+                : 0;
+            const dateDistance = dateDistanceDays(program, item);
+            const dateScore = dateDistance === null
+                ? 0
+                : dateDistance === 0
+                    ? 24
+                    : dateDistance <= 1
+                        ? 10
+                        : -24;
+            const score = titleScore + descriptionScore + dateScore;
+            const hasTextEvidence = titleScore >= 18 || descriptionScore >= 12;
+            const hasDateConflict = dateDistance !== null && dateDistance > 1;
 
-            let score = 0;
-            if (names.some((name) => name === programName)) score += 8;
-            if (
-                programName.length >= 8 &&
-                names.some((name) => name.length >= 8 && (name.includes(programName) || programName.includes(name)))
-            ) {
-                score += 4;
-            }
-
-            return { item, score };
+            return { item, score, titleScore, descriptionScore, hasTextEvidence, hasDateConflict };
         })
-        .filter(({ score }) => score >= 8)
+        .filter(({ score, titleScore, hasTextEvidence, hasDateConflict }) =>
+            score >= 42 &&
+            hasTextEvidence &&
+            !hasDateConflict &&
+            titleScore >= 12
+        )
         .sort((a, b) => b.score - a.score);
 
     return scored[0]?.item ?? null;
@@ -241,28 +395,66 @@ function getKanVodSearchQueries(program: Program): string[] {
         queries.push("שבע");
     }
 
+    if (!queries.length) {
+        const tokens = tokenizeMatchText(program.name).filter((token) => token.length >= 3);
+        if (normalized.length >= 4) {
+            queries.push(program.name);
+        }
+        if (tokens.length >= 2) {
+            queries.push(tokens.slice(0, 2).join(" "));
+        }
+        if (tokens[0]) {
+            queries.push(tokens[0]);
+        }
+    }
+
     return Array.from(new Set(queries.filter(Boolean)));
 }
 
 function findKanEpisodeMatch(program: Program, series: KanVodSeriesDetails): KanVodEpisode | null {
     const programName = normalizeProgramName(program.name);
-    const kanAliases = getKanVodSearchQueries(program).map(normalizeProgramName);
-    const acceptedNames = [programName, ...kanAliases].filter(Boolean);
-    if (!acceptedNames.length) return null;
+    if (!programName) return null;
 
-    return series.episodes.find((episode) => {
-        const episodeNames = [
-            episode.episodeName,
-            episode.title,
-        ].map(normalizeProgramName).filter(Boolean);
-
-        return episodeNames.some((name) =>
-            acceptedNames.some((accepted) =>
-                name === accepted ||
-                (accepted.length >= 8 && name.includes(accepted))
-            )
+    const scored = series.episodes.map((episode) => {
+        const titleScore = scoreTextMatch(
+            program.name,
+            [episode.episodeName, episode.title, series.title].filter(Boolean) as string[],
+            42,
+            30,
+            26
         );
-    }) ?? null;
+        const descriptionScore = program.description
+            ? scoreTextMatch(
+                program.description,
+                [episode.description, episode.episodeOverview, series.description].filter(Boolean) as string[],
+                22,
+                18,
+                22
+            )
+            : 0;
+        const dateDistance = dateDistanceDaysForValue(program, episode.published || "");
+        const dateScore = dateDistance === null
+            ? 0
+            : dateDistance === 0
+                ? 24
+                : dateDistance <= 1
+                    ? 10
+                    : -24;
+        const score = titleScore + descriptionScore + dateScore;
+        const hasTextEvidence = titleScore >= 18 || descriptionScore >= 12;
+        const hasDateConflict = dateDistance !== null && dateDistance > 1;
+
+        return { episode, score, titleScore, hasTextEvidence, hasDateConflict };
+    })
+        .filter(({ score, titleScore, hasTextEvidence, hasDateConflict }) =>
+            score >= 42 &&
+            titleScore >= 12 &&
+            hasTextEvidence &&
+            !hasDateConflict
+        )
+        .sort((a, b) => b.score - a.score);
+
+    return scored[0]?.episode ?? null;
 }
 
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
@@ -331,7 +523,7 @@ export default function GuidePage() {
 
     const ensureKanVodMatch = useCallback(async (program: Program) => {
         const queries = getKanVodSearchQueries(program);
-        const cacheKey = normalizeProgramName(queries.join("|"));
+        const cacheKey = vodMatchCacheKey(program, queries);
         if (!cacheKey) return null;
 
         if (kanVodMatchCacheRef.current.has(cacheKey)) {
@@ -425,7 +617,8 @@ export default function GuidePage() {
             .flatMap((channel) => channel.programs)
             .filter((program) => program.end <= nowSec)
             .filter((program) => {
-                const cacheKey = normalizeProgramName(getKanVodSearchQueries(program).join("|"));
+                const queries = getKanVodSearchQueries(program);
+                const cacheKey = vodMatchCacheKey(program, queries);
                 return cacheKey && !kanVodMatchCacheRef.current.has(cacheKey);
             })
             .slice(0, 8);
@@ -473,7 +666,7 @@ export default function GuidePage() {
 
             if (isKanChannel(ch)) {
                 const queries = getKanVodSearchQueries(program);
-                const cacheKey = normalizeProgramName(queries.join("|"));
+                const cacheKey = vodMatchCacheKey(program, queries);
                 if (!cacheKey) {
                     showProgramDetails(program, ch);
                     return;
@@ -516,7 +709,7 @@ export default function GuidePage() {
         if (findVodMatchForProgram(program, channel, vodRecentItems)) return true;
 
         const kanCacheKey = isKanChannel(channel)
-            ? normalizeProgramName(getKanVodSearchQueries(program).join("|"))
+            ? vodMatchCacheKey(program, getKanVodSearchQueries(program))
             : "";
         if (kanCacheKey && kanVodProgramKeys.has(kanCacheKey)) return true;
 
