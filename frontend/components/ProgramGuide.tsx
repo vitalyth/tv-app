@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
-import { Clock3, ListVideo, Play } from "lucide-react";
+import { Clock3, ListVideo, Play, Video } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { CHANNEL_REGION_SECTIONS, getChannelRegion } from "@/lib/channel-regions";
 import { useNowSec } from "@/hooks/use-now-sec";
@@ -21,6 +21,7 @@ interface ProgramGuideProps {
     playingChannelIndex?: number | null;
     onChannelClick?: (channel: Channel) => void;
     onProgramClick?: (program: Program, channel: Channel, isLive: boolean) => void;
+    hasVodForProgram?: (program: Program, channel: Channel) => boolean;
     guideStartSec?: number;
     guideEndSec?: number;
     onGuideRangeChange?: (range: { start: number; end: number }) => void;
@@ -159,6 +160,7 @@ const ProgramCell = memo(function ProgramCell({
     nowSec,
     pxPerSec,
     isPlayingProgram,
+    hasVod,
     onClick,
     didDrag,
 }: {
@@ -169,6 +171,7 @@ const ProgramCell = memo(function ProgramCell({
     nowSec: number;
     pxPerSec: number;
     isPlayingProgram: boolean;
+    hasVod: boolean;
     onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
     didDrag: React.MutableRefObject<boolean>;
 }) {
@@ -243,6 +246,15 @@ const ProgramCell = memo(function ProgramCell({
                 ) : isLive && (
                     <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
                 )}
+                {hasVod && !isLive && !isPlayingProgram && (
+                    <span
+                        className="shrink-0 mt-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-cyan-300/15 text-cyan-200 ring-1 ring-cyan-200/35"
+                        title="זמין ב-VOD"
+                        aria-label="זמין ב-VOD"
+                    >
+                        <Video className="h-2.5 w-2.5" aria-hidden="true" />
+                    </span>
+                )}
                 <div className="min-w-0 flex-1 overflow-hidden" dir="rtl">
                     <p className="text-xs font-semibold text-white truncate leading-tight">{program.name}</p>
                     <p className="text-[10px] text-zinc-400 mt-0.5 truncate">
@@ -260,6 +272,7 @@ const ProgramCell = memo(function ProgramCell({
         prev.guideEnd === next.guideEnd &&
         prev.pxPerSec === next.pxPerSec &&
         prev.isPlayingProgram === next.isPlayingProgram &&
+        prev.hasVod === next.hasVod &&
         prev.onClick === next.onClick &&
         prev.didDrag === next.didDrag &&
         isProgramLive(prev.program, prev.nowSec) === isProgramLive(next.program, next.nowSec)
@@ -276,6 +289,7 @@ function ProgramGuide({
     playingChannelIndex,
     onChannelClick,
     onProgramClick,
+    hasVodForProgram,
     guideStartSec,
     guideEndSec,
     onGuideRangeChange,
@@ -291,7 +305,6 @@ function ProgramGuide({
     const scrollTopStart = useRef(0);
     const previousGuideStartRef = useRef<number | null>(null);
     const lastRangeRequestRef = useRef<string | null>(null);
-    const initialScrollMetricsRef = useRef({ nowRight: 0, totalGridW: 0 });
     const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
 
     /*
@@ -441,10 +454,6 @@ function ProgramGuide({
         };
     }, [guideEndSec, guideRows, guideStartSec, nowSec, pxPerSec]);
 
-    useEffect(() => {
-        initialScrollMetricsRef.current = { nowRight, totalGridW };
-    }, [nowRight, totalGridW]);
-
     const updateVisibleDateLabel = useCallback(() => {
         if (!mainRef.current) {
             setVisibleDateLabel(formatGuideDate(guideStart));
@@ -519,28 +528,35 @@ function ProgramGuide({
         maybeLoadMoreForScroll();
     }, [maybeLoadMoreForScroll, updateVisibleDateLabel]);
 
-    // Auto-scroll: position "now" at ~30% from the right on load
+    // Auto-scroll: load the wider range, but initially show one hour before now.
     const didScrollRef = useRef(false);
     const mainCallbackRef = useCallback(
         (node: HTMLDivElement | null) => {
             (mainRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
-
-            if (node && !didScrollRef.current) {
-                requestAnimationFrame(() => {
-                    const visibleW = node.clientWidth;
-                    const channelW = getGuideChannelWidth();
-                    const visibleProgramW = Math.max(0, visibleW - channelW);
-                    const { nowRight: initialNowRight, totalGridW: initialTotalGridW } = initialScrollMetricsRef.current;
-                    const nowX = initialTotalGridW - initialNowRight;
-                    const target = nowX - visibleProgramW * 0.7;
-                    const maxScrollLeft = Math.max(0, channelW + initialTotalGridW - visibleW);
-                    node.scrollLeft = Math.max(0, Math.min(target, maxScrollLeft));
-                    didScrollRef.current = true;
-                });
-            }
         },
         []
     );
+
+    useEffect(() => {
+        if (!mainRef.current || didScrollRef.current || totalGridW <= 0) return;
+
+        const frame = requestAnimationFrame(() => {
+            const node = mainRef.current;
+            if (!node || didScrollRef.current) return;
+
+            const channelW = getGuideChannelWidth();
+            const nowX = totalGridW - nowRight;
+            const target = nowX - cellW;
+            const visibleW = node.clientWidth;
+            const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
+
+            node.scrollLeft = Math.max(0, Math.min(target, maxScrollLeft));
+            didScrollRef.current = true;
+            updateVisibleDateLabel();
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [cellW, nowRight, totalGridW, updateVisibleDateLabel]);
 
     const scrollToNow = useCallback(() => {
         if (!mainRef.current) return;
@@ -828,6 +844,7 @@ function ProgramGuide({
                                                 nowSec={nowSec}
                                                 pxPerSec={pxPerSec}
                                                 isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
+                                                hasVod={hasVodForProgram?.(prog, ch) ?? false}
                                                 onClick={onProgramClick}
                                                 didDrag={didDrag}
                                             />

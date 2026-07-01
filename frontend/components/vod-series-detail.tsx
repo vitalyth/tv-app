@@ -156,7 +156,7 @@ export function VodSeriesFloatingHeader({
   actions: VodDetailAction[];
 }) {
   return (
-    <div className={`fixed left-3 right-3 top-[var(--site-header-height,0px)] z-40 bg-background pb-2 pt-1.5 transition-[opacity,transform] duration-300 sm:left-4 sm:right-4 sm:pt-3 ${
+    <div className={`vod-series-floating-header fixed left-3 right-3 top-[var(--site-header-height,0px)] z-40 bg-background pb-2 pt-1.5 transition-[opacity,transform] duration-300 sm:left-4 sm:right-4 sm:pt-3 ${
       show
         ? "translate-y-0 opacity-100 ease-out"
         : "pointer-events-none -translate-y-3 opacity-0 ease-in"
