@@ -247,7 +247,7 @@ function ShellContent({
                                     <h2 className="text-2xl font-bold leading-8 text-foreground">
                                         {panelTitle}
                                     </h2>
-                                    <p className="mt-3 line-clamp-5 whitespace-pre-line text-sm leading-6 text-muted-foreground">
+                                    <p className="program-side-panel__description mt-3 line-clamp-5 whitespace-pre-line text-sm leading-6 text-muted-foreground">
                                         {panelDescription}
                                     </p>
                                 </div>

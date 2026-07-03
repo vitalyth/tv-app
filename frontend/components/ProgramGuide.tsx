@@ -36,6 +36,11 @@ type PositionedGuideRow = GuideRow & {
     height: number;
 };
 
+type VisibleViewport = {
+    top: number;
+    height: number;
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CELL_W = 300;       // px per hour
@@ -52,6 +57,7 @@ const LAZY_EDGE_THRESHOLD = 260;
 const LAZY_EXPAND_HOURS = 12;
 const MAX_HOURS_BACK = 24;
 const MAX_HOURS_FORWARD = 48;
+const ROW_OVERSCAN_PX = CELL_H * 4;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -305,7 +311,12 @@ function ProgramGuide({
     const scrollTopStart = useRef(0);
     const previousGuideStartRef = useRef<number | null>(null);
     const lastRangeRequestRef = useRef<string | null>(null);
+    const scrollFrameRef = useRef<number | null>(null);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const maybeLoadMoreForScrollRef = useRef<(() => void) | null>(null);
     const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
+    const lastVisibleDateLabelRef = useRef(visibleDateLabel);
+    const [visibleViewport, setVisibleViewport] = useState<VisibleViewport>({ top: 0, height: 900 });
 
     /*
     useEffect(() => {
@@ -454,18 +465,63 @@ function ProgramGuide({
         };
     }, [guideEndSec, guideRows, guideStartSec, nowSec, pxPerSec]);
 
+    const visibleGuideRows = useMemo(() => {
+        const visibleTop = visibleViewport.top;
+        const visibleBottom = visibleTop + visibleViewport.height;
+
+        return guideRows.filter((row) => row.top + row.height >= visibleTop && row.top <= visibleBottom);
+    }, [guideRows, visibleViewport]);
+
     const updateVisibleDateLabel = useCallback(() => {
         if (!mainRef.current) {
-            setVisibleDateLabel(formatGuideDate(guideStart));
+            const fallbackLabel = formatGuideDate(guideStart);
+            if (lastVisibleDateLabelRef.current !== fallbackLabel) {
+                lastVisibleDateLabelRef.current = fallbackLabel;
+                setVisibleDateLabel(fallbackLabel);
+            }
             return;
         }
 
         const channelW = getGuideChannelWidth();
         const visibleProgramLeft = Math.max(0, mainRef.current.scrollLeft - channelW);
         const visibleTs = guideStart + Math.round(visibleProgramLeft / pxPerSec);
+        const nextLabel = formatGuideDate(visibleTs);
 
-        setVisibleDateLabel(formatGuideDate(visibleTs));
+        if (lastVisibleDateLabelRef.current !== nextLabel) {
+            lastVisibleDateLabelRef.current = nextLabel;
+            setVisibleDateLabel(nextLabel);
+        }
     }, [guideStart, pxPerSec]);
+
+    const updateVisibleViewport = useCallback(() => {
+        const node = mainRef.current;
+        if (!node) return;
+
+        const nextTop = Math.max(0, node.scrollTop - HEAD_H - ROW_OVERSCAN_PX);
+        const nextHeight = node.clientHeight + ROW_OVERSCAN_PX * 2;
+
+        setVisibleViewport((previous) => {
+            if (
+                Math.abs(previous.top - nextTop) < CELL_H / 2 &&
+                Math.abs(previous.height - nextHeight) < CELL_H / 2
+            ) {
+                return previous;
+            }
+
+            return { top: nextTop, height: nextHeight };
+        });
+    }, []);
+
+    const scheduleViewportUpdate = useCallback(() => {
+        if (scrollFrameRef.current !== null) return;
+
+        scrollFrameRef.current = requestAnimationFrame(() => {
+            scrollFrameRef.current = null;
+            updateVisibleViewport();
+            updateVisibleDateLabel();
+            maybeLoadMoreForScrollRef.current?.();
+        });
+    }, [updateVisibleDateLabel, updateVisibleViewport]);
 
     useEffect(() => {
         const previousGuideStart = previousGuideStartRef.current;
@@ -477,8 +533,13 @@ function ProgramGuide({
 
         previousGuideStartRef.current = guideStart;
         lastRangeRequestRef.current = `${guideStart}:${guideEnd}`;
-        requestAnimationFrame(updateVisibleDateLabel);
-    }, [guideEnd, guideStart, pxPerSec, updateVisibleDateLabel]);
+        const frame = requestAnimationFrame(() => {
+            updateVisibleViewport();
+            updateVisibleDateLabel();
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [guideEnd, guideStart, pxPerSec, updateVisibleDateLabel, updateVisibleViewport]);
 
     const requestGuideRange = useCallback(
         (range: { start: number; end: number }) => {
@@ -523,19 +584,40 @@ function ProgramGuide({
         }
     }, [guideEnd, guideStart, nowSec, onGuideRangeChange, requestGuideRange]);
 
+    useEffect(() => {
+        maybeLoadMoreForScrollRef.current = maybeLoadMoreForScroll;
+    }, [maybeLoadMoreForScroll]);
+
     const handleGuideScroll = useCallback(() => {
-        updateVisibleDateLabel();
-        maybeLoadMoreForScroll();
-    }, [maybeLoadMoreForScroll, updateVisibleDateLabel]);
+        scheduleViewportUpdate();
+    }, [scheduleViewportUpdate]);
 
     // Auto-scroll: load the wider range, but initially show one hour before now.
     const didScrollRef = useRef(false);
     const mainCallbackRef = useCallback(
         (node: HTMLDivElement | null) => {
+            resizeObserverRef.current?.disconnect();
+            resizeObserverRef.current = null;
             (mainRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+
+            if (node && typeof ResizeObserver !== "undefined") {
+                resizeObserverRef.current = new ResizeObserver(scheduleViewportUpdate);
+                resizeObserverRef.current.observe(node);
+                scheduleViewportUpdate();
+            }
         },
-        []
+        [scheduleViewportUpdate]
     );
+
+    useEffect(() => {
+        return () => {
+            resizeObserverRef.current?.disconnect();
+            if (scrollFrameRef.current !== null) {
+                cancelAnimationFrame(scrollFrameRef.current);
+                scrollFrameRef.current = null;
+            }
+        };
+    }, []);
 
     useEffect(() => {
         if (!mainRef.current || didScrollRef.current || totalGridW <= 0) return;
@@ -552,11 +634,12 @@ function ProgramGuide({
 
             node.scrollLeft = Math.max(0, Math.min(target, maxScrollLeft));
             didScrollRef.current = true;
+            updateVisibleViewport();
             updateVisibleDateLabel();
         });
 
         return () => cancelAnimationFrame(frame);
-    }, [cellW, nowRight, totalGridW, updateVisibleDateLabel]);
+    }, [cellW, nowRight, totalGridW, updateVisibleDateLabel, updateVisibleViewport]);
 
     const scrollToNow = useCallback(() => {
         if (!mainRef.current) return;
@@ -654,13 +737,14 @@ function ProgramGuide({
                         className="sticky left-0 z-[70] border-r border-zinc-800 bg-zinc-900"
                         style={{ width: CHAN_W, height: totalGridH }}
                     >
-                        {guideRows.map((row) => {
+                        <div className="relative h-full w-full">
+                        {visibleGuideRows.map((row) => {
                             if (row.type === "section") {
                                 return (
                                     <div
                                         key={row.key}
-                                        className="guide-section-row flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-3"
-                                        style={{ height: row.height }}
+                                        className="guide-section-row absolute inset-x-0 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-3"
+                                        style={{ top: row.top, height: row.height }}
                                     >
                                         <span className="truncate text-xs font-bold text-zinc-200">{row.label}</span>
                                         <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-bold text-zinc-400">
@@ -682,14 +766,14 @@ function ProgramGuide({
                                 <div
                                     key={ch.id}
                                     className={`
-                                        guide-channel-cell relative flex items-center gap-2 px-3 border-b border-zinc-800/70
+                                        guide-channel-cell absolute inset-x-0 flex items-center gap-2 px-3 border-b border-zinc-800/70
                                         transition-colors cursor-pointer
                                         ${isPlayingChannel
                                             ? "bg-emerald-950/80 shadow-[inset_-3px_0_0_rgb(52_211_153)] hover:bg-emerald-900/70"
                                             : "hover:bg-zinc-800"
                                         }
                                     `}
-                                    style={{ height: row.height }}
+                                    style={{ top: row.top, height: row.height }}
                                     onClick={() => onChannelClick?.(ch)}
                                     aria-current={isPlayingChannel ? "true" : undefined}
                                 >
@@ -760,6 +844,7 @@ function ProgramGuide({
                                 </div>
                             );
                         })}
+                        </div>
                     </div>
 
                     {/* Grid */}
@@ -780,7 +865,7 @@ function ProgramGuide({
                             />
                         ))}
 
-                        {guideRows.map((row) => (
+                        {visibleGuideRows.map((row) => (
                             row.type === "section" ? (
                                 <div
                                     key={row.key}
@@ -803,7 +888,7 @@ function ProgramGuide({
                             style={{ right: `${nowRight}px` }}
                         />
 
-                        {guideRows.map((row) => {
+                        {visibleGuideRows.map((row) => {
                             if (row.type === "section") {
                                 return null;
                             }
