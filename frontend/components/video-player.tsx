@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useEffect, useState } from "react";
+import { useCallback, useRef, useEffect, useLayoutEffect, useState } from "react";
 import { Cast, Radio, AlertCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import videojs from "video.js";
@@ -48,8 +48,8 @@ interface VideoPlayerProps {
   onEnded?: () => void;
   autoNextLabel?: string | null;
   onCancelAutoNext?: () => void;
-  onResize?: () => void;
   className?: string;
+  hideTopControls?: boolean;
 }
 
 export function VideoPlayer({
@@ -58,10 +58,11 @@ export function VideoPlayer({
   onEnded,
   autoNextLabel,
   onCancelAutoNext,
-  onResize,
   className,
+  hideTopControls = false,
 }: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const inlineHostRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,6 +107,32 @@ export function VideoPlayer({
     channel?.type === "vod"
       ? "טוען את הפרק..."
       : "טוען את הערוץ...";
+
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    const inlineHost = inlineHostRef.current;
+    if (!node || !inlineHost) return;
+
+    const shouldPortalToBody = isExpanded && !isFullscreen;
+
+    if (shouldPortalToBody) {
+      if (node.parentElement !== document.body) {
+        document.body.appendChild(node);
+      }
+    } else if (node.parentElement !== inlineHost) {
+      inlineHost.appendChild(node);
+    }
+
+    return () => {
+      if (node.parentElement !== document.body) return;
+
+      if (inlineHost.isConnected) {
+        inlineHost.appendChild(node);
+      } else {
+        node.remove();
+      }
+    };
+  }, [isExpanded, isFullscreen]);
 
   // Clear any pending hide timer
   const clearOverlayTimer = useCallback(() => {
@@ -169,11 +196,7 @@ export function VideoPlayer({
 
     setIsExpanded((value) => !value);
     showControls();
-
-    if (onResize) {
-      onResize();
-    }
-  }, [onResize, showControls]);
+  }, [showControls]);
 
   const toggleFullscreen = useCallback(async () => {
     const container = containerRef.current;
@@ -842,15 +865,16 @@ export function VideoPlayer({
     );
   }
 
-  return (
+  const playerNode = (
     <div
       ref={containerRef}
       data-player-root
+      data-expanded={isExpanded && !isFullscreen ? "true" : "false"}
       data-mobile-device={isMobileDevice ? "true" : "false"}
       data-touch-device={isTouchDevice ? "true" : "false"}
       className={`
         relative overflow-hidden bg-black
-        ${isExpanded && !isFullscreen ? "fixed inset-0 z-[1000] rounded-none" : "rounded-xl"}
+        ${isExpanded && !isFullscreen ? "rounded-none" : "rounded-xl"}
         ${className || ""}
       `}
       onMouseMove={isMobileDevice ? undefined : showControls}
@@ -949,9 +973,9 @@ export function VideoPlayer({
             onToggleFullscreen={toggleFullscreen}
             onInteraction={keepControlsVisible}
             topControls={{
-              showChannelInfo: true,
-              showCast: true,
-              showClose: true,
+              showChannelInfo: !hideTopControls,
+              showCast: !hideTopControls,
+              showClose: !hideTopControls,
             }}
             bottomControls={{
               showPlay: true,
@@ -1069,6 +1093,12 @@ export function VideoPlayer({
           height: 100% !important;
         }
       `}</style>
+    </div>
+  );
+
+  return (
+    <div ref={inlineHostRef} className="contents">
+      {playerNode}
     </div>
   );
 }

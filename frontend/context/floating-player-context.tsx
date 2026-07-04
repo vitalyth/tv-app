@@ -9,12 +9,10 @@ import {
     useMemo,
     useRef,
     useState,
-    type CSSProperties,
     type ReactNode,
 } from "react";
-import { type Channel } from "@/lib/channels-data";
+import { type Channel, type Program } from "@/lib/channels-data";
 import { addRecentlyViewedChannel } from "@/hooks/useRecentlyViewed";
-import { useDraggable } from "@/hooks/useDraggable";
 import {
     kanVodService,
     type KanVodEpisode,
@@ -34,14 +32,29 @@ type PlayOptions = {
 
 type FloatingPlayerContextValue = {
     currentChannel: Channel | null;
+    programDetails: ProgramDetails | null;
     play: (channel: Channel, options?: PlayOptions) => void;
+    playKanVodEpisode: (series: KanVodSeriesDetails, episode: KanVodEpisode, options?: PlayOptions) => void;
     close: () => void;
+    showProgramDetails: (program: Program, channel: Channel) => void;
+    clearProgramDetails: () => void;
+    renderPlayer: (className?: string, options?: RenderPlayerOptions) => ReactNode;
+    setDockedPlayerActive: (active: boolean) => void;
     setCloseHandler: (handler: (() => void) | null) => void;
+};
+
+export type ProgramDetails = {
+    program: Program;
+    channel: Channel;
 };
 
 type KanNextEpisodePreview = {
     series: KanVodSeriesDetails;
     episode: KanVodEpisode;
+};
+
+type RenderPlayerOptions = {
+    hideTopControls?: boolean;
 };
 
 const FloatingPlayerContext = createContext<FloatingPlayerContextValue | null>(null);
@@ -97,7 +110,6 @@ const kanEpisodeToChannel = (
 };
 
 export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
-    const playerRef = useRef<HTMLDivElement>(null);
     const closeHandlerRef = useRef<(() => void) | null>(null);
     const endedHandlerRef = useRef<(() => void) | null>(null);
     const viewportStateRef = useRef({
@@ -114,13 +126,10 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     const [isMobileLandscape, setIsMobileLandscape] = useState(false);
     const [nextEpisodePreview, setNextEpisodePreview] = useState<KanNextEpisodePreview | null>(null);
     const [isAutoNextCancelled, setIsAutoNextCancelled] = useState(false);
+    const [isDockedPlayerActive, setDockedPlayerActive] = useState(false);
+    const [programDetails, setProgramDetails] = useState<ProgramDetails | null>(null);
 
     currentChannelRef.current = currentChannel;
-
-    const { position, isDragging, dragHandleProps, restorePosition } = useDraggable(
-        playerRef,
-        !!currentChannel && !isFullscreen && !isMobile
-    );
 
     const play = useCallback((channel: Channel, options?: PlayOptions) => {
         if (channel.type !== "vod") {
@@ -131,9 +140,14 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         endedHandlerRef.current = options?.onEnded ?? null;
         setIsAutoNextCancelled(false);
         setNextEpisodePreview(null);
+        setProgramDetails(null);
         setCurrentChannel(channel);
         setIsFullscreen(options?.fullscreen ?? isMobileLandscape);
     }, [isMobileLandscape]);
+
+    const playKanVodEpisode = useCallback((series: KanVodSeriesDetails, episode: KanVodEpisode, options?: PlayOptions) => {
+        play(kanEpisodeToChannel(series, episode), options);
+    }, [play]);
 
     const close = useCallback(() => {
         closeHandlerRef.current?.();
@@ -141,10 +155,25 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         endedHandlerRef.current = null;
         setIsAutoNextCancelled(false);
         setNextEpisodePreview(null);
+        setProgramDetails(null);
         setCurrentChannel(null);
         setIsFullscreen(false);
-        restorePosition(true);
-    }, [restorePosition]);
+    }, []);
+
+    const showProgramDetails = useCallback((program: Program, channel: Channel) => {
+        closeHandlerRef.current?.();
+        closeHandlerRef.current = null;
+        endedHandlerRef.current = null;
+        setIsAutoNextCancelled(false);
+        setNextEpisodePreview(null);
+        setCurrentChannel(null);
+        setIsFullscreen(false);
+        setProgramDetails({ program, channel });
+    }, []);
+
+    const clearProgramDetails = useCallback(() => {
+        setProgramDetails(null);
+    }, []);
 
     const setCloseHandler = useCallback((handler: (() => void) | null) => {
         closeHandlerRef.current = handler;
@@ -217,23 +246,6 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         }
     }, [isAutoNextCancelled, isFullscreen, nextEpisodePreview, play]);
 
-    const onResize = useCallback(() => {
-        if (isMobileLandscape) {
-            setIsFullscreen(true);
-            return;
-        }
-
-        setIsFullscreen((prev) => {
-            const next = !prev;
-
-            if (prev === true && next === false) {
-                restorePosition();
-            }
-
-            return next;
-        });
-    }, [isMobileLandscape, restorePosition]);
-
     useEffect(() => {
         if (!currentChannel) return;
 
@@ -250,43 +262,12 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     }, [currentChannel, close]);
 
     useEffect(() => {
-        const handleResize = () => {
-            if (!playerRef.current || isMobile) return;
-
-            const rect = playerRef.current.getBoundingClientRect();
-            const corrected = {
-                x: Math.max(0, Math.min(rect.left, window.innerWidth - rect.width)),
-                y: Math.max(0, Math.min(rect.top, window.innerHeight - rect.height)),
-            };
-
-            if (rect.left !== corrected.x || rect.top !== corrected.y) {
-                playerRef.current.style.transform =
-                    `translate(${corrected.x}px, ${corrected.y}px)`;
-            }
-        };
-
-        window.addEventListener("resize", handleResize);
-
-        return () => window.removeEventListener("resize", handleResize);
-    }, [isMobile]);
-
-    useEffect(() => {
-        if (isMobile) {
-            restorePosition(true);
-        }
-    }, [isMobile, restorePosition]);
-
-    useEffect(() => {
         if (!currentChannel || !isMobile) return;
 
         setIsFullscreen((current) =>
             current === isMobileLandscape ? current : isMobileLandscape
         );
-
-        if (!isMobileLandscape) {
-            restorePosition(true);
-        }
-    }, [currentChannel, isMobile, isMobileLandscape, restorePosition]);
+    }, [currentChannel, isMobile, isMobileLandscape]);
 
     useEffect(() => {
         const className = "floating-player-mobile-portrait-active";
@@ -335,10 +316,6 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                     setIsFullscreen((current) =>
                         current === landscape ? current : landscape
                     );
-
-                    if (!landscape) {
-                        restorePosition(true);
-                    }
                 }
             });
         };
@@ -360,86 +337,89 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
             window.removeEventListener("resize", update);
             window.removeEventListener("orientationchange", update);
         };
-    }, [restorePosition]);
+    }, []);
 
-    const playerStyle: CSSProperties =
-        position && !isFullscreen && !isMobile
-            ? {
-                position: "fixed",
-                top: 0,
-                left: 0,
-                transform: `translate(${position.x}px, ${position.y}px)`,
-                zIndex: 900,
-                transition: isDragging ? "none" : "box-shadow 0.2s",
-                boxShadow: isDragging
-                    ? "0 24px 64px rgba(0,0,0,0.7)"
-                    : "0 8px 32px rgba(0,0,0,0.5)",
-            }
-            : {};
+    const renderPlayer = useCallback((className = "h-full w-full", options?: RenderPlayerOptions) => {
+        if (!currentChannel) {
+            return null;
+        }
+
+        return (
+            <VideoPlayer
+                className={className}
+                channel={currentChannel}
+                onClose={close}
+                onEnded={handleEnded}
+                autoNextLabel={
+                    !isAutoNextCancelled
+                        ? nextEpisodePreview?.episode.episodeName ||
+                          nextEpisodePreview?.episode.title ||
+                          null
+                        : null
+                }
+                onCancelAutoNext={() => setIsAutoNextCancelled(true)}
+                hideTopControls={options?.hideTopControls}
+            />
+        );
+    }, [
+        close,
+        currentChannel,
+        handleEnded,
+        isAutoNextCancelled,
+        nextEpisodePreview,
+    ]);
 
     const value = useMemo<FloatingPlayerContextValue>(() => ({
         currentChannel,
+        programDetails,
         play,
+        playKanVodEpisode,
         close,
+        showProgramDetails,
+        clearProgramDetails,
+        renderPlayer,
+        setDockedPlayerActive,
         setCloseHandler,
-    }), [currentChannel, play, close, setCloseHandler]);
+    }), [
+        clearProgramDetails,
+        currentChannel,
+        programDetails,
+        play,
+        playKanVodEpisode,
+        close,
+        renderPlayer,
+        setCloseHandler,
+        showProgramDetails,
+    ]);
+
+    const shouldShowGlobalPlayer = currentChannel && (
+        isFullscreen ||
+        isMobile ||
+        !isDockedPlayerActive
+    );
 
     return (
         <FloatingPlayerContext.Provider value={value}>
             {children}
 
-            {currentChannel && (
+            {shouldShowGlobalPlayer && (
                 <div
-                    ref={playerRef}
                     dir="rtl"
-                    style={playerStyle}
-                    className={
-                        position && !isFullscreen && !isMobile
-                            ? "player-dragged"
-                            : isFullscreen
-                                ? "player-overlay-fullscreen"
-                                : "player-overlay"
-                    }
+                    className={isFullscreen ? "player-overlay-fullscreen" : "player-overlay"}
                 >
-                    {!isFullscreen && !isMobile && (
-                        <div
-                            {...dragHandleProps}
-                            className="player-drag-handle"
-                            title="גרור להזזה"
-                        >
-                            <span className="drag-line" />
-                        </div>
-                    )}
-
-                    <VideoPlayer
-                        className="h-full w-full"
-                        channel={currentChannel}
-                        onClose={close}
-                        onEnded={handleEnded}
-                        autoNextLabel={
-                            !isAutoNextCancelled
-                                ? nextEpisodePreview?.episode.episodeName ||
-                                  nextEpisodePreview?.episode.title ||
-                                  null
-                                : null
-                        }
-                        onCancelAutoNext={() => setIsAutoNextCancelled(true)}
-                        onResize={onResize}
-                    />
+                    {renderPlayer("h-full w-full")}
                 </div>
             )}
 
             <style jsx global>{`
                 .player-overlay,
-                .player-dragged,
                 .player-overlay-fullscreen {
                     aspect-ratio: 16 / 9;
                     z-index: 900;
                     overflow: hidden;
                 }
 
-                .player-overlay,
-                .player-dragged {
+                .player-overlay {
                     border-radius: 10px;
                 }
 
@@ -450,12 +430,6 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                     bottom: 20px;
                     right: 20px;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-                }
-
-                .player-dragged {
-                    width: clamp(400px, 40vw, 700px);
-                    height: auto;
-                    will-change: transform;
                 }
 
                 .player-overlay-fullscreen {
@@ -505,39 +479,6 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                     }
                 }
 
-                .player-drag-handle {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    height: 28px;
-                    background: linear-gradient(
-                        to bottom,
-                        rgba(0, 0, 0, 0.65) 0%,
-                        rgba(0, 0, 0, 0.0) 100%
-                    );
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 910;
-                    border-radius: 10px 10px 0 0;
-                    opacity: 0;
-                    pointer-events: auto;
-                    transition: opacity 0.2s;
-                }
-
-                .player-dragged:hover .player-drag-handle,
-                .player-overlay:hover .player-drag-handle {
-                    opacity: 1;
-                }
-
-                .drag-line {
-                    width: 70px;
-                    height: 4px;
-                    background: rgba(255,255,255,0.7);
-                    border-radius: 2px;
-                    pointer-events: none;
-                }
             `}</style>
         </FloatingPlayerContext.Provider>
     );

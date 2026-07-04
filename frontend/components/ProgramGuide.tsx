@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
-import { Clock3, ListVideo, Play } from "lucide-react";
+import { Clock3, ListVideo, Play, Video } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { CHANNEL_REGION_SECTIONS, getChannelRegion } from "@/lib/channel-regions";
 import { useNowSec } from "@/hooks/use-now-sec";
@@ -21,6 +21,7 @@ interface ProgramGuideProps {
     playingChannelIndex?: number | null;
     onChannelClick?: (channel: Channel) => void;
     onProgramClick?: (program: Program, channel: Channel, isLive: boolean) => void;
+    hasVodForProgram?: (program: Program, channel: Channel) => boolean;
     guideStartSec?: number;
     guideEndSec?: number;
     onGuideRangeChange?: (range: { start: number; end: number }) => void;
@@ -31,6 +32,11 @@ type GuideRow =
     | { type: "channel"; key: string; channel: Channel };
 
 type PositionedGuideRow = GuideRow & {
+    top: number;
+    height: number;
+};
+
+type VisibleViewport = {
     top: number;
     height: number;
 };
@@ -51,6 +57,7 @@ const LAZY_EDGE_THRESHOLD = 260;
 const LAZY_EXPAND_HOURS = 12;
 const MAX_HOURS_BACK = 24;
 const MAX_HOURS_FORWARD = 48;
+const ROW_OVERSCAN_PX = CELL_H * 4;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -159,6 +166,7 @@ const ProgramCell = memo(function ProgramCell({
     nowSec,
     pxPerSec,
     isPlayingProgram,
+    hasVod,
     onClick,
     didDrag,
 }: {
@@ -169,6 +177,7 @@ const ProgramCell = memo(function ProgramCell({
     nowSec: number;
     pxPerSec: number;
     isPlayingProgram: boolean;
+    hasVod: boolean;
     onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
     didDrag: React.MutableRefObject<boolean>;
 }) {
@@ -243,6 +252,15 @@ const ProgramCell = memo(function ProgramCell({
                 ) : isLive && (
                     <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
                 )}
+                {hasVod && !isLive && !isPlayingProgram && (
+                    <span
+                        className="shrink-0 mt-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-cyan-300/15 text-cyan-200 ring-1 ring-cyan-200/35"
+                        title="זמין ב-VOD"
+                        aria-label="זמין ב-VOD"
+                    >
+                        <Video className="h-2.5 w-2.5" aria-hidden="true" />
+                    </span>
+                )}
                 <div className="min-w-0 flex-1 overflow-hidden" dir="rtl">
                     <p className="text-xs font-semibold text-white truncate leading-tight">{program.name}</p>
                     <p className="text-[10px] text-zinc-400 mt-0.5 truncate">
@@ -260,6 +278,7 @@ const ProgramCell = memo(function ProgramCell({
         prev.guideEnd === next.guideEnd &&
         prev.pxPerSec === next.pxPerSec &&
         prev.isPlayingProgram === next.isPlayingProgram &&
+        prev.hasVod === next.hasVod &&
         prev.onClick === next.onClick &&
         prev.didDrag === next.didDrag &&
         isProgramLive(prev.program, prev.nowSec) === isProgramLive(next.program, next.nowSec)
@@ -276,6 +295,7 @@ function ProgramGuide({
     playingChannelIndex,
     onChannelClick,
     onProgramClick,
+    hasVodForProgram,
     guideStartSec,
     guideEndSec,
     onGuideRangeChange,
@@ -291,8 +311,12 @@ function ProgramGuide({
     const scrollTopStart = useRef(0);
     const previousGuideStartRef = useRef<number | null>(null);
     const lastRangeRequestRef = useRef<string | null>(null);
-    const initialScrollMetricsRef = useRef({ nowRight: 0, totalGridW: 0 });
+    const scrollFrameRef = useRef<number | null>(null);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const maybeLoadMoreForScrollRef = useRef<(() => void) | null>(null);
     const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
+    const lastVisibleDateLabelRef = useRef(visibleDateLabel);
+    const [visibleViewport, setVisibleViewport] = useState<VisibleViewport>({ top: 0, height: 900 });
 
     /*
     useEffect(() => {
@@ -441,22 +465,63 @@ function ProgramGuide({
         };
     }, [guideEndSec, guideRows, guideStartSec, nowSec, pxPerSec]);
 
-    useEffect(() => {
-        initialScrollMetricsRef.current = { nowRight, totalGridW };
-    }, [nowRight, totalGridW]);
+    const visibleGuideRows = useMemo(() => {
+        const visibleTop = visibleViewport.top;
+        const visibleBottom = visibleTop + visibleViewport.height;
+
+        return guideRows.filter((row) => row.top + row.height >= visibleTop && row.top <= visibleBottom);
+    }, [guideRows, visibleViewport]);
 
     const updateVisibleDateLabel = useCallback(() => {
         if (!mainRef.current) {
-            setVisibleDateLabel(formatGuideDate(guideStart));
+            const fallbackLabel = formatGuideDate(guideStart);
+            if (lastVisibleDateLabelRef.current !== fallbackLabel) {
+                lastVisibleDateLabelRef.current = fallbackLabel;
+                setVisibleDateLabel(fallbackLabel);
+            }
             return;
         }
 
         const channelW = getGuideChannelWidth();
         const visibleProgramLeft = Math.max(0, mainRef.current.scrollLeft - channelW);
         const visibleTs = guideStart + Math.round(visibleProgramLeft / pxPerSec);
+        const nextLabel = formatGuideDate(visibleTs);
 
-        setVisibleDateLabel(formatGuideDate(visibleTs));
+        if (lastVisibleDateLabelRef.current !== nextLabel) {
+            lastVisibleDateLabelRef.current = nextLabel;
+            setVisibleDateLabel(nextLabel);
+        }
     }, [guideStart, pxPerSec]);
+
+    const updateVisibleViewport = useCallback(() => {
+        const node = mainRef.current;
+        if (!node) return;
+
+        const nextTop = Math.max(0, node.scrollTop - HEAD_H - ROW_OVERSCAN_PX);
+        const nextHeight = node.clientHeight + ROW_OVERSCAN_PX * 2;
+
+        setVisibleViewport((previous) => {
+            if (
+                Math.abs(previous.top - nextTop) < CELL_H / 2 &&
+                Math.abs(previous.height - nextHeight) < CELL_H / 2
+            ) {
+                return previous;
+            }
+
+            return { top: nextTop, height: nextHeight };
+        });
+    }, []);
+
+    const scheduleViewportUpdate = useCallback(() => {
+        if (scrollFrameRef.current !== null) return;
+
+        scrollFrameRef.current = requestAnimationFrame(() => {
+            scrollFrameRef.current = null;
+            updateVisibleViewport();
+            updateVisibleDateLabel();
+            maybeLoadMoreForScrollRef.current?.();
+        });
+    }, [updateVisibleDateLabel, updateVisibleViewport]);
 
     useEffect(() => {
         const previousGuideStart = previousGuideStartRef.current;
@@ -468,8 +533,13 @@ function ProgramGuide({
 
         previousGuideStartRef.current = guideStart;
         lastRangeRequestRef.current = `${guideStart}:${guideEnd}`;
-        requestAnimationFrame(updateVisibleDateLabel);
-    }, [guideEnd, guideStart, pxPerSec, updateVisibleDateLabel]);
+        const frame = requestAnimationFrame(() => {
+            updateVisibleViewport();
+            updateVisibleDateLabel();
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [guideEnd, guideStart, pxPerSec, updateVisibleDateLabel, updateVisibleViewport]);
 
     const requestGuideRange = useCallback(
         (range: { start: number; end: number }) => {
@@ -514,33 +584,62 @@ function ProgramGuide({
         }
     }, [guideEnd, guideStart, nowSec, onGuideRangeChange, requestGuideRange]);
 
-    const handleGuideScroll = useCallback(() => {
-        updateVisibleDateLabel();
-        maybeLoadMoreForScroll();
-    }, [maybeLoadMoreForScroll, updateVisibleDateLabel]);
+    useEffect(() => {
+        maybeLoadMoreForScrollRef.current = maybeLoadMoreForScroll;
+    }, [maybeLoadMoreForScroll]);
 
-    // Auto-scroll: position "now" at ~30% from the right on load
+    const handleGuideScroll = useCallback(() => {
+        scheduleViewportUpdate();
+    }, [scheduleViewportUpdate]);
+
+    // Auto-scroll: load the wider range, but initially show one hour before now.
     const didScrollRef = useRef(false);
     const mainCallbackRef = useCallback(
         (node: HTMLDivElement | null) => {
+            resizeObserverRef.current?.disconnect();
+            resizeObserverRef.current = null;
             (mainRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
 
-            if (node && !didScrollRef.current) {
-                requestAnimationFrame(() => {
-                    const visibleW = node.clientWidth;
-                    const channelW = getGuideChannelWidth();
-                    const visibleProgramW = Math.max(0, visibleW - channelW);
-                    const { nowRight: initialNowRight, totalGridW: initialTotalGridW } = initialScrollMetricsRef.current;
-                    const nowX = initialTotalGridW - initialNowRight;
-                    const target = nowX - visibleProgramW * 0.7;
-                    const maxScrollLeft = Math.max(0, channelW + initialTotalGridW - visibleW);
-                    node.scrollLeft = Math.max(0, Math.min(target, maxScrollLeft));
-                    didScrollRef.current = true;
-                });
+            if (node && typeof ResizeObserver !== "undefined") {
+                resizeObserverRef.current = new ResizeObserver(scheduleViewportUpdate);
+                resizeObserverRef.current.observe(node);
+                scheduleViewportUpdate();
             }
         },
-        []
+        [scheduleViewportUpdate]
     );
+
+    useEffect(() => {
+        return () => {
+            resizeObserverRef.current?.disconnect();
+            if (scrollFrameRef.current !== null) {
+                cancelAnimationFrame(scrollFrameRef.current);
+                scrollFrameRef.current = null;
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!mainRef.current || didScrollRef.current || totalGridW <= 0) return;
+
+        const frame = requestAnimationFrame(() => {
+            const node = mainRef.current;
+            if (!node || didScrollRef.current) return;
+
+            const channelW = getGuideChannelWidth();
+            const nowX = totalGridW - nowRight;
+            const target = nowX - cellW;
+            const visibleW = node.clientWidth;
+            const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
+
+            node.scrollLeft = Math.max(0, Math.min(target, maxScrollLeft));
+            didScrollRef.current = true;
+            updateVisibleViewport();
+            updateVisibleDateLabel();
+        });
+
+        return () => cancelAnimationFrame(frame);
+    }, [cellW, nowRight, totalGridW, updateVisibleDateLabel, updateVisibleViewport]);
 
     const scrollToNow = useCallback(() => {
         if (!mainRef.current) return;
@@ -638,13 +737,14 @@ function ProgramGuide({
                         className="sticky left-0 z-[70] border-r border-zinc-800 bg-zinc-900"
                         style={{ width: CHAN_W, height: totalGridH }}
                     >
-                        {guideRows.map((row) => {
+                        <div className="relative h-full w-full">
+                        {visibleGuideRows.map((row) => {
                             if (row.type === "section") {
                                 return (
                                     <div
                                         key={row.key}
-                                        className="guide-section-row flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-3"
-                                        style={{ height: row.height }}
+                                        className="guide-section-row absolute inset-x-0 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-3"
+                                        style={{ top: row.top, height: row.height }}
                                     >
                                         <span className="truncate text-xs font-bold text-zinc-200">{row.label}</span>
                                         <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-bold text-zinc-400">
@@ -666,14 +766,14 @@ function ProgramGuide({
                                 <div
                                     key={ch.id}
                                     className={`
-                                        guide-channel-cell relative flex items-center gap-2 px-3 border-b border-zinc-800/70
+                                        guide-channel-cell absolute inset-x-0 flex items-center gap-2 px-3 border-b border-zinc-800/70
                                         transition-colors cursor-pointer
                                         ${isPlayingChannel
                                             ? "bg-emerald-950/80 shadow-[inset_-3px_0_0_rgb(52_211_153)] hover:bg-emerald-900/70"
                                             : "hover:bg-zinc-800"
                                         }
                                     `}
-                                    style={{ height: row.height }}
+                                    style={{ top: row.top, height: row.height }}
                                     onClick={() => onChannelClick?.(ch)}
                                     aria-current={isPlayingChannel ? "true" : undefined}
                                 >
@@ -744,6 +844,7 @@ function ProgramGuide({
                                 </div>
                             );
                         })}
+                        </div>
                     </div>
 
                     {/* Grid */}
@@ -764,7 +865,7 @@ function ProgramGuide({
                             />
                         ))}
 
-                        {guideRows.map((row) => (
+                        {visibleGuideRows.map((row) => (
                             row.type === "section" ? (
                                 <div
                                     key={row.key}
@@ -787,7 +888,7 @@ function ProgramGuide({
                             style={{ right: `${nowRight}px` }}
                         />
 
-                        {guideRows.map((row) => {
+                        {visibleGuideRows.map((row) => {
                             if (row.type === "section") {
                                 return null;
                             }
@@ -828,6 +929,7 @@ function ProgramGuide({
                                                 nowSec={nowSec}
                                                 pxPerSec={pxPerSec}
                                                 isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
+                                                hasVod={hasVodForProgram?.(prog, ch) ?? false}
                                                 onClick={onProgramClick}
                                                 didDrag={didDrag}
                                             />

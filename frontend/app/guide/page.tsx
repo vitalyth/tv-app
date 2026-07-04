@@ -1,26 +1,460 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import useSWR from "swr";
 import { useChannelsContext } from "@/context/channels-context";
 import ProgramGuide from "@/components/ProgramGuide";
 import { ChannelsFilters } from "@/components/channels-filters";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
-import { Channel, Program } from "@/lib/channels-data";
+import {
+    Channel,
+    Program,
+    VodItem,
+    VodPlaybackMeta,
+    getKanVodEpisodeId,
+    getKanVodProgramId,
+} from "@/lib/channels-data";
 import { channelService } from "@/lib/services/channel-service";
+import {
+    kanVodService,
+    type KanVodEpisode,
+    type KanVodSeriesDetails,
+} from "@/lib/services/kan-vod-service";
 import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-import { X } from "lucide-react";
 
 const SECS_PER_HOUR = 3600;
-const INITIAL_HOURS_BACK = 1;
+const INITIAL_HOURS_BACK = 3;
 const INITIAL_HOURS_FORWARD = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MATCH_STOP_WORDS = new Set([
+    "של",
+    "עם",
+    "את",
+    "על",
+    "כל",
+    "לא",
+    "גם",
+    "או",
+    "זה",
+    "זו",
+    "הוא",
+    "היא",
+    "הם",
+    "הן",
+    "יש",
+    "אין",
+    "עוד",
+    "פרק",
+    "עונה",
+    "חדשות",
+    "שידור",
+    "ישיר",
+    "live",
+    "vod",
+]);
 
-function formatProgramTime(ts: number): string {
-    return new Date(ts * 1000).toLocaleTimeString("he-IL", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hourCycle: "h23",
+function normalizeProgramName(value?: string): string {
+    return (value || "")
+        .replace(/\s*[-–]\s*\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\s*$/g, "")
+        .replace(/\s*\|\s*/g, " ")
+        .replace(/[״"׳'`]/g, "")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function tokenizeMatchText(value?: string): string[] {
+    const normalized = normalizeProgramName(value);
+    if (!normalized) return [];
+
+    return Array.from(new Set(
+        normalized
+            .split(" ")
+            .map((token) => token.trim())
+            .filter((token) => token.length >= 2)
+            .filter((token) => !MATCH_STOP_WORDS.has(token))
+            .filter((token) => !/^\d+$/.test(token))
+    ));
+}
+
+function tokenOverlapScore(sourceTokens: string[], targetTokens: string[], maxScore: number): number {
+    if (!sourceTokens.length || !targetTokens.length) return 0;
+
+    const targetSet = new Set(targetTokens);
+    const shared = sourceTokens.filter((token) => targetSet.has(token)).length;
+    if (!shared) return 0;
+
+    const sourceRatio = shared / sourceTokens.length;
+    const targetRatio = shared / targetTokens.length;
+
+    return Math.round(Math.max(sourceRatio, targetRatio) * maxScore);
+}
+
+function parseVodDate(value?: string): Date | null {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric) && numeric > 0) {
+        const timestamp = numeric > 10_000_000_000 ? numeric : numeric * 1000;
+        const date = new Date(timestamp);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const dateMatch = trimmed.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+    if (dateMatch) {
+        const day = Number(dateMatch[1]);
+        const month = Number(dateMatch[2]);
+        const year = Number(dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3]);
+        const date = new Date(year, month - 1, day);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function startOfLocalDay(date: Date): number {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function dateDistanceDaysForValue(program: Program, value?: string): number | null {
+    const vodDate = parseVodDate(value);
+    if (!vodDate) return null;
+
+    const programDate = new Date(program.start * 1000);
+    return Math.abs(startOfLocalDay(programDate) - startOfLocalDay(vodDate)) / DAY_MS;
+}
+
+function programDateKey(program: Program): string {
+    return new Date(program.start * 1000).toLocaleDateString("sv-SE");
+}
+
+function vodMatchCacheKey(program: Program, queries: string[]): string {
+    return [
+        programDateKey(program),
+        normalizeProgramName(program.name),
+        normalizeProgramName(queries.join("|")),
+    ].filter(Boolean).join("::");
+}
+
+function dateDistanceDays(program: Program, item: VodItem): number | null {
+    const sourceTimestamp = (item as VodItem & { sourceTimestamp?: number }).sourceTimestamp;
+    return dateDistanceDaysForValue(program, item.aired || (sourceTimestamp ? String(sourceTimestamp) : ""));
+}
+
+function scoreTextMatch(
+    sourceText: string,
+    targetTexts: string[],
+    exactScore: number,
+    partialScore: number,
+    overlapScore: number
+): number {
+    const source = normalizeProgramName(sourceText);
+    if (!source) return 0;
+
+    const sourceTokens = tokenizeMatchText(source);
+
+    return Math.max(
+        0,
+        ...targetTexts.map((targetText) => {
+            const target = normalizeProgramName(targetText);
+            if (!target) return 0;
+
+            if (target === source) return exactScore;
+            if (source.length >= 8 && target.length >= 8 && (target.includes(source) || source.includes(target))) {
+                return partialScore;
+            }
+
+            return tokenOverlapScore(sourceTokens, tokenizeMatchText(target), overlapScore);
+        })
+    );
+}
+
+function getChannelMatchKeysFromText(value?: string): Set<string> {
+    const normalized = normalizeProgramName(value);
+    const compact = normalized.replace(/\s+/g, "");
+    const keys = new Set<string>();
+
+    if (!normalized) return keys;
+
+    if (compact.includes("קשת") || compact.includes("keshet") || compact === "12") {
+        keys.add("keshet-12");
+    }
+    if (compact.includes("רשת") || compact.includes("reshet") || compact === "13") {
+        keys.add("reshet-13");
+    }
+    if (
+        compact.includes("עכשיו14") ||
+        compact.includes("ערוץ14") ||
+        compact === "14" ||
+        compact.includes("14tv") ||
+        compact.includes("now14") ||
+        compact.includes("c14") ||
+        compact.includes("channel14")
+    ) {
+        keys.add("channel-14");
+    }
+    if ((compact.includes("כאן") || compact.includes("kan")) && compact.includes("11")) {
+        keys.add("kan-11");
+    }
+    if ((compact.includes("חינוכית") || compact.includes("kan")) && compact.includes("23")) {
+        keys.add("kan-23");
+    }
+    if ((compact.includes("מכאן") || compact.includes("makan") || compact.includes("kan")) && compact.includes("33")) {
+        keys.add("kan-33");
+    }
+    if (compact.includes("i24") || compact.includes("i24news")) {
+        keys.add("i24news");
+    }
+    if (compact.includes("כלכלה") && compact.includes("10")) {
+        keys.add("calcalah-10");
+    }
+    if (compact.includes("כנסת") || compact.includes("knesset")) {
+        keys.add("knesset");
+    }
+
+    return keys;
+}
+
+function getChannelMatchKeys(channel: Channel): Set<string> {
+    const keys = new Set<string>();
+
+    [
+        channel.name,
+        channel.id,
+        channel.channelID,
+        channel.tvgID,
+        channel.module,
+    ].forEach((value) => {
+        getChannelMatchKeysFromText(value).forEach((key) => keys.add(key));
     });
+
+    return keys;
+}
+
+function getVodItemChannelMatchKeys(item: VodItem): Set<string> {
+    const keys = new Set<string>();
+    const vodChannelName = (item as VodItem & { vodChannelName?: string }).vodChannelName;
+
+    [
+        item.channelName,
+        vodChannelName,
+        item.module,
+        item.logo,
+        item.channelImage,
+        item.url,
+    ].forEach((value) => {
+        getChannelMatchKeysFromText(value).forEach((key) => keys.add(key));
+    });
+
+    return keys;
+}
+
+function isSameVodChannel(channel: Channel, item: VodItem): boolean {
+    const channelKeys = getChannelMatchKeys(channel);
+    const vodKeys = getVodItemChannelMatchKeys(item);
+
+    if (!channelKeys.size || !vodKeys.size) return false;
+
+    return Array.from(channelKeys).some((key) => vodKeys.has(key));
+}
+
+function vodItemToChannel(item: VodItem): Channel {
+    const vodMeta: VodPlaybackMeta = {
+        programName: item.programName || item.name,
+        seasonName: item.seasonName || item.season,
+        channelName: item.channelName || (item as VodItem & { vodChannelName?: string }).vodChannelName || "VOD",
+        episodeName: item.episodeName || item.title || item.name,
+        episodeDescription: item.episodeDescription || item.description || item.plot,
+        programDescription: item.programDescription || item.description || item.plot,
+        programImage: item.programImage || item.logo,
+        channelImage: item.channelImage || item.logo,
+        episodeImage: item.episodeImage || item.logo,
+    };
+
+    return {
+        id: getKanVodEpisodeId(item.module, item.episodeId, item.id),
+        index: 0,
+        name: vodMeta.channelName,
+        logo: vodMeta.channelImage || item.logo,
+        category: "vod",
+        channelID: item.url,
+        module: item.module,
+        mode: item.mode,
+        linkDetails: {
+            link: item.url,
+        },
+        type: "vod",
+        programs: [],
+        tvgID: "",
+        url: item.url,
+        moreData: item.moreData,
+        playerLogo: vodMeta.channelImage || item.logo,
+        playerTitle: [vodMeta.channelName, vodMeta.programName].filter(Boolean).join(" · "),
+        playerSubtitle: [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean).join(" · "),
+        vodProgramId: getKanVodProgramId(item.module, item.programId, []),
+        vodMeta,
+    };
+}
+
+function findVodMatchForProgram(program: Program, channel: Channel, vodItems: VodItem[]): VodItem | null {
+    const programName = normalizeProgramName(program.name);
+    if (!programName) return null;
+    const programDescription = normalizeProgramName(program.description);
+
+    const scored = vodItems
+        .filter((item) => item.isPlayable && isSameVodChannel(channel, item))
+        .map((item) => {
+            const itemNames = [
+                item.programName,
+                item.episodeName,
+                item.title,
+                item.name,
+            ].filter(Boolean) as string[];
+            const itemDescriptions = [
+                item.episodeDescription,
+                item.programDescription,
+                item.description,
+                item.plot,
+            ].filter(Boolean) as string[];
+            const titleScore = scoreTextMatch(program.name, itemNames, 42, 30, 26);
+            const descriptionScore = programDescription
+                ? scoreTextMatch(program.description, itemDescriptions, 22, 18, 22)
+                : 0;
+            const dateDistance = dateDistanceDays(program, item);
+            const dateScore = dateDistance === null
+                ? 0
+                : dateDistance === 0
+                    ? 24
+                    : dateDistance <= 1
+                        ? 10
+                        : -24;
+            const score = titleScore + descriptionScore + dateScore;
+            const hasTextEvidence = titleScore >= 18 || descriptionScore >= 12;
+            const hasDateConflict = dateDistance !== null && dateDistance > 1;
+
+            return { item, score, titleScore, descriptionScore, hasTextEvidence, hasDateConflict };
+        })
+        .filter(({ score, titleScore, hasTextEvidence, hasDateConflict }) =>
+            score >= 42 &&
+            hasTextEvidence &&
+            !hasDateConflict &&
+            titleScore >= 12
+        )
+        .sort((a, b) => b.score - a.score);
+
+    return scored[0]?.item ?? null;
+}
+
+function isKanChannel(channel: Channel): boolean {
+    const id = `${channel.id} ${channel.channelID || ""} ${channel.tvgID || ""}`.toLowerCase();
+    const name = channel.name.replace(/\s+/g, "");
+
+    return (
+        channel.module === "kan" ||
+        channel.module === "kan-vod" ||
+        id.includes("ch_11") ||
+        id.includes("kan") ||
+        name.includes("כאן11")
+    );
+}
+
+function getKanVodSearchQueries(program: Program): string[] {
+    const normalized = normalizeProgramName(program.name);
+    const queries: string[] = [];
+
+    if (
+        normalized.includes("מהדורת כאן חדשות") ||
+        normalized.includes("חדשות כאן") ||
+        normalized.includes("חדשות הערב")
+    ) {
+        queries.push("מהדורת כאן חדשות");
+    }
+
+    if (normalized.includes("כאן בשש")) {
+        queries.push("כאן בשש");
+    }
+
+    if (normalized.includes("העולם היום")) {
+        queries.push("העולם היום");
+    }
+
+    if (normalized.includes("בנימיני וגואטה")) {
+        queries.push("בנימיני וגואטה");
+    }
+
+    if (normalized.includes("שלוש")) {
+        queries.push("שלוש");
+    }
+
+    if (normalized.includes("שבע")) {
+        queries.push("שבע");
+    }
+
+    if (!queries.length) {
+        const tokens = tokenizeMatchText(program.name).filter((token) => token.length >= 3);
+        if (normalized.length >= 4) {
+            queries.push(program.name);
+        }
+        if (tokens.length >= 2) {
+            queries.push(tokens.slice(0, 2).join(" "));
+        }
+        if (tokens[0]) {
+            queries.push(tokens[0]);
+        }
+    }
+
+    return Array.from(new Set(queries.filter(Boolean)));
+}
+
+function findKanEpisodeMatch(program: Program, series: KanVodSeriesDetails): KanVodEpisode | null {
+    const programName = normalizeProgramName(program.name);
+    if (!programName) return null;
+
+    const scored = series.episodes.map((episode) => {
+        const titleScore = scoreTextMatch(
+            program.name,
+            [episode.episodeName, episode.title, series.title].filter(Boolean) as string[],
+            42,
+            30,
+            26
+        );
+        const descriptionScore = program.description
+            ? scoreTextMatch(
+                program.description,
+                [episode.description, episode.episodeOverview, series.description].filter(Boolean) as string[],
+                22,
+                18,
+                22
+            )
+            : 0;
+        const dateDistance = dateDistanceDaysForValue(program, episode.published || "");
+        const dateScore = dateDistance === null
+            ? 0
+            : dateDistance === 0
+                ? 24
+                : dateDistance <= 1
+                    ? 10
+                    : -24;
+        const score = titleScore + descriptionScore + dateScore;
+        const hasTextEvidence = titleScore >= 18 || descriptionScore >= 12;
+        const hasDateConflict = dateDistance !== null && dateDistance > 1;
+
+        return { episode, score, titleScore, hasTextEvidence, hasDateConflict };
+    })
+        .filter(({ score, titleScore, hasTextEvidence, hasDateConflict }) =>
+            score >= 42 &&
+            titleScore >= 12 &&
+            hasTextEvidence &&
+            !hasDateConflict
+        )
+        .sort((a, b) => b.score - a.score);
+
+    return scored[0]?.episode ?? null;
 }
 
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
@@ -48,14 +482,19 @@ function mergeEpg(
 
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
-    const { currentChannel, play, close } = useFloatingPlayer();
+    const { currentChannel, play, playKanVodEpisode, showProgramDetails } = useFloatingPlayer();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [epgByChannel, setEpgByChannel] = useState<Record<string, Program[]>>({});
-    const [selectedProgram, setSelectedProgram] = useState<{
-        program: Program;
-        channel: Channel;
-    } | null>(null);
+    const { data: vodRecentItems = [] } = useSWR(
+        "guide-vod-recent",
+        () => channelService.getVodRecent() as Promise<VodItem[]>,
+        {
+            refreshInterval: 5 * 60 * 1000,
+            revalidateOnFocus: true,
+            dedupingInterval: 60000,
+        }
+    );
     const initialNowRef = useRef(Math.floor(Date.now() / 1000));
     const [guideRange, setGuideRange] = useState(() => {
         const start = Math.floor(
@@ -66,6 +505,59 @@ export default function GuidePage() {
         return { start, end };
     });
     const loadedRangeRef = useRef<{ start: number; end: number } | null>(null);
+    const kanVodMatchCacheRef = useRef(new Map<string, { series: KanVodSeriesDetails; episode: KanVodEpisode } | null>());
+    const [kanVodProgramKeys, setKanVodProgramKeys] = useState<Set<string>>(() => new Set());
+
+    const cacheKanVodMatch = useCallback((cacheKey: string, match: { series: KanVodSeriesDetails; episode: KanVodEpisode } | null) => {
+        kanVodMatchCacheRef.current.set(cacheKey, match);
+
+        if (match) {
+            setKanVodProgramKeys((current) => {
+                if (current.has(cacheKey)) return current;
+                const next = new Set(current);
+                next.add(cacheKey);
+                return next;
+            });
+        }
+    }, []);
+
+    const ensureKanVodMatch = useCallback(async (program: Program) => {
+        const queries = getKanVodSearchQueries(program);
+        const cacheKey = vodMatchCacheKey(program, queries);
+        if (!cacheKey) return null;
+
+        if (kanVodMatchCacheRef.current.has(cacheKey)) {
+            return kanVodMatchCacheRef.current.get(cacheKey) ?? null;
+        }
+
+        try {
+            const results = await Promise.all(
+                queries.map((query) => kanVodService.getSeries({ query, limit: 5 }).catch(() => null))
+            );
+            const series = results
+                .flatMap((result) => result?.series ?? [])
+                .find(Boolean);
+
+            if (!series) {
+                cacheKanVodMatch(cacheKey, null);
+                return null;
+            }
+
+            const details = await kanVodService.getSeriesDetails(series.id);
+            const episode = findKanEpisodeMatch(program, details);
+            if (!episode) {
+                cacheKanVodMatch(cacheKey, null);
+                return null;
+            }
+
+            const match = { series: details, episode };
+            cacheKanVodMatch(cacheKey, match);
+            return match;
+        } catch {
+            cacheKanVodMatch(cacheKey, null);
+            return null;
+        }
+    }, [cacheKanVodMatch]);
 
     const loadEpg = useCallback((range: { start: number; end: number }, replace = false) => {
         return channelService.getEpg(range)
@@ -119,17 +611,24 @@ export default function GuidePage() {
     const filteredChannels = useFilteredChannels(channelsWithEpg, searchQuery, selectedCategory);
 
     useEffect(() => {
-        const className = "floating-player-mobile-portrait-active";
-        const isProgramDetailsOpen = Boolean(selectedProgram);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const candidates = channelsWithEpg
+            .filter(isKanChannel)
+            .flatMap((channel) => channel.programs)
+            .filter((program) => program.end <= nowSec)
+            .filter((program) => {
+                const queries = getKanVodSearchQueries(program);
+                const cacheKey = vodMatchCacheKey(program, queries);
+                return cacheKey && !kanVodMatchCacheRef.current.has(cacheKey);
+            })
+            .slice(0, 8);
 
-        document.documentElement.classList.toggle(className, isProgramDetailsOpen);
+        if (!candidates.length) return;
 
-        return () => {
-            if (isProgramDetailsOpen) {
-                document.documentElement.classList.remove(className);
-            }
-        };
-    }, [selectedProgram]);
+        candidates.forEach((program) => {
+            ensureKanVodMatch(program).catch(() => undefined);
+        });
+    }, [channelsWithEpg, ensureKanVodMatch, guideRange]);
 
     // Restore Cast session after page refresh:
     // When channels finish loading, check if there was an active Cast session
@@ -153,17 +652,71 @@ export default function GuidePage() {
 
     const handleProgramClick = useCallback((program: Program, ch: Channel, isLive: boolean) => {
         if (isLive) {
-            setSelectedProgram(null);
             playChannel(ch);
             return;
         }
 
-        close();
-        setSelectedProgram({ program, channel: ch });
-    }, [close, playChannel]);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (program.end <= nowSec) {
+            const vodMatch = findVodMatchForProgram(program, ch, vodRecentItems);
+            if (vodMatch) {
+                play(vodItemToChannel(vodMatch));
+                return;
+            }
+
+            if (isKanChannel(ch)) {
+                const queries = getKanVodSearchQueries(program);
+                const cacheKey = vodMatchCacheKey(program, queries);
+                if (!cacheKey) {
+                    showProgramDetails(program, ch);
+                    return;
+                }
+                const cached = kanVodMatchCacheRef.current.get(cacheKey);
+
+                if (cached) {
+                    playKanVodEpisode(cached.series, cached.episode);
+                    return;
+                }
+
+                if (cached === null) {
+                    showProgramDetails(program, ch);
+                    return;
+                }
+
+                ensureKanVodMatch(program)
+                    .then((match) => {
+                        if (match) {
+                            playKanVodEpisode(match.series, match.episode);
+                            return;
+                        }
+
+                        showProgramDetails(program, ch);
+                    })
+                return;
+            }
+        }
+
+        showProgramDetails(program, ch);
+    }, [ensureKanVodMatch, play, playChannel, playKanVodEpisode, showProgramDetails, vodRecentItems]);
+
+    const hasVodForProgram = useCallback((program: Program, channel: Channel) => {
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (program.end > nowSec) return false;
+
+        const programName = normalizeProgramName(program.name);
+        if (!programName) return false;
+
+        if (findVodMatchForProgram(program, channel, vodRecentItems)) return true;
+
+        const kanCacheKey = isKanChannel(channel)
+            ? vodMatchCacheKey(program, getKanVodSearchQueries(program))
+            : "";
+        if (kanCacheKey && kanVodProgramKeys.has(kanCacheKey)) return true;
+
+        return false;
+    }, [kanVodProgramKeys, vodRecentItems]);
 
     const handleChannelClick = useCallback((ch: Channel) => {
-        setSelectedProgram(null);
         playChannel(ch);
     }, [playChannel]);
 
@@ -194,45 +747,13 @@ export default function GuidePage() {
                         playingChannelIndex={currentChannel?.type === "vod" ? undefined : currentChannel?.index}
                         onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
+                        hasVodForProgram={hasVodForProgram}
                         guideStartSec={guideRange.start}
                         guideEndSec={guideRange.end}
                         onGuideRangeChange={handleGuideRangeChange}
                     />
                 </div>
             </main>
-            {selectedProgram && (
-                <div dir="rtl" className="player-overlay program-details-overlay border border-border bg-background">
-                    <button
-                        type="button"
-                        onClick={() => setSelectedProgram(null)}
-                        className="absolute left-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white transition-colors hover:bg-black/65"
-                        aria-label="סגור פרטי תוכנית"
-                    >
-                        <X className="h-4 w-4" aria-hidden="true" />
-                    </button>
-
-                    {selectedProgram.program.image && (
-                        <img
-                            src={selectedProgram.program.image}
-                            alt=""
-                            className="h-1/2 w-full bg-muted object-cover"
-                            loading="lazy"
-                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
-                        />
-                    )}
-                    <div className={`${selectedProgram.program.image ? "h-1/2" : "h-full"} overflow-y-auto p-4 text-right`}>
-                        <h2 className="text-base font-bold leading-6 text-foreground sm:text-xl sm:leading-7">
-                            {selectedProgram.program.name}
-                        </h2>
-                        <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-                            {selectedProgram.channel.name} · {formatProgramTime(selectedProgram.program.start)} - {formatProgramTime(selectedProgram.program.end)}
-                        </p>
-                        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">
-                            {selectedProgram.program.description || "אין תיאור זמין לתוכנית הזו."}
-                        </p>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

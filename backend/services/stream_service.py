@@ -3,7 +3,7 @@ from services.custom_channel_service import get_custom_channel
 
 
 def get_custom_channel_stream(custom_channel):
-    return custom_channel.get("streamUrl")
+    return custom_channel.get("streamUrl") or (custom_channel.get("linkDetails") or {}).get("link")
 
 
 def _prepare_keshet_module(module_script):
@@ -38,7 +38,9 @@ def get_stream(channel):
 
     custom_channel = get_custom_channel(channel_id)
     if custom_channel:
-        return get_custom_channel_stream(custom_channel)
+        custom_stream = get_custom_channel_stream(custom_channel)
+        if custom_stream:
+            return custom_stream
     
     xbmcplugin.clearStream()
 
