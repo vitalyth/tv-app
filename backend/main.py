@@ -205,14 +205,12 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
 
     if custom_channel:
         url = get_custom_channel_stream(custom_channel)
-        if not url:
-            return Response("Custom channel stream not found", status_code=404)
-
-        return handle_proxy(
-            request,
-            url,
-            (custom_channel.get("linkDetails") or {}).get("referer", "")
-        )
+        if url:
+            return handle_proxy(
+                request,
+                url,
+                (custom_channel.get("linkDetails") or {}).get("referer", "")
+            )
 
     channel_data = common.GetChannel(channel_id)
     channel = Channel.model_validate(channel_data)
