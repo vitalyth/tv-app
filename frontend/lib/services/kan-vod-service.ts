@@ -87,11 +87,6 @@ export type KanVodSeriesResponse = {
   error?: string | null;
 };
 
-export type KanVodProgramMatch = {
-  series: KanVodSeriesDetails;
-  episode: KanVodEpisode;
-};
-
 export const kanVodService = {
   async getSeries({
     refresh = false,
@@ -161,26 +156,4 @@ export const kanVodService = {
     return await response.json() as KanVodNextEpisode;
   },
 
-  async matchProgram(program: {
-    name: string;
-    description?: string;
-    start: number;
-    end: number;
-  }): Promise<KanVodProgramMatch | null> {
-    const response = await fetch(api("/kan-vod-match"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-      body: JSON.stringify({ program }),
-    });
-
-    if (response.status === 204 || response.status === 404) return null;
-    if (!response.ok) {
-      throw new Error(`Failed to match Kan VOD program (${response.status})`);
-    }
-
-    return await response.json() as KanVodProgramMatch;
-  },
 };

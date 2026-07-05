@@ -16,6 +16,14 @@ export interface Program {
   name: string
   description: string
   image?: string
+  hasVod?: boolean
+  vodCheckedAt?: number
+  vodMatch?: {
+    module?: string
+    series?: any
+    episode?: any
+    item?: VodItem
+  }
 }
 
 export interface Channel {

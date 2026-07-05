@@ -40,6 +40,7 @@ from services.epg_storage import (
     replace_all_epg,
     replace_channel_programs,
 )
+from services.epg_vod_enrichment import enrich_epg_with_vod, enrich_programs_with_vod
 
 KAN_MIN_PROGRAMS = 10
 MAKO12_MIN_PROGRAMS = 10
@@ -60,12 +61,19 @@ def write_json(data, output_path: Path) -> None:
     persisted cache now lives in SQLite.
     """
     if isinstance(data, dict):
-        replace_all_epg(data, get_epg_db_path_from_output_dir(output_path.parent / "epg"))
+        replace_all_epg(
+            enrich_epg_with_vod(data),
+            get_epg_db_path_from_output_dir(output_path.parent / "epg"),
+        )
         return
 
     if isinstance(data, list):
         channel_id = output_path.stem
-        replace_channel_programs(channel_id, data, get_epg_db_path_from_output_dir(output_path.parent))
+        replace_channel_programs(
+            channel_id,
+            enrich_programs_with_vod(channel_id, data),
+            get_epg_db_path_from_output_dir(output_path.parent),
+        )
         return
 
 

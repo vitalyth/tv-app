@@ -179,33 +179,6 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         closeHandlerRef.current = handler;
     }, []);
 
-    useEffect(() => {
-        if (currentChannel?.module !== "kan-vod" || endedHandlerRef.current) {
-            setNextEpisodePreview(null);
-            return;
-        }
-
-        let isCurrent = true;
-        setNextEpisodePreview(null);
-        setIsAutoNextCancelled(false);
-
-        kanVodService.getNextEpisode(currentChannel.id)
-            .then(async (next) => {
-                if (!next || !isCurrent) return;
-                const series = await kanVodService.getSeriesDetails(next.programId);
-                if (isCurrent) {
-                    setNextEpisodePreview({ series, episode: next.episode });
-                }
-            })
-            .catch((error) => {
-                console.error("Failed to prepare next Kan VOD episode:", error);
-            });
-
-        return () => {
-            isCurrent = false;
-        };
-    }, [currentChannel]);
-
     const handleEnded = useCallback(async () => {
         const customHandler = endedHandlerRef.current;
         if (customHandler) {

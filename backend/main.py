@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Query, Body
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from urllib.parse import quote
@@ -20,7 +20,6 @@ from services.kan_vod_service import (
     get_kan_vod_series_details,
     get_kan_vod_stream,
 )
-from services.kan_vod_match_service import find_kan_vod_match
 import os
 import socket
 from models.schemas import Channel
@@ -396,21 +395,6 @@ def kan_vod_next(request: Request, episode_id: str = Query(..., min_length=1)):
         return Response(status_code=204)
 
     return result
-
-@app.post("/kan-vod-match")
-def kan_vod_match(request: Request, payload: dict = Body(...)):
-    program = payload.get("program") if isinstance(payload, dict) else None
-    if not isinstance(program, dict):
-        return Response("Program is required", status_code=400)
-
-    match = find_kan_vod_match(
-        program,
-        api_prefix=get_request_api_prefix(request),
-    )
-    if not match:
-        return Response(status_code=204)
-
-    return match
 
 @app.get("/kan-vod/{program_id}")
 def kan_vod_details(

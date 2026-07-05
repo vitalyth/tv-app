@@ -103,6 +103,11 @@ def main() -> int:
             ],
             interval_seconds=read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
         ),
+        ScheduledJob(
+            name="epg_vod_enrichment",
+            command=[python, "enrich_epg_vod.py"],
+            interval_seconds=read_interval("EPG_VOD_ENRICH_INTERVAL_SECONDS", 3 * 60 * 60),
+        ),
     ]
 
     print(f"Scheduler cache directory: {CACHE_DIR}", flush=True)
