@@ -1,18 +1,17 @@
 import time
 import copy
-import json
-from pathlib import Path
-from plugin_video_idanplus.resources.lib.epg import GetEPG
-from config import CACHE_DIR
+from services.epg_storage import (
+    DEFAULT_EPG_DB_PATH,
+    epg_db_mtime,
+    load_all_epg,
+)
 
 _epg_cache = None
 _last_update = 0
 _epg_cache_fallback_mtime = 0
-_fallback_epg_cache = None
-_fallback_epg_mtime = 0
 
 EPG_TTL = 30 * 60 # 30 minutes
-FALLBACK_EPG_FILE = CACHE_DIR / "epg.json"
+FALLBACK_EPG_DB = DEFAULT_EPG_DB_PATH
 
 WINDOW_BACK = 3 * 60 * 60     # 3 hours back
 WINDOW_FORWARD = 12 * 60 * 60 # 12 hours forward
@@ -59,27 +58,17 @@ def _merge_fallback_epg(epg_list, now):
 
     return merged_epg
 
-def _load_fallback_epg():
-    global _fallback_epg_cache, _fallback_epg_mtime
-
-    if not FALLBACK_EPG_FILE.exists():
-        return {}
-
-    fallback_mtime = FALLBACK_EPG_FILE.stat().st_mtime
-    if _fallback_epg_cache is not None and fallback_mtime == _fallback_epg_mtime:
-        return copy.deepcopy(_fallback_epg_cache)
-
-    with FALLBACK_EPG_FILE.open("r", encoding="utf-8") as fallback_file:
-        fallback_epg = json.load(fallback_file)
-
-    _fallback_epg_cache = fallback_epg
-    _fallback_epg_mtime = fallback_mtime
-    return copy.deepcopy(fallback_epg)
+def _load_fallback_epg(start: int | None = None, end: int | None = None):
+    return load_all_epg(FALLBACK_EPG_DB, start=start, end=end)
 
 def _get_fallback_epg_mtime():
-    if not FALLBACK_EPG_FILE.exists():
-        return 0
-    return FALLBACK_EPG_FILE.stat().st_mtime
+    return epg_db_mtime(FALLBACK_EPG_DB)
+
+
+def _load_external_epg_source():
+    from plugin_video_idanplus.resources.lib.epg import GetEPG
+
+    return GetEPG()
 
 def get_now_epg(start: int | None = None, end: int | None = None):
     global _epg_cache, _last_update, _epg_cache_fallback_mtime
@@ -97,11 +86,11 @@ def get_now_epg(start: int | None = None, end: int | None = None):
     ):
         epgList = copy.deepcopy(_epg_cache)
     else:
-        # Priority 1: local cache/epg.json
+        # Priority 1: local SQLite EPG cache
         epgList = _load_fallback_epg()
 
         if epgList and _has_current_programs(epgList, now):
-            print(">>> Using local EPG cache: cache/epg.json")
+            print(">>> Using local EPG cache: cache/epg.sqlite")
         else:
             if epgList:
                 print(">>> Local EPG cache has no current programs, refreshing from source...")
@@ -111,9 +100,9 @@ def get_now_epg(start: int | None = None, end: int | None = None):
             # Priority 2: external EPG source
             #epgList = GetEPG(deltaInSec=0)
             #epgList = GetEPG(deltaInSec=1 * 60 * 60) # 1 hour
-            epgList = GetEPG() # default 24 hours
+            epgList = _load_external_epg_source() # default 24 hours
 
-            # Keep using cache/epg.json as fallback for missing/stale channels
+            # Keep using cache/epg.sqlite as fallback for missing/stale channels
             epgList = _merge_fallback_epg(epgList, now)
 
         _epg_cache = epgList

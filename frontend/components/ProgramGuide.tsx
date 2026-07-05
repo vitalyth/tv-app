@@ -41,6 +41,11 @@ type VisibleViewport = {
     height: number;
 };
 
+type VisibleTimeRange = {
+    start: number;
+    end: number;
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CELL_W = 300;       // px per hour
@@ -52,12 +57,14 @@ const SECS_PER_HOUR = 3600;
 const PX_PER_SEC = CELL_W / SECS_PER_HOUR;
 const HOURS_BACK = 1;
 const HOURS_FORWARD = 5;
+const INITIAL_LOAD_BUFFER_HOURS = 2;
 const DEFAULT_CHANNEL_W = 130;
 const LAZY_EDGE_THRESHOLD = 260;
 const LAZY_EXPAND_HOURS = 12;
 const MAX_HOURS_BACK = 24;
 const MAX_HOURS_FORWARD = 48;
 const ROW_OVERSCAN_PX = CELL_H * 4;
+const TIME_OVERSCAN_HOURS = 2;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -201,7 +208,7 @@ const ProgramCell = memo(function ProgramCell({
         <div
             className={`
         absolute top-1.5 rounded-lg border cursor-pointer select-none overflow-hidden
-        transition-all duration-150 hover:brightness-125 hover:z-50 hover:shadow-xl focus-visible:brightness-125 focus-visible:z-50 focus-visible:shadow-xl
+        transition-colors duration-150 hover:brightness-125 hover:z-50 hover:shadow-xl focus-visible:brightness-125 focus-visible:z-50 focus-visible:shadow-xl
         ${isPlayingProgram
                     ? "bg-emerald-900/95 border-emerald-300/80 ring-2 ring-emerald-300/70 shadow-lg shadow-emerald-950/60"
                     : isLive
@@ -209,7 +216,7 @@ const ProgramCell = memo(function ProgramCell({
                         : "bg-zinc-800/90 border-zinc-700/50"
                 }
             `}
-            style={{ right: right + 2, width, height: CELL_H - 12 }}
+            style={{ right: right + 2, width, height: CELL_H - 12, contain: "layout paint style" }}
             onClick={(e) => {
                 if (didDrag.current) {
                     e.preventDefault();
@@ -317,6 +324,7 @@ function ProgramGuide({
     const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
     const lastVisibleDateLabelRef = useRef(visibleDateLabel);
     const [visibleViewport, setVisibleViewport] = useState<VisibleViewport>({ top: 0, height: 900 });
+    const [visibleTimeRange, setVisibleTimeRange] = useState<VisibleTimeRange | null>(null);
 
     /*
     useEffect(() => {
@@ -380,8 +388,13 @@ function ProgramGuide({
     }, []);
 
     const nowSec = useNowSec();
+    const nowSecRef = useRef(nowSec);
     const cellW = CELL_W;
     const pxPerSec = PX_PER_SEC;
+
+    useEffect(() => {
+        nowSecRef.current = nowSec;
+    }, [nowSec]);
 
     const visibleChannels = useMemo(() => uniqueChannelsByIndex(channels), [channels]);
     const channelsByIndex = useMemo(() => groupChannelsByIndex(sourceChannels), [sourceChannels]);
@@ -471,6 +484,25 @@ function ProgramGuide({
 
         return guideRows.filter((row) => row.top + row.height >= visibleTop && row.top <= visibleBottom);
     }, [guideRows, visibleViewport]);
+    const visibleProgramsByChannelId = useMemo(() => {
+        const programsByChannelId = new Map<string, Program[]>();
+
+        visibleGuideRows.forEach((row) => {
+            if (row.type === "section") {
+                return;
+            }
+
+            programsByChannelId.set(
+                row.channel.id,
+                row.channel.programs.filter((program) =>
+                    program.end > (visibleTimeRange?.start ?? guideStart) &&
+                    program.start < (visibleTimeRange?.end ?? guideEnd)
+                )
+            );
+        });
+
+        return programsByChannelId;
+    }, [guideEnd, guideStart, visibleGuideRows, visibleTimeRange]);
 
     const updateVisibleDateLabel = useCallback(() => {
         if (!mainRef.current) {
@@ -497,8 +529,20 @@ function ProgramGuide({
         const node = mainRef.current;
         if (!node) return;
 
+        const channelW = getGuideChannelWidth();
         const nextTop = Math.max(0, node.scrollTop - HEAD_H - ROW_OVERSCAN_PX);
         const nextHeight = node.clientHeight + ROW_OVERSCAN_PX * 2;
+        const visibleProgramLeft = Math.max(0, node.scrollLeft - channelW);
+        const visibleProgramW = Math.max(cellW, node.clientWidth - channelW);
+        const timeOverscan = TIME_OVERSCAN_HOURS * SECS_PER_HOUR;
+        const nextTimeStart = Math.max(
+            guideStart,
+            Math.floor(guideStart + visibleProgramLeft / pxPerSec - timeOverscan)
+        );
+        const nextTimeEnd = Math.min(
+            guideEnd,
+            Math.ceil(guideStart + (visibleProgramLeft + visibleProgramW) / pxPerSec + timeOverscan)
+        );
 
         setVisibleViewport((previous) => {
             if (
@@ -510,7 +554,19 @@ function ProgramGuide({
 
             return { top: nextTop, height: nextHeight };
         });
-    }, []);
+
+        setVisibleTimeRange((previous) => {
+            if (
+                previous &&
+                Math.abs(previous.start - nextTimeStart) < SECS_PER_HOUR / 2 &&
+                Math.abs(previous.end - nextTimeEnd) < SECS_PER_HOUR / 2
+            ) {
+                return previous;
+            }
+
+            return { start: nextTimeStart, end: nextTimeEnd };
+        });
+    }, [cellW, guideEnd, guideStart, pxPerSec]);
 
     const scheduleViewportUpdate = useCallback(() => {
         if (scrollFrameRef.current !== null) return;
@@ -553,6 +609,34 @@ function ProgramGuide({
         },
         [onGuideRangeChange]
     );
+
+    const requestBufferedVisibleRange = useCallback((node: HTMLDivElement) => {
+        if (!onGuideRangeChange) return;
+
+        const channelW = getGuideChannelWidth();
+        const visibleProgramW = Math.max(cellW, node.clientWidth - channelW);
+        const visibleProgramSeconds = Math.ceil(visibleProgramW / pxPerSec);
+        const currentNowSec = nowSecRef.current;
+        const visibleStart = Math.floor(
+            (currentNowSec - HOURS_BACK * SECS_PER_HOUR) / SECS_PER_HOUR
+        ) * SECS_PER_HOUR;
+        const visibleEnd = visibleStart + visibleProgramSeconds;
+        const bufferSeconds = INITIAL_LOAD_BUFFER_HOURS * SECS_PER_HOUR;
+
+        requestGuideRange({
+            start: Math.floor((visibleStart - bufferSeconds) / SECS_PER_HOUR) * SECS_PER_HOUR,
+            end: Math.ceil((visibleEnd + bufferSeconds) / SECS_PER_HOUR) * SECS_PER_HOUR,
+        });
+    }, [cellW, onGuideRangeChange, pxPerSec, requestGuideRange]);
+
+    const handleGuideResize = useCallback(() => {
+        scheduleViewportUpdate();
+
+        const node = mainRef.current;
+        if (node) {
+            requestBufferedVisibleRange(node);
+        }
+    }, [requestBufferedVisibleRange, scheduleViewportUpdate]);
 
     const maybeLoadMoreForScroll = useCallback(() => {
         if (!mainRef.current || !onGuideRangeChange) return;
@@ -601,12 +685,14 @@ function ProgramGuide({
             (mainRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
 
             if (node && typeof ResizeObserver !== "undefined") {
-                resizeObserverRef.current = new ResizeObserver(scheduleViewportUpdate);
+                resizeObserverRef.current = new ResizeObserver(handleGuideResize);
                 resizeObserverRef.current.observe(node);
-                scheduleViewportUpdate();
+                handleGuideResize();
+            } else if (node) {
+                requestBufferedVisibleRange(node);
             }
         },
-        [scheduleViewportUpdate]
+        [handleGuideResize, requestBufferedVisibleRange]
     );
 
     useEffect(() => {
@@ -897,6 +983,7 @@ function ProgramGuide({
                             const isPlayingChannel =
                                 ch.id === playingChannelId ||
                                 ch.index === playingChannelIndex;
+                            const visiblePrograms = visibleProgramsByChannelId.get(ch.id) ?? [];
 
                             return (
                                 <div
@@ -911,7 +998,7 @@ function ProgramGuide({
                                             aria-hidden="true"
                                         />
                                     )}
-                                    {ch.programs.length === 0 ? (
+                                    {visiblePrograms.length === 0 ? (
                                         <div
                                             className="absolute top-1.5 inset-x-2 rounded-lg border border-zinc-800/40 bg-zinc-900/50 flex items-center pr-3"
                                             style={{ height: CELL_H - 12 }}
@@ -919,9 +1006,9 @@ function ProgramGuide({
                                             <span className="text-xs text-zinc-600">אין מידע</span>
                                         </div>
                                     ) : (
-                                        ch.programs.map((prog, pi) => (
+                                        visiblePrograms.map((prog) => (
                                             <ProgramCell
-                                                key={pi}
+                                                key={`${prog.start}:${prog.end}:${prog.name}`}
                                                 program={prog}
                                                 channel={ch}
                                                 guideStart={guideStart}

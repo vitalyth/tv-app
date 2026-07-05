@@ -157,7 +157,7 @@ python parse_epg.py --channel i24news
 python parse_epg.py --channel 11
 ```
 
-This updates the specific channel JSON file, for example `epg/33.json`, and rebuilds the combined `epg.json` automatically.
+This updates the local SQLite EPG database at `epg.sqlite`.
 
 Default intervals:
 
@@ -172,7 +172,7 @@ The backend and scheduler share the same runtime cache volume:
 ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
 ```
 
-This means the scheduler writes `epg.json`, `epg/*.json`, and `vod_recent.json`, and the API reads the updated files from the same location.
+This means the scheduler writes `epg.sqlite` and `vod_recent.json`, and the API reads the updated files from the same location.
 
 To view scheduler logs:
 

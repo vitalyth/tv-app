@@ -1,11 +1,10 @@
 import argparse
-import json
 import os
 import traceback
 from pathlib import Path
 
 from epg_parsers.c14 import parse_c14_epg
-from epg_parsers.common import dedupe_and_sort_programs, merge_existing_with_new_programs, write_json
+from epg_parsers.common import dedupe_and_sort_programs, merge_existing_with_new_programs
 from epg_parsers.i24 import parse_i24_epg
 from epg_parsers.keshet_thematic import KESHET_THEMATIC_CHANNELS, parse_keshet_thematic_epg
 from epg_parsers.tv10 import parse_tv10_epg
@@ -29,13 +28,17 @@ from epg_parsers.fishenzon import (
 from epg_parsers.local_us import LOCAL_US_CHANNEL_IDS, parse_local_us_epg
 from epg_parsers.isramedia import (
     DEFAULT_URL,
-    ISRAMEDIA_TVGID_MAP,
-    MAPPED_ISRAMEDIA_IDS,
     fetch_html,
     get_output_channel_id,
     parse_channel_epg,
     parse_channel_id,
     parse_channel_options,
+)
+from services.epg_storage import (
+    load_all_epg,
+    load_channel_programs,
+    replace_all_epg,
+    replace_channel_programs,
 )
 
 KAN_MIN_PROGRAMS = 10
@@ -45,29 +48,40 @@ C14_MIN_PROGRAMS = 10
 NINE_TV_MIN_PROGRAMS = 10
 
 
+def get_epg_db_path_from_output_dir(output_dir: Path) -> Path:
+    return output_dir.parent / "epg.sqlite"
+
+
+def write_json(data, output_path: Path) -> None:
+    """
+    Backward-compatible writer for the parser.
+
+    The parser still builds channel lists and a combined dict in memory, but the
+    persisted cache now lives in SQLite.
+    """
+    if isinstance(data, dict):
+        replace_all_epg(data, get_epg_db_path_from_output_dir(output_path.parent / "epg"))
+        return
+
+    if isinstance(data, list):
+        channel_id = output_path.stem
+        replace_channel_programs(channel_id, data, get_epg_db_path_from_output_dir(output_path.parent))
+        return
+
+
 def combine_epg_directory(output_dir: Path) -> dict:
-    combined_epg = {}
-    for channel_file in sorted(output_dir.glob("*.json")):
-        channel_id = channel_file.stem
-        if channel_id in MAPPED_ISRAMEDIA_IDS and (output_dir / f"{ISRAMEDIA_TVGID_MAP[channel_id]}.json").exists():
-            continue
-
-        with channel_file.open("r", encoding="utf-8") as input_file:
-            programs = json.load(input_file)
-        combined_epg[channel_id] = dedupe_and_sort_programs(programs)
-
-    return combined_epg
+    db_path = get_epg_db_path_from_output_dir(output_dir)
+    combined_epg = load_all_epg(db_path)
+    return {
+        channel_id: dedupe_and_sort_programs(programs)
+        for channel_id, programs in combined_epg.items()
+    }
 
 
 def read_existing_channel_programs(output_dir: Path, channel_id: str) -> list[dict]:
-    channel_file = output_dir / f"{channel_id}.json"
-    if not channel_file.exists():
-        return []
-
-    with channel_file.open("r", encoding="utf-8") as input_file:
-        programs = json.load(input_file)
-
-    if isinstance(programs, list):
+    db_path = get_epg_db_path_from_output_dir(output_dir)
+    programs = load_channel_programs(channel_id, db_path)
+    if programs:
         return dedupe_and_sort_programs(programs)
 
     return []
@@ -124,13 +138,13 @@ def has_reliable_9tv_schedule(programs: list[dict]) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse EPG sources into JSON.")
+    parser = argparse.ArgumentParser(description="Parse EPG sources into the local SQLite cache.")
     parser.add_argument("--url", default=DEFAULT_URL, help="IsraMedia EPG page URL")
-    parser.add_argument("--output", help="Output JSON path. Defaults to backend/cache/epg/<channel>.json")
-    parser.add_argument("--output-dir", help="Output directory for --all-channels. Defaults to backend/cache/epg")
+    parser.add_argument("--output", help="Deprecated. Kept for CLI compatibility; EPG is stored in SQLite.")
+    parser.add_argument("--output-dir", help="Deprecated output directory hint. The SQLite DB is stored next to this directory.")
     parser.add_argument(
         "--combined-output",
-        help="Combined EPG JSON path for --all-channels. Defaults to backend/cache/epg.json",
+        help="Deprecated. Kept for CLI compatibility; EPG is stored in SQLite.",
     )
     parser.add_argument(
         "--filename-mode",
@@ -151,7 +165,7 @@ def main():
     parser.add_argument(
         "--all-channels",
         action="store_true",
-        help="Parse every channel listed in the page channel selector and write <channel_id>.json for each.",
+        help="Parse every channel listed in the page channel selector and store it in SQLite.",
     )
     parser.add_argument(
         "--combine-existing",
@@ -166,7 +180,7 @@ def main():
     parser.add_argument(
         "--i24-only",
         action="store_true",
-        help="Fetch only the official i24 Hebrew schedule and write i24news.json plus the combined EPG.",
+        help="Fetch only the official i24 Hebrew schedule and store it in SQLite.",
     )
     parser.add_argument(
         "--channel",
@@ -178,12 +192,12 @@ def main():
     output_channel_id = get_output_channel_id(channel_id, args.filename_mode)
     default_cache_dir = Path(os.getenv("BACKEND_CACHE_DIR", Path(__file__).parent / "cache"))
     output_dir = Path(args.output_dir) if args.output_dir else default_cache_dir / "epg"
-    combined_output = Path(args.combined_output) if args.combined_output else default_cache_dir / "epg.json"
+    combined_output = Path(args.combined_output) if args.combined_output else default_cache_dir / "epg.sqlite"
 
     if args.combine_existing:
         combined_epg = combine_epg_directory(output_dir)
         write_json(combined_epg, combined_output)
-        print(f"Wrote {len(combined_epg)} channels to {combined_output}")
+        print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         return
 
     if args.i24_only:
@@ -197,7 +211,7 @@ def main():
         write_json(combined_epg, combined_output)
 
         print(f"Wrote {len(i24_programs)} programs to {output_path}")
-        print(f"Wrote {len(combined_epg)} channels to {combined_output}")
+        print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         return
 
     if args.channel:
@@ -431,7 +445,7 @@ def main():
         combined_epg = combine_epg_directory(output_dir)
         combined_epg[args.channel] = dedupe_and_sort_programs(programs)
         write_json(combined_epg, combined_output)
-        print(f"Wrote {len(combined_epg)} channels to {combined_output}")
+        print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         return
 
     first_html = fetch_html(args.url)
@@ -901,7 +915,7 @@ def main():
                 print(f"Wrote {len(local_programs)} programs to {output_path}")
 
         write_json(combined_epg, combined_output)
-        print(f"\nWrote {len(combined_epg)} channels to {combined_output}")
+        print(f"\nStored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         if failed_channels:
             print(f"Completed with cached/skipped channels: {', '.join(failed_channels)}")
         return

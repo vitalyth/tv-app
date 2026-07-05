@@ -51,7 +51,7 @@ def run_job(job: ScheduledJob) -> None:
 
 
 def log_cache_file_status() -> None:
-    for cache_file in (CACHE_DIR / "epg.json", CACHE_DIR / "vod_recent.json"):
+    for cache_file in (CACHE_DIR / "epg.sqlite", CACHE_DIR / "vod_recent.json"):
         if not cache_file.exists():
             print(f"Cache file missing: {cache_file}", flush=True)
             continue

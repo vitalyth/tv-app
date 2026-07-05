@@ -17,15 +17,11 @@ import {
 import { channelService } from "@/lib/services/channel-service";
 import {
     kanVodService,
-    type KanVodEpisode,
-    type KanVodSeriesDetails,
+    type KanVodProgramMatch,
 } from "@/lib/services/kan-vod-service";
 import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 import { useFloatingPlayer } from "@/context/floating-player-context";
 
-const SECS_PER_HOUR = 3600;
-const INITIAL_HOURS_BACK = 3;
-const INITIAL_HOURS_FORWARD = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MATCH_STOP_WORDS = new Set([
     "של",
@@ -133,11 +129,11 @@ function programDateKey(program: Program): string {
     return new Date(program.start * 1000).toLocaleDateString("sv-SE");
 }
 
-function vodMatchCacheKey(program: Program, queries: string[]): string {
+function vodMatchCacheKey(program: Program): string {
     return [
         programDateKey(program),
         normalizeProgramName(program.name),
-        normalizeProgramName(queries.join("|")),
+        normalizeProgramName(program.description),
     ].filter(Boolean).join("::");
 }
 
@@ -363,100 +359,6 @@ function isKanChannel(channel: Channel): boolean {
     );
 }
 
-function getKanVodSearchQueries(program: Program): string[] {
-    const normalized = normalizeProgramName(program.name);
-    const queries: string[] = [];
-
-    if (
-        normalized.includes("מהדורת כאן חדשות") ||
-        normalized.includes("חדשות כאן") ||
-        normalized.includes("חדשות הערב")
-    ) {
-        queries.push("מהדורת כאן חדשות");
-    }
-
-    if (normalized.includes("כאן בשש")) {
-        queries.push("כאן בשש");
-    }
-
-    if (normalized.includes("העולם היום")) {
-        queries.push("העולם היום");
-    }
-
-    if (normalized.includes("בנימיני וגואטה")) {
-        queries.push("בנימיני וגואטה");
-    }
-
-    if (normalized.includes("שלוש")) {
-        queries.push("שלוש");
-    }
-
-    if (normalized.includes("שבע")) {
-        queries.push("שבע");
-    }
-
-    if (!queries.length) {
-        const tokens = tokenizeMatchText(program.name).filter((token) => token.length >= 3);
-        if (normalized.length >= 4) {
-            queries.push(program.name);
-        }
-        if (tokens.length >= 2) {
-            queries.push(tokens.slice(0, 2).join(" "));
-        }
-        if (tokens[0]) {
-            queries.push(tokens[0]);
-        }
-    }
-
-    return Array.from(new Set(queries.filter(Boolean)));
-}
-
-function findKanEpisodeMatch(program: Program, series: KanVodSeriesDetails): KanVodEpisode | null {
-    const programName = normalizeProgramName(program.name);
-    if (!programName) return null;
-
-    const scored = series.episodes.map((episode) => {
-        const titleScore = scoreTextMatch(
-            program.name,
-            [episode.episodeName, episode.title, series.title].filter(Boolean) as string[],
-            42,
-            30,
-            26
-        );
-        const descriptionScore = program.description
-            ? scoreTextMatch(
-                program.description,
-                [episode.description, episode.episodeOverview, series.description].filter(Boolean) as string[],
-                22,
-                18,
-                22
-            )
-            : 0;
-        const dateDistance = dateDistanceDaysForValue(program, episode.published || "");
-        const dateScore = dateDistance === null
-            ? 0
-            : dateDistance === 0
-                ? 24
-                : dateDistance <= 1
-                    ? 10
-                    : -24;
-        const score = titleScore + descriptionScore + dateScore;
-        const hasTextEvidence = titleScore >= 18 || descriptionScore >= 12;
-        const hasDateConflict = dateDistance !== null && dateDistance > 1;
-
-        return { episode, score, titleScore, hasTextEvidence, hasDateConflict };
-    })
-        .filter(({ score, titleScore, hasTextEvidence, hasDateConflict }) =>
-            score >= 42 &&
-            titleScore >= 12 &&
-            hasTextEvidence &&
-            !hasDateConflict
-        )
-        .sort((a, b) => b.score - a.score);
-
-    return scored[0]?.episode ?? null;
-}
-
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
     const byKey = new Map<string, Program>();
 
@@ -495,35 +397,22 @@ export default function GuidePage() {
             dedupingInterval: 60000,
         }
     );
-    const initialNowRef = useRef(Math.floor(Date.now() / 1000));
-    const [guideRange, setGuideRange] = useState(() => {
-        const start = Math.floor(
-            (initialNowRef.current - INITIAL_HOURS_BACK * SECS_PER_HOUR) / SECS_PER_HOUR
-        ) * SECS_PER_HOUR;
-        const end = start + (INITIAL_HOURS_BACK + INITIAL_HOURS_FORWARD) * SECS_PER_HOUR;
-
-        return { start, end };
-    });
+    const [guideRange, setGuideRange] = useState<{ start: number; end: number } | null>(null);
     const loadedRangeRef = useRef<{ start: number; end: number } | null>(null);
-    const kanVodMatchCacheRef = useRef(new Map<string, { series: KanVodSeriesDetails; episode: KanVodEpisode } | null>());
-    const [kanVodProgramKeys, setKanVodProgramKeys] = useState<Set<string>>(() => new Set());
+    const epgRequestCacheRef = useRef(new Map<string, Promise<Record<string, Program[]>>>());
+    const kanVodMatchCacheRef = useRef(new Map<string, KanVodProgramMatch | null>());
+    const vodAvailabilityCacheRef = useRef(new Map<string, boolean>());
 
-    const cacheKanVodMatch = useCallback((cacheKey: string, match: { series: KanVodSeriesDetails; episode: KanVodEpisode } | null) => {
+    useEffect(() => {
+        vodAvailabilityCacheRef.current.clear();
+    }, [vodRecentItems]);
+
+    const cacheKanVodMatch = useCallback((cacheKey: string, match: KanVodProgramMatch | null) => {
         kanVodMatchCacheRef.current.set(cacheKey, match);
-
-        if (match) {
-            setKanVodProgramKeys((current) => {
-                if (current.has(cacheKey)) return current;
-                const next = new Set(current);
-                next.add(cacheKey);
-                return next;
-            });
-        }
     }, []);
 
     const ensureKanVodMatch = useCallback(async (program: Program) => {
-        const queries = getKanVodSearchQueries(program);
-        const cacheKey = vodMatchCacheKey(program, queries);
+        const cacheKey = vodMatchCacheKey(program);
         if (!cacheKey) return null;
 
         if (kanVodMatchCacheRef.current.has(cacheKey)) {
@@ -531,26 +420,12 @@ export default function GuidePage() {
         }
 
         try {
-            const results = await Promise.all(
-                queries.map((query) => kanVodService.getSeries({ query, limit: 5 }).catch(() => null))
-            );
-            const series = results
-                .flatMap((result) => result?.series ?? [])
-                .find(Boolean);
-
-            if (!series) {
-                cacheKanVodMatch(cacheKey, null);
-                return null;
-            }
-
-            const details = await kanVodService.getSeriesDetails(series.id);
-            const episode = findKanEpisodeMatch(program, details);
-            if (!episode) {
-                cacheKanVodMatch(cacheKey, null);
-                return null;
-            }
-
-            const match = { series: details, episode };
+            const match = await kanVodService.matchProgram({
+                name: program.name,
+                description: program.description,
+                start: program.start,
+                end: program.end,
+            });
             cacheKanVodMatch(cacheKey, match);
             return match;
         } catch {
@@ -560,44 +435,57 @@ export default function GuidePage() {
     }, [cacheKanVodMatch]);
 
     const loadEpg = useCallback((range: { start: number; end: number }, replace = false) => {
-        return channelService.getEpg(range)
+        const requestKey = `${range.start}:${range.end}`;
+        const request = epgRequestCacheRef.current.get(requestKey) ?? channelService.getEpg(range)
+            .then((epg) => (epg && typeof epg === "object" ? epg as Record<string, Program[]> : {}))
+            .finally(() => {
+                epgRequestCacheRef.current.delete(requestKey);
+            });
+
+        epgRequestCacheRef.current.set(requestKey, request);
+
+        return request
             .then((epg) => {
-                if (epg && typeof epg === "object") {
-                    const epgMap = epg as Record<string, Program[]>;
-                    setEpgByChannel((current) => replace ? epgMap : mergeEpg(current, epgMap));
-                    loadedRangeRef.current = range;
-                }
+                setEpgByChannel((current) => replace ? epg : mergeEpg(current, epg));
+                loadedRangeRef.current = range;
             })
             .catch(() => undefined);
     }, []);
 
     useEffect(() => {
-        let cancelled = false;
+        if (!guideRange) return;
 
         const loadedRange = loadedRangeRef.current;
         if (loadedRange && guideRange.start >= loadedRange.start && guideRange.end <= loadedRange.end) {
-            return () => {
-                cancelled = true;
-            };
+            return;
         }
 
-        channelService.getEpg(guideRange)
-            .then((epg) => {
-                if (!cancelled && epg && typeof epg === "object") {
-                    const epgMap = epg as Record<string, Program[]>;
-                    setEpgByChannel((current) => loadedRange ? mergeEpg(current, epgMap) : epgMap);
-                    loadedRangeRef.current = guideRange;
-                }
-            })
-            .catch(() => undefined);
+        const timeout = window.setTimeout(() => {
+            loadEpg(guideRange, !loadedRange);
+        }, 120);
 
-        return () => {
-            cancelled = true;
-        };
-    }, [guideRange]);
+        return () => window.clearTimeout(timeout);
+    }, [guideRange, loadEpg]);
 
     const handleGuideRangeChange = useCallback((range: { start: number; end: number }) => {
-        setGuideRange(range);
+        setGuideRange((current) => {
+            if (!current) {
+                return range;
+            }
+
+            if (range.start >= current.start && range.end <= current.end) {
+                return current;
+            }
+
+            if (range.start === current.start && range.end === current.end) {
+                return current;
+            }
+
+            return {
+                start: Math.min(current.start, range.start),
+                end: Math.max(current.end, range.end),
+            };
+        });
     }, []);
 
     const channelsWithEpg = useMemo(
@@ -609,26 +497,6 @@ export default function GuidePage() {
     );
 
     const filteredChannels = useFilteredChannels(channelsWithEpg, searchQuery, selectedCategory);
-
-    useEffect(() => {
-        const nowSec = Math.floor(Date.now() / 1000);
-        const candidates = channelsWithEpg
-            .filter(isKanChannel)
-            .flatMap((channel) => channel.programs)
-            .filter((program) => program.end <= nowSec)
-            .filter((program) => {
-                const queries = getKanVodSearchQueries(program);
-                const cacheKey = vodMatchCacheKey(program, queries);
-                return cacheKey && !kanVodMatchCacheRef.current.has(cacheKey);
-            })
-            .slice(0, 8);
-
-        if (!candidates.length) return;
-
-        candidates.forEach((program) => {
-            ensureKanVodMatch(program).catch(() => undefined);
-        });
-    }, [channelsWithEpg, ensureKanVodMatch, guideRange]);
 
     // Restore Cast session after page refresh:
     // When channels finish loading, check if there was an active Cast session
@@ -665,8 +533,7 @@ export default function GuidePage() {
             }
 
             if (isKanChannel(ch)) {
-                const queries = getKanVodSearchQueries(program);
-                const cacheKey = vodMatchCacheKey(program, queries);
+                const cacheKey = vodMatchCacheKey(program);
                 if (!cacheKey) {
                     showProgramDetails(program, ch);
                     return;
@@ -706,15 +573,14 @@ export default function GuidePage() {
         const programName = normalizeProgramName(program.name);
         if (!programName) return false;
 
-        if (findVodMatchForProgram(program, channel, vodRecentItems)) return true;
+        const cacheKey = `${channel.id}:${program.start}:${program.end}:${programName}`;
+        const cached = vodAvailabilityCacheRef.current.get(cacheKey);
+        if (cached !== undefined) return cached;
 
-        const kanCacheKey = isKanChannel(channel)
-            ? vodMatchCacheKey(program, getKanVodSearchQueries(program))
-            : "";
-        if (kanCacheKey && kanVodProgramKeys.has(kanCacheKey)) return true;
-
-        return false;
-    }, [kanVodProgramKeys, vodRecentItems]);
+        const hasVod = Boolean(findVodMatchForProgram(program, channel, vodRecentItems));
+        vodAvailabilityCacheRef.current.set(cacheKey, hasVod);
+        return hasVod;
+    }, [vodRecentItems]);
 
     const handleChannelClick = useCallback((ch: Channel) => {
         playChannel(ch);
@@ -722,6 +588,7 @@ export default function GuidePage() {
 
     const refreshNow = useCallback(() => {
         refresh();
+        if (!guideRange) return;
         loadEpg(guideRange, true);
     }, [guideRange, loadEpg, refresh]);
 
@@ -748,8 +615,8 @@ export default function GuidePage() {
                         onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
                         hasVodForProgram={hasVodForProgram}
-                        guideStartSec={guideRange.start}
-                        guideEndSec={guideRange.end}
+                        guideStartSec={guideRange?.start}
+                        guideEndSec={guideRange?.end}
                         onGuideRangeChange={handleGuideRangeChange}
                     />
                 </div>

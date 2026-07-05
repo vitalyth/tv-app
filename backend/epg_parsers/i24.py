@@ -57,32 +57,36 @@ def parse_i24_epg(
     url: str | None = None,
     today: datetime | None = None,
     language: str = "he",
+    weeks_ahead: int = 1,
 ) -> list[dict]:
     schedules = fetch_json(url or I24_SCHEDULES_URL_TEMPLATE.format(language=language))
     today = today or datetime.now(APP_TZ)
     week_start = today.date() - timedelta(days=(today.weekday() + 1) % 7)
 
     programs = []
-    for schedule in schedules:
-        show = schedule.get("show") or {}
-        title = show.get("title")
-        if not title:
-            continue
+    for week_offset in range(max(0, weeks_ahead) + 1):
+        current_week_start = week_start + timedelta(days=week_offset * 7)
 
-        day = int(schedule["day"])
-        program_date = week_start + timedelta(days=day)
-        start_dt = datetime.combine(program_date, parse_utc_clock(schedule["startHour"]))
-        end_day = day + (1 if schedule["endHour"] <= schedule["startHour"] else 0)
-        end_dt = datetime.combine(week_start + timedelta(days=end_day), parse_utc_clock(schedule["endHour"]))
+        for schedule in schedules:
+            show = schedule.get("show") or {}
+            title = show.get("title")
+            if not title:
+                continue
 
-        programs.append(
-            {
-                "start": int(start_dt.timestamp()),
-                "end": int(end_dt.timestamp()),
-                "name": title,
-                "description": program_description(show),
-                "image": program_image(show),
-            }
-        )
+            day = int(schedule["day"])
+            program_date = current_week_start + timedelta(days=day)
+            start_dt = datetime.combine(program_date, parse_utc_clock(schedule["startHour"]))
+            end_day = day + (1 if schedule["endHour"] <= schedule["startHour"] else 0)
+            end_dt = datetime.combine(current_week_start + timedelta(days=end_day), parse_utc_clock(schedule["endHour"]))
+
+            programs.append(
+                {
+                    "start": int(start_dt.timestamp()),
+                    "end": int(end_dt.timestamp()),
+                    "name": title,
+                    "description": program_description(show),
+                    "image": program_image(show),
+                }
+            )
 
     return fill_short_gaps(dedupe_and_sort_programs(programs))

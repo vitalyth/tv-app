@@ -5,9 +5,9 @@ from xml.etree import ElementTree
 
 
 def _load_guide_epg() -> dict:
-    from services.epg_service import get_now_epg
+    from services.epg_storage import load_all_epg
 
-    return get_now_epg()
+    return load_all_epg()
 
 
 class EPGService:
