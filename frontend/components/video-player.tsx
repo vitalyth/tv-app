@@ -88,6 +88,7 @@ export function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [autoNextCountdown, setAutoNextCountdown] = useState<number | null>(null);
+  const shouldHideTopControls = hideTopControls && !isExpanded && !isFullscreen;
 
   onEndedRef.current = onEnded;
   autoNextLabelRef.current = autoNextLabel;
@@ -973,9 +974,9 @@ export function VideoPlayer({
             onToggleFullscreen={toggleFullscreen}
             onInteraction={keepControlsVisible}
             topControls={{
-              showChannelInfo: !hideTopControls,
-              showCast: !hideTopControls,
-              showClose: !hideTopControls,
+              showChannelInfo: !shouldHideTopControls,
+              showCast: !shouldHideTopControls,
+              showClose: !shouldHideTopControls,
             }}
             bottomControls={{
               showPlay: true,
