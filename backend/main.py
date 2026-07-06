@@ -240,8 +240,12 @@ def proxy_options():
     return cors_preflight()
 
 @app.get("/epg")
-def epg(start: int | None = Query(default=None), end: int | None = Query(default=None)):
-    return get_now_epg(start=start, end=end)
+def epg(
+    start: int | None = Query(default=None),
+    end: int | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=120),
+):
+    return get_now_epg(start=start, end=end, query=q)
 
 @app.get("/epg.xml")
 def epg_xml():

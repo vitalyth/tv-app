@@ -76,6 +76,10 @@ function formatTime(ts: number): string {
     });
 }
 
+function formatTimeRange(start: number, end: number): string {
+    return `${formatTime(start)} - ${formatTime(end)}`;
+}
+
 function uniqueChannelsByIndex(channels: Channel[]): Channel[] {
     const seen = new Set<number>();
 
@@ -270,8 +274,8 @@ const ProgramCell = memo(function ProgramCell({
                 )}
                 <div className="min-w-0 flex-1 overflow-hidden" dir="rtl">
                     <p className="text-xs font-semibold text-white truncate leading-tight">{program.name}</p>
-                    <p className="text-[10px] text-zinc-400 mt-0.5 truncate">
-                        {formatTime(program.start)} – {formatTime(program.end)}
+                    <p className="text-[10px] text-zinc-400 mt-0.5 truncate" dir="ltr">
+                        {formatTimeRange(program.start, program.end)}
                     </p>
                 </div>
             </div>

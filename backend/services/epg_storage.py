@@ -169,6 +169,7 @@ def load_channel_programs(
     db_path: Path | str | None = None,
     start: int | None = None,
     end: int | None = None,
+    query: str | None = None,
 ) -> list[dict[str, Any]]:
     path = get_epg_db_path(db_path)
     if not path.exists():
@@ -182,6 +183,11 @@ def load_channel_programs(
     if end is not None:
         clauses.append("start < ?")
         params.append(int(end))
+    search_query = (query or "").strip().lower()
+    if search_query:
+        clauses.append("(LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(description) LIKE ? ESCAPE '\\')")
+        like_query = f"%{_escape_like(search_query)}%"
+        params.extend([like_query, like_query])
 
     with sqlite3.connect(path) as con:
         con.row_factory = sqlite3.Row
@@ -202,6 +208,7 @@ def load_all_epg(
     db_path: Path | str | None = None,
     start: int | None = None,
     end: int | None = None,
+    query: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     path = get_epg_db_path(db_path)
     if not path.exists():
@@ -215,6 +222,11 @@ def load_all_epg(
     if end is not None:
         clauses.append("start < ?")
         params.append(int(end))
+    search_query = (query or "").strip().lower()
+    if search_query:
+        clauses.append("(LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(description) LIKE ? ESCAPE '\\')")
+        like_query = f"%{_escape_like(search_query)}%"
+        params.extend([like_query, like_query])
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
 
@@ -234,6 +246,15 @@ def load_all_epg(
     for row in rows:
         epg.setdefault(row["channel_id"], []).append(_row_to_program(row))
     return epg
+
+
+def _escape_like(value: str) -> str:
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
 
 
 def epg_db_mtime(db_path: Path | str | None = None) -> float:

@@ -27,6 +27,10 @@ function formatProgramTime(ts: number): string {
     });
 }
 
+function formatProgramTimeRange(start: number, end: number): string {
+    return `${formatProgramTime(start)} - ${formatProgramTime(end)}`;
+}
+
 function resolvePanelImage(image?: string): string {
     if (!image) return "";
     if (image.startsWith("http://") || image.startsWith("https://")) return image;
@@ -109,8 +113,11 @@ function ShellContent({
         currentChannel?.playerSubtitle ||
         panelChannel?.name ||
         "";
+    const panelTimeRange = panelProgram
+        ? formatProgramTimeRange(panelProgram.start, panelProgram.end)
+        : "";
     const panelSubtitle = panelProgram
-        ? `${panelChannel?.name || ""} · ${formatProgramTime(panelProgram.start)} - ${formatProgramTime(panelProgram.end)}`
+        ? panelChannel?.name || ""
         : currentChannel?.vodMeta
             ? [currentChannel.vodMeta.channelName, currentChannel.vodMeta.seasonName].filter(Boolean).join(" · ")
             : panelChannel?.name || "";
@@ -198,6 +205,12 @@ function ShellContent({
                                                 </span>
                                             )}
                                             {panelSubtitle}
+                                            {panelTimeRange && (
+                                                <>
+                                                    <span aria-hidden="true">·</span>
+                                                    <span dir="ltr">{panelTimeRange}</span>
+                                                </>
+                                            )}
                                         </p>
                                     )}
                                 </div>
@@ -295,6 +308,12 @@ function ShellContent({
                         {panelSubtitle && (
                             <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
                                 {panelSubtitle}
+                                {panelTimeRange && (
+                                    <>
+                                        <span aria-hidden="true"> · </span>
+                                        <span dir="ltr">{panelTimeRange}</span>
+                                    </>
+                                )}
                             </p>
                         )}
                         <p className="mt-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">

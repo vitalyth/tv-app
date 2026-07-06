@@ -58,8 +58,12 @@ def _merge_fallback_epg(epg_list, now):
 
     return merged_epg
 
-def _load_fallback_epg(start: int | None = None, end: int | None = None):
-    return load_all_epg(FALLBACK_EPG_DB, start=start, end=end)
+def _load_fallback_epg(
+    start: int | None = None,
+    end: int | None = None,
+    query: str | None = None,
+):
+    return load_all_epg(FALLBACK_EPG_DB, start=start, end=end, query=query)
 
 def _get_fallback_epg_mtime():
     return epg_db_mtime(FALLBACK_EPG_DB)
@@ -70,13 +74,21 @@ def _load_external_epg_source():
 
     return GetEPG()
 
-def get_now_epg(start: int | None = None, end: int | None = None):
+def get_now_epg(
+    start: int | None = None,
+    end: int | None = None,
+    query: str | None = None,
+):
     global _epg_cache, _last_update, _epg_cache_fallback_mtime
 
     now = int(time.time())
     window_start = start if start is not None else now - WINDOW_BACK
     window_end = end if end is not None else now + WINDOW_FORWARD
     fallback_mtime = _get_fallback_epg_mtime()
+    search_query = (query or "").strip()
+
+    if search_query:
+        return _load_fallback_epg(start=window_start, end=window_end, query=search_query)
 
     # use in-memory cache if valid
     if (

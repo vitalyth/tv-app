@@ -84,12 +84,16 @@ export default function GuidePage() {
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [epgByChannel, setEpgByChannel] = useState<Record<string, Program[]>>({});
     const [guideRange, setGuideRange] = useState<{ start: number; end: number } | null>(null);
-    const loadedRangeRef = useRef<{ start: number; end: number } | null>(null);
+    const loadedRangeRef = useRef<{ start: number; end: number; query: string } | null>(null);
     const epgRequestCacheRef = useRef(new Map<string, Promise<Record<string, Program[]>>>());
 
-    const loadEpg = useCallback((range: { start: number; end: number }, replace = false) => {
-        const requestKey = `${range.start}:${range.end}`;
-        const request = epgRequestCacheRef.current.get(requestKey) ?? channelService.getEpg(range)
+    const loadEpg = useCallback((range: { start: number; end: number }, query = "", replace = false) => {
+        const normalizedQuery = query.trim();
+        const requestKey = `${range.start}:${range.end}:${normalizedQuery}`;
+        const request = epgRequestCacheRef.current.get(requestKey) ?? channelService.getEpg({
+            ...range,
+            q: normalizedQuery || undefined,
+        })
             .then((epg) => (epg && typeof epg === "object" ? epg as Record<string, Program[]> : {}))
             .finally(() => {
                 epgRequestCacheRef.current.delete(requestKey);
@@ -100,7 +104,7 @@ export default function GuidePage() {
         return request
             .then((epg) => {
                 setEpgByChannel((current) => replace ? epg : mergeEpg(current, epg));
-                loadedRangeRef.current = range;
+                loadedRangeRef.current = { ...range, query: normalizedQuery };
             })
             .catch(() => undefined);
     }, []);
@@ -108,17 +112,23 @@ export default function GuidePage() {
     useEffect(() => {
         if (!guideRange) return;
 
+        const searchText = searchQuery.trim();
         const loadedRange = loadedRangeRef.current;
-        if (loadedRange && guideRange.start >= loadedRange.start && guideRange.end <= loadedRange.end) {
+        if (
+            loadedRange &&
+            loadedRange.query === searchText &&
+            guideRange.start >= loadedRange.start &&
+            guideRange.end <= loadedRange.end
+        ) {
             return;
         }
 
         const timeout = window.setTimeout(() => {
-            loadEpg(guideRange, !loadedRange);
+            loadEpg(guideRange, searchText, !loadedRange || loadedRange.query !== searchText);
         }, 120);
 
         return () => window.clearTimeout(timeout);
-    }, [guideRange, loadEpg]);
+    }, [guideRange, loadEpg, searchQuery]);
 
     const handleGuideRangeChange = useCallback((range: { start: number; end: number }) => {
         setGuideRange((current) => {
@@ -206,8 +216,8 @@ export default function GuidePage() {
     const refreshNow = useCallback(() => {
         refresh();
         if (!guideRange) return;
-        loadEpg(guideRange, true);
-    }, [guideRange, loadEpg, refresh]);
+        loadEpg(guideRange, searchQuery, true);
+    }, [guideRange, loadEpg, refresh, searchQuery]);
 
     return (
         <div className="h-full flex flex-col bg-background">

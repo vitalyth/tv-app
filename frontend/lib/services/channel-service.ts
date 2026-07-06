@@ -5,8 +5,8 @@ export const channelService = {
     return apiFetch("/live_channels");
   },
 
-  getEpg(params?: { start?: number; end?: number }) {
-    if (params?.start === undefined && params?.end === undefined) {
+  getEpg(params?: { start?: number; end?: number; q?: string }) {
+    if (params?.start === undefined && params?.end === undefined && !params?.q) {
       return apiFetch("/epg");
     }
 
@@ -16,6 +16,9 @@ export const channelService = {
     }
     if (params.end !== undefined) {
       searchParams.set("end", String(params.end));
+    }
+    if (params.q?.trim()) {
+      searchParams.set("q", params.q.trim());
     }
 
     return apiFetch(`/epg?${searchParams.toString()}`);
