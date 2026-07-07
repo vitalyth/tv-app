@@ -48,7 +48,7 @@ type VisibleTimeRange = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CELL_W = 300;       // px per hour
+const CELL_W = 180;       // px per hour
 const CELL_H = 72;        // px per channel row
 const SECTION_H = 34;     // px per channel group header
 const CHAN_W = "var(--guide-channel-width, 130px)"; // channel column width
@@ -247,6 +247,8 @@ const ProgramCell = memo(function ProgramCell({
                         alt=""
                         className="h-full w-full object-cover"
                         loading="lazy"
+                        decoding="async"
+                        fetchPriority="low"
                         style={{
                             WebkitMaskImage: "linear-gradient(to right, black 0%, black 50%, rgb(0 0 0 / 0.55) 72%, rgb(0 0 0 / 0.12) 90%, transparent 100%)",
                             maskImage: "linear-gradient(to right, black 0%, black 50%, rgb(0 0 0 / 0.55) 72%, rgb(0 0 0 / 0.12) 90%, transparent 100%)",
@@ -325,6 +327,7 @@ function ProgramGuide({
     const scrollFrameRef = useRef<number | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
     const maybeLoadMoreForScrollRef = useRef<(() => void) | null>(null);
+    const previousNowSecRef = useRef<number | null>(null);
     const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
     const lastVisibleDateLabelRef = useRef(visibleDateLabel);
     const [visibleViewport, setVisibleViewport] = useState<VisibleViewport>({ top: 0, height: 900 });
@@ -731,7 +734,7 @@ function ProgramGuide({
         return () => cancelAnimationFrame(frame);
     }, [cellW, nowRight, totalGridW, updateVisibleDateLabel, updateVisibleViewport]);
 
-    const scrollToNow = useCallback(() => {
+    const scrollToNow = useCallback((behavior: ScrollBehavior = "smooth") => {
         if (!mainRef.current) return;
         const visibleW = mainRef.current.clientWidth;
         const channelW = getGuideChannelWidth();
@@ -739,8 +742,40 @@ function ProgramGuide({
         const target = nowX - cellW;
         const maxScrollLeft = Math.max(0, channelW + totalGridW - visibleW);
         const clamped = Math.max(0, Math.min(target, maxScrollLeft));
-        mainRef.current.scrollTo({ left: clamped, behavior: "smooth" });
+        mainRef.current.scrollTo({ left: clamped, behavior });
     }, [cellW, nowRight, totalGridW]);
+
+    useEffect(() => {
+        const previousNowSec = previousNowSecRef.current;
+        previousNowSecRef.current = nowSec;
+
+        if (previousNowSec === null || !mainRef.current || !didScrollRef.current || totalGridW <= 0) {
+            return;
+        }
+
+        const deltaSeconds = nowSec - previousNowSec;
+        if (deltaSeconds <= 0 || deltaSeconds > SECS_PER_HOUR) {
+            return;
+        }
+
+        const node = mainRef.current;
+        const channelW = getGuideChannelWidth();
+        const previousNowX = (previousNowSec - guideStart) * pxPerSec;
+        const visibleProgramLeft = Math.max(0, node.scrollLeft - channelW);
+        const visibleProgramW = Math.max(cellW, node.clientWidth - channelW);
+        const nowWasVisible =
+            previousNowX >= visibleProgramLeft - 2 &&
+            previousNowX <= visibleProgramLeft + visibleProgramW + 2;
+
+        if (!nowWasVisible) {
+            return;
+        }
+
+        const deltaPx = deltaSeconds * pxPerSec;
+        const maxScrollLeft = Math.max(0, channelW + totalGridW - node.clientWidth);
+        node.scrollLeft = Math.max(0, Math.min(node.scrollLeft + deltaPx, maxScrollLeft));
+        scheduleViewportUpdate();
+    }, [cellW, guideStart, nowSec, pxPerSec, scheduleViewportUpdate, totalGridW]);
 
     return (
         <div className="h-full w-full bg-background flex flex-col font-sans overflow-hidden">
@@ -812,7 +847,7 @@ function ProgramGuide({
                         }}
                     >
                         <button
-                            onClick={scrollToNow}
+                            onClick={() => scrollToNow()}
                             className="guide-now-button rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-background transition-colors hover:bg-accent"
                             aria-label="עכשיו"
                         >

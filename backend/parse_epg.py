@@ -421,6 +421,7 @@ def main():
 
         elif args.channel in LOCAL_US_CHANNEL_IDS:
             programs = parse_local_us_epg(args.channel)
+            replace_existing_programs = True
 
         else:
             first_html = fetch_html(args.url)
@@ -904,8 +905,10 @@ def main():
 
         print("\nParsing local US channels from public TV guides")
         for channel_id in LOCAL_US_CHANNEL_IDS:
+            replace_local_programs = False
             try:
                 local_programs = parse_local_us_epg(channel_id)
+                replace_local_programs = True
             except Exception as ex:
                 failed_channels.append(channel_id)
                 print(f"Failed parsing {channel_id}: {ex}")
@@ -915,7 +918,8 @@ def main():
                     continue
                 print(f"Using existing cached programs for {channel_id}")
 
-            local_programs = merge_with_existing_channel(output_dir, channel_id, local_programs)
+            if not replace_local_programs:
+                local_programs = merge_with_existing_channel(output_dir, channel_id, local_programs)
             combined_epg[channel_id] = local_programs
             if local_programs:
                 output_path = output_dir / f"{channel_id}.json"

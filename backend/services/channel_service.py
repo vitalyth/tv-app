@@ -845,6 +845,39 @@ def _timestamp_matches_dates(timestamp: float, allowed_dates: set) -> bool:
     return datetime.fromtimestamp(timestamp).date() in allowed_dates
 
 
+def _item_matches_today_or_yesterday(item: dict) -> bool:
+    return _timestamp_matches_dates(_item_timestamp_from_fields(item), _today_and_yesterday_dates())
+
+
+def _is_vod_recent_placeholder_item(item: dict) -> bool:
+    text = " ".join(
+        clean_kodi_label(str(item.get(field, "") or "")).lower()
+        for field in (
+            "name",
+            "title",
+            "programName",
+            "description",
+            "programDescription",
+            "episodeDescription",
+        )
+    )
+    program_id = str(item.get("programId") or item.get("program_id") or "")
+
+    return (
+        program_id == "991817"
+        or "vod storage" in text
+        or "dam episodes with missing info" in text
+        or "לא שויכו לסדרה" in text
+        or "לתחקר למה זה קרה" in text
+    )
+
+
+def _prefer_today_or_yesterday_items(items: list[dict]) -> list[dict]:
+    items = [item for item in items if not _is_vod_recent_placeholder_item(item)]
+    fresh_items = [item for item in items if _item_matches_today_or_yesterday(item)]
+    return fresh_items or items
+
+
 def _vod_recent_item_matches_channel_window(item: dict) -> bool:
     timestamp = _item_timestamp_from_fields(item)
     channel_id = item.get("vodChannelId")
@@ -897,6 +930,8 @@ def _sort_vod_items_by_recent(items: list[dict]) -> list[dict]:
 
 
 def _select_vod_recent_items(items: list[dict], max_items: int, preserve_source_order: bool) -> list[dict]:
+    items = _prefer_today_or_yesterday_items(items)
+
     if not preserve_source_order:
         return _sort_vod_items_by_recent(items)[:max_items]
 
@@ -925,22 +960,42 @@ def _sort_vod_recent_cache_items(items: list[dict]) -> list[dict]:
         channel_id: index for index, channel_id in enumerate(VOD_RECENT_PRIORITY_CHANNEL_IDS)
     }
     fallback_rank = len(priority_rank)
-    indexed_items = [
-        (item, _vod_recent_timestamp(item))
-        for item in items
-    ]
 
-    return [
-        item
-        for item, _ in sorted(
-            indexed_items,
-            key=lambda indexed_item: (
-                priority_rank.get(indexed_item[0].get("vodChannelId"), fallback_rank),
-                -indexed_item[1],
-                indexed_item[0].get("sourceOrder", 0),
-            ),
+    grouped_items: dict[str, list[dict]] = {}
+    for item in items:
+        channel_id = item.get("vodChannelId") or ""
+        grouped_items.setdefault(channel_id, []).append(item)
+
+    for channel_items in grouped_items.values():
+        channel_items[:] = _prefer_today_or_yesterday_items(channel_items)
+        channel_items.sort(
+            key=lambda item: (
+                -_vod_recent_timestamp(item),
+                item.get("sourceOrder", 0),
+            )
         )
-    ]
+
+    channel_order = sorted(
+        grouped_items.keys(),
+        key=lambda channel_id: (
+            priority_rank.get(channel_id, fallback_rank),
+            channel_id,
+        ),
+    )
+
+    mixed_items: list[dict] = []
+    while True:
+        added_in_round = False
+        for channel_id in channel_order:
+            channel_items = grouped_items[channel_id]
+            if not channel_items:
+                continue
+
+            mixed_items.append(channel_items.pop(0))
+            added_in_round = True
+
+        if not added_in_round:
+            return mixed_items
 
 
 def _vod_recent_timestamp(item: dict) -> float:
@@ -970,41 +1025,43 @@ def _fetch_kan_vod_recent_items(limit: int) -> list[dict]:
         source_timestamp = _parse_aired_timestamp(published)
         episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
         program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
+        recent_item = {
+            "id": f"kan-vod:{episode_id}",
+            "episodeId": episode_id,
+            "name": title,
+            "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
+            "streamUrl": episode.get("stream_url") or "",
+            "playUrl": episode.get("play_url") or episode.get("url") or "",
+            "mode": 0,
+            "logo": episode_image or program_image or normalize_vod_image("kan.jpg"),
+            "module": "kan-vod",
+            "moreData": "",
+            "description": description,
+            "title": title,
+            "plot": description,
+            "aired": published,
+            "season": str(episode.get("season_number") or ""),
+            "episode": episode_id,
+            "programId": episode.get("program_id") or "",
+            "programName": program_name,
+            "programDescription": program_description,
+            "programImage": program_image,
+            "seasonName": season_title,
+            "channelName": "כאן 11",
+            "channelImage": normalize_vod_image("kan.jpg"),
+            "episodeName": title,
+            "episodeDescription": description,
+            "episodeImage": episode_image,
+            "isFolder": False,
+            "isPlayable": True,
+            "sourceTimestamp": source_timestamp,
+            "sourceOrder": index,
+        }
 
-        recent_items.append(
-            {
-                "id": f"kan-vod:{episode_id}",
-                "episodeId": episode_id,
-                "name": title,
-                "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
-                "streamUrl": episode.get("stream_url") or "",
-                "playUrl": episode.get("play_url") or episode.get("url") or "",
-                "mode": 0,
-                "logo": episode_image or program_image or normalize_vod_image("kan.jpg"),
-                "module": "kan-vod",
-                "moreData": "",
-                "description": description,
-                "title": title,
-                "plot": description,
-                "aired": published,
-                "season": str(episode.get("season_number") or ""),
-                "episode": episode_id,
-                "programId": episode.get("program_id") or "",
-                "programName": program_name,
-                "programDescription": program_description,
-                "programImage": program_image,
-                "seasonName": season_title,
-                "channelName": "כאן 11",
-                "channelImage": normalize_vod_image("kan.jpg"),
-                "episodeName": title,
-                "episodeDescription": description,
-                "episodeImage": episode_image,
-                "isFolder": False,
-                "isPlayable": True,
-                "sourceTimestamp": source_timestamp,
-                "sourceOrder": index,
-            }
-        )
+        if _is_vod_recent_placeholder_item(recent_item):
+            continue
+
+        recent_items.append(recent_item)
 
     return recent_items
 
@@ -1117,6 +1174,9 @@ def _merge_vod_recent_cache_items(new_items: list[dict], total_limit: int) -> li
     for item in [*new_items, *existing_items]:
         item_id = item.get("id")
         if not item_id or item_id in merged_by_id:
+            continue
+
+        if _is_vod_recent_placeholder_item(item):
             continue
 
         if not _vod_recent_item_matches_channel_window(item):
@@ -1300,7 +1360,9 @@ def refresh_vod_recent_cache(
 def get_vod_recent_items(max_per_channel: int = 10, total_limit: int = VOD_RECENT_TOTAL_LIMIT) -> list[dict]:
     file_items = _read_vod_recent_cache_file()
     if file_items is not None:
-        return file_items
+        return _sort_vod_recent_cache_items([
+            item for item in file_items if not _is_vod_recent_placeholder_item(item)
+        ])[:total_limit]
 
     # If cache was never generated yet, return an empty list immediately.
     # The scheduler / refresh_vod_recent.py should populate this file in the background.
