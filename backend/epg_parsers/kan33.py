@@ -1,12 +1,9 @@
 import html
 import json
 import re
-import os
-import sqlite3
 import time
 from urllib.error import HTTPError, URLError
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from html.parser import HTMLParser
 from urllib.parse import urlencode
 from urllib.parse import urljoin
@@ -23,7 +20,6 @@ except ImportError:
 KAN33_SCHEDULE_URL = "https://www.kan.org.il/umbraco/surface/LoadBroadcastSchedule/LoadSchedule"
 KAN_TV_GUIDE_URL = "https://www.kan.org.il/tv-guide/"
 KAN_BASE_URL = "https://www.kan.org.il"
-KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", str(Path(__file__).resolve().parents[1] / "db" / "kan_vod.db"))
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 APP_TZ = ZoneInfo("America/New_York")
 KAN11_CHANNEL_ID = "4444"
@@ -163,77 +159,6 @@ def normalize_program_title(value: str) -> str:
     return " ".join(value.split()).lower()
 
 
-def load_kan_vod_images(db_path: str = KAN_VOD_DB_PATH) -> dict[str, str]:
-    if not Path(db_path).exists():
-        return {}
-
-    con = sqlite3.connect(db_path)
-    try:
-        rows = con.execute(
-            """
-            SELECT title, image, 0 AS priority
-            FROM programs
-            WHERE image IS NOT NULL AND image != ''
-            UNION ALL
-            SELECT p.title, e.image, 1 AS priority
-            FROM programs p
-            JOIN episodes e ON e.program_id = p.id
-            WHERE e.image IS NOT NULL AND e.image != ''
-            ORDER BY title, priority
-            """
-        ).fetchall()
-    finally:
-        con.close()
-
-    images: dict[str, str] = {}
-    for title, image, _priority in rows:
-        normalized = normalize_program_title(title or "")
-        normalized_image = normalize_image_url(image)
-        if not normalized or not normalized_image:
-            continue
-
-        current = images.get(normalized)
-        if not current or is_preferred_kan_image(normalized_image, current):
-            images[normalized] = normalized_image
-
-    return images
-
-
-def find_vod_image_for_title(title: str, image_map: dict[str, str]) -> str:
-    normalized = normalize_program_title(title)
-    if not normalized:
-        return ""
-
-    image = image_map.get(normalized)
-    if image:
-        return image
-
-    for candidate, candidate_image in image_map.items():
-        if len(candidate) < 4:
-            continue
-
-        if normalized.startswith(candidate) or candidate.startswith(normalized):
-            return candidate_image
-
-    return ""
-
-
-def enrich_program_images_from_vod(programs: list[dict]) -> list[dict]:
-    image_map = load_kan_vod_images()
-    if not image_map:
-        return programs
-
-    for program in programs:
-        image = find_vod_image_for_title(program.get("name", ""), image_map)
-        current_image = normalize_image_url(program.get("image", ""))
-        if image and (not current_image or is_preferred_kan_image(image, current_image)):
-            program["image"] = image
-        elif current_image:
-            program["image"] = current_image
-
-    return programs
-
-
 def first_value(*values) -> str:
     for value in values:
         if value:
@@ -247,7 +172,7 @@ def normalize_image_url(value: str) -> str:
     if not value:
         return ""
 
-    if "," in value and " " in value:
+    if " " in value:
         value = value.split(",", 1)[0].strip().split(" ", 1)[0]
 
     value = urljoin(KAN_BASE_URL, value)
@@ -270,22 +195,6 @@ def extract_kan_azure_image_url(value: str) -> str:
 
     year, month, day, filename = match.groups()
     return f"https://kanstatic.azureedge.net/download/pictures/{year}/{month}/{day}/{filename}"
-
-
-def is_preferred_kan_image(candidate: str, current: str) -> bool:
-    candidate_is_direct_cdn = "kanstatic.azureedge.net" in candidate
-    current_is_direct_cdn = "kanstatic.azureedge.net" in current
-
-    if candidate_is_direct_cdn != current_is_direct_cdn:
-        return candidate_is_direct_cdn
-
-    candidate_is_mobapi = "mobapi.kan.org.il" in candidate
-    current_is_mobapi = "mobapi.kan.org.il" in current
-
-    if candidate_is_mobapi != current_is_mobapi:
-        return not candidate_is_mobapi
-
-    return False
 
 
 def find_image_in_object(value) -> str:
@@ -330,6 +239,8 @@ def extract_first_image(html_text: str) -> str:
         r"<source[^>]+srcset='([^']+)'",
         r'background-image:\s*url\(["\']?([^"\'()]+)',
         r'"(?:Image|image|ImageUrl|imageUrl|Thumbnail|thumbnail|Poster|poster)"\s*:\s*"([^"]+)"',
+        r'((?:https?:)?//www\.kan\.org\.il/media/[^"\'<>\s)]+)',
+        r'(/media/[^"\'<>\s)]+)',
     ]
 
     for pattern in patterns:
@@ -366,7 +277,7 @@ def parse_results_item_html(html_text: str) -> list[dict]:
         description = clean_text(
             extract_first_attr(block, r'<div[^>]*class="program-description"[^>]*>(.*?)</div>')
         )
-        image = extract_first_attr(block, r'<img[^>]+src="([^"]+)"')
+        image = extract_first_image(block)
 
         if not start_dt or not title:
             continue
@@ -581,6 +492,31 @@ def parse_kan33_day(html_text: str, schedule_day: datetime) -> list[dict]:
     return text_programs
 
 
+def apply_tv_guide_images(programs: list[dict], page_programs: list[dict]) -> list[dict]:
+    if not programs or not page_programs:
+        return programs
+
+    image_by_start = {
+        program["start"]: program["image"]
+        for program in page_programs
+        if program.get("image")
+    }
+    image_by_start_and_title = {
+        (program["start"], normalize_program_title(program.get("name", ""))): program["image"]
+        for program in page_programs
+        if program.get("image")
+    }
+
+    for program in programs:
+        image = image_by_start_and_title.get(
+            (program["start"], normalize_program_title(program.get("name", "")))
+        ) or image_by_start.get(program["start"])
+        if image:
+            program["image"] = normalize_image_url(image)
+
+    return programs
+
+
 def parse_kan_schedule_epg(
     channel_id: str,
     label: str,
@@ -595,6 +531,7 @@ def parse_kan_schedule_epg(
     for offset in range(days):
         schedule_day = today + timedelta(days=offset)
         url = build_schedule_url(schedule_day, channel_id=channel_id, current_page_id=current_page_id)
+        page_url = build_tv_guide_url(schedule_day, channel_id=channel_id)
         source_url = url
         try:
             html_text = fetch_html(url)
@@ -608,7 +545,6 @@ def parse_kan_schedule_epg(
             day_programs = []
 
         if not day_programs:
-            page_url = build_tv_guide_url(schedule_day, channel_id=channel_id)
             try:
                 page_html = fetch_html(page_url)
                 day_programs = parse_kan33_day(page_html, schedule_day)
@@ -618,11 +554,18 @@ def parse_kan_schedule_epg(
                     print(f"Skipped {label} tv-guide day after partial success: {page_url}")
                     break
                 raise
+        else:
+            try:
+                page_html = fetch_html(page_url)
+                page_programs = parse_kan33_day(page_html, schedule_day)
+                day_programs = apply_tv_guide_images(day_programs, page_programs)
+            except Exception as ex:
+                print(f"Skipped {label} tv-guide images for {page_url}: {ex}")
 
         print(f"Parsed {len(day_programs)} {label} programs from {source_url}")
         programs.extend(day_programs)
 
-    return fill_short_gaps(dedupe_and_sort_programs(enrich_program_images_from_vod(programs)))
+    return fill_short_gaps(dedupe_and_sort_programs(programs))
 
 
 def parse_kan11_epg(days: int = 5, today: datetime | None = None) -> list[dict]:

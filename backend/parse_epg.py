@@ -13,7 +13,7 @@ from epg_parsers.knesset import parse_knesset_epg
 from epg_parsers.walla33 import parse_walla33_epg
 from epg_parsers.kabbalah import parse_kabbalah_epg
 from epg_parsers.hidabroot import parse_hidabroot_epg
-from epg_parsers.kan33 import enrich_program_images_from_vod, parse_kan11_epg, parse_kan23_epg, parse_kan33_epg
+from epg_parsers.kan33 import parse_kan11_epg, parse_kan23_epg, parse_kan33_epg
 from epg_parsers.kan_worldcup import parse_kan_worldcup_epg
 from epg_parsers.mako12 import parse_mako12_epg
 from epg_parsers.radio100fm import parse_100fm_epg
@@ -403,7 +403,6 @@ def main():
                 replace_existing_programs = True
             else:
                 replace_existing_programs = True
-            programs = enrich_program_images_from_vod(programs)
 
         elif args.channel == "kan_worldcup":
             programs = parse_kan_worldcup_epg()
@@ -446,8 +445,6 @@ def main():
         else:
             if not replace_existing_programs:
                 programs = merge_with_existing_channel(output_dir, args.channel, programs)
-            if args.channel == "11":
-                programs = enrich_program_images_from_vod(programs)
         write_json(programs, output_path)
         print(f"Wrote {len(programs)} programs to {output_path}")
 
@@ -661,7 +658,6 @@ def main():
             )
             kan11_programs = combined_epg.get("11", []) or read_existing_channel_programs(output_dir, "11")
 
-        kan11_programs = enrich_program_images_from_vod(kan11_programs)
         combined_epg["11"] = kan11_programs
         if kan11_programs:
             output_path = output_dir / "11.json"

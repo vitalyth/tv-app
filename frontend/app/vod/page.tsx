@@ -23,6 +23,7 @@ import {
 
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
+const VOD_SEARCH_PARAM = "q";
 const VOD_RECENT_KEY = "vod_recently_watched";
 const SEARCH_RESULT_LIMIT = 120;
 
@@ -319,8 +320,9 @@ export default function VodPage() {
         const params = new URLSearchParams(window.location.search);
         const stack = parseJsonParam<VodNode[]>(params.get(VOD_PATH_PARAM));
         const item = parseJsonParam<VodItem>(params.get(VOD_PLAY_PARAM));
+        const query = params.get(VOD_SEARCH_PARAM) || "";
 
-        setSearchQuery("");
+        setSearchQuery(query);
         setNavigationStack(Array.isArray(stack) ? stack : []);
         if (item) {
             const nextStack = Array.isArray(stack) ? stack : [];

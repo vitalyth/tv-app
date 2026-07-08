@@ -18,6 +18,8 @@ export interface Program {
   image?: string
   hasVod?: boolean
   vodCheckedAt?: number
+  vodProgramLink?: string
+  vodLink?: string
   vodMatch?: {
     module?: string
     series?: any

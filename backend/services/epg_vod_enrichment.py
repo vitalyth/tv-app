@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from config import CACHE_DIR
 from services.kan_vod_match_service import find_kan_vod_match
@@ -19,6 +20,7 @@ VOD_RECENT_EPG_CHANNEL_IDS = {
 VOD_RECHECK_SECONDS = int(os.getenv("EPG_VOD_RECHECK_SECONDS", str(6 * 60 * 60)))
 RECENT_PROGRAM_WINDOW_SECONDS = int(os.getenv("EPG_VOD_RECENT_WINDOW_SECONDS", str(7 * 24 * 60 * 60)))
 VOD_RECENT_CACHE_FILE = CACHE_DIR / "vod_recent.json"
+KAN_VOD_MATCH_VERSION = 3
 MATCH_STOP_WORDS = {
     "של",
     "עם",
@@ -49,15 +51,17 @@ MATCH_STOP_WORDS = {
 
 def _compact_kan_vod_match(match: dict[str, Any]) -> dict[str, Any]:
     series = dict(match.get("series") or {})
-    episode = dict(match.get("episode") or {})
+    episode = dict(match.get("episode") or {}) if match.get("episode") else None
 
     series.pop("episodes", None)
 
-    return {
+    compact = {
         "module": "kan-vod",
         "series": series,
-        "episode": episode,
     }
+    if episode:
+        compact["episode"] = episode
+    return compact
 
 
 def _normalize_text(value: str | None) -> str:
@@ -186,6 +190,37 @@ def _compact_vod_recent_match(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_vod_link(program: dict[str, Any], match: dict[str, Any] | None) -> str:
+    if not match:
+        return ""
+
+    if match.get("module") == "kan-vod":
+        series = match.get("series") or {}
+        program_id = (
+            series.get("id")
+            or series.get("programId")
+            or series.get("program_id")
+        )
+        if program_id:
+            return f"/kan-vod/{quote(str(program_id), safe='')}"
+
+    item = match.get("item") or {}
+    if item.get("module") == "kan-vod":
+        program_id = item.get("programId") or item.get("program_id")
+        if program_id:
+            return f"/kan-vod/{quote(str(program_id), safe='')}"
+
+    search_text = (
+        item.get("programName")
+        or item.get("name")
+        or item.get("title")
+        or program.get("name")
+        or ""
+    ).strip()
+
+    return f"/vod?q={quote(search_text, safe='')}" if search_text else ""
+
+
 def _find_vod_recent_match(
     channel_id: str,
     program: dict[str, Any],
@@ -276,6 +311,16 @@ def _should_check_program(program: dict[str, Any], now: int) -> bool:
     return checked_at <= 0 or now - checked_at >= VOD_RECHECK_SECONDS
 
 
+def _attach_vod_program_link(program: dict[str, Any], match: dict[str, Any] | None) -> None:
+    vod_program_link = _build_vod_link(program, match)
+    if vod_program_link:
+        program["vodProgramLink"] = vod_program_link
+        program["vodLink"] = vod_program_link
+    else:
+        program.pop("vodProgramLink", None)
+        program.pop("vodLink", None)
+
+
 def enrich_programs_with_vod(
     channel_id: str,
     programs: list[dict[str, Any]],
@@ -293,8 +338,13 @@ def enrich_programs_with_vod(
 
     for program in programs:
         next_program = deepcopy(program)
+        match = None
+        needs_kan_rematch = (
+            channel_id in KAN_EPG_CHANNEL_IDS
+            and int(next_program.get("vodMatchVersion") or 0) < KAN_VOD_MATCH_VERSION
+        )
 
-        if _should_check_program(next_program, current_time):
+        if needs_kan_rematch or _should_check_program(next_program, current_time):
             kan_match = (
                 find_kan_vod_match(next_program, api_prefix=api_prefix)
                 if channel_id in KAN_EPG_CHANNEL_IDS
@@ -308,17 +358,69 @@ def enrich_programs_with_vod(
             match = _compact_kan_vod_match(kan_match) if kan_match else (
                 _compact_vod_recent_match(recent_match) if recent_match else None
             )
-            next_program["hasVod"] = bool(match)
+            has_episode_match = bool(
+                (match or {}).get("episode") or (match or {}).get("item")
+            )
+            next_program["hasVod"] = has_episode_match
             next_program["vodCheckedAt"] = current_time
+            if channel_id in KAN_EPG_CHANNEL_IDS:
+                next_program["vodMatchVersion"] = KAN_VOD_MATCH_VERSION
+            _attach_vod_program_link(next_program, match)
 
-            if match:
+            if has_episode_match and match:
                 next_program["vodMatch"] = match
             else:
                 next_program.pop("vodMatch", None)
+        elif (
+            channel_id in KAN_EPG_CHANNEL_IDS
+            and (
+                not (next_program.get("vodProgramLink") or next_program.get("vodLink"))
+                or not next_program.get("vodMatch")
+            )
+        ):
+            kan_match = find_kan_vod_match(next_program, api_prefix=api_prefix)
+            match = _compact_kan_vod_match(kan_match) if kan_match else None
+            _attach_vod_program_link(next_program, match)
+
+            has_episode_match = bool((match or {}).get("episode"))
+            next_program["hasVod"] = has_episode_match
+            next_program["vodMatchVersion"] = KAN_VOD_MATCH_VERSION
+            if has_episode_match and match:
+                next_program["vodMatch"] = match
+            else:
+                next_program.pop("vodMatch", None)
+        elif next_program.get("hasVod") and next_program.get("vodMatch") and not (
+            next_program.get("vodProgramLink") or next_program.get("vodLink")
+        ):
+            _attach_vod_program_link(next_program, next_program.get("vodMatch"))
 
         enriched_programs.append(next_program)
 
     return enriched_programs
+
+
+def add_vod_links_to_epg(epg: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    linked_epg: dict[str, list[dict[str, Any]]] = {}
+
+    for channel_id, programs in (epg or {}).items():
+        linked_programs: list[dict[str, Any]] = []
+        for program in programs or []:
+            next_program = dict(program)
+            if next_program.get("vodProgramLink"):
+                next_program["vodLink"] = next_program.get("vodProgramLink")
+            elif next_program.get("vodLink"):
+                next_program["vodProgramLink"] = next_program.get("vodLink")
+            elif next_program.get("hasVod") and next_program.get("vodMatch"):
+                vod_program_link = _build_vod_link(next_program, next_program.get("vodMatch"))
+                next_program["vodProgramLink"] = vod_program_link
+                next_program["vodLink"] = vod_program_link
+            else:
+                next_program.pop("vodProgramLink", None)
+                next_program.pop("vodLink", None)
+            linked_programs.append(next_program)
+        linked_epg[str(channel_id)] = linked_programs
+
+    return linked_epg
 
 
 def enrich_epg_with_vod(

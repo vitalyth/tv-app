@@ -1,5 +1,6 @@
 import time
 import copy
+from services.epg_vod_enrichment import add_vod_links_to_epg
 from services.epg_storage import (
     DEFAULT_EPG_DB_PATH,
     epg_db_mtime,
@@ -162,4 +163,4 @@ def get_now_epg(
 
         epgList[channel] = programs
 
-    return epgList
+    return add_vod_links_to_epg(epgList)

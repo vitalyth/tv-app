@@ -5,54 +5,10 @@ import { useChannelsContext } from "@/context/channels-context";
 import ProgramGuide from "@/components/ProgramGuide";
 import { ChannelsFilters } from "@/components/channels-filters";
 import { useFilteredChannels } from "@/hooks/useFilteredChannels";
-import {
-    Channel,
-    Program,
-    VodPlaybackMeta,
-    getKanVodEpisodeId,
-    getKanVodProgramId,
-} from "@/lib/channels-data";
+import { Channel, Program } from "@/lib/channels-data";
 import { channelService } from "@/lib/services/channel-service";
 import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 import { useFloatingPlayer } from "@/context/floating-player-context";
-
-function vodItemToChannel(item: any): Channel {
-    const vodMeta: VodPlaybackMeta = {
-        programName: item.programName || item.name,
-        seasonName: item.seasonName || item.season,
-        channelName: item.channelName || item.vodChannelName || "VOD",
-        episodeName: item.episodeName || item.title || item.name,
-        episodeDescription: item.episodeDescription || item.description || item.plot,
-        programDescription: item.programDescription || item.description || item.plot,
-        programImage: item.programImage || item.logo,
-        channelImage: item.channelImage || item.logo,
-        episodeImage: item.episodeImage || item.logo,
-    };
-
-    return {
-        id: getKanVodEpisodeId(item.module, item.episodeId, item.id),
-        index: 0,
-        name: vodMeta.channelName,
-        logo: vodMeta.channelImage || item.logo,
-        category: "vod",
-        channelID: item.url,
-        module: item.module,
-        mode: item.mode,
-        linkDetails: {
-            link: item.url,
-        },
-        type: "vod",
-        programs: [],
-        tvgID: "",
-        url: item.url,
-        moreData: item.moreData,
-        playerLogo: vodMeta.channelImage || item.logo,
-        playerTitle: [vodMeta.channelName, vodMeta.programName].filter(Boolean).join(" · "),
-        playerSubtitle: [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean).join(" · "),
-        vodProgramId: getKanVodProgramId(item.module, item.programId, []),
-        vodMeta,
-    };
-}
 
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
     const byKey = new Map<string, Program>();
@@ -79,7 +35,7 @@ function mergeEpg(
 
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
-    const { currentChannel, play, playKanVodEpisode, showProgramDetails } = useFloatingPlayer();
+    const { currentChannel, play, showProgramDetails } = useFloatingPlayer();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [epgByChannel, setEpgByChannel] = useState<Record<string, Program[]>>({});
@@ -187,21 +143,8 @@ export default function GuidePage() {
             return;
         }
 
-        const nowSec = Math.floor(Date.now() / 1000);
-        if (program.end <= nowSec) {
-            if (program.vodMatch?.series && program.vodMatch?.episode) {
-                playKanVodEpisode(program.vodMatch.series, program.vodMatch.episode);
-                return;
-            }
-
-            if (program.vodMatch?.item) {
-                play(vodItemToChannel(program.vodMatch.item));
-                return;
-            }
-        }
-
         showProgramDetails(program, ch);
-    }, [play, playChannel, playKanVodEpisode, showProgramDetails]);
+    }, [playChannel, showProgramDetails]);
 
     const hasVodForProgram = useCallback((program: Program) => {
         const nowSec = Math.floor(Date.now() / 1000);

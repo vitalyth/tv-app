@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import Header from "@/components/Header";
 import { APP_VERSION } from "@/lib/version";
 import { FloatingPlayerProvider, useFloatingPlayer } from "@/context/floating-player-context";
 import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 import { useNowSec } from "@/hooks/use-now-sec";
 import { type Channel, type Program } from "@/lib/channels-data";
-import { Cast, X } from "lucide-react";
+import { Cast, Clapperboard, X } from "lucide-react";
 
 const getPageTitle = (pathname: string) => {
     if (pathname === "/") return "בית";
@@ -84,11 +85,13 @@ function ShellContent({
     const {
         currentChannel,
         programDetails,
+        playKanVodEpisode,
         close,
         clearProgramDetails,
         renderPlayer,
         setDockedPlayerActive,
     } = useFloatingPlayer();
+    const router = useRouter();
     const nowSec = useNowSec();
     const isDesktopSidePanel = useDesktopSidePanel();
     const [isSidePanelClosed, setIsSidePanelClosed] = useState(false);
@@ -126,6 +129,10 @@ function ShellContent({
         currentChannel?.vodMeta?.episodeDescription ||
         currentChannel?.vodMeta?.programDescription ||
         "אין תיאור זמין לתוכנית הזו.";
+    const panelVodHref = panelProgram?.vodProgramLink || panelProgram?.vodLink || "";
+    const panelVodSeries = panelProgram?.vodMatch?.series;
+    const panelVodEpisode = panelProgram?.vodMatch?.episode;
+    const hasSpecificVodEpisode = Boolean(panelVodSeries && panelVodEpisode);
     const shouldShowSidePanel = isDesktopSidePanel && !isSidePanelClosed && Boolean(panelChannel);
     const shouldDockPlayer = shouldShowSidePanel && Boolean(currentChannel);
     const isPlaybackPanel = Boolean(currentChannel && !programDetails);
@@ -143,24 +150,20 @@ function ShellContent({
         return () => setDockedPlayerActive(false);
     }, [setDockedPlayerActive, shouldDockPlayer]);
 
-    useEffect(() => {
-        const className = "floating-player-mobile-portrait-active";
-        const isMobileProgramDetailsOpen = Boolean(programDetails) && !isDesktopSidePanel;
-
-        document.documentElement.classList.toggle(className, isMobileProgramDetailsOpen);
-
-        return () => {
-            if (isMobileProgramDetailsOpen) {
-                document.documentElement.classList.remove(className);
-            }
-        };
-    }, [isDesktopSidePanel, programDetails]);
-
     const closeSidePanel = useCallback(() => {
         setIsSidePanelClosed(true);
         clearProgramDetails();
         close();
     }, [clearProgramDetails, close]);
+
+    const playSpecificVodEpisode = useCallback(() => {
+        if (!panelVodSeries || !panelVodEpisode) return;
+
+        if (panelVodHref) {
+            router.push(panelVodHref);
+        }
+        playKanVodEpisode(panelVodSeries, panelVodEpisode);
+    }, [panelVodEpisode, panelVodHref, panelVodSeries, playKanVodEpisode, router]);
 
     return (
         <div className={`app-shell flex h-dvh flex-col bg-background ${shouldShowSidePanel ? "site-shell--side-panel-open" : ""}`}>
@@ -171,6 +174,72 @@ function ShellContent({
                 className={`min-h-0 flex-1 overflow-hidden ${shouldShowSidePanel ? "grid gap-3 py-4 pl-4 pr-0 lg:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)]" : "flex flex-col"}`}
             >
                 <div dir="rtl" className="site-content min-h-0 flex-1 flex flex-col overflow-hidden">
+                    {programDetails && !isDesktopSidePanel && (
+                        <div dir="rtl" className="program-details-inline shrink-0 overflow-hidden border border-border bg-background">
+                            <button
+                                type="button"
+                                onClick={clearProgramDetails}
+                                className="absolute left-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white transition-colors hover:bg-black/65"
+                                aria-label="סגור פרטי תוכנית"
+                            >
+                                <X className="h-4 w-4" aria-hidden="true" />
+                            </button>
+
+                            {panelImage && (
+                                <img
+                                    key={`${panelImage}-mobile`}
+                                    src={panelImage}
+                                    alt=""
+                                    className="h-full w-2/5 shrink-0 bg-muted object-cover"
+                                    loading="lazy"
+                                    onLoad={(event) => { (event.currentTarget as HTMLImageElement).style.display = ""; }}
+                                    onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
+                                />
+                            )}
+                            <div className="min-w-0 flex-1 overflow-hidden p-4 pl-10 text-right">
+                                <h2 className="line-clamp-2 text-base font-bold leading-6 text-foreground sm:text-xl sm:leading-7">
+                                    {panelTitle}
+                                </h2>
+                                {panelSubtitle && (
+                                    <p className="mt-1 truncate text-xs text-muted-foreground sm:text-sm">
+                                        {panelSubtitle}
+                                        {panelTimeRange && (
+                                            <>
+                                                <span aria-hidden="true"> · </span>
+                                                <span dir="ltr">{panelTimeRange}</span>
+                                            </>
+                                        )}
+                                    </p>
+                                )}
+                                <p className="mt-3 line-clamp-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">
+                                    {panelDescription}
+                                </p>
+                                {(panelVodHref || hasSpecificVodEpisode) && (
+                                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                        {panelVodHref && (
+                                            <Link
+                                                href={panelVodHref}
+                                                className="inline-flex items-center gap-1.5 rounded-md border border-primary/45 bg-primary/12 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                                            >
+                                                <Clapperboard className="h-3.5 w-3.5" aria-hidden="true" />
+                                                פתח עמוד תוכנית
+                                            </Link>
+                                        )}
+                                        {hasSpecificVodEpisode && (
+                                            <button
+                                                type="button"
+                                                onClick={playSpecificVodEpisode}
+                                                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-accent"
+                                            >
+                                                <Clapperboard className="h-3.5 w-3.5" aria-hidden="true" />
+                                                נגן פרק ב-VOD
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
                     {children}
                 </div>
 
@@ -263,6 +332,29 @@ function ShellContent({
                                     <p className="program-side-panel__description mt-3 line-clamp-5 whitespace-pre-line text-sm leading-6 text-muted-foreground">
                                         {panelDescription}
                                     </p>
+                                    {(panelVodHref || hasSpecificVodEpisode) && (
+                                        <div className="mt-4 flex flex-wrap justify-end gap-2">
+                                            {panelVodHref && (
+                                                <Link
+                                                    href={panelVodHref}
+                                                    className="inline-flex items-center gap-2 rounded-md border border-primary/45 bg-primary/12 px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/20"
+                                                >
+                                                    <Clapperboard className="h-4 w-4" aria-hidden="true" />
+                                                    פתח עמוד תוכנית
+                                                </Link>
+                                            )}
+                                            {hasSpecificVodEpisode && (
+                                                <button
+                                                    type="button"
+                                                    onClick={playSpecificVodEpisode}
+                                                    className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent"
+                                                >
+                                                    <Clapperboard className="h-4 w-4" aria-hidden="true" />
+                                                    נגן פרק ב-VOD
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </section>
                         </div>
@@ -278,50 +370,6 @@ function ShellContent({
                     </aside>
                 )}
             </main>
-
-            {programDetails && !isDesktopSidePanel && (
-                <div dir="rtl" className="player-overlay program-details-overlay border border-border bg-background">
-                    <button
-                        type="button"
-                        onClick={clearProgramDetails}
-                        className="absolute left-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white transition-colors hover:bg-black/65"
-                        aria-label="סגור פרטי תוכנית"
-                    >
-                        <X className="h-4 w-4" aria-hidden="true" />
-                    </button>
-
-                    {panelImage && (
-                        <img
-                            key={`${panelImage}-mobile`}
-                            src={panelImage}
-                            alt=""
-                            className="h-1/2 w-full bg-muted object-cover"
-                            loading="lazy"
-                            onLoad={(event) => { (event.currentTarget as HTMLImageElement).style.display = ""; }}
-                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
-                        />
-                    )}
-                    <div className={`${panelImage ? "h-1/2" : "h-full"} overflow-y-auto p-4 text-right`}>
-                        <h2 className="text-base font-bold leading-6 text-foreground sm:text-xl sm:leading-7">
-                            {panelTitle}
-                        </h2>
-                        {panelSubtitle && (
-                            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-                                {panelSubtitle}
-                                {panelTimeRange && (
-                                    <>
-                                        <span aria-hidden="true"> · </span>
-                                        <span dir="ltr">{panelTimeRange}</span>
-                                    </>
-                                )}
-                            </p>
-                        )}
-                        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">
-                            {panelDescription}
-                        </p>
-                    </div>
-                </div>
-            )}
 
             <footer className="shrink-0 border-t border-border bg-card px-4 py-3 text-center text-xs text-muted-foreground">
                 TV App · v{APP_VERSION}
