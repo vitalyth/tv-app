@@ -482,7 +482,14 @@ export default function CustomPlayerControls({
 
     const updateQuality = () => {
       const qLevels = player.qualityLevels?.();
-      if (!qLevels || !qLevels.length) return;
+      if (!qLevels || !qLevels.length) {
+        setLevels([]);
+        setQualityLabel("Auto");
+        setAutoMode(true);
+        setSelectedQualityKey(null);
+        setAutoLabel("Auto");
+        return;
+      }
 
       const currentAutoMode = isAuto(qLevels);
       const currentLevel = getCurrentLevel(qLevels);
@@ -674,6 +681,7 @@ export default function CustomPlayerControls({
     showFullscreen: true,
     ...bottomControls,
   };
+  const canSelectQuality = bottomOptions.showQuality && levels.length > 0;
 
   return (
     <>
@@ -1024,7 +1032,7 @@ export default function CustomPlayerControls({
               </button>
             )}
 
-            {bottomOptions.showQuality && (
+            {canSelectQuality && (
               <div
                 className="relative z-[70]"
                 onMouseEnter={() => {

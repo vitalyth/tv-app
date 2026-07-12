@@ -25,6 +25,7 @@ const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000;
 const VOD_PROGRESS_END_THRESHOLD_SECONDS = 30;
 const PLAYBACK_RECOVERY_DELAY_MS = 8000;
 const PLAYBACK_RELOAD_AFTER_ATTEMPTS = 2;
+const PLAYBACK_LOADING_DELAY_MS = 1200;
 const VOD_BUFFER_WATCH_INTERVAL_MS = 2000;
 const VOD_LOW_BUFFER_SECONDS = 12;
 const VOD_BUFFER_STALL_MS = 8000;
@@ -66,6 +67,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoreExpandedAfterFullscreenRef = useRef(false);
   const lastVodProgressSaveRef = useRef(0);
   const preCastMutedRef = useRef(false);
@@ -109,6 +111,10 @@ export function VideoPlayer({
       ? "טוען את הפרק..."
       : "טוען את הערוץ...";
 
+  const setPlayerLoading = useCallback((value: boolean) => {
+    setIsLoading((current) => (current === value ? current : value));
+  }, []);
+
   useLayoutEffect(() => {
     const node = containerRef.current;
     const inlineHost = inlineHostRef.current;
@@ -140,6 +146,13 @@ export function VideoPlayer({
     if (overlayTimerRef.current) {
       clearTimeout(overlayTimerRef.current);
       overlayTimerRef.current = null;
+    }
+  }, []);
+
+  const clearLoadingTimer = useCallback(() => {
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = null;
     }
   }, []);
 
@@ -183,8 +196,11 @@ export function VideoPlayer({
 
   // Cleanup timer on unmount
   useEffect(() => {
-    return () => clearOverlayTimer();
-  }, [clearOverlayTimer]);
+    return () => {
+      clearOverlayTimer();
+      clearLoadingTimer();
+    };
+  }, [clearLoadingTimer, clearOverlayTimer]);
 
   const resetViewMode = useCallback(() => {
     setIsExpanded(false);
@@ -243,7 +259,7 @@ export function VideoPlayer({
     preCastVolumeRef.current = player.volume?.() ?? 1;
     player.pause();
     player.muted(true);
-    setIsLoading(false);
+    setPlayerLoading(false);
 
     window.setTimeout(() => {
       suppressCastVolumeSyncRef.current = false;
@@ -353,7 +369,7 @@ export function VideoPlayer({
 
     let isMounted = true;
 
-    setIsLoading(true);
+    setPlayerLoading(true);
     setHasError(false);
     setStreamUrl(null);
     setStreamChannelId(null);
@@ -381,7 +397,7 @@ export function VideoPlayer({
         setHasError(true);
       })
       .finally(() => {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) setPlayerLoading(false);
       });
 
     return () => {
@@ -394,7 +410,8 @@ export function VideoPlayer({
     if (!channel || !videoRef.current) return;
 
     setHasError(false);
-    setIsLoading(true);
+    setPlayerLoading(true);
+    clearLoadingTimer();
     setIsExpanded(false);
     showControls();
 
@@ -404,7 +421,7 @@ export function VideoPlayer({
         playerRef.current = null;
         setPlayerInstance(null);
       }
-      setIsLoading(false);
+      setPlayerLoading(false);
       return;
     }
 
@@ -499,6 +516,26 @@ export function VideoPlayer({
       recoveryTimer = null;
     };
 
+    const scheduleDelayedLoading = () => {
+      if (loadingTimerRef.current || isCastingRef.current) return;
+
+      loadingTimerRef.current = setTimeout(() => {
+        loadingTimerRef.current = null;
+
+        if (
+          player.isDisposed?.() ||
+          isCastingRef.current ||
+          player.paused?.() ||
+          player.ended?.() ||
+          (player.readyState?.() ?? 0) >= 3
+        ) {
+          return;
+        }
+
+        setPlayerLoading(true);
+      }, PLAYBACK_LOADING_DELAY_MS);
+    };
+
     const reloadCurrentSource = () => {
       const source = (player as any).currentSource?.();
       if (!source?.src) return;
@@ -547,7 +584,15 @@ export function VideoPlayer({
     };
 
     const schedulePlaybackRecovery = () => {
-      if (recoveryTimer || player.paused?.() || isCastingRef.current) return;
+      if (
+        recoveryTimer ||
+        player.paused?.() ||
+        isCastingRef.current ||
+        (player.readyState?.() ?? 0) >= 3
+      ) {
+        return;
+      }
+
       recoveryTimer = setTimeout(recoverPlayback, PLAYBACK_RECOVERY_DELAY_MS);
     };
 
@@ -684,6 +729,15 @@ export function VideoPlayer({
       showControls();
     });
 
+    const markPlaybackActive = () => {
+      if (player.isDisposed?.() || isCastingRef.current) return;
+
+      clearRecoveryTimer();
+      clearLoadingTimer();
+      recoveryAttempts = 0;
+      setPlayerLoading(false);
+    };
+
     player.on("playing", () => {
       clearRecoveryTimer();
       recoveryAttempts = 0;
@@ -693,14 +747,15 @@ export function VideoPlayer({
         return;
       }
 
-      setIsLoading(false);
+      markPlaybackActive();
       setHasError(false);
       showControls();
     });
 
     player.on("error", () => {
+      clearLoadingTimer();
       setHasError(true);
-      setIsLoading(false);
+      setPlayerLoading(false);
       setIsExpanded(false);
     });
 
@@ -710,12 +765,15 @@ export function VideoPlayer({
         return;
       }
 
-      setIsLoading(true);
+      scheduleDelayedLoading();
       schedulePlaybackRecovery();
     };
 
     player.on("waiting", handlePlaybackInterruption);
     player.on("stalled", handlePlaybackInterruption);
+    player.on("canplay", markPlaybackActive);
+    player.on("canplaythrough", markPlaybackActive);
+    player.on("timeupdate", markPlaybackActive);
     player.on("pause", clearRecoveryTimer);
 
     player.on("volumechange", () => {
@@ -780,6 +838,7 @@ export function VideoPlayer({
 
     return () => {
       clearRecoveryTimer();
+      clearLoadingTimer();
       clearInterval(vodBufferWatchdog);
 
       if (playerRef.current && !playerRef.current.isDisposed()) {
@@ -793,9 +852,11 @@ export function VideoPlayer({
     activeStreamUrl,
     isCasting,
     channel,
+    clearLoadingTimer,
     pauseLocalPlayerForCasting,
     resetViewMode,
     showControls,
+    setPlayerLoading,
   ]);
 
   useEffect(() => {
