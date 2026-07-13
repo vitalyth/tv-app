@@ -43,6 +43,12 @@ const shouldUseVpnProxy = (channel: Channel) => {
   return channel.linkDetails?.vpn || channel.module === "kan-vod" || channelId.startsWith("ch_11");
 };
 
+type IOSFullscreenVideo = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
+  webkitDisplayingFullscreen?: boolean;
+};
+
 interface VideoPlayerProps {
   channel: Channel | null;
   onClose: () => void;
@@ -220,6 +226,24 @@ export function VideoPlayer({
     if (!container) return;
 
     try {
+      if (isPhoneLike) {
+        const videoElement = playerRef.current?.el?.()?.querySelector?.("video") as IOSFullscreenVideo | null;
+
+        if (videoElement?.webkitEnterFullscreen) {
+          if (videoElement.webkitDisplayingFullscreen && videoElement.webkitExitFullscreen) {
+            videoElement.webkitExitFullscreen();
+            setIsFullscreen(false);
+          } else {
+            videoElement.webkitEnterFullscreen();
+            setIsFullscreen(true);
+            setIsExpanded(false);
+          }
+
+          showControls();
+          return;
+        }
+      }
+
       if (document.fullscreenElement) {
         await document.exitFullscreen();
       } else {
@@ -235,7 +259,7 @@ export function VideoPlayer({
     } catch (error) {
       console.warn("Fullscreen failed:", error);
     }
-  }, [isExpanded, showControls]);
+  }, [isExpanded, isPhoneLike, showControls]);
 
   const handlePlayerDoubleClick = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
@@ -363,6 +387,33 @@ export function VideoPlayer({
       );
     };
   }, [showControls]);
+
+  useEffect(() => {
+    if (!isPhoneLike || !playerInstance || playerInstance.isDisposed?.()) return;
+
+    const videoElement = playerInstance.el?.()?.querySelector?.("video") as IOSFullscreenVideo | null;
+    if (!videoElement) return;
+
+    const handleIOSFullscreenBegin = () => {
+      setIsFullscreen(true);
+      setIsExpanded(false);
+      showControls();
+    };
+
+    const handleIOSFullscreenEnd = () => {
+      setIsFullscreen(false);
+      restoreExpandedAfterFullscreenRef.current = false;
+      showControls();
+    };
+
+    videoElement.addEventListener("webkitbeginfullscreen", handleIOSFullscreenBegin as EventListener);
+    videoElement.addEventListener("webkitendfullscreen", handleIOSFullscreenEnd as EventListener);
+
+    return () => {
+      videoElement.removeEventListener("webkitbeginfullscreen", handleIOSFullscreenBegin as EventListener);
+      videoElement.removeEventListener("webkitendfullscreen", handleIOSFullscreenEnd as EventListener);
+    };
+  }, [isPhoneLike, playerInstance, showControls]);
 
   useEffect(() => {
     if (!channel) return;
