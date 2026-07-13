@@ -286,15 +286,10 @@ export function useGoogleCast({
         if (castContentType === "application/x-mpegURL") {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
-            const tsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.TS
-            const tsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.MPEG2_TS
 
             if ((isBrightcoveStream(streamUrl) || isFmp4HlsStream(streamUrl, channel)) && hlsSegmentFormat && hlsVideoSegmentFormat) {
                 mediaInfo.hlsSegmentFormat = hlsSegmentFormat
                 mediaInfo.hlsVideoSegmentFormat = hlsVideoSegmentFormat
-            } else if (tsSegmentFormat && tsVideoSegmentFormat) {
-                mediaInfo.hlsSegmentFormat = tsSegmentFormat
-                mediaInfo.hlsVideoSegmentFormat = tsVideoSegmentFormat
             }
         }
 
