@@ -33,6 +33,7 @@ type PlayOptions = {
 type FloatingPlayerContextValue = {
     currentChannel: Channel | null;
     programDetails: ProgramDetails | null;
+    dockedCastControl: DockedCastControl | null;
     play: (channel: Channel, options?: PlayOptions) => void;
     playKanVodEpisode: (series: KanVodSeriesDetails, episode: KanVodEpisode, options?: PlayOptions) => void;
     close: () => void;
@@ -41,6 +42,7 @@ type FloatingPlayerContextValue = {
     renderPlayer: (className?: string, options?: RenderPlayerOptions) => ReactNode;
     setDockedPlayerActive: (active: boolean) => void;
     setCloseHandler: (handler: (() => void) | null) => void;
+    setDockedCastControl: (control: DockedCastControl | null) => void;
 };
 
 export type ProgramDetails = {
@@ -55,6 +57,15 @@ type KanNextEpisodePreview = {
 
 type RenderPlayerOptions = {
     hideTopControls?: boolean;
+    registerDockedCastControl?: boolean;
+};
+
+export type DockedCastControl = {
+    canCast: boolean;
+    isAvailable: boolean;
+    isCasting: boolean;
+    isConnecting: boolean;
+    onCast: () => void;
 };
 
 const FloatingPlayerContext = createContext<FloatingPlayerContextValue | null>(null);
@@ -128,6 +139,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
     const [isAutoNextCancelled, setIsAutoNextCancelled] = useState(false);
     const [isDockedPlayerActive, setDockedPlayerActive] = useState(false);
     const [programDetails, setProgramDetails] = useState<ProgramDetails | null>(null);
+    const [dockedCastControl, setDockedCastControl] = useState<DockedCastControl | null>(null);
 
     currentChannelRef.current = currentChannel;
 
@@ -332,6 +344,7 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
                 }
                 onCancelAutoNext={() => setIsAutoNextCancelled(true)}
                 hideTopControls={options?.hideTopControls}
+                onCastControlChange={options?.registerDockedCastControl ? setDockedCastControl : undefined}
             />
         );
     }, [
@@ -340,11 +353,13 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         handleEnded,
         isAutoNextCancelled,
         nextEpisodePreview,
+        setDockedCastControl,
     ]);
 
     const value = useMemo<FloatingPlayerContextValue>(() => ({
         currentChannel,
         programDetails,
+        dockedCastControl,
         play,
         playKanVodEpisode,
         close,
@@ -353,15 +368,18 @@ export function FloatingPlayerProvider({ children }: { children: ReactNode }) {
         renderPlayer,
         setDockedPlayerActive,
         setCloseHandler,
+        setDockedCastControl,
     }), [
         clearProgramDetails,
         currentChannel,
+        dockedCastControl,
         programDetails,
         play,
         playKanVodEpisode,
         close,
         renderPlayer,
         setCloseHandler,
+        setDockedCastControl,
         showProgramDetails,
     ]);
 

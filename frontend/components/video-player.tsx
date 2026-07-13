@@ -14,6 +14,7 @@ import { useGoogleCast } from "@/hooks/useGoogleCast";
 import { useMobileDevice } from "@/hooks/use-mobile-device";
 import CustomPlayerControls from "@/components/custom-player-controls";
 import { getVodProgress, saveVodProgress } from "@/lib/vod-progress";
+import { type DockedCastControl } from "@/context/floating-player-context";
 import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
@@ -57,6 +58,7 @@ interface VideoPlayerProps {
   onCancelAutoNext?: () => void;
   className?: string;
   hideTopControls?: boolean;
+  onCastControlChange?: (control: DockedCastControl | null) => void;
 }
 
 export function VideoPlayer({
@@ -67,6 +69,7 @@ export function VideoPlayer({
   onCancelAutoNext,
   className,
   hideTopControls = false,
+  onCastControlChange,
 }: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const inlineHostRef = useRef<HTMLDivElement>(null);
@@ -966,6 +969,28 @@ export function VideoPlayer({
 
     stopCasting().finally(onClose);
   };
+
+  useEffect(() => {
+    if (!onCastControlChange) return;
+
+    onCastControlChange({
+      canCast: !!activeStreamUrl,
+      isAvailable: isCastAvailable,
+      isCasting,
+      isConnecting: isCastConnecting,
+      onCast: isCasting ? stopCasting : requestCastSession,
+    });
+
+    return () => onCastControlChange(null);
+  }, [
+    activeStreamUrl,
+    isCastAvailable,
+    isCastConnecting,
+    isCasting,
+    onCastControlChange,
+    requestCastSession,
+    stopCasting,
+  ]);
 
   if (!channel) {
     return (

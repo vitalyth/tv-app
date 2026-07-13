@@ -84,6 +84,7 @@ function ShellContent({
 }) {
     const {
         currentChannel,
+        dockedCastControl,
         programDetails,
         playKanVodEpisode,
         close,
@@ -285,8 +286,29 @@ function ShellContent({
                                 </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-3">
-                                {isPlaybackPanel && (
-                                    <Cast className="h-4 w-4 text-white/55" aria-hidden="true" />
+                                {isPlaybackPanel && dockedCastControl && (
+                                    <button
+                                        type="button"
+                                        onClick={dockedCastControl.onCast}
+                                        disabled={
+                                            dockedCastControl.isConnecting ||
+                                            !dockedCastControl.canCast ||
+                                            (!dockedCastControl.isAvailable && !dockedCastControl.isCasting)
+                                        }
+                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/20 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/45 hover:text-white disabled:pointer-events-none disabled:opacity-40 ${dockedCastControl.isCasting ? "text-primary" : ""}`}
+                                        aria-label={dockedCastControl.isCasting ? "עצור Cast" : "הפעל Cast"}
+                                        title={
+                                            !dockedCastControl.canCast
+                                                ? "Cast is not ready"
+                                                : !dockedCastControl.isAvailable && !dockedCastControl.isCasting
+                                                    ? "Cast device not available"
+                                                    : dockedCastControl.isCasting
+                                                        ? "Stop casting"
+                                                        : "Cast"
+                                        }
+                                    >
+                                        <Cast className="h-4 w-4" aria-hidden="true" />
+                                    </button>
                                 )}
                                 <button
                                     type="button"
@@ -363,7 +385,10 @@ function ShellContent({
                             <div className="program-side-panel__player">
                                 <div className="program-side-panel__player-bridge" />
                                 <div className="program-side-panel__player-frame">
-                                    {renderPlayer("h-full w-full", { hideTopControls: true })}
+                                    {renderPlayer("h-full w-full", {
+                                        hideTopControls: true,
+                                        registerDockedCastControl: true,
+                                    })}
                                 </div>
                             </div>
                         )}

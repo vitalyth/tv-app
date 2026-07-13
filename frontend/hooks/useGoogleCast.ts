@@ -83,6 +83,11 @@ const buildCastImageUrl = (logo: string) => {
     return resolveAbsoluteUrl(`/ch/${logo}`)
 }
 
+const shouldUseVpnProxy = (channel: Channel) => {
+    const channelId = channel.channelID || channel.id || ""
+    return channel.linkDetails?.vpn || channel.module === "kan-vod" || channelId.startsWith("ch_11")
+}
+
 const getCastSourceUrl = (streamUrl: string) => {
     try {
         const parsedUrl = new URL(streamUrl)
@@ -179,7 +184,10 @@ const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, chan
         return resolveAbsoluteUrl(castSourceUrl)
     }
 
-    const proxyPath = `/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1`
+    const useVpnProxy = shouldUseVpnProxy(channel)
+    const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy"
+    const vpnParam = useVpnProxy ? "&vpn=true" : ""
+    const proxyPath = `${proxyEndpoint}?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`
 
     return resolveCastApiUrl(proxyPath)
 }
@@ -187,23 +195,6 @@ const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, chan
 const hasDvrWindow = (media?: chrome.cast.media.Media | null) => {
     const duration = media?.media?.duration
     return typeof duration === "number" && Number.isFinite(duration) && duration > 0
-}
-
-const stopCurrentCastMedia = (session: cast.framework.CastSession) => {
-    const media = session.getMediaSession()
-    const stop = (media as any)?.stop
-
-    if (!media || typeof stop !== "function") {
-        return Promise.resolve()
-    }
-
-    return new Promise<void>((resolve) => {
-        try {
-            stop.call(media, null, resolve, resolve)
-        } catch {
-            resolve()
-        }
-    })
 }
 
 const ensureCastSenderScript = () => {
@@ -250,14 +241,28 @@ export function useGoogleCast({
     const remoteControllerRef = useRef<cast.framework.RemotePlayerController | null>(null)
     const mediaStatusUnsubscribeRef = useRef<(() => void) | null>(null)
     const lastVodProgressSaveRef = useRef(0)
-    const desiredLoadKeyRef = useRef<string | null>(null)
+    const desiredLoadRef = useRef<(CastLoadOptions & { loadKey: string }) | null>(null)
+    const isDrainingLoadQueueRef = useRef(false)
+    const channelRef = useRef(channel)
+    const streamUrlRef = useRef(streamUrl)
+    const programNameRef = useRef(programName)
+    const onCastStartedRef = useRef(onCastStarted)
+    const onCastEndedRef = useRef(onCastEnded)
+
+    useEffect(() => {
+        channelRef.current = channel
+        streamUrlRef.current = streamUrl
+        programNameRef.current = programName
+        onCastStartedRef.current = onCastStarted
+        onCastEndedRef.current = onCastEnded
+    }, [channel, onCastEnded, onCastStarted, programName, streamUrl])
 
     const clearMediaStatusListener = useCallback(() => {
         mediaStatusUnsubscribeRef.current?.()
         mediaStatusUnsubscribeRef.current = null
     }, [])
 
-    const loadLiveMedia = useCallback(async ({ channel, streamUrl, programName }: CastLoadOptions) => {
+    const loadCastMediaNow = useCallback(async ({ channel, streamUrl, programName }: CastLoadOptions) => {
         const castApi = getCast()
         const chromeCast = getChromeCast()
         const session = castApi?.framework.CastContext.getInstance().getCurrentSession()
@@ -266,12 +271,9 @@ export function useGoogleCast({
 
         const loadKey = `${channel.id}:${streamUrl}`
         if (lastLoadKeyRef.current === loadKey) return true
-        if (desiredLoadKeyRef.current && desiredLoadKeyRef.current !== loadKey) return false
 
         const loadSequence = loadSequenceRef.current + 1
         loadSequenceRef.current = loadSequence
-        const isSwitchingMedia = Boolean(lastLoadKeyRef.current && lastLoadKeyRef.current !== loadKey)
-        lastLoadKeyRef.current = loadKey
 
         const castSourceUrl = getCastSourceUrl(streamUrl)
         const castContentType = getCastContentType(castSourceUrl, channel)
@@ -284,10 +286,15 @@ export function useGoogleCast({
         if (castContentType === "application/x-mpegURL") {
             const hlsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.FMP4
             const hlsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.FMP4
+            const tsSegmentFormat = (chromeCast.media as any).HlsSegmentFormat?.TS
+            const tsVideoSegmentFormat = (chromeCast.media as any).HlsVideoSegmentFormat?.MPEG2_TS
 
             if ((isBrightcoveStream(streamUrl) || isFmp4HlsStream(streamUrl, channel)) && hlsSegmentFormat && hlsVideoSegmentFormat) {
                 mediaInfo.hlsSegmentFormat = hlsSegmentFormat
                 mediaInfo.hlsVideoSegmentFormat = hlsVideoSegmentFormat
+            } else if (tsSegmentFormat && tsVideoSegmentFormat) {
+                mediaInfo.hlsSegmentFormat = tsSegmentFormat
+                mediaInfo.hlsVideoSegmentFormat = tsVideoSegmentFormat
             }
         }
 
@@ -326,22 +333,14 @@ export function useGoogleCast({
         }
 
         try {
-            clearMediaStatusListener()
-
-            if (isSwitchingMedia) {
-                await stopCurrentCastMedia(session)
-
-                if (loadSequenceRef.current !== loadSequence || desiredLoadKeyRef.current !== loadKey) {
-                    return true
-                }
-            }
-
             await session.loadMedia(request)
 
-            if (loadSequenceRef.current !== loadSequence || desiredLoadKeyRef.current !== loadKey) {
+            if (loadSequenceRef.current !== loadSequence) {
                 return true
             }
 
+            clearMediaStatusListener()
+            lastLoadKeyRef.current = loadKey
             saveCastChannelId(channel.id)
 
             const media = session.getMediaSession()
@@ -377,46 +376,84 @@ export function useGoogleCast({
             setError(null)
             return true
         } catch (err) {
-            if (loadSequenceRef.current === loadSequence && desiredLoadKeyRef.current === loadKey) {
-                if (lastLoadKeyRef.current === loadKey) {
-                    lastLoadKeyRef.current = null
-                }
+            if (loadSequenceRef.current === loadSequence) {
                 console.error("Failed to load Cast media:", err)
                 setError("cast-load-failed")
-                setSessionState("disconnected")
-                setHasDvr(false)
-                setDeviceName(null)
-                clearMediaStatusListener()
-                clearCastChannelId()
-                onCastEnded?.()
-
-                try {
-                    await session.endSession(true)
-                } catch (stopErr) {
-                    console.warn("Failed to stop Cast session after media load failure:", stopErr)
-                }
             } else {
                 console.debug("Ignored stale Cast media load failure:", err)
             }
             return false
         }
-    }, [clearMediaStatusListener, onCastEnded])
+    }, [clearMediaStatusListener])
+
+    const drainLoadQueue = useCallback(async () => {
+        if (isDrainingLoadQueueRef.current) return
+
+        isDrainingLoadQueueRef.current = true
+
+        try {
+            while (desiredLoadRef.current) {
+                const target = desiredLoadRef.current
+
+                if (lastLoadKeyRef.current === target.loadKey) {
+                    desiredLoadRef.current = null
+                    continue
+                }
+
+                const loaded = await loadCastMediaNow(target)
+                const targetStillDesired = desiredLoadRef.current?.loadKey === target.loadKey
+
+                if (targetStillDesired) {
+                    desiredLoadRef.current = null
+                }
+
+                if (!loaded && targetStillDesired) {
+                    break
+                }
+            }
+        } finally {
+            isDrainingLoadQueueRef.current = false
+        }
+    }, [loadCastMediaNow])
+
+    const queueCastMediaLoad = useCallback((options: CastLoadOptions) => {
+        desiredLoadRef.current = {
+            ...options,
+            loadKey: `${options.channel.id}:${options.streamUrl}`,
+        }
+
+        void drainLoadQueue()
+    }, [drainLoadQueue])
+
+    const loadCurrentMedia = useCallback(() => {
+        const currentChannel = channelRef.current
+        const currentStreamUrl = streamUrlRef.current
+
+        if (!currentChannel || !currentStreamUrl) return
+
+        queueCastMediaLoad({
+            channel: currentChannel,
+            streamUrl: currentStreamUrl,
+            programName: programNameRef.current,
+        })
+    }, [queueCastMediaLoad])
 
     const requestCastSession = useCallback(async () => {
         const castApi = getCast()
-        if (!castApi?.framework || !channel || !streamUrl) return
+        if (!castApi?.framework || !channelRef.current || !streamUrlRef.current) return
 
         setError(null)
         setSessionState("connecting")
 
         try {
             await castApi.framework.CastContext.getInstance().requestSession()
+            loadCurrentMedia()
         } catch (err) {
             console.warn("Cast session request failed:", err)
             setError("cast-session-failed")
             setSessionState("disconnected")
         }
-    }, [channel, streamUrl])
+    }, [loadCurrentMedia])
 
     const stopCasting = useCallback(async () => {
         const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
@@ -428,10 +465,10 @@ export function useGoogleCast({
         setHasDvr(false)
         loadSequenceRef.current += 1
         lastLoadKeyRef.current = null
-        desiredLoadKeyRef.current = null
+        desiredLoadRef.current = null
         clearMediaStatusListener()
         clearCastChannelId()
-        onCastEnded?.()
+        onCastEndedRef.current?.()
 
         try {
             await session?.endSession(true)
@@ -440,7 +477,7 @@ export function useGoogleCast({
             setSessionState("connected")
             setError("cast-stop-failed")
         }
-    }, [clearMediaStatusListener, onCastEnded])
+    }, [clearMediaStatusListener])
 
     const setVolume = useCallback(async (volume: number, muted: boolean) => {
         const session = getCast()?.framework.CastContext.getInstance().getCurrentSession()
@@ -492,8 +529,9 @@ export function useGoogleCast({
                     const session = castApi.framework.CastContext.getInstance().getCurrentSession()
                     const name = session?.getCastDevice?.()?.friendlyName ?? null
                     setDeviceName(name)
-                    if (channel?.id) saveCastChannelId(channel.id)
-                    onCastStarted?.()
+                    if (channelRef.current?.id) saveCastChannelId(channelRef.current.id)
+                    onCastStartedRef.current?.()
+                    loadCurrentMedia()
                     return
                 }
 
@@ -511,10 +549,10 @@ export function useGoogleCast({
                     setDeviceName(null)
                     loadSequenceRef.current += 1
                     lastLoadKeyRef.current = null
-                    desiredLoadKeyRef.current = null
+                    desiredLoadRef.current = null
                     clearMediaStatusListener()
                     clearCastChannelId()
-                    onCastEnded?.()
+                    onCastEndedRef.current?.()
                 }
             }
 
@@ -541,25 +579,16 @@ export function useGoogleCast({
 
             clearMediaStatusListener()
         }
-    }, [channel, clearMediaStatusListener, onCastEnded, onCastStarted])
+    }, [clearMediaStatusListener, loadCurrentMedia])
 
     useEffect(() => {
         if (sessionState !== "connected" || !channel || !streamUrl) return
 
         const loadKey = `${channel.id}:${streamUrl}`
-        desiredLoadKeyRef.current = loadKey
         if (lastLoadKeyRef.current === loadKey) return
 
-        const loadTimer = window.setTimeout(() => {
-            if (desiredLoadKeyRef.current === loadKey) {
-                void loadLiveMedia({ channel, streamUrl, programName })
-            }
-        }, 100)
-
-        return () => {
-            window.clearTimeout(loadTimer)
-        }
-    }, [channel, loadLiveMedia, programName, sessionState, streamUrl])
+        queueCastMediaLoad({ channel, streamUrl, programName })
+    }, [channel, programName, queueCastMediaLoad, sessionState, streamUrl])
 
     return {
         deviceName,
