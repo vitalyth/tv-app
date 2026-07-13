@@ -185,9 +185,8 @@ const buildCastStreamUrl = (castSourceUrl: string, castContentType: string, chan
     }
 
     const useVpnProxy = shouldUseVpnProxy(channel)
-    const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy"
     const vpnParam = useVpnProxy ? "&vpn=true" : ""
-    const proxyPath = `${proxyEndpoint}?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`
+    const proxyPath = `/proxy?url=${encodeURIComponent(castSourceUrl)}&referer=${encodeURIComponent(referer)}&cast=1${vpnParam}`
 
     return resolveCastApiUrl(proxyPath)
 }
