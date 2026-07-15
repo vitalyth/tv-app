@@ -693,6 +693,7 @@ export default function CustomPlayerControls({
             onMouseEnter={onInteraction}
             onMouseMove={onInteraction}
             className={`
+            custom-player-controls__top
             absolute top-0 left-0 right-0 z-[60]
             bg-linear-to-b from-black/85 via-black/45 to-transparent
             px-3 sm:px-4 pt-3 sm:pt-4 pb-8 sm:pb-10

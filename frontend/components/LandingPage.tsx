@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { channelService } from "@/lib/services/channel-service";
 import { useRecentlyViewed } from "@/hooks/useRecentlyViewed";
-import { useFloatingPlayer } from "@/context/floating-player-context";
+import { usePlayer } from "@/context/player-context";
 import {
   Channel,
   Program,
@@ -205,7 +205,7 @@ const carouselCompactCardClass =
 
 const LandingPage = () => {
   const router = useRouter();
-  const { play } = useFloatingPlayer();
+  const { play } = usePlayer();
   const [recentVodItems, setRecentVodItems] = useState<RecentVodItem[]>([]);
   const [heroIndex, setHeroIndex] = useState(0);
 

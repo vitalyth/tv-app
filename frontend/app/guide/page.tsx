@@ -8,7 +8,7 @@ import { useFilteredChannels } from "@/hooks/useFilteredChannels";
 import { Channel, Program } from "@/lib/channels-data";
 import { channelService } from "@/lib/services/channel-service";
 import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
-import { useFloatingPlayer } from "@/context/floating-player-context";
+import { usePlayer } from "@/context/player-context";
 
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
     const byKey = new Map<string, Program>();
@@ -35,7 +35,7 @@ function mergeEpg(
 
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
-    const { currentChannel, play, showProgramDetails } = useFloatingPlayer();
+    const { currentChannel, play, showProgramDetails } = usePlayer();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [epgByChannel, setEpgByChannel] = useState<Record<string, Program[]>>({});

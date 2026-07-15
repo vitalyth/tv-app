@@ -21,7 +21,7 @@ import {
   type VodEpisodeCardItem,
   type VodSeasonTab,
 } from "@/components/vod-series-detail";
-import { useFloatingPlayer } from "@/context/floating-player-context";
+import { usePlayer } from "@/context/player-context";
 import { type Channel, type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
 import { kanVodService, type KanVodEpisode, type KanVodSeriesDetails } from "@/lib/services/kan-vod-service";
 
@@ -212,7 +212,7 @@ const episodeToChannel = (series: KanVodSeriesDetails, episode: KanVodEpisode): 
 export default function KanVodDetailsPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const { currentChannel, play, setCloseHandler } = useFloatingPlayer();
+  const { currentChannel, play, setCloseHandler } = usePlayer();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSeason, setActiveSeason] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);

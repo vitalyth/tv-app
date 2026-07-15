@@ -177,8 +177,9 @@
 .program-details-inline {
   position: relative;
   display: flex;
-  aspect-ratio: 16 / 9;
   width: calc(100% - 1rem);
+  height: min(36vh, 220px, calc((100vw - 16px) * 9 / 16));
+  max-height: min(36vh, 220px, calc((100vw - 16px) * 9 / 16));
   margin: 0.5rem;
   border-radius: 0.75rem;
 }

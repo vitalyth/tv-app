@@ -14,7 +14,7 @@ import { useGoogleCast } from "@/hooks/useGoogleCast";
 import { useMobileDevice } from "@/hooks/use-mobile-device";
 import CustomPlayerControls from "@/components/custom-player-controls";
 import { getVodProgress, saveVodProgress } from "@/lib/vod-progress";
-import { type DockedCastControl } from "@/context/floating-player-context";
+import { type DockedCastControl } from "@/context/player-context";
 import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {

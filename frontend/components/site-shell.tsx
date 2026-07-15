@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import { APP_VERSION } from "@/lib/version";
-import { FloatingPlayerProvider, useFloatingPlayer } from "@/context/floating-player-context";
+import { PlayerProvider, usePlayer } from "@/context/player-context";
 import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 import { useNowSec } from "@/hooks/use-now-sec";
 import { type Channel, type Program } from "@/lib/channels-data";
@@ -58,7 +58,7 @@ function useDesktopSidePanel() {
     const [isDesktopSidePanel, setIsDesktopSidePanel] = useState(false);
 
     useEffect(() => {
-        const media = window.matchMedia("(min-width: 1024px)");
+        const media = window.matchMedia("(min-width: 1400px)");
         const update = () => setIsDesktopSidePanel(media.matches);
 
         update();
@@ -91,7 +91,7 @@ function ShellContent({
         clearProgramDetails,
         renderPlayer,
         setDockedPlayerActive,
-    } = useFloatingPlayer();
+    } = usePlayer();
     const router = useRouter();
     const nowSec = useNowSec();
     const isDesktopSidePanel = useDesktopSidePanel();
@@ -180,7 +180,7 @@ function ShellContent({
                             <button
                                 type="button"
                                 onClick={clearProgramDetails}
-                                className="absolute left-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-black/45 text-white transition-colors hover:bg-black/65"
+                                className="absolute left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-md bg-black/20 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/45 hover:text-white"
                                 aria-label="סגור פרטי תוכנית"
                             >
                                 <X className="h-4 w-4" aria-hidden="true" />
@@ -437,9 +437,9 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
     }
 
     return (
-        <FloatingPlayerProvider>
+        <PlayerProvider>
             <GlobalLoadingIndicator />
             <ShellContent title={title}>{children}</ShellContent>
-        </FloatingPlayerProvider>
+        </PlayerProvider>
     );
 }

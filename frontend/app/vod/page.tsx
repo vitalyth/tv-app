@@ -15,7 +15,7 @@ import {
 } from "@/lib/channels-data";
 import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
-import { useFloatingPlayer } from "@/context/floating-player-context";
+import { usePlayer } from "@/context/player-context";
 import {
     ContinueWatchingVodCarousel,
     NewVodCarousel,
@@ -194,7 +194,7 @@ const parseJsonParam = <T,>(value: string | null): T | null => {
 
 export default function VodPage() {
     const router = useRouter();
-    const { play, setCloseHandler } = useFloatingPlayer();
+    const { play, setCloseHandler } = usePlayer();
     const [searchQuery, setSearchQuery] = useState("");
     const [navigationStack, setNavigationStack] = useState<VodNode[]>([]);
     const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
