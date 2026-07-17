@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Cast, X } from "lucide-react";
 import { useCurrentProgram } from "@/hooks/useCurrentProgram";
 import { type Channel, type Program } from "@/lib/channels-data";
@@ -71,6 +71,22 @@ const formatTimeRange = (program: Program | null): string => {
     if (!program) return "";
     return `${formatTime(program.start)} - ${formatTime(program.end)}`;
 };
+
+function useCanShowTopDetails() {
+    const [canShowTopDetails, setCanShowTopDetails] = useState(true);
+
+    useEffect(() => {
+        const media = window.matchMedia("(min-width: 820px)");
+        const update = () => setCanShowTopDetails(media.matches);
+
+        update();
+        media.addEventListener("change", update);
+
+        return () => media.removeEventListener("change", update);
+    }, []);
+
+    return canShowTopDetails;
+}
 
 const resolveProgramPanel = (channel: Channel, program: Program | null): TopProgramPanel => {
     const title =
@@ -245,6 +261,7 @@ export function TopPlayerOverlay({
     renderPlayer,
 }: TopPlayerOverlayProps) {
     const currentProgram = useCurrentProgram(channel?.programs);
+    const canShowTopDetails = useCanShowTopDetails();
 
     if (!channel || (!isFullscreen && isDocked)) {
         return null;
@@ -260,13 +277,14 @@ export function TopPlayerOverlay({
 
     const panel = resolveProgramPanel(channel, currentProgram);
     const hasDetails = Boolean(panel.title || panel.description);
+    const shouldShowDetails = hasDetails && canShowTopDetails;
 
     return (
         <div
             dir="ltr"
-            className={`top-playback ${hasDetails ? "top-playback--with-details" : "top-playback--player-only"}`}
+            className={`top-playback ${shouldShowDetails ? "top-playback--with-details" : "top-playback--player-only"}`}
         >
-            {hasDetails && (
+            {shouldShowDetails && (
                 <TopProgramCard
                     actions={<CastButton castControl={castControl} />}
                     channelLogo={resolveChannelLogo(channel)}
@@ -282,8 +300,8 @@ export function TopPlayerOverlay({
                     />
                 )}
                 {renderPlayer("h-full w-full top-playback__video-root", {
-                    hideTopControls: hasDetails,
-                    registerDockedCastControl: hasDetails,
+                    hideTopControls: shouldShowDetails,
+                    registerDockedCastControl: shouldShowDetails,
                 })}
             </div>
         </div>
