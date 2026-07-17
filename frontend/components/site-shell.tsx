@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
@@ -154,7 +154,7 @@ function ShellContent({
         }
     }, [currentChannel, programDetails]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         setDockedPlayerActive(shouldDockPlayer);
 
         return () => setDockedPlayerActive(false);

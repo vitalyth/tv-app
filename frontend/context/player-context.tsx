@@ -67,6 +67,7 @@ type PlayerSlotState = {
     className: string;
     hideTopControls: boolean;
     registerDockedCastControl: boolean;
+    order?: number;
 };
 
 export type DockedCastControl = {
@@ -188,6 +189,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const autoNextInProgressRef = useRef(false);
     const playerShellRef = useRef<HTMLDivElement | null>(null);
     const playerParkingRef = useRef<HTMLDivElement | null>(null);
+    const playerSlotOrderRef = useRef(0);
+    const playerSlotsRef = useRef(new Map<HTMLDivElement, PlayerSlotState>());
 
     const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -371,19 +374,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const attachPlayerSlot = useCallback((slot: PlayerSlotState | null, element?: HTMLDivElement) => {
         setActivePlayerSlot((current) => {
             if (!slot) {
-                return current?.element === element ? null : current;
+                if (element) {
+                    playerSlotsRef.current.delete(element);
+                }
+
+                if (current?.element !== element) {
+                    return current;
+                }
+
+                return [...playerSlotsRef.current.values()]
+                    .sort((a, b) => (b.order ?? 0) - (a.order ?? 0))[0] ?? null;
             }
 
+            const existingSlot = playerSlotsRef.current.get(slot.element);
+            const nextSlot = {
+                ...slot,
+                order: existingSlot?.order ?? ++playerSlotOrderRef.current,
+            };
+            playerSlotsRef.current.set(slot.element, nextSlot);
+
             if (
-                current?.element === slot.element &&
-                current.className === slot.className &&
-                current.hideTopControls === slot.hideTopControls &&
-                current.registerDockedCastControl === slot.registerDockedCastControl
+                current?.element === nextSlot.element &&
+                current.className === nextSlot.className &&
+                current.hideTopControls === nextSlot.hideTopControls &&
+                current.registerDockedCastControl === nextSlot.registerDockedCastControl
             ) {
                 return current;
             }
 
-            return slot;
+            return nextSlot;
         });
     }, []);
 
