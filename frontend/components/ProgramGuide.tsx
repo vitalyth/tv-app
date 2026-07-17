@@ -325,7 +325,8 @@ function ProgramGuide({
     const previousGuideStartRef = useRef<number | null>(null);
     const lastRangeRequestRef = useRef<string | null>(null);
     const scrollFrameRef = useRef<number | null>(null);
-    const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastGuideSizeRef = useRef<{ width: number; height: number } | null>(null);
     const maybeLoadMoreForScrollRef = useRef<(() => void) | null>(null);
     const previousNowSecRef = useRef<number | null>(null);
     const [visibleDateLabel, setVisibleDateLabel] = useState(() => formatGuideDate(Date.now() / 1000));
@@ -636,14 +637,44 @@ function ProgramGuide({
         });
     }, [cellW, onGuideRangeChange, pxPerSec, requestGuideRange]);
 
-    const handleGuideResize = useCallback(() => {
-        scheduleViewportUpdate();
-
+    const runGuideResizeUpdate = useCallback(() => {
         const node = mainRef.current;
-        if (node) {
-            requestBufferedVisibleRange(node);
+        if (!node) return;
+
+        updateVisibleViewport();
+        updateVisibleDateLabel();
+        requestBufferedVisibleRange(node);
+    }, [requestBufferedVisibleRange, updateVisibleDateLabel, updateVisibleViewport]);
+
+    const handleGuideResize = useCallback(() => {
+        const node = mainRef.current;
+        if (!node) return;
+
+        const nextSize = {
+            width: Math.round(node.clientWidth),
+            height: Math.round(node.clientHeight),
+        };
+        const previousSize = lastGuideSizeRef.current;
+
+        if (
+            previousSize &&
+            Math.abs(previousSize.width - nextSize.width) < 8 &&
+            Math.abs(previousSize.height - nextSize.height) < 8
+        ) {
+            return;
         }
-    }, [requestBufferedVisibleRange, scheduleViewportUpdate]);
+
+        lastGuideSizeRef.current = nextSize;
+
+        if (resizeTimeoutRef.current !== null) {
+            clearTimeout(resizeTimeoutRef.current);
+        }
+
+        resizeTimeoutRef.current = setTimeout(() => {
+            resizeTimeoutRef.current = null;
+            runGuideResizeUpdate();
+        }, 120);
+    }, [runGuideResizeUpdate]);
 
     const maybeLoadMoreForScroll = useCallback(() => {
         if (!mainRef.current || !onGuideRangeChange) return;
@@ -687,24 +718,25 @@ function ProgramGuide({
     const didScrollRef = useRef(false);
     const mainCallbackRef = useCallback(
         (node: HTMLDivElement | null) => {
-            resizeObserverRef.current?.disconnect();
-            resizeObserverRef.current = null;
+            lastGuideSizeRef.current = null;
             (mainRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
 
-            if (node && typeof ResizeObserver !== "undefined") {
-                resizeObserverRef.current = new ResizeObserver(handleGuideResize);
-                resizeObserverRef.current.observe(node);
-                handleGuideResize();
-            } else if (node) {
-                requestBufferedVisibleRange(node);
+            if (node) {
+                runGuideResizeUpdate();
             }
         },
-        [handleGuideResize, requestBufferedVisibleRange]
+        [runGuideResizeUpdate]
     );
 
     useEffect(() => {
+        window.addEventListener("resize", handleGuideResize);
+
         return () => {
-            resizeObserverRef.current?.disconnect();
+            window.removeEventListener("resize", handleGuideResize);
+            if (resizeTimeoutRef.current !== null) {
+                clearTimeout(resizeTimeoutRef.current);
+                resizeTimeoutRef.current = null;
+            }
             if (scrollFrameRef.current !== null) {
                 cancelAnimationFrame(scrollFrameRef.current);
                 scrollFrameRef.current = null;

@@ -1,17 +1,18 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Cast, X } from "lucide-react";
 import {
     createContext,
     useCallback,
     useContext,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
     type ReactNode,
 } from "react";
+import { TopPlayerOverlay } from "@/components/player/top-player-overlay";
 import { type Channel, type Program } from "@/lib/channels-data";
 import { addRecentlyViewedChannel } from "@/hooks/useRecentlyViewed";
 import {
@@ -61,6 +62,13 @@ type RenderPlayerOptions = {
     registerDockedCastControl?: boolean;
 };
 
+type PlayerSlotState = {
+    element: HTMLDivElement;
+    className: string;
+    hideTopControls: boolean;
+    registerDockedCastControl: boolean;
+};
+
 export type DockedCastControl = {
     canCast: boolean;
     isAvailable: boolean;
@@ -71,32 +79,55 @@ export type DockedCastControl = {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
-const resolvePlayerPanelImage = (image?: string): string => {
-    if (!image) return "";
-    if (image.startsWith("http://") || image.startsWith("https://")) return image;
-    if (image.startsWith("//")) return `https:${image}`;
-    if (image.startsWith("/")) return image;
-    return `/ch/${image}`;
+const getViewportPlayerState = () => {
+    if (typeof window === "undefined") {
+        return {
+            isMobile: false,
+            isMobileLandscape: false,
+        };
+    }
+
+    const compactWidth = window.matchMedia("(max-width: 499px)").matches;
+    const coarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+    const phoneLikeViewport =
+        compactWidth ||
+        (coarsePointer && Math.min(window.innerWidth, window.innerHeight) <= 499);
+
+    return {
+        isMobile: phoneLikeViewport,
+        isMobileLandscape: phoneLikeViewport && window.innerWidth > window.innerHeight,
+    };
 };
 
-const findCurrentProgram = (channel: Channel | null): Program | null => {
-    if (!channel?.programs?.length) return null;
+function PlayerSlot({
+    attach,
+    className,
+    options,
+}: {
+    attach: (slot: PlayerSlotState | null, element?: HTMLDivElement) => void;
+    className: string;
+    options?: RenderPlayerOptions;
+}) {
+    const slotRef = useRef<HTMLDivElement | null>(null);
+    const hideTopControls = Boolean(options?.hideTopControls);
+    const registerDockedCastControl = Boolean(options?.registerDockedCastControl);
 
-    const nowSec = Math.floor(Date.now() / 1000);
-    return channel.programs.find((program) => nowSec >= program.start && nowSec < program.end) ?? null;
-};
+    useLayoutEffect(() => {
+        const element = slotRef.current;
+        if (!element) return;
 
-const formatPlayerTime = (ts: number): string => {
-    return new Date(ts * 1000).toLocaleTimeString("he-IL", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hourCycle: "h23",
-    });
-};
+        attach({
+            element,
+            className,
+            hideTopControls,
+            registerDockedCastControl,
+        });
 
-const formatPlayerTimeRange = (start: number, end: number): string => {
-    return `${formatPlayerTime(start)} - ${formatPlayerTime(end)}`;
-};
+        return () => attach(null, element);
+    }, [attach, className, hideTopControls, registerDockedCastControl]);
+
+    return <div ref={slotRef} className="h-full w-full" />;
+}
 
 const getKanSeasonTitle = (series: KanVodSeriesDetails, seasonId?: string | null) => {
     return series.seasons.find((season) => season.season_id === seasonId)?.title || "פרקים";
@@ -151,23 +182,23 @@ const kanEpisodeToChannel = (
 export function PlayerProvider({ children }: { children: ReactNode }) {
     const closeHandlerRef = useRef<(() => void) | null>(null);
     const endedHandlerRef = useRef<(() => void) | null>(null);
-    const viewportStateRef = useRef({
-        isMobile: false,
-        isMobileLandscape: false,
-    });
-    const orientationFrameRef = useRef<number | null>(null);
+    const initialViewportState = useMemo(() => getViewportPlayerState(), []);
+    const viewportStateRef = useRef(initialViewportState);
     const currentChannelRef = useRef<Channel | null>(null);
     const autoNextInProgressRef = useRef(false);
+    const playerShellRef = useRef<HTMLDivElement | null>(null);
+    const playerParkingRef = useRef<HTMLDivElement | null>(null);
 
     const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const [isMobile, setIsMobile] = useState(false);
-    const [isMobileLandscape, setIsMobileLandscape] = useState(false);
+    const [isMobile, setIsMobile] = useState(initialViewportState.isMobile);
+    const [isMobileLandscape, setIsMobileLandscape] = useState(initialViewportState.isMobileLandscape);
     const [nextEpisodePreview, setNextEpisodePreview] = useState<KanNextEpisodePreview | null>(null);
     const [isAutoNextCancelled, setIsAutoNextCancelled] = useState(false);
     const [isDockedPlayerActive, setDockedPlayerActive] = useState(false);
     const [programDetails, setProgramDetails] = useState<ProgramDetails | null>(null);
     const [dockedCastControl, setDockedCastControl] = useState<DockedCastControl | null>(null);
+    const [activePlayerSlot, setActivePlayerSlot] = useState<PlayerSlotState | null>(null);
 
     currentChannelRef.current = currentChannel;
 
@@ -182,8 +213,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setNextEpisodePreview(null);
         setProgramDetails(null);
         setCurrentChannel(channel);
-        setIsFullscreen(options?.fullscreen ?? isMobileLandscape);
-    }, [isMobileLandscape]);
+        setIsFullscreen(options?.fullscreen ?? viewportStateRef.current.isMobileLandscape);
+    }, []);
 
     const playKanVodEpisode = useCallback((series: KanVodSeriesDetails, episode: KanVodEpisode, options?: PlayOptions) => {
         play(kanEpisodeToChannel(series, episode), options);
@@ -274,7 +305,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return () => document.removeEventListener("keydown", handleKeyDown, true);
     }, [currentChannel, close]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!currentChannel || !isMobile) return;
 
         setIsFullscreen((current) =>
@@ -282,7 +313,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         );
     }, [currentChannel, isMobile, isMobileLandscape]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const className = "player-top-active";
         const isTopPlayerOpen = !!currentChannel && !isFullscreen && !isDockedPlayerActive;
 
@@ -293,93 +324,88 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         };
     }, [currentChannel, isDockedPlayerActive, isFullscreen]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const compactWidthMedia = window.matchMedia("(max-width: 499px)");
         const coarsePointerMedia = window.matchMedia("(hover: none) and (pointer: coarse)");
 
         const update = () => {
-            if (orientationFrameRef.current !== null) {
+            const nextState = getViewportPlayerState();
+
+            if (
+                viewportStateRef.current.isMobile === nextState.isMobile &&
+                viewportStateRef.current.isMobileLandscape === nextState.isMobileLandscape
+            ) {
                 return;
             }
 
-            orientationFrameRef.current = requestAnimationFrame(() => {
-                orientationFrameRef.current = null;
+            viewportStateRef.current = nextState;
+            setIsMobile(nextState.isMobile);
+            setIsMobileLandscape(nextState.isMobileLandscape);
 
-                const phoneLikeViewport =
-                    compactWidthMedia.matches ||
-                    (coarsePointerMedia.matches && Math.min(window.innerWidth, window.innerHeight) <= 499);
-                const landscape = phoneLikeViewport && window.innerWidth > window.innerHeight;
-
-                if (
-                    viewportStateRef.current.isMobile === phoneLikeViewport &&
-                    viewportStateRef.current.isMobileLandscape === landscape
-                ) {
-                    return;
-                }
-
-                viewportStateRef.current = {
-                    isMobile: phoneLikeViewport,
-                    isMobileLandscape: landscape,
-                };
-
-                setIsMobile(phoneLikeViewport);
-                setIsMobileLandscape(landscape);
-
-                if (currentChannelRef.current && phoneLikeViewport) {
-                    setIsFullscreen((current) =>
-                        current === landscape ? current : landscape
-                    );
-                }
-            });
+            if (currentChannelRef.current && nextState.isMobile) {
+                setIsFullscreen((current) =>
+                    current === nextState.isMobileLandscape
+                        ? current
+                        : nextState.isMobileLandscape
+                );
+            }
         };
 
         update();
 
         compactWidthMedia.addEventListener("change", update);
         coarsePointerMedia.addEventListener("change", update);
+        window.addEventListener("resize", update);
         window.addEventListener("orientationchange", update);
+        window.visualViewport?.addEventListener("resize", update);
 
         return () => {
-            if (orientationFrameRef.current !== null) {
-                cancelAnimationFrame(orientationFrameRef.current);
-            }
-
             compactWidthMedia.removeEventListener("change", update);
             coarsePointerMedia.removeEventListener("change", update);
+            window.removeEventListener("resize", update);
             window.removeEventListener("orientationchange", update);
+            window.visualViewport?.removeEventListener("resize", update);
         };
     }, []);
+
+    const attachPlayerSlot = useCallback((slot: PlayerSlotState | null, element?: HTMLDivElement) => {
+        setActivePlayerSlot((current) => {
+            if (!slot) {
+                return current?.element === element ? null : current;
+            }
+
+            if (
+                current?.element === slot.element &&
+                current.className === slot.className &&
+                current.hideTopControls === slot.hideTopControls &&
+                current.registerDockedCastControl === slot.registerDockedCastControl
+            ) {
+                return current;
+            }
+
+            return slot;
+        });
+    }, []);
+
+    useLayoutEffect(() => {
+        const shell = playerShellRef.current;
+        const parking = playerParkingRef.current;
+        const host = activePlayerSlot?.element ?? parking;
+
+        if (!shell || !host || shell.parentElement === host) return;
+
+        host.appendChild(shell);
+    }, [activePlayerSlot]);
 
     const renderPlayer = useCallback((className = "h-full w-full", options?: RenderPlayerOptions) => {
         if (!currentChannel) {
             return null;
         }
 
-        return (
-            <VideoPlayer
-                className={className}
-                channel={currentChannel}
-                onClose={close}
-                onEnded={handleEnded}
-                autoNextLabel={
-                    !isAutoNextCancelled
-                        ? nextEpisodePreview?.episode.episodeName ||
-                          nextEpisodePreview?.episode.title ||
-                          null
-                        : null
-                }
-                onCancelAutoNext={() => setIsAutoNextCancelled(true)}
-                hideTopControls={options?.hideTopControls}
-                onCastControlChange={options?.registerDockedCastControl ? setDockedCastControl : undefined}
-            />
-        );
+        return <PlayerSlot attach={attachPlayerSlot} className={className} options={options} />;
     }, [
-        close,
+        attachPlayerSlot,
         currentChannel,
-        handleEnded,
-        isAutoNextCancelled,
-        nextEpisodePreview,
-        setDockedCastControl,
     ]);
 
     const value = useMemo<PlayerContextValue>(() => ({
@@ -409,283 +435,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         showProgramDetails,
     ]);
 
-    const shouldShowGlobalPlayer = currentChannel && (isFullscreen || !isDockedPlayerActive);
-    const topPlayerProgram = !isFullscreen ? findCurrentProgram(currentChannel) : null;
-    const topPlayerImage = resolvePlayerPanelImage(
-        topPlayerProgram?.image ||
-        currentChannel?.vodMeta?.episodeImage ||
-        currentChannel?.vodMeta?.programImage ||
-        currentChannel?.playerLogo ||
-        currentChannel?.logo
-    );
-    const topPlayerTitle =
-        topPlayerProgram?.name ||
-        currentChannel?.vodMeta?.episodeName ||
-        currentChannel?.playerSubtitle ||
-        currentChannel?.playerTitle ||
-        currentChannel?.name ||
-        "";
-    const topPlayerSubtitle = topPlayerProgram
-        ? currentChannel?.name || ""
-        : currentChannel?.vodMeta
-            ? [currentChannel.vodMeta.channelName, currentChannel.vodMeta.seasonName].filter(Boolean).join(" · ")
-            : currentChannel?.name || "";
-    const topPlayerDescription =
-        topPlayerProgram?.description ||
-        currentChannel?.vodMeta?.episodeDescription ||
-        currentChannel?.vodMeta?.programDescription ||
-        "";
-    const topPlayerChannelName = currentChannel?.vodMeta?.channelName || currentChannel?.name || "";
-    const topPlayerTimeRange = topPlayerProgram
-        ? formatPlayerTimeRange(topPlayerProgram.start, topPlayerProgram.end)
-        : "";
-    const isTopPlayerLive = Boolean(currentChannel?.type !== "vod" && topPlayerProgram);
-    const shouldShowTopPlayerDetails = !isFullscreen && Boolean(topPlayerDescription);
-    const topPlayerWithDetailsClass = shouldShowTopPlayerDetails ? "player-overlay--with-details" : "";
-
     return (
         <PlayerContext.Provider value={value}>
             {children}
-
-            {shouldShowGlobalPlayer && (
-                <div
-                    dir={isFullscreen ? "rtl" : "ltr"}
-                    className={isFullscreen ? "player-overlay-fullscreen" : `player-overlay ${topPlayerWithDetailsClass}`}
-                >
-                    {shouldShowTopPlayerDetails && (
-                        <aside dir="rtl" className="player-overlay__details">
-                            {topPlayerImage && (
-                                <img
-                                    src={topPlayerImage}
-                                    alt=""
-                                    className="player-overlay__details-image"
-                                    loading="lazy"
-                                />
-                            )}
-                            <div className="player-overlay__details-scrim" />
-                            <div className="player-overlay__details-copy">
-                                <div className="mb-4 flex items-start justify-between gap-4">
-                                    <div className="min-w-0 text-right">
-                                        {topPlayerChannelName && (
-                                            <p className="truncate text-xs font-semibold leading-5 text-white/75">
-                                                {topPlayerChannelName}
-                                            </p>
-                                        )}
-                                        <h2 className="line-clamp-2 text-xl font-bold leading-7 text-foreground">
-                                            {topPlayerTitle || currentChannel?.name}
-                                        </h2>
-                                        {(topPlayerTimeRange || isTopPlayerLive) && (
-                                            <p className="mt-1 flex items-center justify-end gap-1.5 truncate text-xs leading-5 text-white/70">
-                                                {isTopPlayerLive && (
-                                                    <span className="relative flex h-2 w-2 shrink-0">
-                                                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                                                        <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
-                                                    </span>
-                                                )}
-                                                {topPlayerTimeRange && <span dir="ltr">{topPlayerTimeRange}</span>}
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div className="flex shrink-0 items-center gap-2">
-                                        {dockedCastControl && (
-                                            <button
-                                                type="button"
-                                                onClick={dockedCastControl.onCast}
-                                                disabled={
-                                                    dockedCastControl.isConnecting ||
-                                                    !dockedCastControl.canCast ||
-                                                    (!dockedCastControl.isAvailable && !dockedCastControl.isCasting)
-                                                }
-                                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/20 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/45 hover:text-white disabled:pointer-events-none disabled:opacity-40 ${dockedCastControl.isCasting ? "text-primary" : ""}`}
-                                                aria-label={dockedCastControl.isCasting ? "עצור Cast" : "הפעל Cast"}
-                                                title={
-                                                    !dockedCastControl.canCast
-                                                        ? "Cast is not ready"
-                                                        : !dockedCastControl.isAvailable && !dockedCastControl.isCasting
-                                                            ? "Cast device not available"
-                                                            : dockedCastControl.isCasting
-                                                                ? "Stop casting"
-                                                                : "Cast"
-                                                }
-                                            >
-                                                <Cast className="h-4 w-4" aria-hidden="true" />
-                                            </button>
-                                        )}
-                                        <button
-                                            type="button"
-                                            onClick={close}
-                                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/20 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/45 hover:text-white"
-                                            aria-label="סגור נגן"
-                                        >
-                                            <X className="h-4 w-4" aria-hidden="true" />
-                                        </button>
-                                    </div>
-                                </div>
-                                {topPlayerDescription && (
-                                    <p className="whitespace-pre-line text-sm leading-6 text-muted-foreground">
-                                        {topPlayerDescription}
-                                    </p>
-                                )}
-                            </div>
-                        </aside>
-                    )}
-                    <div className={isFullscreen ? "h-full w-full" : "player-overlay__player"}>
-                        {renderPlayer(`h-full w-full ${shouldShowTopPlayerDetails ? "player-overlay__video-root" : ""}`, {
-                            registerDockedCastControl: shouldShowTopPlayerDetails,
-                        })}
-                    </div>
-                </div>
-            )}
-
-            <style jsx global>{`
-                .player-overlay-fullscreen,
-                .player-overlay__player {
-                    aspect-ratio: 16 / 9;
-                    overflow: hidden;
-                }
-
-                .player-overlay {
-                    position: fixed;
-                    z-index: 900;
-                    display: grid;
-                    grid-template-columns: minmax(0, 1fr);
-                    width: min(calc(100vw - 16px), 1180px);
-                    top: calc(var(--site-header-height, 73px) + 8px);
-                    left: 50%;
-                    transform: translateX(-50%);
-                    align-items: stretch;
-                    justify-content: center;
-                    pointer-events: none;
-                }
-
-                .player-overlay__player {
-                    justify-self: center;
-                    width: min(64vh, 391px, calc(100vw - 16px));
-                    height: min(36vh, 220px, calc((100vw - 16px) * 9 / 16));
-                    border-radius: 10px;
-                    box-shadow: 0 10px 34px rgba(0,0,0,0.45);
-                    pointer-events: auto;
-                }
-
-                .player-overlay__details {
-                    position: relative;
-                    display: none;
-                    min-width: 0;
-                    overflow: hidden;
-                    border: 1px solid hsl(var(--border));
-                    border-left: 0;
-                    border-radius: 10px 0 0 10px;
-                    background: hsl(var(--card));
-                    pointer-events: auto;
-                }
-
-                .player-overlay__details-image {
-                    position: absolute;
-                    inset: 0;
-                    width: 100%;
-                    height: 100%;
-                    object-fit: cover;
-                    opacity: 0.42;
-                    filter: blur(12px) saturate(1.05);
-                    transform: scale(1.08);
-                }
-
-                .player-overlay__details-scrim {
-                    position: absolute;
-                    inset: 0;
-                    background:
-                        linear-gradient(90deg, rgba(13, 29, 32, 0.72), rgba(13, 29, 32, 0.94)),
-                        linear-gradient(0deg, hsl(var(--card) / 0.74), transparent 60%);
-                }
-
-                .player-overlay__details-copy {
-                    position: relative;
-                    z-index: 1;
-                    height: 100%;
-                    max-height: 100%;
-                    overflow-y: auto;
-                    padding: 22px;
-                }
-
-                .player-overlay-fullscreen {
-                    position: fixed;
-                    z-index: 900;
-                    width: 99vw;
-                    height: 99vh;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    border-radius: 0;
-                }
-
-                @media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 499px) {
-                    .player-overlay-fullscreen {
-                        position: fixed;
-                        z-index: 1000;
-                        width: 99vw;
-                        height: 99vh;
-                        top: 50%;
-                        left: 50%;
-                        right: auto;
-                        bottom: auto;
-                        margin: 0;
-                        transform: translate(-50%, -50%);
-                        border-radius: 0;
-                    }
-                }
-
-                .player-top-active .site-content {
-                    padding-top: calc(min(36vh, 220px, calc((100vw - 16px) * 9 / 16)) + 16px);
-                }
-
-                @media (min-width: 820px) {
-                    .player-overlay--with-details {
-                        grid-template-columns: minmax(0, 1fr) auto;
-                        width: min(calc(100vw - 16px), 1180px);
-                        box-shadow: 0 10px 34px rgba(0,0,0,0.45);
-                    }
-
-                    .player-overlay__details {
-                        display: block;
-                        grid-column: 1;
-                        grid-row: 1;
-                        height: min(36vh, 220px, calc((100vw - 16px) * 9 / 16));
-                        max-height: min(36vh, 220px, calc((100vw - 16px) * 9 / 16));
-                        border-radius: 10px 0 0 10px;
-                    }
-
-                    .player-overlay--with-details .player-overlay__player {
-                        grid-column: 2;
-                        grid-row: 1;
-                        justify-self: end;
-                        border-radius: 0 10px 10px 0;
-                        box-shadow: none;
-                    }
-
-                    .player-overlay--with-details .player-overlay__video-root,
-                    .player-overlay--with-details .player-overlay__player [data-player-root],
-                    .player-overlay--with-details .player-overlay__player [data-vjs-player],
-                    .player-overlay--with-details .player-overlay__player .video-js-container,
-                    .player-overlay--with-details .player-overlay__player .video-js,
-                    .player-overlay--with-details .player-overlay__player video {
-                        border-top-left-radius: 0 !important;
-                        border-bottom-left-radius: 0 !important;
-                        border-top-right-radius: 10px !important;
-                        border-bottom-right-radius: 10px !important;
-                    }
-
-                    .player-overlay--with-details .custom-player-controls__top {
-                        display: none;
-                    }
-                }
-
-                @media (max-width: 767px) {
-                    .player-overlay {
-                        width: calc(100vw - 16px);
-                    }
-                }
-
-            `}</style>
+            <div ref={playerParkingRef} className="hidden" aria-hidden="true" />
+            <div
+                ref={playerShellRef}
+                className={currentChannel && activePlayerSlot ? activePlayerSlot.className : "hidden"}
+            >
+                {currentChannel && (
+                    <VideoPlayer
+                        className="h-full w-full"
+                        channel={currentChannel}
+                        onClose={close}
+                        onEnded={handleEnded}
+                        autoNextLabel={
+                            !isAutoNextCancelled
+                                ? nextEpisodePreview?.episode.episodeName ||
+                                  nextEpisodePreview?.episode.title ||
+                                  null
+                                : null
+                        }
+                        onCancelAutoNext={() => setIsAutoNextCancelled(true)}
+                        hideTopControls={activePlayerSlot?.hideTopControls}
+                        onCastControlChange={
+                            activePlayerSlot?.registerDockedCastControl
+                                ? setDockedCastControl
+                            : undefined
+                        }
+                    />
+                )}
+            </div>
+            <TopPlayerOverlay
+                castControl={dockedCastControl}
+                channel={currentChannel}
+                isDocked={isDockedPlayerActive}
+                isFullscreen={isFullscreen}
+                onClose={close}
+                renderPlayer={renderPlayer}
+            />
         </PlayerContext.Provider>
     );
 }

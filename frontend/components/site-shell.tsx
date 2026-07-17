@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
-import { APP_VERSION } from "@/lib/version";
 import { PlayerProvider, usePlayer } from "@/context/player-context";
+import { TopProgramCard, type TopProgramPanel } from "@/components/player/top-player-overlay";
 import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 import { useNowSec } from "@/hooks/use-now-sec";
 import { type Channel, type Program } from "@/lib/channels-data";
@@ -130,6 +130,15 @@ function ShellContent({
         currentChannel?.vodMeta?.episodeDescription ||
         currentChannel?.vodMeta?.programDescription ||
         "אין תיאור זמין לתוכנית הזו.";
+    const topProgramPanel: TopProgramPanel = {
+        channelName: panelChannel?.name || "",
+        description: panelDescription,
+        image: panelImage,
+        isLive: Boolean(currentChannel?.type !== "vod" && panelProgram && nowSec >= panelProgram.start && nowSec < panelProgram.end),
+        subtitle: panelSubtitle,
+        timeRange: panelTimeRange,
+        title: panelTitle,
+    };
     const panelVodHref = panelProgram?.vodProgramLink || panelProgram?.vodLink || "";
     const panelVodSeries = panelProgram?.vodMatch?.series;
     const panelVodEpisode = panelProgram?.vodMatch?.episode;
@@ -176,70 +185,35 @@ function ShellContent({
             >
                 <div dir="rtl" className="site-content min-h-0 flex-1 flex flex-col overflow-hidden">
                     {programDetails && !isDesktopSidePanel && (
-                        <div dir="rtl" className="program-details-inline shrink-0 overflow-hidden border border-border bg-background">
-                            <button
-                                type="button"
-                                onClick={clearProgramDetails}
-                                className="absolute left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-md bg-black/20 text-white/80 backdrop-blur-sm transition-colors hover:bg-black/45 hover:text-white"
-                                aria-label="סגור פרטי תוכנית"
-                            >
-                                <X className="h-4 w-4" aria-hidden="true" />
-                            </button>
-
-                            {panelImage && (
-                                <img
-                                    key={`${panelImage}-mobile`}
-                                    src={panelImage}
-                                    alt=""
-                                    className="h-full w-2/5 shrink-0 bg-muted object-cover"
-                                    loading="lazy"
-                                    onLoad={(event) => { (event.currentTarget as HTMLImageElement).style.display = ""; }}
-                                    onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
-                                />
+                        <TopProgramCard
+                            actions={(panelVodHref || hasSpecificVodEpisode) && (
+                                <>
+                                    {panelVodHref && (
+                                        <Link
+                                            href={panelVodHref}
+                                            className="top-program-card__action"
+                                        >
+                                            <Clapperboard className="h-4 w-4" aria-hidden="true" />
+                                            פתח עמוד תוכנית
+                                        </Link>
+                                    )}
+                                    {hasSpecificVodEpisode && (
+                                        <button
+                                            type="button"
+                                            onClick={playSpecificVodEpisode}
+                                            className="top-program-card__action top-program-card__action--primary"
+                                        >
+                                            <Clapperboard className="h-4 w-4" aria-hidden="true" />
+                                            נגן פרק ב-VOD
+                                        </button>
+                                    )}
+                                </>
                             )}
-                            <div className="min-w-0 flex-1 overflow-hidden p-4 pl-10 text-right">
-                                <h2 className="line-clamp-2 text-base font-bold leading-6 text-foreground sm:text-xl sm:leading-7">
-                                    {panelTitle}
-                                </h2>
-                                {panelSubtitle && (
-                                    <p className="mt-1 truncate text-xs text-muted-foreground sm:text-sm">
-                                        {panelSubtitle}
-                                        {panelTimeRange && (
-                                            <>
-                                                <span aria-hidden="true"> · </span>
-                                                <span dir="ltr">{panelTimeRange}</span>
-                                            </>
-                                        )}
-                                    </p>
-                                )}
-                                <p className="mt-3 line-clamp-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">
-                                    {panelDescription}
-                                </p>
-                                {(panelVodHref || hasSpecificVodEpisode) && (
-                                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-                                        {panelVodHref && (
-                                            <Link
-                                                href={panelVodHref}
-                                                className="inline-flex items-center gap-1.5 rounded-md border border-primary/45 bg-primary/12 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
-                                            >
-                                                <Clapperboard className="h-3.5 w-3.5" aria-hidden="true" />
-                                                פתח עמוד תוכנית
-                                            </Link>
-                                        )}
-                                        {hasSpecificVodEpisode && (
-                                            <button
-                                                type="button"
-                                                onClick={playSpecificVodEpisode}
-                                                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-accent"
-                                            >
-                                                <Clapperboard className="h-3.5 w-3.5" aria-hidden="true" />
-                                                נגן פרק ב-VOD
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                            channelLogo={channelLogo}
+                            className="program-details-inline"
+                            onClose={clearProgramDetails}
+                            panel={topProgramPanel}
+                        />
                     )}
                     {children}
                 </div>
@@ -395,10 +369,6 @@ function ShellContent({
                     </aside>
                 )}
             </main>
-
-            <footer className="shrink-0 border-t border-border bg-card px-4 py-3 text-center text-xs text-muted-foreground">
-                TV App · v{APP_VERSION}
-            </footer>
         </div>
     );
 }
@@ -407,25 +377,6 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const isLiveRoute = pathname === "/live" || pathname.startsWith("/live/");
     const title = getPageTitle(pathname);
-
-    useEffect(() => {
-        if (isLiveRoute) return;
-
-        const updateHeaderHeight = () => {
-            const header = document.querySelector<HTMLElement>(".site-header");
-            if (!header) return;
-
-            document.documentElement.style.setProperty(
-                "--site-header-height",
-                `${header.offsetHeight}px`
-            );
-        };
-
-        updateHeaderHeight();
-        window.addEventListener("resize", updateHeaderHeight);
-
-        return () => window.removeEventListener("resize", updateHeaderHeight);
-    }, [isLiveRoute]);
 
     if (isLiveRoute) {
         return (

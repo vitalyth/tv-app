@@ -1201,15 +1201,15 @@ export function VideoPlayer({
 
       <style jsx global>{`
         :fullscreen {
-          width: 100vw !important;
-          height: 100vh !important;
+          width: 100dvw !important;
+          height: 100dvh !important;
           border-radius: 0 !important;
           background: black;
         }
 
         :-webkit-full-screen {
-          width: 100vw !important;
-          height: 100vh !important;
+          width: 100dvw !important;
+          height: 100dvh !important;
           border-radius: 0 !important;
           background: black;
         }
@@ -1222,6 +1222,7 @@ export function VideoPlayer({
         :-webkit-full-screen video {
           width: 100% !important;
           height: 100% !important;
+          border-radius: 0 !important;
         }
 
         .video-js-container,

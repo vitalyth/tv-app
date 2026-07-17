@@ -174,7 +174,7 @@ export default function GuidePage() {
                 />
             </div>
 
-            <main className="flex-1 flex flex-col w-full px-4 pb-4 overflow-hidden">
+            <main className="flex-1 flex flex-col w-full overflow-hidden">
                 <div dir="ltr" className="relative flex-1 flex flex-col w-full overflow-hidden">
                     <ProgramGuide
                         channels={filteredChannels}
