@@ -41,6 +41,7 @@ export interface Channel {
   type: string
   programs: Program[]
   tvgID?: string
+  channelNumber?: string
   url?: string
   moreData?: string
   playerLogo?: string

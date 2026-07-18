@@ -4,8 +4,14 @@ from plugin_video_idanplus.resources import main as idan_main
 from models.schemas import Channel
 from services.custom_channel_service import merge_custom_channels
 
+
 def remove_api_prefix(url: str) -> str:
     return url.replace("/api", "", 1)
+
+
+def get_channel_number(channel: dict, channel_model: Channel) -> str:
+    return str(channel.get("channelNumber") or channel_model.index or "").strip()
+
 
 def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
     channels = merge_custom_channels(idan_main.GetUserChannels(type='tv'))
@@ -43,9 +49,12 @@ def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
 
         logo_base = remove_api_prefix(base_url)
         logo = f"{logo_base}/ch/{ch.logo}"
+        channel_number = get_channel_number(channel, ch)
+        channel_number_attribute = f' tvg-chno="{channel_number}"' if channel_number else ""
 
         lines.append(
-            f'#EXTINF:-1 tvg-id="{ch.tvgID}" tvg-name="{ch.name}" tvg-logo="{logo}",{ch.name}'
+            f'#EXTINF:-1 tvg-id="{ch.tvgID}" tvg-name="{ch.name}" '
+            f'tvg-logo="{logo}"{channel_number_attribute},{ch.name}'
         )
 
         lines.append(proxy_url)

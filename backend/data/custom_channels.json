@@ -1,7 +1,103 @@
 [
   {
+    "id": "ch_11",
+    "channelID": "ch_11",
+    "channelNumber": "11"
+  },
+  {
+    "id": "ch_11b",
+    "channelID": "ch_11b",
+    "channelNumber": "11"
+  },
+  {
+    "id": "ch_11c",
+    "channelID": "ch_11c",
+    "channelNumber": "11"
+  },
+  {
+    "id": "ch_12",
+    "channelID": "ch_12",
+    "channelNumber": "12"
+  },
+  {
+    "id": "ch_12b",
+    "channelID": "ch_12b",
+    "channelNumber": "12"
+  },
+  {
+    "id": "ch_12b2",
+    "channelID": "ch_12b2",
+    "channelNumber": "12"
+  },
+  {
+    "id": "ch_12b3",
+    "channelID": "ch_12b3",
+    "channelNumber": "12"
+  },
+  {
+    "id": "ch_12c",
+    "channelID": "ch_12c",
+    "channelNumber": "12"
+  },
+  {
+    "id": "ch_13",
+    "channelID": "ch_13",
+    "channelNumber": "13"
+  },
+  {
+    "id": "ch_13b",
+    "channelID": "ch_13b",
+    "channelNumber": "13"
+  },
+  {
+    "id": "ch_13b2",
+    "channelID": "ch_13b2",
+    "channelNumber": "13"
+  },
+  {
+    "id": "ch_13c",
+    "channelID": "ch_13c",
+    "channelNumber": "13"
+  },
+  {
+    "id": "ch_14",
+    "channelID": "ch_14",
+    "channelNumber": "14"
+  },
+  {
+    "id": "ch_14b",
+    "channelID": "ch_14b",
+    "channelNumber": "14"
+  },
+  {
+    "id": "ch_14b2",
+    "channelID": "ch_14b2",
+    "channelNumber": "14"
+  },
+  {
+    "id": "ch_10",
+    "channelID": "ch_10",
+    "channelNumber": "10"
+  },
+  {
+    "id": "ch_23",
+    "channelID": "ch_23",
+    "channelNumber": "80"
+  },
+  {
+    "id": "ch_23b",
+    "channelID": "ch_23b",
+    "channelNumber": "80"
+  },
+  {
+    "id": "ch_24",
+    "channelID": "ch_24",
+    "channelNumber": "24"
+  },
+  {
     "id": "ch_bb",
     "channelID": "ch_bb",
+    "channelNumber": "26",
     "name": "האח הגדול 26",
     "title": "האח הגדול 26",
     "label": "האח הגדול 26",
@@ -23,6 +119,7 @@
   {
     "id": "ch_bbb",
     "channelID": "ch_bbb",
+    "channelNumber": "26",
     "name": "האח הגדול 26 - גיבוי",
     "title": "האח הגדול 26 - גיבוי",
     "label": "האח הגדול 26 - גיבוי",
@@ -44,31 +141,102 @@
   {
     "id": "ch_i24newsen",
     "channelID": "ch_i24newsen",
+    "channelNumber": "118",
     "tvgID": "i24newsen"
   },
   {
     "id": "ch_i24newsfr",
     "channelID": "ch_i24newsfr",
+    "channelNumber": "144",
     "tvgID": "i24newsfr"
   },
   {
     "id": "ch_i24newsar",
     "channelID": "ch_i24newsar",
+    "channelNumber": "119",
     "tvgID": "i24newsar"
   },
   {
     "id": "ch_erets",
     "channelID": "ch_erets",
+    "channelNumber": "27",
     "tvgID": "erets"
   },
   {
     "id": "ch_savri",
     "channelID": "ch_savri",
+    "channelNumber": "28",
     "tvgID": "savri"
+  },
+  {
+    "id": "ch_33",
+    "channelID": "ch_33",
+    "channelNumber": "33"
+  },
+  {
+    "id": "ch_33b",
+    "channelID": "ch_33b",
+    "channelNumber": "33"
+  },
+  {
+    "id": "ch_66",
+    "channelID": "ch_66",
+    "channelNumber": "66"
+  },
+  {
+    "id": "ch_97",
+    "channelID": "ch_97",
+    "channelNumber": "97"
+  },
+  {
+    "id": "ch_99",
+    "channelID": "ch_99",
+    "channelNumber": "99"
+  },
+  {
+    "id": "ch_99c",
+    "channelID": "ch_99c",
+    "channelNumber": "99"
+  },
+  {
+    "id": "ch_sport5",
+    "channelID": "ch_sport5",
+    "channelNumber": "55"
+  },
+  {
+    "id": "ch_100",
+    "channelID": "ch_100",
+    "channelNumber": "100"
+  },
+  {
+    "id": "ch_9",
+    "channelID": "ch_9",
+    "channelNumber": "9"
+  },
+  {
+    "id": "ch_i24news",
+    "channelID": "ch_i24news",
+    "channelNumber": "15"
+  },
+  {
+    "id": "ch_13comedy",
+    "channelID": "ch_13comedy",
+    "channelNumber": "24"
+  },
+  {
+    "id": "ch_13nofesh",
+    "channelID": "ch_13nofesh",
+    "channelNumber": "25"
+  },
+  {
+    "id": "ch_13reality",
+    "channelID": "ch_13reality",
+    "channelNumber": "32"
   },
   {
     "id": "kan_worldcup",
     "channelID": "kan_worldcup",
+    "channelNumber": "50",
     "name": "כאן מונדיאל",
     "title": "כאן מונדיאל",
     "label": "כאן מונדיאל",
@@ -90,6 +258,7 @@
   {
     "id": "cnn",
     "channelID": "cnn",
+    "channelNumber": "102",
     "name": "CNN Headlines",
     "title": "CNN Headlines",
     "label": "CNN Headlines",
@@ -110,6 +279,7 @@
   {
     "id": "cbs_news_boston",
     "channelID": "cbs_news_boston",
+    "channelNumber": "9996",
     "name": "CBS News Boston",
     "title": "CBS News Boston",
     "label": "CBS News Boston",
@@ -130,6 +300,7 @@
   {
     "id": "nbc10_boston",
     "channelID": "nbc10_boston",
+    "channelNumber": "9995",
     "name": "NBC10 Boston",
     "title": "NBC10 Boston",
     "label": "NBC10 Boston",
@@ -150,6 +321,7 @@
   {
     "id": "wcvb_boston",
     "channelID": "wcvb_boston",
+    "channelNumber": "9994",
     "name": "WCVB Boston",
     "title": "WCVB Boston",
     "label": "WCVB Boston",
@@ -170,6 +342,7 @@
   {
     "id": "boston25",
     "channelID": "boston25",
+    "channelNumber": "9993",
     "name": "Boston 25",
     "title": "Boston 25",
     "label": "Boston 25",
@@ -190,6 +363,7 @@
   {
     "id": "gbh_boston",
     "channelID": "gbh_boston",
+    "channelNumber": "9992",
     "name": "GBH World",
     "title": "GBH World",
     "label": "GBH World",
@@ -210,6 +384,7 @@
   {
     "id": "iltv",
     "channelID": "iltv",
+    "channelNumber": "9999",
     "name": "ILTV",
     "title": "ILTV",
     "label": "ILTV",
@@ -230,6 +405,7 @@
   {
     "id": "ftv",
     "channelID": "ftv",
+    "channelNumber": "9998",
     "name": "FashionTV",
     "title": "FashionTV",
     "label": "FashionTV",
@@ -250,6 +426,7 @@
   {
     "id": "ch_16tv",
     "channelID": "ch_16tv",
+    "channelNumber": "16",
     "name": "ערוץ 16",
     "title": "ערוץ 16",
     "label": "ערוץ 16",
