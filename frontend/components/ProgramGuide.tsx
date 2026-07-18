@@ -120,6 +120,10 @@ function getSourceLabel(channel: Channel, sourceIndex: number): string {
     return sourceIndex === 0 ? "ראשי" : `מקור ${sourceIndex + 1}`;
 }
 
+function getChannelDisplayNumber(channel: Channel): string | number {
+    return channel.channelNumber || channel.index;
+}
+
 function getGuideChannelWidth(): number {
     if (typeof window === "undefined") {
         return DEFAULT_CHANNEL_W;
@@ -954,7 +958,7 @@ function ProgramGuide({
                                                 ? activeSource
                                                     ? getSourceLabel(activeSource, sourceOptions.indexOf(activeSource))
                                                     : "מנגן עכשיו"
-                                                : ch.index}
+                                                : getChannelDisplayNumber(ch)}
                                         </p>
                                     </div>
                                     {hasSourceOptions && (

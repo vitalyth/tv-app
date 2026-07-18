@@ -299,7 +299,8 @@ def get_live_channels():
             type=channel["type"],
             linkDetails=channel["linkDetails"],
             programs=programs,
-            tvgID=channel["tvgID"]
+            tvgID=channel["tvgID"],
+            channelNumber=channel.get("channelNumber"),
         )
 
         results.append(ch)
