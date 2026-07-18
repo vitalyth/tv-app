@@ -9,6 +9,7 @@ import { Channel, Program } from "@/lib/channels-data";
 import { channelService } from "@/lib/services/channel-service";
 import { getPersistedCastChannelId } from "@/hooks/useGoogleCast";
 import { usePlayer } from "@/context/player-context";
+import { useNowSec } from "@/hooks/use-now-sec";
 
 function dedupeAndSortPrograms(programs: Program[]): Program[] {
     const byKey = new Map<string, Program>();
@@ -35,13 +36,15 @@ function mergeEpg(
 
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
-    const { currentChannel, play, showProgramDetails } = usePlayer();
+    const { currentChannel, play, programDetails, showProgramDetails } = usePlayer();
+    const nowSec = useNowSec();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState<string>("");
     const [epgByChannel, setEpgByChannel] = useState<Record<string, Program[]>>({});
     const [guideRange, setGuideRange] = useState<{ start: number; end: number } | null>(null);
     const loadedRangeRef = useRef<{ start: number; end: number; query: string } | null>(null);
     const epgRequestCacheRef = useRef(new Map<string, Promise<Record<string, Program[]>>>());
+    const autoPlayedProgramKeyRef = useRef<string | null>(null);
 
     const loadEpg = useCallback((range: { start: number; end: number }, query = "", replace = false) => {
         const normalizedQuery = query.trim();
@@ -117,6 +120,21 @@ export default function GuidePage() {
 
     const filteredChannels = useFilteredChannels(channelsWithEpg, searchQuery, selectedCategory);
 
+    useEffect(() => {
+        if (!programDetails) return;
+
+        const { channel, program } = programDetails;
+        const isLive = nowSec >= program.start && nowSec < program.end;
+
+        if (!isLive) return;
+
+        const key = `${channel.id}:${program.start}:${program.end}:${program.name}`;
+        if (autoPlayedProgramKeyRef.current === key) return;
+
+        autoPlayedProgramKeyRef.current = key;
+        play(channel);
+    }, [nowSec, play, programDetails]);
+
     // Restore Cast session after page refresh:
     // When channels finish loading, check if there was an active Cast session
     // before the refresh. If so, reselect the channel so the Cast SDK can
@@ -182,6 +200,7 @@ export default function GuidePage() {
                         logoBasePath="/ch/"
                         playingChannelId={currentChannel?.type === "vod" ? undefined : currentChannel?.id}
                         playingChannelIndex={currentChannel?.type === "vod" ? undefined : currentChannel?.index}
+                        selectedProgram={programDetails}
                         onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
                         hasVodForProgram={hasVodForProgram}

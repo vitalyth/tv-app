@@ -11,6 +11,11 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ProgramGuideProps {
@@ -19,6 +24,7 @@ interface ProgramGuideProps {
     logoBasePath?: string;
     playingChannelId?: string | null;
     playingChannelIndex?: number | null;
+    selectedProgram?: { program: Program; channel: Channel } | null;
     onChannelClick?: (channel: Channel) => void;
     onProgramClick?: (program: Program, channel: Channel, isLive: boolean) => void;
     hasVodForProgram?: (program: Program, channel: Channel) => boolean;
@@ -124,6 +130,10 @@ function getChannelDisplayNumber(channel: Channel): string | number {
     return channel.channelNumber || channel.index;
 }
 
+function getProgramSelectionKey(program: Program, channel: Channel): string {
+    return `${channel.id}:${program.start}:${program.end}:${program.name}`;
+}
+
 function getGuideChannelWidth(): number {
     if (typeof window === "undefined") {
         return DEFAULT_CHANNEL_W;
@@ -181,7 +191,9 @@ const ProgramCell = memo(function ProgramCell({
     nowSec,
     pxPerSec,
     isPlayingProgram,
+    isSelectedProgram,
     hasVod,
+    enableTooltip,
     onClick,
     didDrag,
 }: {
@@ -192,7 +204,9 @@ const ProgramCell = memo(function ProgramCell({
     nowSec: number;
     pxPerSec: number;
     isPlayingProgram: boolean;
+    isSelectedProgram: boolean;
     hasVod: boolean;
+    enableTooltip: boolean;
     onClick?: (p: Program, ch: Channel, isLive: boolean) => void;
     didDrag: React.MutableRefObject<boolean>;
 }) {
@@ -212,13 +226,15 @@ const ProgramCell = memo(function ProgramCell({
     const showInlineImage = Boolean(programImage && width >= 76);
     const leadingOffsetClass = showInlineImage ? "pl-16" : "";
 
-    return (
+    const cell = (
         <div
             className={`
         absolute top-1.5 rounded-lg border cursor-pointer select-none overflow-hidden
         transition-colors duration-150 hover:brightness-125 hover:z-50 hover:shadow-xl focus-visible:brightness-125 focus-visible:z-50 focus-visible:shadow-xl
         ${isPlayingProgram
                     ? "bg-emerald-900/95 border-emerald-300/80 ring-2 ring-emerald-300/70 shadow-lg shadow-emerald-950/60"
+                    : isSelectedProgram
+                        ? "bg-cyan-950/80 border-cyan-300/80 ring-2 ring-cyan-300/60 shadow-lg shadow-cyan-950/50"
                     : isLive
                         ? "bg-primary/20 border-primary/60 shadow-lg shadow-primary/10"
                         : "bg-zinc-800/90 border-zinc-700/50"
@@ -287,6 +303,39 @@ const ProgramCell = memo(function ProgramCell({
             </div>
         </div>
     );
+
+    if (!enableTooltip) {
+        return cell;
+    }
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                {cell}
+            </TooltipTrigger>
+            <TooltipContent
+                dir="rtl"
+                side="top"
+                align="center"
+                sideOffset={8}
+                collisionPadding={12}
+                hideArrow
+                className="z-[130] w-80 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-cyan-300/45 bg-zinc-950/95 p-3.5 text-right text-zinc-300 shadow-[0_18px_42px_rgba(0,0,0,0.55)] ring-1 ring-white/5 backdrop-blur-md"
+            >
+                <div className="text-sm font-bold leading-tight text-white">{program.name}</div>
+                <div dir="rtl" className="mt-1 flex flex-wrap items-center justify-start gap-1.5 text-right text-[11px] text-zinc-400">
+                    <span dir="ltr" className="text-right">{formatTimeRange(program.start, program.end)}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{channel.name}</span>
+                </div>
+                {program.description && (
+                    <p className="mt-2 line-clamp-3 text-xs leading-5 text-zinc-300">
+                        {program.description}
+                    </p>
+                )}
+            </TooltipContent>
+        </Tooltip>
+    );
 }, (prev, next) => {
     return (
         prev.program === next.program &&
@@ -295,7 +344,9 @@ const ProgramCell = memo(function ProgramCell({
         prev.guideEnd === next.guideEnd &&
         prev.pxPerSec === next.pxPerSec &&
         prev.isPlayingProgram === next.isPlayingProgram &&
+        prev.isSelectedProgram === next.isSelectedProgram &&
         prev.hasVod === next.hasVod &&
+        prev.enableTooltip === next.enableTooltip &&
         prev.onClick === next.onClick &&
         prev.didDrag === next.didDrag &&
         isProgramLive(prev.program, prev.nowSec) === isProgramLive(next.program, next.nowSec)
@@ -310,6 +361,7 @@ function ProgramGuide({
     logoBasePath = "/",
     playingChannelId,
     playingChannelIndex,
+    selectedProgram,
     onChannelClick,
     onProgramClick,
     hasVodForProgram,
@@ -337,6 +389,7 @@ function ProgramGuide({
     const lastVisibleDateLabelRef = useRef(visibleDateLabel);
     const [visibleViewport, setVisibleViewport] = useState<VisibleViewport>({ top: 0, height: 900 });
     const [visibleTimeRange, setVisibleTimeRange] = useState<VisibleTimeRange | null>(null);
+    const [enableProgramTooltip, setEnableProgramTooltip] = useState(false);
 
     /*
     useEffect(() => {
@@ -410,6 +463,11 @@ function ProgramGuide({
 
     const visibleChannels = useMemo(() => uniqueChannelsByIndex(channels), [channels]);
     const channelsByIndex = useMemo(() => groupChannelsByIndex(sourceChannels), [sourceChannels]);
+    const selectedProgramKey = useMemo(() => (
+        selectedProgram
+            ? getProgramSelectionKey(selectedProgram.program, selectedProgram.channel)
+            : null
+    ), [selectedProgram]);
     const guideRows = useMemo<PositionedGuideRow[]>(() => {
         let top = 0;
         const rows: PositionedGuideRow[] = [];
@@ -717,6 +775,16 @@ function ProgramGuide({
     const handleGuideScroll = useCallback(() => {
         scheduleViewportUpdate();
     }, [scheduleViewportUpdate]);
+
+    useEffect(() => {
+        const media = window.matchMedia("(hover: hover) and (pointer: fine)");
+        const update = () => setEnableProgramTooltip(media.matches);
+
+        update();
+        media.addEventListener("change", update);
+
+        return () => media.removeEventListener("change", update);
+    }, []);
 
     // Auto-scroll: load the wider range, but initially show one hour before now.
     const didScrollRef = useRef(false);
@@ -1091,7 +1159,9 @@ function ProgramGuide({
                                                 nowSec={nowSec}
                                                 pxPerSec={pxPerSec}
                                                 isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
+                                                isSelectedProgram={selectedProgramKey === getProgramSelectionKey(prog, ch)}
                                                 hasVod={hasVodForProgram?.(prog, ch) ?? false}
+                                                enableTooltip={enableProgramTooltip}
                                                 onClick={onProgramClick}
                                                 didDrag={didDrag}
                                             />

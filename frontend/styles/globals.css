@@ -219,6 +219,15 @@
   pointer-events: auto;
 }
 
+.top-playback--with-details .top-playback__player,
+.top-playback--with-details .top-playback__player [data-player-root],
+.top-playback--with-details .top-playback__player .video-js-container,
+.top-playback--with-details .top-playback__player .video-js,
+.top-playback--with-details .top-playback__player video {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+
 .top-playback--player-only {
   width: auto;
   transform: none;
