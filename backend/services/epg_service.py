@@ -17,48 +17,6 @@ FALLBACK_EPG_DB = DEFAULT_EPG_DB_PATH
 WINDOW_BACK = 3 * 60 * 60     # 3 hours back
 WINDOW_FORWARD = 12 * 60 * 60 # 12 hours forward
 
-def _programs_have_current(programs, now):
-    for program in programs:
-        if program.get("end", 0) > now:
-            return True
-    return False
-
-def _has_current_programs(epg_list, now):
-    for programs in epg_list.values():
-        if _programs_have_current(programs, now):
-            return True
-    return False
-
-def _merge_fallback_epg(epg_list, now):
-    fallback_epg = _load_fallback_epg()
-    if not fallback_epg:
-        return epg_list
-
-    if not epg_list:
-        print(">>> Using local EPG fallback...")
-        return fallback_epg
-
-    merged_epg = copy.deepcopy(epg_list)
-    added_channels = 0
-    refreshed_channels = 0
-
-    for channel, fallback_programs in fallback_epg.items():
-        if not _programs_have_current(fallback_programs, now):
-            continue
-
-        current_programs = merged_epg.get(channel, [])
-        if not current_programs:
-            merged_epg[channel] = fallback_programs
-            added_channels += 1
-        elif not _programs_have_current(current_programs, now):
-            merged_epg[channel] = fallback_programs
-            refreshed_channels += 1
-
-    if added_channels or refreshed_channels:
-        print(f">>> Merged local EPG fallback: {added_channels} added, {refreshed_channels} refreshed")
-
-    return merged_epg
-
 def _load_fallback_epg(
     start: int | None = None,
     end: int | None = None,
@@ -68,12 +26,6 @@ def _load_fallback_epg(
 
 def _get_fallback_epg_mtime():
     return epg_db_mtime(FALLBACK_EPG_DB)
-
-
-def _load_external_epg_source():
-    from plugin_video_idanplus.resources.lib.epg import GetEPG
-
-    return GetEPG()
 
 def get_now_epg(
     start: int | None = None,
@@ -99,24 +51,10 @@ def get_now_epg(
     ):
         epgList = copy.deepcopy(_epg_cache)
     else:
-        # Priority 1: local SQLite EPG cache
+        # Runtime EPG reads only from the local SQLite cache. Source fallback
+        # belongs to parse_epg.py so imported data is persisted first.
         epgList = _load_fallback_epg()
-
-        if epgList and _has_current_programs(epgList, now):
-            print(">>> Using local EPG cache: cache/epg.sqlite")
-        else:
-            if epgList:
-                print(">>> Local EPG cache has no current programs, refreshing from source...")
-            else:
-                print(">>> Local EPG cache is missing/empty, refreshing from source...")
-
-            # Priority 2: external EPG source
-            #epgList = GetEPG(deltaInSec=0)
-            #epgList = GetEPG(deltaInSec=1 * 60 * 60) # 1 hour
-            epgList = _load_external_epg_source() # default 24 hours
-
-            # Keep using cache/epg.sqlite as fallback for missing/stale channels
-            epgList = _merge_fallback_epg(epgList, now)
+        print(f">>> Using local EPG cache: {FALLBACK_EPG_DB}")
 
         _epg_cache = epgList
         _epg_cache_fallback_mtime = fallback_mtime

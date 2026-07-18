@@ -90,14 +90,25 @@ def replace_channel_programs(
     programs: list[dict[str, Any]],
     db_path: Path | str | None = None,
 ) -> list[dict[str, Any]]:
+    return upsert_channel_programs(channel_id, programs, db_path)
+
+
+def upsert_channel_programs(
+    channel_id: str,
+    programs: list[dict[str, Any]],
+    db_path: Path | str | None = None,
+) -> list[dict[str, Any]]:
     path = init_epg_db(db_path)
     normalized_programs = dedupe_and_sort_programs(
         [program for program in (_normalize_program(program) for program in programs) if program]
     )
     updated_at = int(time.time())
 
+    if not normalized_programs:
+        return load_channel_programs(channel_id, path)
+
     with sqlite3.connect(path) as con:
-        con.execute("DELETE FROM epg_programs WHERE channel_id = ?", (channel_id,))
+        _delete_conflicting_programs(con, channel_id, normalized_programs)
         con.executemany(
             """
             INSERT OR REPLACE INTO epg_programs
@@ -119,10 +130,17 @@ def replace_channel_programs(
             ],
         )
 
-    return normalized_programs
+    return load_channel_programs(channel_id, path)
 
 
 def replace_all_epg(
+    epg: dict[str, list[dict[str, Any]]],
+    db_path: Path | str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    return upsert_all_epg(epg, db_path)
+
+
+def upsert_all_epg(
     epg: dict[str, list[dict[str, Any]]],
     db_path: Path | str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
@@ -136,9 +154,11 @@ def replace_all_epg(
     }
 
     with sqlite3.connect(path) as con:
-        con.execute("DELETE FROM epg_programs")
         rows = []
         for channel_id, programs in normalized_epg.items():
+            if not programs:
+                continue
+            _delete_conflicting_programs(con, channel_id, programs)
             rows.extend(
                 (
                     channel_id,
@@ -161,7 +181,44 @@ def replace_all_epg(
             rows,
         )
 
-    return normalized_epg
+    return load_all_epg(path)
+
+
+def _delete_conflicting_programs(
+    con: sqlite3.Connection,
+    channel_id: str,
+    programs: list[dict[str, Any]],
+) -> None:
+    """
+    Remove stale rows only when the new import gives a better version of the
+    same schedule slot or the same named show moved inside the refreshed window.
+
+    This intentionally does not clear the whole channel/table. If a source
+    returns partial data, unrelated existing programs remain available.
+    """
+    for program in programs:
+        con.execute(
+            """
+            DELETE FROM epg_programs
+            WHERE channel_id = ?
+              AND NOT (start = ? AND end = ? AND name = ?)
+              AND (
+                (start = ? AND end = ?)
+                OR (name = ? AND start < ? AND end > ?)
+              )
+            """,
+            (
+                channel_id,
+                program["start"],
+                program["end"],
+                program["name"],
+                program["start"],
+                program["end"],
+                program["name"],
+                program["end"],
+                program["start"],
+            ),
+        )
 
 
 def load_channel_programs(

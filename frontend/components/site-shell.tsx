@@ -181,7 +181,7 @@ function ShellContent({
 
             <main
                 dir="ltr"
-                className={`min-h-0 flex-1 overflow-hidden ${shouldShowSidePanel ? "grid gap-3 py-4 pl-4 pr-0 lg:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)]" : "flex flex-col"}`}
+                className={`min-h-0 flex-1 overflow-hidden ${shouldShowSidePanel ? "grid gap-3 pl-4 pr-0 lg:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)]" : "flex flex-col"}`}
             >
                 <div dir="rtl" className="site-content min-h-0 flex-1 flex flex-col overflow-hidden">
                     {programDetails && !isDesktopSidePanel && (

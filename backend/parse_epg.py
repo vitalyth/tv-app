@@ -1,5 +1,7 @@
 import argparse
+import json
 import os
+import time
 import traceback
 from pathlib import Path
 
@@ -37,8 +39,8 @@ from epg_parsers.isramedia import (
 from services.epg_storage import (
     load_all_epg,
     load_channel_programs,
-    replace_all_epg,
-    replace_channel_programs,
+    upsert_all_epg,
+    upsert_channel_programs,
 )
 from services.epg_vod_enrichment import enrich_epg_with_vod, enrich_programs_with_vod
 
@@ -46,35 +48,124 @@ KAN_MIN_PROGRAMS = 10
 MAKO12_MIN_PROGRAMS = 10
 RESHET13_MIN_PROGRAMS = 10
 C14_MIN_PROGRAMS = 10
-NINE_TV_MIN_PROGRAMS = 10
+NINE_TV_MIN_PROGRAMS = 20
+
+FORMAL_EPG_CHANNEL_IDS = {
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "23",
+    "33",
+    "66",
+    "97",
+    "99",
+    "100fm",
+    "i24news",
+    "i24newsen",
+    "i24newsfr",
+    "i24newsar",
+    "ftv",
+    "kan_worldcup",
+    *FISHENZON_CHANNEL_IDS,
+    *KESHET_THEMATIC_CHANNELS,
+    *LOCAL_US_CHANNEL_IDS,
+}
+
+ACTIVE_IMPORT_CHANNEL_IDS: set[str] | None = None
+IDAN_PLUS_EPG_CACHE: dict[str, list[dict]] | None = None
+IDAN_PLUS_EPG_LOAD_FAILED = False
+
+
+def _collect_channel_epg_ids(channels: list[dict]) -> set[str]:
+    epg_ids = set()
+    for channel in channels:
+        if channel.get("type") not in (None, "tv"):
+            continue
+
+        channel_index = channel.get("my_index", channel.get("index"))
+        if channel_index in (0, "0"):
+            continue
+
+        for key in ("tvgID", "channelID", "id"):
+            value = str(channel.get(key) or "").strip()
+            if value:
+                epg_ids.add(value)
+
+    return epg_ids
+
+
+def load_active_epg_channel_ids() -> set[str]:
+    """
+    Return the EPG ids for channels that are actually exposed by the app.
+
+    The normal path uses the same channel assembly as the live channel API.
+    The JSON fallback keeps the parser usable in stripped-down environments
+    where the Idan Plus compatibility layer cannot be imported.
+    """
+    try:
+        from plugin_video_idanplus.resources import main as idan_main
+        from services.custom_channel_service import merge_custom_channels
+
+        return _collect_channel_epg_ids(
+            merge_custom_channels(idan_main.GetUserChannels(type="tv"))
+        )
+    except Exception as ex:
+        print(f"Could not load runtime channel list, using JSON fallback: {ex}")
+
+    channels = []
+    backend_dir = Path(__file__).resolve().parent
+    for path in (
+        backend_dir / "profile" / "channels.json",
+        backend_dir / "plugin_video_idanplus" / "resources" / "channels.json",
+    ):
+        if not path.exists():
+            continue
+
+        with path.open("r", encoding="utf-8") as input_file:
+            data = json.load(input_file)
+        channels = list(data.values()) if isinstance(data, dict) else data
+        break
+
+    custom_channels_path = backend_dir / "data" / "custom_channels.json"
+    if custom_channels_path.exists():
+        with custom_channels_path.open("r", encoding="utf-8") as input_file:
+            custom_channels = json.load(input_file)
+        if isinstance(custom_channels, list):
+            channels.extend(custom_channels)
+
+    return _collect_channel_epg_ids(channels)
 
 
 def get_epg_db_path_from_output_dir(output_dir: Path) -> Path:
     return output_dir.parent / "epg.sqlite"
 
 
-def write_json(data, output_path: Path) -> None:
-    """
-    Backward-compatible writer for the parser.
+def persist_epg(epg: dict[str, list[dict]], output_dir: Path) -> None:
+    if ACTIVE_IMPORT_CHANNEL_IDS is not None:
+        epg = {
+            channel_id: programs
+            for channel_id, programs in epg.items()
+            if channel_id in ACTIVE_IMPORT_CHANNEL_IDS
+        }
 
-    The parser still builds channel lists and a combined dict in memory, but the
-    persisted cache now lives in SQLite.
-    """
-    if isinstance(data, dict):
-        replace_all_epg(
-            enrich_epg_with_vod(data),
-            get_epg_db_path_from_output_dir(output_path.parent / "epg"),
-        )
+    upsert_all_epg(
+        enrich_epg_with_vod(epg),
+        get_epg_db_path_from_output_dir(output_dir),
+    )
+
+
+def persist_channel_programs(channel_id: str, programs: list[dict], output_dir: Path) -> None:
+    if ACTIVE_IMPORT_CHANNEL_IDS is not None and channel_id not in ACTIVE_IMPORT_CHANNEL_IDS:
         return
 
-    if isinstance(data, list):
-        channel_id = output_path.stem
-        replace_channel_programs(
-            channel_id,
-            enrich_programs_with_vod(channel_id, data),
-            get_epg_db_path_from_output_dir(output_path.parent),
-        )
-        return
+    upsert_channel_programs(
+        channel_id,
+        enrich_programs_with_vod(channel_id, programs),
+        get_epg_db_path_from_output_dir(output_dir),
+    )
 
 
 def combine_epg_directory(output_dir: Path) -> dict:
@@ -100,29 +191,28 @@ def merge_with_existing_channel(output_dir: Path, channel_id: str, new_programs:
     return merge_existing_with_new_programs(existing_programs, new_programs)
 
 
-def parse_isramedia_channel(
-    channel_id: str,
-    url: str,
-    days: str,
-    available_days: bool,
-    filename_mode: str,
-) -> list[dict]:
-    first_html = fetch_html(url)
-    channels = parse_channel_options(first_html, url)
-    channel = next(
-        (
-            item
-            for item in channels
-            if get_output_channel_id(item["id"], filename_mode) == channel_id
-            or item["id"] == channel_id
-        ),
-        None,
-    )
+def load_idanplus_epg_fallback() -> dict[str, list[dict]]:
+    global IDAN_PLUS_EPG_CACHE, IDAN_PLUS_EPG_LOAD_FAILED
 
-    if not channel:
-        return []
+    if IDAN_PLUS_EPG_CACHE is not None:
+        return IDAN_PLUS_EPG_CACHE
+    if IDAN_PLUS_EPG_LOAD_FAILED:
+        return {}
 
-    return parse_channel_epg(channel["url"], days, available_days)
+    try:
+        IDAN_PLUS_EPG_CACHE = fetch_fishenzon_epg() or {}
+        print(f"Loaded Idan Plus fallback EPG source for {len(IDAN_PLUS_EPG_CACHE)} channels")
+    except Exception as ex:
+        IDAN_PLUS_EPG_LOAD_FAILED = True
+        IDAN_PLUS_EPG_CACHE = {}
+        print(f"Could not load Idan Plus fallback EPG: {ex}")
+
+    return IDAN_PLUS_EPG_CACHE
+
+
+def parse_idanplus_fallback(channel_id: str) -> list[dict]:
+    programs = load_idanplus_epg_fallback().get(channel_id, [])
+    return dedupe_and_sort_programs(programs or [])
 
 
 def has_reliable_kan_schedule(programs: list[dict]) -> bool:
@@ -142,17 +232,23 @@ def has_reliable_c14_schedule(programs: list[dict]) -> bool:
 
 
 def has_reliable_9tv_schedule(programs: list[dict]) -> bool:
-    return len(programs) >= NINE_TV_MIN_PROGRAMS
+    if len(programs) < NINE_TV_MIN_PROGRAMS:
+        return False
+
+    # 9TV can return a partial official day, e.g. only overnight programs.
+    # Treat it as reliable only when it covers the near future too.
+    min_future_end = int(time.time()) + 6 * 60 * 60
+    return any(int(program.get("end", 0)) >= min_future_end for program in programs)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Parse EPG sources into the local SQLite cache.")
     parser.add_argument("--url", default=DEFAULT_URL, help="IsraMedia EPG page URL")
-    parser.add_argument("--output", help="Deprecated. Kept for CLI compatibility; EPG is stored in SQLite.")
-    parser.add_argument("--output-dir", help="Deprecated output directory hint. The SQLite DB is stored next to this directory.")
+    parser.add_argument("--output", help="Deprecated and ignored. EPG is stored in SQLite.")
+    parser.add_argument("--output-dir", help="SQLite location hint. The DB is stored next to this legacy directory.")
     parser.add_argument(
         "--combined-output",
-        help="Deprecated. Kept for CLI compatibility; EPG is stored in SQLite.",
+        help="Deprecated and ignored. EPG is stored in SQLite.",
     )
     parser.add_argument(
         "--filename-mode",
@@ -178,7 +274,7 @@ def main():
     parser.add_argument(
         "--combine-existing",
         action="store_true",
-        help="Build the combined EPG JSON from files already in --output-dir without fetching pages.",
+        help="Refresh the combined SQLite EPG view from existing DB data without fetching pages.",
     )
     parser.add_argument(
         "--skip-i24",
@@ -200,30 +296,27 @@ def main():
     output_channel_id = get_output_channel_id(channel_id, args.filename_mode)
     default_cache_dir = Path(os.getenv("BACKEND_CACHE_DIR", Path(__file__).parent / "cache"))
     output_dir = Path(args.output_dir) if args.output_dir else default_cache_dir / "epg"
-    combined_output = Path(args.combined_output) if args.combined_output else default_cache_dir / "epg.sqlite"
 
     if args.combine_existing:
         combined_epg = combine_epg_directory(output_dir)
-        write_json(combined_epg, combined_output)
+        persist_epg(combined_epg, output_dir)
         print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         return
 
     if args.i24_only:
         i24_programs = parse_i24_epg()
         i24_programs = merge_with_existing_channel(output_dir, "i24news", i24_programs)
-        output_path = output_dir / "i24news.json"
-        write_json(i24_programs, output_path)
+        persist_channel_programs("i24news", i24_programs, output_dir)
 
         combined_epg = combine_epg_directory(output_dir)
         combined_epg["i24news"] = i24_programs
-        write_json(combined_epg, combined_output)
+        persist_epg(combined_epg, output_dir)
 
-        print(f"Wrote {len(i24_programs)} programs to {output_path}")
+        print(f"Stored {len(i24_programs)} programs for i24news")
         print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         return
 
     if args.channel:
-        output_path = output_dir / f"{args.channel}.json"
         replace_existing_programs = False
 
         if args.channel == "10":
@@ -239,15 +332,9 @@ def main():
             if not has_reliable_9tv_schedule(programs):
                 print(
                     f"9TV official schedule returned only {len(programs)} programs; "
-                    "using fallback EPG source"
+                    "using Idan Plus fallback EPG source"
                 )
-                programs = parse_isramedia_channel(
-                    "9",
-                    args.url,
-                    args.days,
-                    args.available_days,
-                    args.filename_mode,
-                )
+                programs = parse_idanplus_fallback("9")
             else:
                 replace_existing_programs = True
 
@@ -261,15 +348,9 @@ def main():
             if not has_reliable_mako12_schedule(programs):
                 print(
                     f"Keshet 12 official schedule returned only {len(programs)} programs; "
-                    "using fallback EPG source"
+                    "using Idan Plus fallback EPG source"
                 )
-                programs = parse_isramedia_channel(
-                    "12",
-                    args.url,
-                    args.days,
-                    args.available_days,
-                    args.filename_mode,
-                )
+                programs = parse_idanplus_fallback("12")
             else:
                 replace_existing_programs = True
 
@@ -283,15 +364,9 @@ def main():
             if not has_reliable_reshet13_schedule(programs):
                 print(
                     f"Reshet 13 official schedule returned only {len(programs)} programs; "
-                    "using fallback EPG source"
+                    "using Idan Plus fallback EPG source"
                 )
-                programs = parse_isramedia_channel(
-                    "13",
-                    args.url,
-                    args.days,
-                    args.available_days,
-                    args.filename_mode,
-                )
+                programs = parse_idanplus_fallback("13")
             else:
                 replace_existing_programs = True
 
@@ -305,15 +380,9 @@ def main():
             if not has_reliable_c14_schedule(programs):
                 print(
                     f"Channel 14 official schedule returned only {len(programs)} programs; "
-                    "using fallback EPG source"
+                    "using Idan Plus fallback EPG source"
                 )
-                programs = parse_isramedia_channel(
-                    "14",
-                    args.url,
-                    args.days,
-                    args.available_days,
-                    args.filename_mode,
-                )
+                programs = parse_idanplus_fallback("14")
             else:
                 replace_existing_programs = True
 
@@ -327,9 +396,9 @@ def main():
             if not has_reliable_kan_schedule(programs):
                 print(
                     f"Kan 33 official schedule returned only {len(programs)} programs; "
-                    "using Walla fallback EPG source"
+                    "using Idan Plus fallback EPG source"
                 )
-                programs = parse_walla33_epg()
+                programs = parse_idanplus_fallback("33") or parse_walla33_epg()
                 replace_existing_programs = True
             else:
                 replace_existing_programs = True
@@ -344,15 +413,9 @@ def main():
             if not has_reliable_kan_schedule(programs):
                 print(
                     f"Kan 23 official schedule returned only {len(programs)} programs; "
-                    "using fallback EPG source"
+                    "using Idan Plus fallback EPG source"
                 )
-                programs = parse_isramedia_channel(
-                    "23",
-                    args.url,
-                    args.days,
-                    args.available_days,
-                    args.filename_mode,
-                )
+                programs = parse_idanplus_fallback("23")
                 replace_existing_programs = True
             else:
                 replace_existing_programs = True
@@ -391,15 +454,9 @@ def main():
             if not has_reliable_kan_schedule(programs):
                 print(
                     f"Kan 11 official schedule returned only {len(programs)} programs; "
-                    "using fallback EPG source"
+                    "using Idan Plus fallback EPG source"
                 )
-                programs = parse_isramedia_channel(
-                    "11",
-                    args.url,
-                    args.days,
-                    args.available_days,
-                    args.filename_mode,
-                )
+                programs = parse_idanplus_fallback("11")
                 replace_existing_programs = True
             else:
                 replace_existing_programs = True
@@ -445,44 +502,47 @@ def main():
         else:
             if not replace_existing_programs:
                 programs = merge_with_existing_channel(output_dir, args.channel, programs)
-        write_json(programs, output_path)
-        print(f"Wrote {len(programs)} programs to {output_path}")
+        persist_channel_programs(args.channel, programs, output_dir)
+        print(f"Stored {len(programs)} programs for {args.channel}")
 
         combined_epg = combine_epg_directory(output_dir)
         combined_epg[args.channel] = dedupe_and_sort_programs(programs)
-        write_json(combined_epg, combined_output)
+        persist_epg(combined_epg, output_dir)
         print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         return
 
-    first_html = fetch_html(args.url)
-
     if args.all_channels:
-        channels = parse_channel_options(first_html, args.url)
-        if not channels:
-            raise SystemExit("No channels found in page selector")
+        global ACTIVE_IMPORT_CHANNEL_IDS
+        active_epg_channel_ids = load_active_epg_channel_ids()
+        ACTIVE_IMPORT_CHANNEL_IDS = active_epg_channel_ids or None
+        if active_epg_channel_ids:
+            print(f"Filtering EPG import to {len(active_epg_channel_ids)} active app channels")
+        else:
+            print("Active app channel list is empty; EPG import will not be filtered")
 
-        print(f"Found {len(channels)} channels")
+        def should_import_channel(channel_id: str) -> bool:
+            return not active_epg_channel_ids or channel_id in active_epg_channel_ids
+
+        def filter_active_channels(epg: dict[str, list[dict]]) -> dict[str, list[dict]]:
+            if not active_epg_channel_ids:
+                return epg
+            return {
+                channel_id: programs
+                for channel_id, programs in epg.items()
+                if channel_id in active_epg_channel_ids
+            }
+
+        fallback_channels = None
+
+        def get_fallback_channels() -> list[dict]:
+            nonlocal fallback_channels
+            if fallback_channels is None:
+                first_html = fetch_html(args.url)
+                fallback_channels = parse_channel_options(first_html, args.url)
+            return fallback_channels
+
         combined_epg = {}
         failed_channels = []
-        for channel in channels:
-            output_channel_id = get_output_channel_id(channel["id"], args.filename_mode)
-            print(f"\nParsing channel {channel['id']} -> {output_channel_id}: {channel['name']}")
-            try:
-                channel_programs = parse_channel_epg(channel["url"], args.days, args.available_days)
-            except Exception as ex:
-                failed_channels.append(output_channel_id)
-                print(f"Failed parsing channel {channel['id']} -> {output_channel_id}: {ex}")
-                traceback.print_exc()
-                channel_programs = read_existing_channel_programs(output_dir, output_channel_id)
-                if not channel_programs:
-                    continue
-                print(f"Using existing cached programs for {output_channel_id}")
-
-            channel_programs = merge_with_existing_channel(output_dir, output_channel_id, channel_programs)
-            combined_epg[output_channel_id] = channel_programs
-            output_path = output_dir / f"{output_channel_id}.json"
-            write_json(channel_programs, output_path)
-            print(f"Wrote {len(channel_programs)} programs to {output_path}")
 
         print("\nParsing TV10 from official API")
         try:
@@ -498,9 +558,8 @@ def main():
         tv10_programs = merge_with_existing_channel(output_dir, "10", tv10_programs)
         combined_epg["10"] = tv10_programs
         if tv10_programs:
-            output_path = output_dir / "10.json"
-            write_json(tv10_programs, output_path)
-            print(f"Wrote {len(tv10_programs)} programs to {output_path}")
+            persist_channel_programs("10", tv10_programs, output_dir)
+            print(f"Stored {len(tv10_programs)} programs for 10")
 
         print("\nParsing Keshet 12 from official Mako schedule")
         try:
@@ -514,15 +573,19 @@ def main():
         if not has_reliable_mako12_schedule(mako12_programs):
             print(
                 f"Keshet 12 official schedule returned only {len(mako12_programs)} programs; "
-                "keeping existing parsed programs"
+                "trying Idan Plus fallback EPG source"
             )
-            mako12_programs = combined_epg.get("12", []) or read_existing_channel_programs(output_dir, "12")
+            fallback_programs = parse_idanplus_fallback("12")
+            mako12_programs = (
+                fallback_programs
+                or combined_epg.get("12", [])
+                or read_existing_channel_programs(output_dir, "12")
+            )
 
         combined_epg["12"] = mako12_programs
         if mako12_programs:
-            output_path = output_dir / "12.json"
-            write_json(mako12_programs, output_path)
-            print(f"Wrote {len(mako12_programs)} programs to {output_path}")
+            persist_channel_programs("12", mako12_programs, output_dir)
+            print(f"Stored {len(mako12_programs)} programs for 12")
 
         print("\nParsing Reshet 13 from official schedule")
         try:
@@ -536,32 +599,48 @@ def main():
         if not has_reliable_reshet13_schedule(reshet13_programs):
             print(
                 f"Reshet 13 official schedule returned only {len(reshet13_programs)} programs; "
-                "keeping existing parsed programs"
+                "trying Idan Plus fallback EPG source"
             )
-            reshet13_programs = combined_epg.get("13", []) or read_existing_channel_programs(output_dir, "13")
+            fallback_programs = parse_idanplus_fallback("13")
+            reshet13_programs = (
+                fallback_programs
+                or combined_epg.get("13", [])
+                or read_existing_channel_programs(output_dir, "13")
+            )
 
         combined_epg["13"] = reshet13_programs
         if reshet13_programs:
-            output_path = output_dir / "13.json"
-            write_json(reshet13_programs, output_path)
-            print(f"Wrote {len(reshet13_programs)} programs to {output_path}")
+            persist_channel_programs("13", reshet13_programs, output_dir)
+            print(f"Stored {len(reshet13_programs)} programs for 13")
 
         print("\nParsing Fishenzon channels")
-        try:
-            fishenzon_epg = fetch_fishenzon_epg()
-        except Exception as ex:
-            fishenzon_epg = {}
-            print(f"Failed fetching Fishenzon EPG: {ex}")
-            traceback.print_exc()
+        active_fishenzon_channel_ids = [
+            channel_id for channel_id in FISHENZON_CHANNEL_IDS if should_import_channel(channel_id)
+        ]
+        if active_fishenzon_channel_ids:
+            try:
+                fishenzon_epg = fetch_fishenzon_epg()
+            except Exception as ex:
+                fishenzon_epg = {}
+                print(f"Failed fetching Fishenzon EPG: {ex}")
+                traceback.print_exc()
 
-        try:
-            reshet_image_map = fetch_reshet_program_image_map()
-        except Exception as ex:
+            try:
+                reshet_image_map = fetch_reshet_program_image_map()
+            except Exception as ex:
+                reshet_image_map = {}
+                print(f"Failed fetching Reshet 13 program images: {ex}")
+                traceback.print_exc()
+        else:
+            fishenzon_epg = {}
             reshet_image_map = {}
-            print(f"Failed fetching Reshet 13 program images: {ex}")
-            traceback.print_exc()
+            print("Skipping Fishenzon channels: none are active in the app channel list")
 
         for fishenzon_channel_id in FISHENZON_CHANNEL_IDS:
+            if not should_import_channel(fishenzon_channel_id):
+                print(f"Skipping {fishenzon_channel_id}: channel is not in the app channel list")
+                continue
+
             try:
                 channel_programs = parse_fishenzon_channel_epg(
                     fishenzon_channel_id,
@@ -576,12 +655,15 @@ def main():
 
             combined_epg[fishenzon_channel_id] = channel_programs
             if channel_programs:
-                output_path = output_dir / f"{fishenzon_channel_id}.json"
-                write_json(channel_programs, output_path)
-                print(f"Wrote {len(channel_programs)} programs to {output_path}")
+                persist_channel_programs(fishenzon_channel_id, channel_programs, output_dir)
+                print(f"Stored {len(channel_programs)} programs for {fishenzon_channel_id}")
 
         print("\nParsing Keshet thematic live channels")
         for keshet_channel_id in KESHET_THEMATIC_CHANNELS:
+            if not should_import_channel(keshet_channel_id):
+                print(f"Skipping {keshet_channel_id}: channel is not in the app channel list")
+                continue
+
             try:
                 channel_programs = parse_keshet_thematic_epg(keshet_channel_id)
             except Exception as ex:
@@ -592,9 +674,8 @@ def main():
 
             combined_epg[keshet_channel_id] = channel_programs
             if channel_programs:
-                output_path = output_dir / f"{keshet_channel_id}.json"
-                write_json(channel_programs, output_path)
-                print(f"Wrote {len(channel_programs)} programs to {output_path}")
+                persist_channel_programs(keshet_channel_id, channel_programs, output_dir)
+                print(f"Stored {len(channel_programs)} programs for {keshet_channel_id}")
 
         print("\nParsing Channel 14 from official schedule")
         try:
@@ -608,15 +689,19 @@ def main():
         if not has_reliable_c14_schedule(c14_programs):
             print(
                 f"Channel 14 official schedule returned only {len(c14_programs)} programs; "
-                "keeping existing parsed programs"
+                "trying Idan Plus fallback EPG source"
             )
-            c14_programs = combined_epg.get("14", []) or read_existing_channel_programs(output_dir, "14")
+            fallback_programs = parse_idanplus_fallback("14")
+            c14_programs = (
+                fallback_programs
+                or combined_epg.get("14", [])
+                or read_existing_channel_programs(output_dir, "14")
+            )
 
         combined_epg["14"] = c14_programs
         if c14_programs:
-            output_path = output_dir / "14.json"
-            write_json(c14_programs, output_path)
-            print(f"Wrote {len(c14_programs)} programs to {output_path}")
+            persist_channel_programs("14", c14_programs, output_dir)
+            print(f"Stored {len(c14_programs)} programs for 14")
 
         print("\nParsing 9TV from official schedule")
         try:
@@ -630,15 +715,19 @@ def main():
         if not has_reliable_9tv_schedule(nine_tv_programs):
             print(
                 f"9TV official schedule returned only {len(nine_tv_programs)} programs; "
-                "keeping existing parsed programs"
+                "trying Idan Plus fallback EPG source"
             )
-            nine_tv_programs = combined_epg.get("9", []) or read_existing_channel_programs(output_dir, "9")
+            fallback_programs = parse_idanplus_fallback("9")
+            nine_tv_programs = (
+                fallback_programs
+                or combined_epg.get("9", [])
+                or read_existing_channel_programs(output_dir, "9")
+            )
 
         combined_epg["9"] = nine_tv_programs
         if nine_tv_programs:
-            output_path = output_dir / "9.json"
-            write_json(nine_tv_programs, output_path)
-            print(f"Wrote {len(nine_tv_programs)} programs to {output_path}")
+            persist_channel_programs("9", nine_tv_programs, output_dir)
+            print(f"Stored {len(nine_tv_programs)} programs for 9")
 
         print("\nParsing Kan 11 from official schedule")
         try:
@@ -654,15 +743,19 @@ def main():
         if not has_reliable_kan_schedule(kan11_programs):
             print(
                 f"Kan 11 official schedule returned only {len(kan11_programs)} programs; "
-                "keeping existing parsed programs"
+                "trying Idan Plus fallback EPG source"
             )
-            kan11_programs = combined_epg.get("11", []) or read_existing_channel_programs(output_dir, "11")
+            fallback_programs = parse_idanplus_fallback("11")
+            kan11_programs = (
+                fallback_programs
+                or combined_epg.get("11", [])
+                or read_existing_channel_programs(output_dir, "11")
+            )
 
         combined_epg["11"] = kan11_programs
         if kan11_programs:
-            output_path = output_dir / "11.json"
-            write_json(kan11_programs, output_path)
-            print(f"Wrote {len(kan11_programs)} programs to {output_path}")
+            persist_channel_programs("11", kan11_programs, output_dir)
+            print(f"Stored {len(kan11_programs)} programs for 11")
 
         print("\nParsing Knesset from official site")
         try:
@@ -678,9 +771,8 @@ def main():
         knesset_programs = merge_with_existing_channel(output_dir, "99", knesset_programs)
         combined_epg["99"] = knesset_programs
         if knesset_programs:
-            output_path = output_dir / "99.json"
-            write_json(knesset_programs, output_path)
-            print(f"Wrote {len(knesset_programs)} programs to {output_path}")
+            persist_channel_programs("99", knesset_programs, output_dir)
+            print(f"Stored {len(knesset_programs)} programs for 99")
 
         print("\nParsing Kan 33 from official schedule")
         try:
@@ -696,20 +788,19 @@ def main():
         if not has_reliable_kan_schedule(kan33_programs):
             print(
                 f"Kan 33 official schedule returned only {len(kan33_programs)} programs; "
-                "using Walla fallback EPG source"
+                "trying Idan Plus fallback EPG source"
             )
             try:
-                kan33_programs = parse_walla33_epg()
+                kan33_programs = parse_idanplus_fallback("33") or parse_walla33_epg()
             except Exception as ex:
-                print(f"Failed parsing Walla 33 fallback: {ex}")
+                print(f"Failed parsing Kan 33 fallback: {ex}")
                 traceback.print_exc()
                 kan33_programs = combined_epg.get("33", []) or read_existing_channel_programs(output_dir, "33")
 
         combined_epg["33"] = kan33_programs
         if kan33_programs:
-            output_path = output_dir / "33.json"
-            write_json(kan33_programs, output_path)
-            print(f"Wrote {len(kan33_programs)} programs to {output_path}")
+            persist_channel_programs("33", kan33_programs, output_dir)
+            print(f"Stored {len(kan33_programs)} programs for 33")
 
         print("\nParsing Kan 23 from official schedule")
         try:
@@ -725,15 +816,19 @@ def main():
         if not has_reliable_kan_schedule(kan23_programs):
             print(
                 f"Kan 23 official schedule returned only {len(kan23_programs)} programs; "
-                "keeping existing parsed programs"
+                "trying Idan Plus fallback EPG source"
             )
-            kan23_programs = combined_epg.get("23", []) or read_existing_channel_programs(output_dir, "23")
+            fallback_programs = parse_idanplus_fallback("23")
+            kan23_programs = (
+                fallback_programs
+                or combined_epg.get("23", [])
+                or read_existing_channel_programs(output_dir, "23")
+            )
 
         combined_epg["23"] = kan23_programs
         if kan23_programs:
-            output_path = output_dir / "23.json"
-            write_json(kan23_programs, output_path)
-            print(f"Wrote {len(kan23_programs)} programs to {output_path}")
+            persist_channel_programs("23", kan23_programs, output_dir)
+            print(f"Stored {len(kan23_programs)} programs for 23")
 
         print("\nParsing Kabbalah from Walla TV Guide")
         try:
@@ -749,9 +844,8 @@ def main():
         kabbalah_programs = merge_with_existing_channel(output_dir, "66", kabbalah_programs)
         combined_epg["66"] = kabbalah_programs
         if kabbalah_programs:
-            output_path = output_dir / "66.json"
-            write_json(kabbalah_programs, output_path)
-            print(f"Wrote {len(kabbalah_programs)} programs to {output_path}")
+            persist_channel_programs("66", kabbalah_programs, output_dir)
+            print(f"Stored {len(kabbalah_programs)} programs for 66")
 
         print("\nParsing Hidabroot from Walla TV Guide")
         try:
@@ -767,9 +861,8 @@ def main():
         hidabroot_programs = merge_with_existing_channel(output_dir, "97", hidabroot_programs)
         combined_epg["97"] = hidabroot_programs
         if hidabroot_programs:
-            output_path = output_dir / "97.json"
-            write_json(hidabroot_programs, output_path)
-            print(f"Wrote {len(hidabroot_programs)} programs to {output_path}")
+            persist_channel_programs("97", hidabroot_programs, output_dir)
+            print(f"Stored {len(hidabroot_programs)} programs for 97")
 
         print("\nParsing 100FM from official schedule")
         try:
@@ -785,9 +878,8 @@ def main():
         radio100fm_programs = merge_with_existing_channel(output_dir, "100fm", radio100fm_programs)
         combined_epg["100fm"] = radio100fm_programs
         if radio100fm_programs:
-            output_path = output_dir / "100fm.json"
-            write_json(radio100fm_programs, output_path)
-            print(f"Wrote {len(radio100fm_programs)} programs to {output_path}")
+            persist_channel_programs("100fm", radio100fm_programs, output_dir)
+            print(f"Stored {len(radio100fm_programs)} programs for 100fm")
 
         if not args.skip_i24:
             print("\nParsing i24news Hebrew from official schedule API")
@@ -804,9 +896,8 @@ def main():
             i24_programs = merge_with_existing_channel(output_dir, "i24news", i24_programs)
             combined_epg["i24news"] = i24_programs
             if i24_programs:
-                output_path = output_dir / "i24news.json"
-                write_json(i24_programs, output_path)
-                print(f"Wrote {len(i24_programs)} programs to {output_path}")
+                persist_channel_programs("i24news", i24_programs, output_dir)
+                print(f"Stored {len(i24_programs)} programs for i24news")
 
             print("\nParsing i24news English from official schedule API")
             try:
@@ -822,9 +913,8 @@ def main():
             i24_en_programs = merge_with_existing_channel(output_dir, "i24newsen", i24_en_programs)
             combined_epg["i24newsen"] = i24_en_programs
             if i24_en_programs:
-                output_path = output_dir / "i24newsen.json"
-                write_json(i24_en_programs, output_path)
-                print(f"Wrote {len(i24_en_programs)} programs to {output_path}")
+                persist_channel_programs("i24newsen", i24_en_programs, output_dir)
+                print(f"Stored {len(i24_en_programs)} programs for i24newsen")
 
             print("\nParsing i24news French from official schedule API")
             try:
@@ -840,9 +930,8 @@ def main():
             i24_fr_programs = merge_with_existing_channel(output_dir, "i24newsfr", i24_fr_programs)
             combined_epg["i24newsfr"] = i24_fr_programs
             if i24_fr_programs:
-                output_path = output_dir / "i24newsfr.json"
-                write_json(i24_fr_programs, output_path)
-                print(f"Wrote {len(i24_fr_programs)} programs to {output_path}")
+                persist_channel_programs("i24newsfr", i24_fr_programs, output_dir)
+                print(f"Stored {len(i24_fr_programs)} programs for i24newsfr")
 
             print("\nParsing i24news Arabic from official schedule API")
             try:
@@ -858,9 +947,8 @@ def main():
             i24_ar_programs = merge_with_existing_channel(output_dir, "i24newsar", i24_ar_programs)
             combined_epg["i24newsar"] = i24_ar_programs
             if i24_ar_programs:
-                output_path = output_dir / "i24newsar.json"
-                write_json(i24_ar_programs, output_path)
-                print(f"Wrote {len(i24_ar_programs)} programs to {output_path}")
+                persist_channel_programs("i24newsar", i24_ar_programs, output_dir)
+                print(f"Stored {len(i24_ar_programs)} programs for i24newsar")
 
         print("\nParsing FashionTV from TV guide")
         try:
@@ -877,9 +965,8 @@ def main():
             ftv_programs = merge_with_existing_channel(output_dir, "ftv", ftv_programs)
         combined_epg["ftv"] = ftv_programs
         if ftv_programs:
-            output_path = output_dir / "ftv.json"
-            write_json(ftv_programs, output_path)
-            print(f"Wrote {len(ftv_programs)} programs to {output_path}")
+            persist_channel_programs("ftv", ftv_programs, output_dir)
+            print(f"Stored {len(ftv_programs)} programs for ftv")
 
         print("\nParsing Kan World Cup from official calendar")
         try:
@@ -895,12 +982,15 @@ def main():
         kan_worldcup_programs = merge_with_existing_channel(output_dir, "kan_worldcup", kan_worldcup_programs)
         combined_epg["kan_worldcup"] = kan_worldcup_programs
         if kan_worldcup_programs:
-            output_path = output_dir / "kan_worldcup.json"
-            write_json(kan_worldcup_programs, output_path)
-            print(f"Wrote {len(kan_worldcup_programs)} programs to {output_path}")
+            persist_channel_programs("kan_worldcup", kan_worldcup_programs, output_dir)
+            print(f"Stored {len(kan_worldcup_programs)} programs for kan_worldcup")
 
         print("\nParsing local US channels from public TV guides")
         for channel_id in LOCAL_US_CHANNEL_IDS:
+            if not should_import_channel(channel_id):
+                print(f"Skipping {channel_id}: channel is not in the app channel list")
+                continue
+
             replace_local_programs = False
             try:
                 local_programs = parse_local_us_epg(channel_id)
@@ -918,22 +1008,62 @@ def main():
                 local_programs = merge_with_existing_channel(output_dir, channel_id, local_programs)
             combined_epg[channel_id] = local_programs
             if local_programs:
-                output_path = output_dir / f"{channel_id}.json"
-                write_json(local_programs, output_path)
-                print(f"Wrote {len(local_programs)} programs to {output_path}")
+                persist_channel_programs(channel_id, local_programs, output_dir)
+                print(f"Stored {len(local_programs)} programs for {channel_id}")
 
-        write_json(combined_epg, combined_output)
+        print("\nParsing fallback EPG channels from IsraMedia")
+        fallback_channels = get_fallback_channels()
+        if not fallback_channels:
+            print("No fallback channels found in IsraMedia selector")
+
+        for channel in fallback_channels:
+            output_channel_id = get_output_channel_id(channel["id"], args.filename_mode)
+            if not should_import_channel(output_channel_id):
+                print(
+                    f"Skipping fallback source for {output_channel_id}: "
+                    "channel is not in the app channel list"
+                )
+                continue
+            if output_channel_id in FORMAL_EPG_CHANNEL_IDS:
+                print(
+                    f"Skipping fallback source for {output_channel_id}: "
+                    "channel has a formal EPG parser"
+                )
+                continue
+            if output_channel_id in combined_epg:
+                print(f"Skipping fallback source for {output_channel_id}: already parsed")
+                continue
+
+            print(f"\nParsing fallback channel {channel['id']} -> {output_channel_id}: {channel['name']}")
+            try:
+                channel_programs = parse_channel_epg(channel["url"], args.days, args.available_days)
+            except Exception as ex:
+                failed_channels.append(output_channel_id)
+                print(f"Failed parsing fallback channel {channel['id']} -> {output_channel_id}: {ex}")
+                traceback.print_exc()
+                channel_programs = read_existing_channel_programs(output_dir, output_channel_id)
+                if not channel_programs:
+                    continue
+                print(f"Using existing cached programs for {output_channel_id}")
+
+            channel_programs = merge_with_existing_channel(output_dir, output_channel_id, channel_programs)
+            combined_epg[output_channel_id] = channel_programs
+            persist_channel_programs(output_channel_id, channel_programs, output_dir)
+            print(f"Stored {len(channel_programs)} programs for {output_channel_id}")
+
+        combined_epg = filter_active_channels(combined_epg)
+        persist_epg(combined_epg, output_dir)
         print(f"\nStored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
         if failed_channels:
             print(f"Completed with cached/skipped channels: {', '.join(failed_channels)}")
         return
 
-    output_path = Path(args.output) if args.output else output_dir / f"{output_channel_id}.json"
+    first_html = fetch_html(args.url)
     programs = parse_channel_epg(args.url, args.days, args.available_days, first_html=first_html)
     programs = merge_with_existing_channel(output_dir, output_channel_id, programs)
-    write_json(programs, output_path)
+    persist_channel_programs(output_channel_id, programs, output_dir)
 
-    print(f"Wrote {len(programs)} programs to {output_path}")
+    print(f"Stored {len(programs)} programs for {output_channel_id}")
 
 
 if __name__ == "__main__":

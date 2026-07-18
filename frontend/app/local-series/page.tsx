@@ -84,7 +84,7 @@ export default function LocalSeriesPage() {
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background" dir="rtl">
-      <div className="mb-5 shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
+      <div className="shrink-0 border-b border-border bg-background px-4 pb-4 pt-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
@@ -108,7 +108,7 @@ export default function LocalSeriesPage() {
       </div>
 
       <PageMain>
-        <div className="flex-1 px-4 pb-6">
+        <div className="flex-1 px-4 pb-6 mt-5">
           {isLoading ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {Array.from({ length: 8 }).map((_, index) => (

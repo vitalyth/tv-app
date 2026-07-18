@@ -246,5 +246,24 @@
       "referer": "https://www.fashiontv.com/",
       "manifest_type": "hls"
     }
+  },
+  {
+    "id": "ch_16tv",
+    "channelID": "ch_16tv",
+    "name": "ערוץ 16",
+    "title": "ערוץ 16",
+    "label": "ערוץ 16",
+    "index": 24,
+    "type": "tv",
+    "module": "tv",
+    "mode": 10,
+    "image": "16tv.jpg",
+    "logo": "16tv.jpg",
+    "tvgID": "16tv",
+    "streamUrl": "https://ch16israel-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8",
+    "linkDetails": {
+      "link": "https://ch16israel-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8",
+      "manifest_type": "hls"
+    }
   }
 ]

@@ -164,7 +164,7 @@ export default function GuidePage() {
 
     return (
         <div className="h-full flex flex-col bg-background">
-            <div className="mb-2 shrink-0 border-b border-border bg-background px-4 py-2">
+            <div className="mb-2 shrink-0 border-b border-border bg-background px-2 py-2">
                 <ChannelsFilters
                     searchQuery={searchQuery}
                     setSearchQuery={setSearchQuery}

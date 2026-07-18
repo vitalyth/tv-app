@@ -510,7 +510,7 @@
 }
 
 .player-top-active .site-content {
-  padding-top: calc(var(--top-playback-height) + (var(--player-top-panel-y-gap) * 2));
+  padding-top: calc(var(--top-playback-height) + var(--player-top-panel-y-gap));
 }
 
 .program-side-panel {
@@ -518,6 +518,7 @@
   z-index: 80;
   display: none;
   min-height: 0;
+  margin-block: var(--player-top-panel-y-gap);
   overflow: hidden;
   border: 1px solid var(--border);
   border-right: 0;
