@@ -10,6 +10,7 @@ from config import CACHE_DIR
 
 BASE_DIR = Path(__file__).resolve().parent
 KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
+KESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("KESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 
 
 @dataclass
@@ -86,22 +87,44 @@ def main() -> int:
             interval_seconds=read_interval("EPG_INTERVAL_SECONDS", 24 * 60 * 60),
         ),
         ScheduledJob(
-            name="vod_recent",
-            command=[python, "refresh_vod_recent.py"],
-            interval_seconds=read_interval("VOD_RECENT_INTERVAL_SECONDS", 12 * 60 * 60),
-        ),
-        ScheduledJob(
             name="kan_vod_scan",
             command=[
                 python,
-                "scripts/kan_db_scanner.py",
+                "scripts/vod_db_scanner.py",
                 "scan",
+                "--provider",
+                "kan",
                 "--db",
                 KAN_VOD_DB_PATH,
                 "--incremental",
                 "--verbose",
             ],
             interval_seconds=read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+        ),
+        ScheduledJob(
+            name="keshet_vod_scan",
+            command=[
+                python,
+                "scripts/vod_db_scanner.py",
+                "scan",
+                "--provider",
+                "keshet",
+                "--db",
+                KAN_VOD_DB_PATH,
+                "--limit-programs",
+                KESHET_VOD_SCAN_LIMIT_PROGRAMS,
+                "--incremental",
+                "--verbose",
+            ],
+            interval_seconds=read_interval(
+                "KESHET_VOD_SCAN_INTERVAL_SECONDS",
+                read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+            ),
+        ),
+        ScheduledJob(
+            name="vod_recent",
+            command=[python, "refresh_vod_recent.py"],
+            interval_seconds=read_interval("VOD_RECENT_INTERVAL_SECONDS", 12 * 60 * 60),
         ),
         ScheduledJob(
             name="epg_vod_enrichment",

@@ -110,6 +110,11 @@ const isKanVodChannel = (channel: VodChannel) => {
   return channel.id === "kan" || name === "כאן 11";
 };
 
+const isKeshetVodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim();
+  return channel.id === "vod_keshet12" || name === "קשת 12";
+};
+
 const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
   const channelNode = stack[0];
   const contentNodes = stack.slice(1).filter((node) => !isVodGroupingNode(node.name));
@@ -378,6 +383,11 @@ const LandingPage = () => {
         return;
       }
 
+      if (item.module === "keshet-vod" && programId) {
+        router.push(`/keshet-vod/${encodeURIComponent(programId)}`);
+        return;
+      }
+
       if (stack.length > 0) {
         const params = new URLSearchParams({
           [VOD_PATH_PARAM]: JSON.stringify(stack),
@@ -396,6 +406,11 @@ const LandingPage = () => {
     (channel: VodChannel) => {
       if (isKanVodChannel(channel)) {
         router.push("/kan-vod");
+        return;
+      }
+
+      if (isKeshetVodChannel(channel)) {
+        router.push("/keshet-vod");
         return;
       }
 

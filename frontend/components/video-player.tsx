@@ -36,6 +36,7 @@ const VOD_AUTO_NEXT_NOTICE_SECONDS = 20;
 const getPlayerImageSrc = (logo?: string) => {
   if (!logo) return "/ch/vod.jpg";
   if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
+  if (logo.startsWith("/")) return logo;
   return `/ch/${logo}`;
 };
 

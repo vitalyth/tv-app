@@ -52,6 +52,10 @@ const resolveChannelLogo = (channel: Channel): string => {
         return "/ch/kan.jpg";
     }
 
+    if (channel.module === "keshet-vod") {
+        return "/ch/mako.png";
+    }
+
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {
         return "/ch/vod.jpg";
     }

@@ -16,6 +16,7 @@ const getPageTitle = (pathname: string) => {
     if (pathname.startsWith("/vod")) return "VOD";
     if (pathname.startsWith("/local-series")) return "סדרות";
     if (pathname.startsWith("/kan-vod")) return "כאן VOD";
+    if (pathname.startsWith("/keshet-vod")) return "קשת VOD";
     if (pathname.startsWith("/guide")) return "שידורים חיים";
     return "שידורים חיים";
 };
@@ -45,6 +46,10 @@ function resolveChannelLogo(channel: Channel | null): string {
 
     if (channel.module === "kan-vod") {
         return "/ch/kan.jpg";
+    }
+
+    if (channel.module === "keshet-vod") {
+        return "/ch/mako.png";
     }
 
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {

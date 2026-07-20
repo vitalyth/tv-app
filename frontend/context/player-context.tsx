@@ -20,6 +20,7 @@ import {
     type KanVodEpisode,
     type KanVodSeriesDetails,
 } from "@/lib/services/kan-vod-service";
+import { keshetVodService } from "@/lib/services/keshet-vod-service";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then((m) => m.VideoPlayer),
@@ -134,26 +135,48 @@ const getKanSeasonTitle = (series: KanVodSeriesDetails, seasonId?: string | null
     return series.seasons.find((season) => season.season_id === seasonId)?.title || "פרקים";
 };
 
+const getVodProviderSettings = (module: string) => {
+    if (module === "keshet-vod") {
+        return {
+            category: "keshet-vod",
+            channelImage: "/ch/mako.png",
+            channelName: "קשת VOD",
+            module: "keshet-vod",
+            referer: "https://www.mako.co.il/",
+        };
+    }
+
+    return {
+        category: "kan-vod",
+        channelImage: "/ch/kan.jpg",
+        channelName: "כאן VOD",
+        module: "kan-vod",
+        referer: "https://www.kan.org.il/",
+    };
+};
+
 const kanEpisodeToChannel = (
     series: KanVodSeriesDetails,
     episode: KanVodEpisode,
+    module = "kan-vod",
 ): Channel => {
     const image = episode.episodeImage || episode.image || series.image || "/ch/vod.jpg";
     const episodeName = episode.episodeName || episode.title || `פרק ${episode.id}`;
     const seasonName = getKanSeasonTitle(series, episode.season_id);
+    const settings = getVodProviderSettings(module);
 
     return {
         id: episode.id,
         index: 0,
         name: series.title,
-        logo: image,
-        category: "kan-vod",
+        logo: settings.channelImage || image,
+        category: settings.category,
         channelID: episode.streamUrl || episode.playUrl || episode.url,
-        module: "kan-vod",
+        module: settings.module,
         mode: 0,
         linkDetails: {
             link: episode.streamUrl || episode.playUrl || episode.url,
-            referer: "https://www.kan.org.il/",
+            referer: settings.referer,
             manifest_type: "hls",
         },
         type: "vod",
@@ -161,7 +184,7 @@ const kanEpisodeToChannel = (
         tvgID: "",
         url: episode.streamUrl,
         moreData: "",
-        playerLogo: image,
+        playerLogo: settings.channelImage || image,
         playerTitle: series.title,
         playerSubtitle: [seasonName, episodeName].filter(Boolean).join(" · "),
         vodProgramId: series.id,
@@ -169,12 +192,12 @@ const kanEpisodeToChannel = (
         vodMeta: {
             programName: series.title,
             seasonName,
-            channelName: "כאן VOD",
+            channelName: settings.channelName,
             episodeName,
             episodeDescription: episode.episodeOverview || "",
             programDescription: series.description || "",
             programImage: series.image || "",
-            channelImage: series.image || "",
+            channelImage: settings.channelImage || series.image || "",
             episodeImage: image,
         },
     };
@@ -261,10 +284,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
 
         const channel = currentChannelRef.current;
+        const channelModule = channel?.module || "";
         if (
             autoNextInProgressRef.current ||
             isAutoNextCancelled ||
-            channel?.module !== "kan-vod"
+            !channel ||
+            !["kan-vod", "keshet-vod"].includes(channelModule)
         ) {
             return;
         }
@@ -273,21 +298,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
         try {
             if (nextEpisodePreview) {
-                play(kanEpisodeToChannel(nextEpisodePreview.series, nextEpisodePreview.episode), {
+                play(kanEpisodeToChannel(nextEpisodePreview.series, nextEpisodePreview.episode, channelModule), {
                     fullscreen: isFullscreen,
                 });
                 return;
             }
 
-            const next = await kanVodService.getNextEpisode(channel.id);
+            const service = channelModule === "keshet-vod" ? keshetVodService : kanVodService;
+            const next = await service.getNextEpisode(channel.id);
             if (next) {
-                const series = await kanVodService.getSeriesDetails(next.programId);
-                play(kanEpisodeToChannel(series, next.episode), {
+                const series = await service.getSeriesDetails(next.programId);
+                play(kanEpisodeToChannel(series, next.episode, channelModule), {
                     fullscreen: isFullscreen,
                 });
             }
         } catch (error) {
-            console.error("Failed to start next Kan VOD episode:", error);
+            console.error("Failed to start next VOD episode:", error);
         } finally {
             autoNextInProgressRef.current = false;
         }

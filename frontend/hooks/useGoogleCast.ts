@@ -74,6 +74,15 @@ const buildCastImageUrl = (logo: string) => {
         return logo
     }
 
+    if (logo.startsWith("/")) {
+        const assetBaseUrl = process.env.NEXT_PUBLIC_CAST_ASSET_BASE_URL
+        if (assetBaseUrl) {
+            return new URL(logo, assetBaseUrl).toString()
+        }
+
+        return resolveAbsoluteUrl(logo)
+    }
+
     const assetBaseUrl = process.env.NEXT_PUBLIC_CAST_ASSET_BASE_URL
 
     if (assetBaseUrl) {
