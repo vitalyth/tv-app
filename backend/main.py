@@ -231,6 +231,9 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
             )
 
     channel_data = common.GetChannel(channel_id)
+    if not channel_data:
+        return Response(f"Channel {channel_id} not found", status_code=404)
+
     channel = Channel.model_validate(channel_data)
     channel.id = channel_id
     channel.channelID = channel_id

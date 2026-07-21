@@ -150,6 +150,22 @@ def _origin_for_url(url):
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def _is_absolute_http_url(url):
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _resolve_relative_proxy_url(url, referer):
+    if _is_absolute_http_url(url):
+        return url
+
+    referer_origin = _origin_for_referer(referer)
+    if referer_origin:
+        return urljoin(referer if referer else f"{referer_origin}/", url)
+
+    return url
+
+
 def _origin_for_referer(referer):
     if not referer:
         return None
@@ -671,30 +687,43 @@ def _looks_like_html_response(text, content_type):
     )
 
 
-def _rewrite_mpd_for_cast(text, source_url, referer, proxy_url, vpn=False):
+def _rewrite_mpd_manifest(text, source_url, referer, proxy_url, cast=False, vpn=False):
     manifest_base = source_url.rsplit("/", 1)[0] + "/"
     base_url_match = re.search(r"<BaseURL>([^<]+)</BaseURL>", text, flags=re.IGNORECASE)
-    segment_base = html.unescape(base_url_match.group(1)) if base_url_match else manifest_base
+    segment_base = urljoin(manifest_base, html.unescape(base_url_match.group(1))) if base_url_match else manifest_base
     request_referer = _default_referer(source_url, referer)
+
+    def proxied_dash_url(uri):
+        full_url = urljoin(segment_base, uri)
+        return _proxied_url(
+            proxy_url,
+            full_url,
+            request_referer,
+            cast,
+            preserve_dash_tokens=True,
+            vpn=vpn,
+        )
 
     def rewrite_template_url(match):
         attr = match.group(1)
         uri = html.unescape(match.group(2))
-        full_url = urljoin(segment_base, uri)
+        proxied = proxied_dash_url(uri)
+        return f'{attr}="{html.escape(proxied, quote=True)}"'
+
+    def rewrite_base_url(match):
+        uri = html.unescape(match.group(1).strip())
         proxied = _proxied_url(
             proxy_url,
-            full_url,
+            urljoin(manifest_base, uri),
             request_referer,
-            True,
+            cast,
             preserve_dash_tokens=True,
             vpn=vpn,
         )
-        return f'{attr}="{html.escape(proxied, quote=True)}"'
+        return f"<BaseURL>{html.escape(proxied, quote=False)}</BaseURL>"
 
     text = re.sub(r'\b(media|initialization)="([^"]+)"', rewrite_template_url, text)
-
-    if base_url_match:
-        text = re.sub(r"<BaseURL>[^<]+</BaseURL>", "", text, count=1, flags=re.IGNORECASE)
+    text = re.sub(r"<BaseURL>([^<]+)</BaseURL>", rewrite_base_url, text, flags=re.IGNORECASE)
 
     return text
 
@@ -817,6 +846,7 @@ def handle_local_file_proxy(request, file_path: str, root_dir: str):
 
 def handle_proxy(request, url, referer, cast=False):
     url, kodi_headers = _split_kodi_url_props(url)
+    url = _resolve_relative_proxy_url(url, referer)
     origin = _origin_for_url(url)
     max_bitrate = _default_max_bitrate_for_request(request, url)
     vpn = _proxy_query_vpn(request)
@@ -895,7 +925,14 @@ def handle_proxy(request, url, referer, cast=False):
 
     if is_mpd:
         proxy_url = _request_public_proxy_url(request)
-        content = _rewrite_mpd_for_cast(text, effective_url, referer, proxy_url, vpn=vpn).encode("utf-8") if cast else r.content
+        content = _rewrite_mpd_manifest(
+            text,
+            effective_url,
+            referer,
+            proxy_url,
+            cast=cast,
+            vpn=vpn,
+        ).encode("utf-8")
         return Response(
             content=content,
             media_type="application/dash+xml",

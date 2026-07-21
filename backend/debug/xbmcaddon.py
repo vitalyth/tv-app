@@ -4,7 +4,10 @@ class Addon:
 
     def __init__(self, id=None):
 
-        self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        backend_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        addon_path = os.path.join(backend_path, "plugin_video_idanplus")
+        self.base_path = addon_path if os.path.isdir(addon_path) else backend_path
+        self.profile_path = os.path.join(backend_path, "profile")
 
         self.settings = {
             "favSortBy": "0",
@@ -78,7 +81,7 @@ class Addon:
             "name": "Debug Addon",
             "version": "1.0",
             "path": self.base_path,
-            "profile": os.path.join(self.base_path, "profile")
+            "profile": self.profile_path
         }
 
         return data.get(key, "")
