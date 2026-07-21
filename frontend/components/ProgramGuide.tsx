@@ -113,6 +113,21 @@ function groupChannelsByIndex(channels: Channel[]): Map<number, Channel[]> {
         groups.set(channel.index, [channel]);
     });
 
+    const sourceOrder = new Map([
+        ["ch_11", 0],
+        ["ch_11b", 1],
+        ["ch_11d", 2],
+        ["ch_11c", 3],
+    ]);
+
+    groups.forEach((group) => {
+        group.sort((a, b) => {
+            const aOrder = sourceOrder.get(a.id) ?? sourceOrder.get(a.channelID) ?? 100;
+            const bOrder = sourceOrder.get(b.id) ?? sourceOrder.get(b.channelID) ?? 100;
+            return aOrder - bOrder;
+        });
+    });
+
     return groups;
 }
 

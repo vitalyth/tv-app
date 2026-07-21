@@ -27,7 +27,7 @@ import { ChevronLeft, Clapperboard, Play, RotateCcw } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
-const QUICK_LIVE_CHANNEL_KEYS = ["11", "kan_worldcup", "12", "13", "14", "i24news"];
+const QUICK_LIVE_CHANNEL_KEYS = ["11", "12", "13", "14", "i24news"];
 const LIVE_NOW_LIMIT = 12;
 const RECENT_LIVE_LIMIT = 12;
 

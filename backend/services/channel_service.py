@@ -197,7 +197,7 @@ def _write_vod_items_cache(cache_key: str, items: list[dict]) -> None:
 
 CHANNELS_BY_CATEGORY = {
     "news": [
-        "ch_11", "ch_11b", "ch_11c",
+        "ch_11", "ch_11b", "ch_11d", "ch_11c",
         "ch_14", "ch_14b", "ch_14b2",
         "ch_99", "ch_99c",
         "ch_ynet",
@@ -231,7 +231,6 @@ CHANNELS_BY_CATEGORY = {
     ],
 
     "sports": [
-        "kan_worldcup",
         "ch_sport5",
         "rd_sport5"
     ],
