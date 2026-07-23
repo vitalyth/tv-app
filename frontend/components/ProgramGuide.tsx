@@ -4,6 +4,7 @@ import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
 import { Clock3, ListVideo, Play, Video } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { CHANNEL_REGION_SECTIONS, getChannelRegion } from "@/lib/channel-regions";
+import { getGridImageSrc } from "@/lib/image-urls";
 import { useNowSec } from "@/hooks/use-now-sec";
 import {
     DropdownMenu,
@@ -170,28 +171,6 @@ function formatGuideDate(ts: number): string {
     });
 }
 
-function resolveProgramImage(program: Program): string {
-    const image = program.image || "";
-
-    if (!image) {
-        return "";
-    }
-
-    if (image.startsWith("http://") || image.startsWith("https://")) {
-        return image;
-    }
-
-    if (image.startsWith("//")) {
-        return `https:${image}`;
-    }
-
-    if (image.startsWith("/")) {
-        return image;
-    }
-
-    return image;
-}
-
 // ─── Program Cell ─────────────────────────────────────────────────────────────
 
 function isProgramLive(program: Program, nowSec: number): boolean {
@@ -237,7 +216,7 @@ const ProgramCell = memo(function ProgramCell({
     //const now = Math.floor(Date.now() / 1000);
     //const isLive = now >= program.start && now < program.end;
     const isLive = isProgramLive(program, nowSec);
-    const programImage = resolveProgramImage(program);
+    const programImage = getGridImageSrc(program.image);
     const showInlineImage = Boolean(programImage && width >= 76);
     const leadingOffsetClass = showInlineImage ? "pl-16" : "";
 

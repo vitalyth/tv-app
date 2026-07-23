@@ -11,6 +11,7 @@ from config import CACHE_DIR
 BASE_DIR = Path(__file__).resolve().parent
 KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
 KESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("KESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
+RESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("RESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 
 
 @dataclass
@@ -118,6 +119,26 @@ def main() -> int:
             ],
             interval_seconds=read_interval(
                 "KESHET_VOD_SCAN_INTERVAL_SECONDS",
+                read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+            ),
+        ),
+        ScheduledJob(
+            name="reshet_vod_scan",
+            command=[
+                python,
+                "scripts/vod_db_scanner.py",
+                "scan",
+                "--provider",
+                "reshet",
+                "--db",
+                KAN_VOD_DB_PATH,
+                "--limit-programs",
+                RESHET_VOD_SCAN_LIMIT_PROGRAMS,
+                "--incremental",
+                "--verbose",
+            ],
+            interval_seconds=read_interval(
+                "RESHET_VOD_SCAN_INTERVAL_SECONDS",
                 read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
             ),
         ),

@@ -9,6 +9,7 @@ import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { getGridImageSrc, getPosterImageSrc } from "@/lib/image-urls";
 import {
   type VodProviderSeries,
   type VodProviderSeriesResponse,
@@ -23,7 +24,9 @@ const getEpisodeCountText = (count: number) => {
   return `${count} פרקים`;
 };
 
-const getSeriesImage = (series: VodProviderSeries) => series.image || "/ch/vod.jpg";
+const getSeriesImage = (series: VodProviderSeries, preferPosterImage = false) => (
+  (preferPosterImage ? getPosterImageSrc(series.image) : getGridImageSrc(series.image)) || "/ch/vod.jpg"
+);
 
 export function VodProviderListPage({
   title,
@@ -75,6 +78,7 @@ export function VodProviderListPage({
   );
   const lastPage = pages?.[pages.length - 1];
   const hasMore = Boolean(lastPage?.hasMore);
+  const preferPosterImages = providerPath === "reshet-vod";
   const isLoadingMore = Boolean(
     isValidating && pages && pages.length > 0 && pages[pages.length - 1]?.offset === (size - 1) * PAGE_SIZE
   );
@@ -118,6 +122,14 @@ export function VodProviderListPage({
     if (selectedCategories.length === 1) return selectedCategories[0];
     return `${selectedCategories.length} קטגוריות`;
   }, [selectedCategories]);
+  const hasCategoryFilter = availableCategories.length > 0;
+
+  useEffect(() => {
+    if (!hasCategoryFilter && selectedCategories.length > 0) {
+      setSelectedCategories([]);
+      setCategorySearch("");
+    }
+  }, [hasCategoryFilter, selectedCategories.length]);
 
   const refresh = async () => {
     setIsRefreshing(true);
@@ -172,24 +184,31 @@ export function VodProviderListPage({
             </div>
           </div>
 
-          <div className="grid w-full grid-cols-[minmax(6.25rem,0.8fr)_minmax(0,1.2fr)_2.5rem] gap-1.5 sm:flex sm:w-auto sm:flex-row sm:gap-2 lg:justify-end">
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="flex h-10 min-w-0 items-center justify-between gap-1.5 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:h-[42px] sm:w-56 sm:shrink-0 sm:gap-2 sm:px-3"
-                  aria-label="סינון לפי קטגוריות"
+          <div
+            className={`grid w-full gap-1.5 sm:flex sm:w-auto sm:flex-row sm:gap-2 lg:justify-end ${
+              hasCategoryFilter
+                ? "grid-cols-[minmax(6.25rem,0.8fr)_minmax(0,1.2fr)_2.5rem]"
+                : "grid-cols-[minmax(0,1fr)_2.5rem]"
+            }`}
+          >
+            {hasCategoryFilter ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-10 min-w-0 items-center justify-between gap-1.5 rounded-lg border border-border bg-card px-2.5 text-sm text-foreground transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:h-[42px] sm:w-56 sm:shrink-0 sm:gap-2 sm:px-3"
+                    aria-label="סינון לפי קטגוריות"
+                  >
+                    <span className="min-w-0 truncate text-right">{categoryLabel}</span>
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  sideOffset={8}
+                  className="flex max-h-[min(70vh,34rem)] w-[calc(100vw-1rem)] max-w-[24rem] flex-col p-2 sm:w-80"
+                  dir="rtl"
                 >
-                  <span className="min-w-0 truncate text-right">{categoryLabel}</span>
-                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                sideOffset={8}
-                className="flex max-h-[min(70vh,34rem)] w-[calc(100vw-1rem)] max-w-[24rem] flex-col p-2 sm:w-80"
-                dir="rtl"
-              >
                 <div className="sticky top-0 z-10 mb-2 bg-popover pb-2">
                   <div className="mb-2 flex items-center justify-between gap-2 px-1">
                     <span className="text-sm font-medium text-foreground">סינון קטגוריות</span>
@@ -260,8 +279,9 @@ export function VodProviderListPage({
                     <div className="px-2 py-6 text-center text-sm text-muted-foreground">לא נמצאו קטגוריות</div>
                   )}
                 </div>
-              </PopoverContent>
-            </Popover>
+                </PopoverContent>
+              </Popover>
+            ) : null}
             <DebouncedSearchInput
               value={searchQuery}
               onChange={setSearchQuery}
@@ -304,19 +324,27 @@ export function VodProviderListPage({
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
               {visibleSeries.map((item) => {
-                const image = getSeriesImage(item);
+                const image = getSeriesImage(item, preferPosterImages);
                 return (
                   <button
                     key={item.id}
                     onClick={() => router.push(`/${providerPath}/${encodeURIComponent(item.id)}`)}
                     className="group flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
                   >
-                    <div className="relative aspect-[2/3] overflow-hidden bg-background">
+                    <div
+                      className={`relative overflow-hidden bg-background ${
+                        preferPosterImages ? "aspect-[3/4]" : "aspect-[2/3]"
+                      }`}
+                    >
                       {image ? (
                         <img
                           src={image}
                           alt=""
-                          className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
+                          className={`h-full w-full transition-transform duration-300 group-hover:scale-105 ${
+                            preferPosterImages
+                              ? "object-cover object-center"
+                              : "object-cover object-top"
+                          }`}
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center bg-muted">

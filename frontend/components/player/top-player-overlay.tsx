@@ -5,6 +5,7 @@ import { Cast, X } from "lucide-react";
 import { useCurrentProgram } from "@/hooks/useCurrentProgram";
 import { type Channel, type Program } from "@/lib/channels-data";
 import { type DockedCastControl } from "@/context/player-context";
+import { getDetailImageSrc, resolveImageSrc } from "@/lib/image-urls";
 
 export type TopProgramPanel = {
     channelName: string;
@@ -39,14 +40,6 @@ type TopProgramCardProps = {
     panel: TopProgramPanel;
 };
 
-const resolvePanelImage = (image?: string): string => {
-    if (!image) return "";
-    if (image.startsWith("http://") || image.startsWith("https://")) return image;
-    if (image.startsWith("//")) return `https:${image}`;
-    if (image.startsWith("/")) return image;
-    return `/ch/${image}`;
-};
-
 const resolveChannelLogo = (channel: Channel): string => {
     if (channel.module === "kan-vod") {
         return "/ch/kan.jpg";
@@ -56,11 +49,15 @@ const resolveChannelLogo = (channel: Channel): string => {
         return "/ch/mako.png";
     }
 
+    if (channel.module === "reshet-vod") {
+        return "/ch/13.jpg";
+    }
+
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {
         return "/ch/vod.jpg";
     }
 
-    return resolvePanelImage(channel.logo || "");
+    return resolveImageSrc(channel.logo || "");
 };
 
 const formatTime = (ts: number): string => {
@@ -114,7 +111,7 @@ const resolveProgramPanel = (channel: Channel, program: Program | null): TopProg
     return {
         channelName: channel.vodMeta?.channelName || channel.name || "",
         description,
-        image: resolvePanelImage(
+        image: getDetailImageSrc(
             program?.image ||
             channel.vodMeta?.episodeImage ||
             channel.vodMeta?.programImage ||

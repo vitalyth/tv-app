@@ -9,6 +9,7 @@ import { TopProgramCard, type TopProgramPanel } from "@/components/player/top-pl
 import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 import { useNowSec } from "@/hooks/use-now-sec";
 import { type Channel, type Program } from "@/lib/channels-data";
+import { getDetailImageSrc, resolveImageSrc } from "@/lib/image-urls";
 import { Cast, Clapperboard, X } from "lucide-react";
 
 const getPageTitle = (pathname: string) => {
@@ -17,6 +18,7 @@ const getPageTitle = (pathname: string) => {
     if (pathname.startsWith("/local-series")) return "סדרות";
     if (pathname.startsWith("/kan-vod")) return "כאן VOD";
     if (pathname.startsWith("/keshet-vod")) return "קשת VOD";
+    if (pathname.startsWith("/reshet-vod")) return "רשת VOD";
     if (pathname.startsWith("/guide")) return "שידורים חיים";
     return "שידורים חיים";
 };
@@ -33,14 +35,6 @@ function formatProgramTimeRange(start: number, end: number): string {
     return `${formatProgramTime(start)} - ${formatProgramTime(end)}`;
 }
 
-function resolvePanelImage(image?: string): string {
-    if (!image) return "";
-    if (image.startsWith("http://") || image.startsWith("https://")) return image;
-    if (image.startsWith("//")) return `https:${image}`;
-    if (image.startsWith("/")) return image;
-    return `/ch/${image}`;
-}
-
 function resolveChannelLogo(channel: Channel | null): string {
     if (!channel) return "";
 
@@ -52,11 +46,15 @@ function resolveChannelLogo(channel: Channel | null): string {
         return "/ch/mako.png";
     }
 
+    if (channel.module === "reshet-vod") {
+        return "/ch/13.jpg";
+    }
+
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {
         return "/ch/vod.jpg";
     }
 
-    return resolvePanelImage(channel.logo || "");
+    return resolveImageSrc(channel.logo || "");
 }
 
 function useDesktopSidePanel() {
@@ -108,7 +106,7 @@ function ShellContent({
     );
     const panelChannel = programDetails?.channel ?? currentChannel;
     const panelProgram = programDetails?.program ?? liveProgram;
-    const panelImage = resolvePanelImage(
+    const panelImage = getDetailImageSrc(
         panelProgram?.image ||
         currentChannel?.vodMeta?.episodeImage ||
         currentChannel?.vodMeta?.programImage ||

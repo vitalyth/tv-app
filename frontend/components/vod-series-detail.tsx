@@ -2,6 +2,7 @@
 
 import { type ReactNode, type Ref } from "react";
 import { Clapperboard, Play, Search, ChevronLeft } from "lucide-react";
+import { getDetailImageSrc, getGridImageSrc, resolveImageSrc } from "@/lib/image-urls";
 
 export type VodDetailMetaItem = {
   key: string;
@@ -73,7 +74,7 @@ function VodPoster({
   return (
     <div className={`shrink-0 overflow-hidden rounded-lg border border-border bg-background ${className}`}>
       {poster ? (
-        <img src={poster} alt="" className="aspect-[2/3] h-full w-full object-cover" />
+        <img src={resolveImageSrc(poster)} alt="" className="aspect-[2/3] h-full w-full object-cover" />
       ) : (
         <div className="flex aspect-[2/3] items-center justify-center">
           <Clapperboard className={iconClassName} />
@@ -166,7 +167,7 @@ export function VodSeriesFloatingHeader({
       }`}>
         <div className="relative min-h-[4.5rem] overflow-hidden sm:min-h-28">
           {backdrop ? (
-            <img src={backdrop} alt="" className="absolute inset-0 h-full w-full object-cover opacity-20" />
+            <img src={getDetailImageSrc(backdrop)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-20" />
           ) : null}
           <div className="absolute inset-0 bg-linear-to-t from-card via-card/80 to-card/30" />
 
@@ -247,7 +248,7 @@ export function VodSeriesHeroCard({
     >
       <div className="relative min-h-[11rem] overflow-hidden sm:min-h-52 lg:min-h-64">
         {backdrop ? (
-          <img src={backdrop} alt="" className="absolute inset-0 h-full w-full object-cover opacity-35" />
+          <img src={getDetailImageSrc(backdrop)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-35" />
         ) : null}
         <div className="absolute inset-0 bg-linear-to-t from-card via-card/80 to-card/30" />
 
@@ -296,7 +297,7 @@ export function VodSeriesHeroCard({
                     <div key={person.id || person.name} className="w-14 shrink-0 text-center sm:w-16">
                       <div className="mx-auto h-10 w-10 overflow-hidden rounded-full border border-border bg-muted">
                         {person.profile ? (
-                          <img src={person.profile} alt="" className="h-full w-full object-cover" />
+                          <img src={getGridImageSrc(person.profile)} alt="" className="h-full w-full object-cover" />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-muted-foreground">
                             {person.name?.slice(0, 1)}
@@ -353,7 +354,7 @@ export function VodEpisodeGrid({
           <div className="relative aspect-video overflow-hidden bg-background">
             {episode.image ? (
               <img
-                src={episode.image}
+                src={getGridImageSrc(episode.image)}
                 alt=""
                 className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
               />

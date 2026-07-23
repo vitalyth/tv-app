@@ -4,6 +4,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from html import unescape
 from urllib.parse import quote, urljoin
 
@@ -33,6 +34,7 @@ KESHT_VOD_STREAM_BATCH_SIZE = int(
 
 MAKO_BASE_URL = "https://www.mako.co.il"
 MAKO_INDEX_URL = f"{MAKO_BASE_URL}/mako-vod-index"
+MAKO_INDEX_CATEGORY_URL = f"{MAKO_INDEX_URL}?filter={{filter_type}}&vcmId={{vcm_id}}"
 MAKO_ENTITLEMENTS_URL = "https://mass.mako.co.il/ClicksStatistics/entitlementsServicesV2.jsp"
 MAKO_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -46,6 +48,16 @@ MAKO_HEADERS = {
     "Origin": MAKO_BASE_URL,
 }
 CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[,;|/•·،]+)\s*")
+MAKO_VOD_CATEGORY_FILTERS: tuple[tuple[str, str, str], ...] = (
+    ("ריאליטי", "genre", "4f9dbac980653210VgnVCM2000002a0c10acRCRD"),
+    ("דוקומנטרי", "genre", "8e8abac980653210VgnVCM2000002a0c10acRCRD"),
+    ("דרמה", "genre", "05fcbac980653210VgnVCM2000002a0c10acRCRD"),
+    ("קומדיה", "genre", "fe2dbac980653210VgnVCM2000002a0c10acRCRD"),
+    ("בישול", "genre", "5d738481c9674210VgnVCM2000002a0c10acRCRD"),
+    ("החדשות", "provider", "ee06c13070733210VgnVCM2000002a0c10acRCRD"),
+    ("פודקאסטים", "provider", "d5aae64655ea0810VgnVCM100000700a10acRCRD"),
+    ("ערוץ 24", "provider", "3377c13070733210VgnVCM2000002a0c10acRCRD"),
+)
 
 
 @dataclass
@@ -82,6 +94,7 @@ class KeshetEpisode:
     stream_url: str | None = None
     kaltura_entry_id: str | None = None
     published: str | None = None
+    published_timestamp: float | None = None
     display_order: int | None = None
 
 
@@ -163,12 +176,14 @@ def _init_db(con: sqlite3.Connection) -> None:
             stream_url TEXT,
             kaltura_entry_id TEXT,
             published TEXT,
+            published_timestamp REAL,
             display_order INTEGER,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """
     )
     _add_column_if_missing(con, "keshet_episodes", "display_order", "INTEGER")
+    _add_column_if_missing(con, "keshet_episodes", "published_timestamp", "REAL")
     con.executescript(
         """
         CREATE INDEX IF NOT EXISTS idx_keshet_programs_title ON keshet_programs(title);
@@ -176,6 +191,7 @@ def _init_db(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_keshet_episodes_program_id ON keshet_episodes(program_id);
         CREATE INDEX IF NOT EXISTS idx_keshet_episodes_season_id ON keshet_episodes(season_id);
         CREATE INDEX IF NOT EXISTS idx_keshet_episodes_title ON keshet_episodes(title);
+        CREATE INDEX IF NOT EXISTS idx_keshet_episodes_published ON keshet_episodes(published_timestamp);
         """
     )
     con.commit()
@@ -185,6 +201,44 @@ def _clean_text(value: object) -> str:
     if value is None:
         return ""
     return unescape(str(value)).replace("\u200b", "").strip()
+
+
+def _normalize_unix_timestamp(value: object) -> float:
+    try:
+        timestamp = float(value or 0)
+    except Exception:
+        return 0.0
+    if timestamp > 10_000_000_000:
+        timestamp /= 1000
+    return timestamp
+
+
+def _parse_published_timestamp(value: object) -> float | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+
+    unix_timestamp = _normalize_unix_timestamp(text)
+    if unix_timestamp > 1_000_000_000:
+        return unix_timestamp
+
+    normalized = text.replace("Z", "+00:00")
+    for fmt in (
+        "%d.%m.%Y",
+        "%d/%m/%Y",
+        "%Y-%m-%d",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%z",
+    ):
+        try:
+            return datetime.strptime(normalized, fmt).timestamp()
+        except ValueError:
+            pass
+
+    try:
+        return datetime.fromisoformat(normalized).timestamp()
+    except ValueError:
+        return None
 
 
 def _normalize_url(url: str, base: str = MAKO_BASE_URL) -> str:
@@ -327,40 +381,107 @@ def hashlib_sha1(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()
 
 
+def _program_from_index_item(item: dict, category_labels: list[str] | None = None) -> KeshetProgram | None:
+    title = _clean_text(item.get("title"))
+    page_url = _normalize_url(item.get("pageUrl") or "")
+    if not title or not page_url:
+        return None
+
+    domo = item.get("domoClick") or {}
+    program_genre = _pick_first_labels(
+        item,
+        ("programGenre", "genre", "genres", "category", "categories", "tags"),
+    )
+    for category in category_labels or []:
+        program_genre = _merge_category_value(program_genre, category)
+
+    return KeshetProgram(
+        id=_pick_program_id(item),
+        mainid=str(domo.get("clicked_channel_id") or ""),
+        title=title,
+        description=_clean_text(item.get("altText") or item.get("subtitle")),
+        url=page_url,
+        image=_normalize_url(item.get("pic") or "") or None,
+        program_format=_pick_first_labels(
+            item,
+            ("programFormat", "format", "contentType", "type"),
+        ),
+        program_genre=program_genre or None,
+    )
+
+
 def fetch_keshet_programs() -> list[KeshetProgram]:
     data = _fetch_json(f"{MAKO_INDEX_URL}?platform=responsive")
     items = data.get("items") or []
-    programs: list[KeshetProgram] = []
-    seen: set[str] = set()
+    categories_by_key, category_programs = fetch_keshet_program_category_index()
+    programs_by_id: dict[str, KeshetProgram] = {}
 
     for item in items:
-        title = _clean_text(item.get("title"))
-        page_url = _normalize_url(item.get("pageUrl") or "")
-        if not title or not page_url or page_url in seen:
+        program_id = _pick_program_id(item)
+        category_key_candidates = {
+            program_id.casefold(),
+            _normalize_url(item.get("pageUrl") or "").casefold(),
+            _normalize_url((item.get("domoClick") or {}).get("clicked_item_url") or "").casefold(),
+        }
+        category_labels = [
+            categories_by_key[key]
+            for key in category_key_candidates
+            if key and key in categories_by_key
+        ]
+        program = _program_from_index_item(item, category_labels)
+        if not program:
+            continue
+        programs_by_id[program.id] = program
+
+    for program in category_programs.values():
+        existing = programs_by_id.get(program.id)
+        if not existing:
+            programs_by_id[program.id] = program
+            continue
+        for category in _split_program_categories(program.program_genre):
+            existing.program_genre = _merge_category_value(existing.program_genre, category)
+
+    return list(programs_by_id.values())
+
+
+def fetch_keshet_program_category_index() -> tuple[dict[str, str], dict[str, KeshetProgram]]:
+    categories_by_key: dict[str, str] = {}
+    programs_by_id: dict[str, KeshetProgram] = {}
+    for category_name, filter_type, vcm_id in MAKO_VOD_CATEGORY_FILTERS:
+        try:
+            data = _fetch_json(
+                f"{MAKO_INDEX_CATEGORY_URL.format(filter_type=quote(filter_type), vcm_id=quote(vcm_id))}"
+                "&platform=responsive"
+            )
+        except Exception:
             continue
 
-        seen.add(page_url)
-        domo = item.get("domoClick") or {}
-        programs.append(
-            KeshetProgram(
-                id=_pick_program_id(item),
-                mainid=str(domo.get("clicked_channel_id") or ""),
-                title=title,
-                description=_clean_text(item.get("altText") or item.get("subtitle")),
-                url=page_url,
-                image=_normalize_url(item.get("pic") or "") or None,
-                program_format=_pick_first_labels(
-                    item,
-                    ("programFormat", "format", "contentType", "type"),
-                ),
-                program_genre=_pick_first_labels(
-                    item,
-                    ("programGenre", "genre", "genres", "category", "categories", "tags"),
-                ),
-            )
-        )
+        for item in data.get("items") or []:
+            program = _program_from_index_item(item, [category_name])
+            if program:
+                existing = programs_by_id.get(program.id)
+                if existing:
+                    existing.program_genre = _merge_category_value(existing.program_genre, category_name)
+                else:
+                    programs_by_id[program.id] = program
 
-    return programs
+            page_url = _normalize_url(item.get("pageUrl") or "")
+            clicked_url = _normalize_url((item.get("domoClick") or {}).get("clicked_item_url") or "")
+            for key in (
+                _pick_program_id(item),
+                page_url,
+                clicked_url,
+            ):
+                normalized_key = str(key or "").casefold()
+                if normalized_key:
+                    categories_by_key[normalized_key] = category_name
+
+    return categories_by_key, programs_by_id
+
+
+def fetch_keshet_program_categories() -> dict[str, str]:
+    categories_by_key, _programs_by_id = fetch_keshet_program_category_index()
+    return categories_by_key
 
 
 def _upsert_program(con: sqlite3.Connection, program: KeshetProgram) -> None:
@@ -416,9 +537,9 @@ def _upsert_episode(con: sqlite3.Connection, episode: KeshetEpisode) -> None:
         """
         INSERT INTO keshet_episodes (
             id, program_id, season_id, title, description, url, image, play_url,
-            stream_url, kaltura_entry_id, published, display_order, updated_at
+            stream_url, kaltura_entry_id, published, published_timestamp, display_order, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             program_id = excluded.program_id,
             season_id = excluded.season_id,
@@ -430,6 +551,7 @@ def _upsert_episode(con: sqlite3.Connection, episode: KeshetEpisode) -> None:
             stream_url = COALESCE(NULLIF(excluded.stream_url, ''), keshet_episodes.stream_url),
             kaltura_entry_id = COALESCE(NULLIF(excluded.kaltura_entry_id, ''), keshet_episodes.kaltura_entry_id),
             published = excluded.published,
+            published_timestamp = excluded.published_timestamp,
             display_order = excluded.display_order,
             updated_at = CURRENT_TIMESTAMP
         """,
@@ -445,6 +567,7 @@ def _upsert_episode(con: sqlite3.Connection, episode: KeshetEpisode) -> None:
             episode.stream_url,
             episode.kaltura_entry_id,
             episode.published,
+            episode.published_timestamp,
             episode.display_order,
         ),
     )
@@ -481,6 +604,70 @@ def _get_program_categories(con: sqlite3.Connection) -> list[str]:
     return sorted(categories_by_key.values(), key=str.casefold)
 
 
+def _merge_category_value(current_value: object, category: str) -> str:
+    categories = _split_program_categories(current_value)
+    if category.casefold() not in {item.casefold() for item in categories}:
+        categories.append(category)
+    return ", ".join(categories)
+
+
+def _enrich_existing_program_categories(con: sqlite3.Connection) -> int:
+    categories_by_key, category_programs = fetch_keshet_program_category_index()
+    if not categories_by_key:
+        return 0
+
+    updated = 0
+    rows = con.execute(
+        """
+        SELECT id, mainid, url, program_genre
+        FROM keshet_programs
+        """
+    ).fetchall()
+    existing_ids = {row["id"] for row in rows}
+
+    for program in category_programs.values():
+        if program.id in existing_ids:
+            continue
+        _upsert_program(con, program)
+        existing_ids.add(program.id)
+        updated += 1
+
+    for row in rows:
+        matched_categories: list[str] = []
+        seen_categories: set[str] = set()
+        for key in (
+            row["id"],
+            row["mainid"],
+            row["url"],
+        ):
+            category = categories_by_key.get(str(key or "").casefold())
+            if category and category.casefold() not in seen_categories:
+                seen_categories.add(category.casefold())
+                matched_categories.append(category)
+
+        if not matched_categories:
+            continue
+
+        genre = row["program_genre"]
+        for category in matched_categories:
+            genre = _merge_category_value(genre, category)
+
+        if genre != row["program_genre"]:
+            con.execute(
+                """
+                UPDATE keshet_programs
+                SET program_genre = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (genre, row["id"]),
+            )
+            updated += 1
+
+    if updated:
+        con.commit()
+    return updated
+
+
 def _normalize_selected_categories(category: object) -> list[str]:
     values = category if isinstance(category, (list, tuple)) else [category]
     categories: list[str] = []
@@ -504,6 +691,7 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["seasonCount"] = int(item.pop("season_count", 0) or 0)
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["latestKanEpisodeId"] = 0
+    item.pop("latest_episode_timestamp", None)
     item["latestEpisodePublished"] = item.pop("latest_episode_published", None)
     return item
 
@@ -595,6 +783,7 @@ def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) ->
             image = _normalize_url(pics[0].get("picUrl") or "") or None
         image = image or program.image
 
+        published = _clean_text(vod.get("date") or vod.get("created") or vod.get("airDate") or vod.get("publishDate"))
         play_url = f"{MAKO_BASE_URL}/VodPlaylist?vcmid={quote(vcmid)}&videoChannelId={quote(str(video_channel_id))}"
         episodes.append(
             KeshetEpisode(
@@ -606,7 +795,8 @@ def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) ->
                 url=_extract_program_page_url_from_playlist_url(play_url),
                 image=image,
                 play_url=play_url,
-                published=_clean_text(vod.get("date") or vod.get("created") or vod.get("airDate") or vod.get("publishDate")),
+                published=published,
+                published_timestamp=_parse_published_timestamp(published),
                 display_order=display_order,
             )
         )
@@ -813,6 +1003,12 @@ def get_keshet_vod_series(
         limit = max(1, min(int(limit or 60), 120))
         offset = max(0, int(offset or 0))
         categories = _get_program_categories(con)
+        if has_programs and len(categories) < len(MAKO_VOD_CATEGORY_FILTERS):
+            try:
+                _with_retries(lambda: _enrich_existing_program_categories(con))
+                categories = _get_program_categories(con)
+            except Exception as ex:
+                error = error or str(ex)
 
         all_rows = con.execute(
             f"""
@@ -821,6 +1017,7 @@ def get_keshet_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
+                MAX(e.published_timestamp) AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published
             FROM keshet_programs p
             LEFT JOIN keshet_seasons s ON s.program_id = p.id
@@ -829,6 +1026,8 @@ def get_keshet_vod_series(
             GROUP BY p.id
             ORDER BY
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
+                latest_episode_timestamp IS NULL,
+                latest_episode_timestamp DESC,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,
                 p.title COLLATE NOCASE

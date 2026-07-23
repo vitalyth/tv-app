@@ -20,6 +20,7 @@ import {
     ContinueWatchingVodCarousel,
     NewVodCarousel,
 } from "@/components/vod-content-carousels";
+import { getGridImageSrc, resolveImageSrc } from "@/lib/image-urls";
 
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
@@ -69,6 +70,11 @@ const isKeshetVodChannel = (channel: VodChannel) => {
     return channel.id === "vod_keshet12" || name === "קשת 12";
 };
 
+const isReshetVodChannel = (channel: VodChannel) => {
+    const name = channel.name.trim();
+    return channel.id === "vod_reshet13" || name === "רשת 13";
+};
+
 type VodNode = {
     name: string;
     module: string;
@@ -80,9 +86,7 @@ type VodNode = {
 };
 
 const getImageSrc = (logo: string) => {
-    if (!logo) return "/ch/vod.jpg";
-    if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
-    return `/ch/${logo}`;
+    return resolveImageSrc(logo) || "/ch/vod.jpg";
 };
 
 const toVodNode = (channel: VodChannel): VodNode => ({
@@ -377,6 +381,11 @@ export default function VodPage() {
             return;
         }
 
+        if (isReshetVodChannel(channel)) {
+            router.push("/reshet-vod");
+            return;
+        }
+
         const nextStack = [toVodNode(channel)];
         setSearchQuery("");
         setNavigationStack(nextStack);
@@ -426,6 +435,12 @@ export default function VodPage() {
         if (item.module === "keshet-vod" && programId) {
             play(itemToChannel(item, stack));
             router.push(`/keshet-vod/${encodeURIComponent(programId)}`);
+            return;
+        }
+
+        if (item.module === "reshet-vod" && programId) {
+            play(itemToChannel(item, stack));
+            router.push(`/reshet-vod/${encodeURIComponent(programId)}`);
             return;
         }
 
@@ -610,7 +625,7 @@ export default function VodPage() {
                                         >
                                             <div className="relative aspect-video overflow-hidden bg-background">
                                                 <img
-                                                    src={getImageSrc(item.logo)}
+                                                    src={getGridImageSrc(getImageSrc(item.logo))}
                                                     alt=""
                                                     className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                                                 />

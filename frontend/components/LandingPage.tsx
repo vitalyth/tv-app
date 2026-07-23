@@ -23,6 +23,7 @@ import {
   ContinueWatchingVodCarousel,
   NewVodCarousel,
 } from "@/components/vod-content-carousels";
+import { getDetailImageSrc, getGridImageSrc, resolveImageSrc } from "@/lib/image-urls";
 import { ChevronLeft, Clapperboard, Play, RotateCcw } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
@@ -82,9 +83,7 @@ const saveRecentVodItem = (item: VodItem, stack: VodNode[]) => {
 };
 
 const getVodImageSrc = (logo: string) => {
-  if (!logo) return "/ch/vod.jpg";
-  if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
-  return `/ch/${logo}`;
+  return resolveImageSrc(logo) || "/ch/vod.jpg";
 };
 
 const isVodGroupingNode = (name?: string) => {
@@ -113,6 +112,11 @@ const isKanVodChannel = (channel: VodChannel) => {
 const isKeshetVodChannel = (channel: VodChannel) => {
   const name = channel.name.trim();
   return channel.id === "vod_keshet12" || name === "קשת 12";
+};
+
+const isReshetVodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim();
+  return channel.id === "vod_reshet13" || name === "רשת 13";
 };
 
 const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
@@ -388,6 +392,11 @@ const LandingPage = () => {
         return;
       }
 
+      if (item.module === "reshet-vod" && programId) {
+        router.push(`/reshet-vod/${encodeURIComponent(programId)}`);
+        return;
+      }
+
       if (stack.length > 0) {
         const params = new URLSearchParams({
           [VOD_PATH_PARAM]: JSON.stringify(stack),
@@ -411,6 +420,11 @@ const LandingPage = () => {
 
       if (isKeshetVodChannel(channel)) {
         router.push("/keshet-vod");
+        return;
+      }
+
+      if (isReshetVodChannel(channel)) {
+        router.push("/reshet-vod");
         return;
       }
 
@@ -464,7 +478,7 @@ const LandingPage = () => {
     >
       <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
         <img
-          src={getVodImageSrc(channel.logo)}
+          src={getGridImageSrc(getVodImageSrc(channel.logo))}
           alt=""
           className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
         />
@@ -534,7 +548,7 @@ const LandingPage = () => {
     : [];
   const heroVodMeta = heroItem ? buildVodMeta(heroItem, heroStack) : null;
   const heroImage = heroVodMeta
-    ? getVodImageSrc(heroVodMeta.episodeImage || heroVodMeta.programImage || heroItem?.logo || "")
+    ? getDetailImageSrc(heroVodMeta.episodeImage || heroVodMeta.programImage || heroItem?.logo || "") || "/ch/vod.jpg"
     : "/ch/vod.jpg";
   const getHeroSlideOffset = (index: number) => {
     if (heroItems.length <= 1) return 0;
@@ -576,9 +590,9 @@ const LandingPage = () => {
                 description: item.description,
               }];
               const itemMeta = buildVodMeta(item, itemStack);
-              const image = getVodImageSrc(
+              const image = getDetailImageSrc(
                 itemMeta.episodeImage || itemMeta.programImage || item.logo,
-              );
+              ) || "/ch/vod.jpg";
 
               return (
                 <img

@@ -21,6 +21,7 @@ import {
     type KanVodSeriesDetails,
 } from "@/lib/services/kan-vod-service";
 import { keshetVodService } from "@/lib/services/keshet-vod-service";
+import { reshetVodService } from "@/lib/services/reshet-vod-service";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then((m) => m.VideoPlayer),
@@ -143,6 +144,18 @@ const getVodProviderSettings = (module: string) => {
             channelName: "קשת VOD",
             module: "keshet-vod",
             referer: "https://www.mako.co.il/",
+            vpn: false,
+        };
+    }
+
+    if (module === "reshet-vod") {
+        return {
+            category: "reshet-vod",
+            channelImage: "/ch/13.jpg",
+            channelName: "רשת VOD",
+            module: "reshet-vod",
+            referer: "https://13tv.co.il/",
+            vpn: true,
         };
     }
 
@@ -152,6 +165,7 @@ const getVodProviderSettings = (module: string) => {
         channelName: "כאן VOD",
         module: "kan-vod",
         referer: "https://www.kan.org.il/",
+        vpn: false,
     };
 };
 
@@ -178,6 +192,7 @@ const kanEpisodeToChannel = (
             link: episode.streamUrl || episode.playUrl || episode.url,
             referer: settings.referer,
             manifest_type: "hls",
+            vpn: Boolean(settings.vpn),
         },
         type: "vod",
         programs: [],
@@ -289,7 +304,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             autoNextInProgressRef.current ||
             isAutoNextCancelled ||
             !channel ||
-            !["kan-vod", "keshet-vod"].includes(channelModule)
+            !["kan-vod", "keshet-vod", "reshet-vod"].includes(channelModule)
         ) {
             return;
         }
@@ -304,7 +319,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            const service = channelModule === "keshet-vod" ? keshetVodService : kanVodService;
+            const service =
+                channelModule === "keshet-vod"
+                    ? keshetVodService
+                    : channelModule === "reshet-vod"
+                        ? reshetVodService
+                        : kanVodService;
             const next = await service.getNextEpisode(channel.id);
             if (next) {
                 const series = await service.getSeriesDetails(next.programId);

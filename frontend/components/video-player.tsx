@@ -15,6 +15,7 @@ import { useMobileDevice } from "@/hooks/use-mobile-device";
 import CustomPlayerControls from "@/components/custom-player-controls";
 import { getVodProgress, saveVodProgress } from "@/lib/vod-progress";
 import { type DockedCastControl } from "@/context/player-context";
+import { getDetailImageSrc } from "@/lib/image-urls";
 import "@/styles/video-player.css";
 
 if (!(videojs as any).getPlugin?.("qualityLevels")) {
@@ -34,15 +35,17 @@ const VOD_AUTO_NEXT_THRESHOLD_SECONDS = 2;
 const VOD_AUTO_NEXT_NOTICE_SECONDS = 20;
 
 const getPlayerImageSrc = (logo?: string) => {
-  if (!logo) return "/ch/vod.jpg";
-  if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
-  if (logo.startsWith("/")) return logo;
-  return `/ch/${logo}`;
+  return getDetailImageSrc(logo) || "/ch/vod.jpg";
 };
 
 const shouldUseVpnProxy = (channel: Channel) => {
   const channelId = channel.channelID || channel.id || "";
-  return channel.linkDetails?.vpn || channel.module === "kan-vod" || channelId.startsWith("ch_11");
+  return (
+    channel.linkDetails?.vpn ||
+    channel.module === "kan-vod" ||
+    channel.module === "reshet-vod" ||
+    channelId.startsWith("ch_11")
+  );
 };
 
 type IOSFullscreenVideo = HTMLVideoElement & {
