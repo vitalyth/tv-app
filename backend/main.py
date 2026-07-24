@@ -5,7 +5,7 @@ from urllib.parse import quote
 from services.channel_service import get_live_channels, get_vod_channels, get_vod_items, get_vod_recent_items
 from services.epg_service import get_now_epg
 from services.stream_service import get_custom_channel_stream, get_stream, get_vod_stream
-from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy
+from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy, handle_image_proxy
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
 from services.local_series_service import (
@@ -276,6 +276,21 @@ def proxy_head(request: Request, url: str, referer: str = None, cast: bool = Fal
 @app.options("/v/proxy")
 @app.options("/vod_proxy")
 def proxy_options():
+    return cors_preflight()
+
+@app.get("/image_proxy")
+@app.head("/image_proxy")
+def image_proxy(
+    url: str,
+    referer: str = None,
+    width: int | None = Query(default=None, ge=1, le=1920),
+    height: int | None = Query(default=None, ge=1, le=1920),
+    quality: int | None = Query(default=None, ge=1, le=95),
+):
+    return handle_image_proxy(url, referer, width=width, height=height, quality=quality)
+
+@app.options("/image_proxy")
+def image_proxy_options():
     return cors_preflight()
 
 @app.get("/epg")

@@ -4,7 +4,7 @@ import { memo, useRef, useCallback, useMemo, useState, useEffect } from "react";
 import { Clock3, ListVideo, Play, Video } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { CHANNEL_REGION_SECTIONS, getChannelRegion } from "@/lib/channel-regions";
-import { getGridImageSrc } from "@/lib/image-urls";
+import { getProgramGuideImageSrc } from "@/lib/image-urls";
 import { useNowSec } from "@/hooks/use-now-sec";
 import {
     DropdownMenu,
@@ -216,7 +216,7 @@ const ProgramCell = memo(function ProgramCell({
     //const now = Math.floor(Date.now() / 1000);
     //const isLive = now >= program.start && now < program.end;
     const isLive = isProgramLive(program, nowSec);
-    const programImage = getGridImageSrc(program.image);
+    const programImage = getProgramGuideImageSrc(program.image);
     const showInlineImage = Boolean(programImage && width >= 76);
     const leadingOffsetClass = showInlineImage ? "pl-16" : "";
 
@@ -259,6 +259,8 @@ const ProgramCell = memo(function ProgramCell({
                     <img
                         src={programImage}
                         alt=""
+                        width={96}
+                        height={54}
                         className="h-full w-full object-cover"
                         loading="lazy"
                         decoding="async"

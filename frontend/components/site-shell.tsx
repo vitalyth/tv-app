@@ -78,6 +78,42 @@ function findLiveProgram(channel: Channel | null, nowSec: number): Program | nul
     return channel.programs.find((program) => nowSec >= program.start && nowSec < program.end) ?? null;
 }
 
+function ProgramPanelImage({
+    className,
+    fallbackSrc,
+    src,
+}: {
+    className: string;
+    fallbackSrc?: string;
+    src: string;
+}) {
+    const [imageSrc, setImageSrc] = useState(src);
+
+    useEffect(() => {
+        setImageSrc(src);
+    }, [src]);
+
+    if (!imageSrc) return null;
+
+    return (
+        <img
+            key={`${className}-${imageSrc}`}
+            src={imageSrc}
+            alt=""
+            className={className}
+            loading="lazy"
+            onError={() => {
+                if (fallbackSrc && imageSrc !== fallbackSrc) {
+                    setImageSrc(fallbackSrc);
+                    return;
+                }
+
+                setImageSrc("");
+            }}
+        />
+    );
+}
+
 function ShellContent({
     children,
     title,
@@ -106,13 +142,14 @@ function ShellContent({
     );
     const panelChannel = programDetails?.channel ?? currentChannel;
     const panelProgram = programDetails?.program ?? liveProgram;
-    const panelImage = getDetailImageSrc(
+    const panelRawImage =
         panelProgram?.image ||
         currentChannel?.vodMeta?.episodeImage ||
         currentChannel?.vodMeta?.programImage ||
         currentChannel?.playerLogo ||
-        currentChannel?.logo
-    );
+        currentChannel?.logo;
+    const panelImage = getDetailImageSrc(panelRawImage);
+    const panelImageFallback = resolveImageSrc(panelRawImage);
     const channelLogo = resolveChannelLogo(panelChannel);
     const panelTitle =
         panelProgram?.name ||
@@ -137,6 +174,7 @@ function ShellContent({
         channelName: panelChannel?.name || "",
         description: panelDescription,
         image: panelImage,
+        imageFallback: panelImageFallback,
         isLive: Boolean(currentChannel?.type !== "vod" && panelProgram && nowSec >= panelProgram.start && nowSec < panelProgram.end),
         subtitle: panelSubtitle,
         timeRange: panelTimeRange,
@@ -302,23 +340,15 @@ function ShellContent({
                             <section className={`program-side-panel__hero ${isPlaybackPanel ? "program-side-panel__hero--playback" : ""}`}>
                                 {panelImage && (
                                     <>
-                                        <img
-                                            key={`${panelImage}-fill`}
+                                        <ProgramPanelImage
                                             src={panelImage}
-                                            alt=""
+                                            fallbackSrc={panelImageFallback}
                                             className="program-side-panel__image-fill"
-                                            loading="lazy"
-                                            onLoad={(event) => { (event.currentTarget as HTMLImageElement).style.display = ""; }}
-                                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
                                         />
-                                        <img
-                                            key={`${panelImage}-main`}
+                                        <ProgramPanelImage
                                             src={panelImage}
-                                            alt=""
+                                            fallbackSrc={panelImageFallback}
                                             className={`program-side-panel__image-main ${isLivePlaybackPanel ? "program-side-panel__image-main--live" : ""}`}
-                                            loading="lazy"
-                                            onLoad={(event) => { (event.currentTarget as HTMLImageElement).style.display = ""; }}
-                                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
                                         />
                                     </>
                                 )}

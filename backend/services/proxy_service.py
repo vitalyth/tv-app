@@ -1,5 +1,6 @@
 from urllib.parse import parse_qs, parse_qsl, unquote, urlencode, urljoin, urlparse
 from pathlib import Path
+from io import BytesIO
 import os
 import mimetypes
 from utils.http import create_session
@@ -9,6 +10,17 @@ import re
 import html
 import json
 
+try:
+    from curl_cffi import requests as curl_requests
+except ImportError:
+    curl_requests = None
+
+try:
+    from PIL import Image, ImageOps
+except ImportError:
+    Image = None
+    ImageOps = None
+
 session = create_session()
 
 PROXY_CONNECT_TIMEOUT_SECONDS = float(os.getenv("PROXY_CONNECT_TIMEOUT_SECONDS", "10"))
@@ -17,6 +29,33 @@ PROXY_REQUEST_TIMEOUT = (PROXY_CONNECT_TIMEOUT_SECONDS, PROXY_READ_TIMEOUT_SECON
 KAN_VOD_PROXY_MAX_BITRATE = int(os.getenv("KAN_VOD_PROXY_MAX_BITRATE", "0"))
 KAN_VOD_SEGMENT_RETRIES = max(0, int(os.getenv("KAN_VOD_SEGMENT_RETRIES", "2")))
 PLUTO_SEGMENT_RETRIES = max(0, int(os.getenv("PLUTO_SEGMENT_RETRIES", "2")))
+
+IMAGE_PROXY_ALLOWED_HOSTS = {
+    "cdn.i24news.tv",
+    "images.frp1.ott.kaltura.com",
+    "images.maariv.co.il",
+    "img.mako.co.il",
+    "insight-images-do.immergo.tv",
+    "kan.org.il",
+    "media3.reshet.tv",
+    "mobapi.kan.org.il",
+    "r.il.cdn-redge.media",
+    "www.9tv.co.il",
+    "www.c14.co.il",
+    "www.kan.org.il",
+    "www.knesset.tv",
+}
+
+IMAGE_PROXY_HEADERS = {
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.kan.org.il/",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    ),
+}
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -127,6 +166,113 @@ def _content_type_for_url(url, content_type):
         return "application/vnd.apple.mpegurl"
 
     return content_type or "application/octet-stream"
+
+
+def _is_allowed_image_proxy_url(url):
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme in {"http", "https"} and host in IMAGE_PROXY_ALLOWED_HOSTS
+
+
+def _bounded_int(value, min_value, max_value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    if parsed < min_value or parsed > max_value:
+        return None
+
+    return parsed
+
+
+def _resize_image_content(content, content_type, width=None, height=None, quality=None):
+    if not width and not height:
+        return content, content_type
+
+    if Image is None or ImageOps is None:
+        return None, content_type
+
+    try:
+        with Image.open(BytesIO(content)) as image:
+            image = ImageOps.exif_transpose(image)
+
+            if width and height:
+                image = ImageOps.fit(
+                    image,
+                    (width, height),
+                    method=Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+            else:
+                image.thumbnail(
+                    (width or image.width, height or image.height),
+                    Image.Resampling.LANCZOS,
+                )
+
+            if image.mode not in {"RGB", "RGBA"}:
+                image = image.convert("RGB")
+
+            output = BytesIO()
+            image.save(output, format="WEBP", quality=quality or 50, method=6)
+            return output.getvalue(), "image/webp"
+    except Exception as exc:
+        print(f"Image resize failed for content_type={content_type}: {exc}", flush=True)
+        return content, content_type
+
+
+def handle_image_proxy(url, referer=None, width=None, height=None, quality=None):
+    if not _is_allowed_image_proxy_url(url):
+        return Response("Image host not allowed", status_code=403, headers=CORS_HEADERS)
+
+    headers = dict(IMAGE_PROXY_HEADERS)
+    if referer:
+        headers["Referer"] = referer
+
+    try:
+        if curl_requests is not None:
+            upstream = curl_requests.get(
+                url,
+                headers=headers,
+                timeout=PROXY_READ_TIMEOUT_SECONDS,
+                impersonate="chrome124",
+            )
+        else:
+            upstream = session.get(url, headers=headers, timeout=PROXY_REQUEST_TIMEOUT)
+    except Exception as exc:
+        return Response(f"Image proxy failed: {exc}", status_code=502, headers=CORS_HEADERS)
+
+    if upstream.status_code >= 400:
+        return Response(
+            f"Image request failed: {upstream.status_code}",
+            status_code=upstream.status_code,
+            headers=CORS_HEADERS,
+        )
+
+    content_type = upstream.headers.get("Content-Type") or mimetypes.guess_type(urlparse(url).path)[0] or "image/jpeg"
+    if not content_type.split(";", 1)[0].strip().lower().startswith("image/"):
+        return Response("Not an image", status_code=415, headers=CORS_HEADERS)
+
+    resize_width = _bounded_int(width, 1, 1920)
+    resize_height = _bounded_int(height, 1, 1920)
+    resize_quality = _bounded_int(quality, 1, 95)
+    content, content_type = _resize_image_content(
+        upstream.content,
+        content_type,
+        width=resize_width,
+        height=resize_height,
+        quality=resize_quality,
+    )
+    if content is None:
+        return Response("Image resize support is not installed", status_code=503, headers=CORS_HEADERS)
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers=_response_headers({
+            "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+        }),
+    )
 
 
 def _url_path(url):

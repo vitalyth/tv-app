@@ -11,6 +11,7 @@ export type TopProgramPanel = {
     channelName: string;
     description: string;
     image: string;
+    imageFallback?: string;
     isLive: boolean;
     subtitle: string;
     timeRange: string;
@@ -108,16 +109,18 @@ const resolveProgramPanel = (channel: Channel, program: Program | null): TopProg
             ? [channel.vodMeta.channelName, channel.vodMeta.seasonName].filter(Boolean).join(" · ")
             : channel.name || "";
 
+    const rawImage =
+        program?.image ||
+        channel.vodMeta?.episodeImage ||
+        channel.vodMeta?.programImage ||
+        channel.playerLogo ||
+        channel.logo;
+
     return {
         channelName: channel.vodMeta?.channelName || channel.name || "",
         description,
-        image: getDetailImageSrc(
-            program?.image ||
-            channel.vodMeta?.episodeImage ||
-            channel.vodMeta?.programImage ||
-            channel.playerLogo ||
-            channel.logo
-        ),
+        image: getDetailImageSrc(rawImage),
+        imageFallback: resolveImageSrc(rawImage),
         isLive: Boolean(channel.type !== "vod" && program),
         subtitle,
         timeRange: formatTimeRange(program),
@@ -189,12 +192,27 @@ export function TopProgramCard({
     onClose,
     panel,
 }: TopProgramCardProps) {
+    const [imageSrc, setImageSrc] = useState(panel.image);
+
+    useEffect(() => {
+        setImageSrc(panel.image);
+    }, [panel.image]);
+
+    const handleImageError = () => {
+        if (panel.imageFallback && imageSrc !== panel.imageFallback) {
+            setImageSrc(panel.imageFallback);
+            return;
+        }
+
+        setImageSrc("");
+    };
+
     return (
         <aside dir="rtl" className={`top-program-card ${className}`}>
-            {panel.image && (
+            {imageSrc && (
                 <>
-                    <img src={panel.image} alt="" className="top-program-card__image-fill" loading="lazy" />
-                    <img src={panel.image} alt="" className="top-program-card__image-main" loading="lazy" />
+                    <img src={imageSrc} alt="" className="top-program-card__image-fill" loading="lazy" onError={handleImageError} />
+                    <img src={imageSrc} alt="" className="top-program-card__image-main" loading="lazy" onError={handleImageError} />
                 </>
             )}
             <div className="top-program-card__scrim" />
