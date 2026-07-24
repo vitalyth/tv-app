@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "@/lib/api"
 import { type Channel } from "@/lib/channels-data"
-import { getVodProgress, saveVodProgress, shouldResumeVodProgress } from "@/lib/vod-progress"
+import { getVodProgress, getVodProgressKey, saveVodProgress, shouldResumeVodProgress } from "@/lib/vod-progress"
 
 const CAST_SDK_SRC = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"
 const DEFAULT_RECEIVER_APP_ID = "CC1AD845"
@@ -336,7 +336,7 @@ export function useGoogleCast({
         request.customData = mediaInfo.customData
 
         if (channel.type === "vod") {
-            const savedProgress = getVodProgress(channel.id)
+            const savedProgress = getVodProgress(getVodProgressKey(channel))
             const resumeTime = savedProgress?.currentTime ?? 0
             const duration = savedProgress?.duration ?? 0
 
@@ -371,7 +371,7 @@ export function useGoogleCast({
 
                 const currentTime = currentMedia.getEstimatedTime?.() ?? 0
                 const duration = currentMedia.media?.duration ?? 0
-                saveVodProgress(channel.id, currentTime, duration)
+                saveVodProgress(getVodProgressKey(channel), currentTime, duration)
                 lastVodProgressSaveRef.current = now
             }
 

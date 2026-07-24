@@ -964,7 +964,28 @@ def get_reshet_vod_series_details(
             (program_id,),
         ).fetchone()
         if not program:
-            return None
+            try:
+                _with_retries(lambda: _scan_program(con, program_id, with_streams=False))
+            except Exception as ex:
+                error = error or str(ex)
+
+            program = con.execute(
+                """
+                SELECT
+                    p.*,
+                    COUNT(DISTINCT s.season_id) AS season_count,
+                    COUNT(DISTINCT e.id) AS episode_count,
+                    COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count
+                FROM reshet_programs p
+                LEFT JOIN reshet_seasons s ON s.program_id = p.id
+                LEFT JOIN reshet_episodes e ON e.program_id = p.id
+                WHERE p.id = ?
+                GROUP BY p.id
+                """,
+                (program_id,),
+            ).fetchone()
+            if not program:
+                return None
 
         if refresh or not int(program["episode_count"] or 0):
             try:

@@ -427,7 +427,8 @@ export default function CustomPlayerControls({
       // Ignore seekable read errors.
     }
 
-    const liveMode = liveTrackerLive === true || !hasFiniteDuration;
+    const liveMode =
+      channel?.type !== "vod" && (liveTrackerLive === true || !hasFiniteDuration);
 
     const safeSeekStart = Number.isFinite(nextSeekStart) ? nextSeekStart : 0;
     const safeSeekEnd = Number.isFinite(nextSeekEnd) ? nextSeekEnd : 0;
@@ -607,6 +608,7 @@ export default function CustomPlayerControls({
 
   const goLive = () => {
     if (!player || player.isDisposed?.()) return;
+    if (channel?.type === "vod") return;
 
     try {
       player.liveTracker?.seekToLiveEdge?.();

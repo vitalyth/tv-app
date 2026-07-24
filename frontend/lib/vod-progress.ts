@@ -1,5 +1,7 @@
 "use client";
 
+import { type Channel } from "@/lib/channels-data";
+
 const VOD_PROGRESS_KEY = "vod_progress";
 const VOD_PROGRESS_END_THRESHOLD_SECONDS = 30;
 
@@ -37,6 +39,17 @@ const saveProgressMap = (map: VodProgressMap) => {
   }
 };
 
+export const getVodProgressKey = (channel: Pick<Channel, "id" | "module" | "vodProgramId" | "vodSeasonId">) => {
+  return [
+    channel.module || "vod",
+    channel.vodProgramId || "",
+    channel.vodSeasonId || "",
+    channel.id,
+  ]
+    .filter(Boolean)
+    .join(":");
+};
+
 export const saveVodProgress = (
   channelId: string,
   currentTime: number,
@@ -45,6 +58,16 @@ export const saveVodProgress = (
   if (!channelId || !Number.isFinite(currentTime)) return;
 
   const map = loadProgressMap();
+
+  if (
+    Number.isFinite(duration) &&
+    duration > 0 &&
+    duration - currentTime <= VOD_PROGRESS_END_THRESHOLD_SECONDS
+  ) {
+    delete map[channelId];
+    saveProgressMap(map);
+    return;
+  }
 
   map[channelId] = {
     currentTime,

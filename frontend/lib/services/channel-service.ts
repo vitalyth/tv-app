@@ -53,6 +53,18 @@ export const channelService = {
   },
 
   getVodStream(item: any) {
+    if (item?.streamEndpoint) {
+      const endpoint = String(item.streamEndpoint).replace(/^\/api(?=\/)/, "");
+      return apiFetch(endpoint);
+    }
+
+    if (item?.module === "reshet-vod") {
+      const episodeId = item?.episodeId || item?.id || "";
+      if (episodeId) {
+        return apiFetch(`/reshet-vod/stream?episode_id=${encodeURIComponent(episodeId)}`);
+      }
+    }
+
     return apiFetch("/vod_stream", {
       method: "POST",
       headers: {

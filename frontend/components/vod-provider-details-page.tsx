@@ -217,6 +217,7 @@ const episodeToChannel = (
     playerSubtitle: [vodMeta.seasonName, vodMeta.episodeName].filter(Boolean).join(" · "),
     vodProgramId: series.id,
     vodSeasonId: episode.season_id || undefined,
+    streamEndpoint: episode.streamEndpoint,
     vodMeta,
   } as Channel;
 };

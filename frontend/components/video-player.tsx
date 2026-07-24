@@ -13,7 +13,13 @@ import { useCurrentProgram } from "@/hooks/useCurrentProgram";
 import { useGoogleCast } from "@/hooks/useGoogleCast";
 import { useMobileDevice } from "@/hooks/use-mobile-device";
 import CustomPlayerControls from "@/components/custom-player-controls";
-import { getVodProgress, saveVodProgress } from "@/lib/vod-progress";
+import {
+  clearVodProgress,
+  getVodProgress,
+  getVodProgressKey,
+  saveVodProgress,
+  shouldResumeVodProgress,
+} from "@/lib/vod-progress";
 import { type DockedCastControl } from "@/context/player-context";
 import { getDetailImageSrc } from "@/lib/image-urls";
 import "@/styles/video-player.css";
@@ -305,15 +311,17 @@ export function VideoPlayer({
     const player = playerRef.current;
     if (!player || player.isDisposed?.() || !channel) return;
 
-    suppressCastVolumeSyncRef.current = true;;
+    suppressCastVolumeSyncRef.current = true;
     player.volume(preCastVolumeRef.current);
     player.muted(preCastMutedRef.current);
     
     if (channel.type === "vod") {
-      const progress = getVodProgress(channel.id);
+      const progressKey = getVodProgressKey(channel);
+      const progress = getVodProgress(progressKey);
       const resumeTime = progress?.currentTime ?? 0;
+      const duration = progress?.duration ?? 0;
 
-      if (resumeTime > 0) {
+      if (shouldResumeVodProgress(resumeTime, duration)) {
         player.currentTime(resumeTime);
       }
     } else {
@@ -599,11 +607,12 @@ export function VideoPlayer({
       if (!source?.src) return;
 
       const resumeTime = channel.type === "vod" ? player.currentTime?.() ?? 0 : 0;
+      const resumeDuration = channel.type === "vod" ? player.duration?.() ?? 0 : 0;
 
       player.one("loadedmetadata", () => {
-        if (channel.type === "vod" && resumeTime > 0) {
+        if (channel.type === "vod" && shouldResumeVodProgress(resumeTime, resumeDuration)) {
           player.currentTime(resumeTime);
-        } else {
+        } else if (channel.type !== "vod") {
           (player as any).liveTracker?.seekToLiveEdge?.();
         }
 
@@ -626,9 +635,9 @@ export function VideoPlayer({
 
       recoveryAttempts += 1;
 
-      if (channel.type !== "vod") {
-        (player as any).liveTracker?.seekToLiveEdge?.();
-      }
+      if (channel.type === "vod") return;
+
+      (player as any).liveTracker?.seekToLiveEdge?.();
 
       player.play()?.catch?.(() => undefined);
 
@@ -738,7 +747,7 @@ export function VideoPlayer({
         now - lastBufferGrowthAt >= VOD_BUFFER_STALL_MS
       ) {
         lastBufferGrowthAt = now;
-        recoverPlayback();
+        scheduleDelayedLoading();
       }
     };
 
@@ -772,13 +781,15 @@ export function VideoPlayer({
     player.on("loadedmetadata", () => {
       setIsExpanded(false);
       if (channel.type === "vod") {
-        const resumeTime = channel.resumeTime ?? getVodProgress(channel.id)?.currentTime ?? 0;
+        const progressKey = getVodProgressKey(channel);
+        const savedProgress = getVodProgress(progressKey);
+        const resumeTime = channel.resumeTime ?? savedProgress?.currentTime ?? 0;
         const duration = player.duration?.() ?? 0;
-        const canResume =
-          resumeTime > 0 &&
-          (!Number.isFinite(duration) ||
-            duration <= 0 ||
-            duration - resumeTime > VOD_PROGRESS_END_THRESHOLD_SECONDS);
+        const resumeDuration =
+          Number.isFinite(duration) && duration > 0
+            ? duration
+            : savedProgress?.duration ?? 0;
+        const canResume = shouldResumeVodProgress(resumeTime, resumeDuration);
 
         if (canResume) {
           player.currentTime(resumeTime);
@@ -824,7 +835,9 @@ export function VideoPlayer({
       }
 
       scheduleDelayedLoading();
-      schedulePlaybackRecovery();
+      if (channel.type !== "vod") {
+        schedulePlaybackRecovery();
+      }
     };
 
     player.on("waiting", handlePlaybackInterruption);
@@ -842,7 +855,7 @@ export function VideoPlayer({
 
     const saveCurrentVodProgress = () => {
       if (channel.type !== "vod" || player.isDisposed?.()) return;
-      saveVodProgress(channel.id, player.currentTime?.() ?? 0, player.duration?.() ?? 0);
+      saveVodProgress(getVodProgressKey(channel), player.currentTime?.() ?? 0, player.duration?.() ?? 0);
     };
 
     let playbackCompletionTriggered = false;
@@ -851,6 +864,7 @@ export function VideoPlayer({
       if (playbackCompletionTriggered || channel.type !== "vod") return;
       playbackCompletionTriggered = true;
       saveCurrentVodProgress();
+      clearVodProgress(getVodProgressKey(channel));
       onEndedRef.current?.();
     };
 
