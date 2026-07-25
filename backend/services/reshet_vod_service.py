@@ -39,6 +39,23 @@ RESHET_HEADERS = {
     "Referer": f"{RESHET_BASE_URL}/",
 }
 CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[,;|/•·،]+)\s*")
+RESHET_IGNORED_CATEGORY_VALUES = {"1259", "series"}
+RESHET_PROGRAM_CATEGORY_ORDER = (
+    "בידור",
+    "דוקו ותחקירים",
+    "דוקו-ריאליטי",
+    "דרמה",
+    "חדשות 13",
+    "קומדיה",
+    "ריאליטי",
+    "שעשועונים",
+    "תוכניות אוכל",
+    "תכניות אירוח",
+    "תכניות אקטואליה",
+)
+RESHET_PROGRAM_CATEGORY_ORDER_BY_KEY = {
+    category.casefold(): index for index, category in enumerate(RESHET_PROGRAM_CATEGORY_ORDER)
+}
 
 
 @dataclass
@@ -316,6 +333,7 @@ def _program_from_catalog_item(item: dict) -> ReshetProgram | None:
     if not isinstance(item, dict):
         return None
     metas = item.get("metas") if isinstance(item.get("metas"), dict) else {}
+    tags = item.get("tags") if isinstance(item.get("tags"), dict) else {}
     media_type = _clean_text(_meta_value(metas.get("MediaType"))).casefold()
     if media_type == "episode":
         return None
@@ -333,8 +351,11 @@ def _program_from_catalog_item(item: dict) -> ReshetProgram | None:
         description=_program_description_from_item(item),
         url=_program_url_from_item(item, program_id),
         image=_first_image(item.get("images")),
-        program_format=_pick_first_labels(item, ("programFormat", "format", "contentType", "type")),
-        program_genre=_pick_first_labels(item, ("programGenre", "genre", "genres", "category", "categories", "tags")),
+        program_format=_pick_first_labels(item, ("programFormat", "format", "contentType")),
+        program_genre=(
+            _pick_first_labels(tags, ("Genre", "Genres", "genre", "genres"))
+            or _pick_first_labels(item, ("programGenre", "genre", "genres", "category", "categories"))
+        ),
     )
 
 
@@ -390,6 +411,11 @@ def _flatten_label_values(value: object) -> list[str]:
     if isinstance(value, str):
         return [_clean_text(value)]
     if isinstance(value, dict):
+        if isinstance(value.get("objects"), list):
+            labels = []
+            for item in value["objects"]:
+                labels.extend(_flatten_label_values(item))
+            return labels
         labels = []
         for key in ("name", "title", "label", "value", "text"):
             label = _clean_text(value.get(key))
@@ -546,10 +572,23 @@ def _split_program_categories(*values: object) -> list[str]:
         for part in CATEGORY_SPLIT_RE.split(str(value)):
             category = " ".join(part.split())
             key = category.casefold()
-            if category and key not in seen:
+            if category and key not in seen and key not in RESHET_IGNORED_CATEGORY_VALUES:
                 seen.add(key)
                 categories.append(category)
     return categories
+
+
+def _needs_category_refresh(con: sqlite3.Connection) -> bool:
+    row = con.execute(
+        """
+        SELECT 1
+        FROM reshet_programs
+        WHERE TRIM(COALESCE(program_genre, '')) = '1259'
+           OR TRIM(COALESCE(program_format, '')) = '1259'
+        LIMIT 1
+        """
+    ).fetchone()
+    return row is not None
 
 
 def _get_program_categories(con: sqlite3.Connection) -> list[str]:
@@ -565,7 +604,13 @@ def _get_program_categories(con: sqlite3.Connection) -> list[str]:
     for row in rows:
         for category in _split_program_categories(row["program_genre"], row["program_format"]):
             categories_by_key.setdefault(category.casefold(), category)
-    return sorted(categories_by_key.values(), key=str.casefold)
+    return sorted(
+        categories_by_key.values(),
+        key=lambda category: (
+            RESHET_PROGRAM_CATEGORY_ORDER_BY_KEY.get(category.casefold(), 999),
+            category.casefold(),
+        ),
+    )
 
 
 def _normalize_selected_categories(category: object) -> list[str]:
@@ -855,6 +900,11 @@ def get_reshet_vod_series(
                 _with_retries(lambda: _upsert_programs_from_api(con))
             except Exception as ex:
                 error = str(ex)
+        elif _needs_category_refresh(con):
+            try:
+                _with_retries(lambda: _upsert_programs_from_api(con))
+            except Exception as ex:
+                error = error or str(ex)
 
         where_clauses = []
         params: list[object] = []
@@ -898,6 +948,8 @@ def get_reshet_vod_series(
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
                 latest_episode_timestamp IS NULL,
                 latest_episode_timestamp DESC,
+                latest_episode_published IS NULL,
+                latest_episode_published DESC,
                 p.title COLLATE NOCASE
             """,
             params,

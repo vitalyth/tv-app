@@ -223,22 +223,70 @@ def _parse_published_timestamp(value: object) -> float | None:
         return unix_timestamp
 
     normalized = text.replace("Z", "+00:00")
+    normalized = re.sub(r"\s*@\s*", " ", normalized)
+    date_match = re.search(r"\d{1,2}[./]\d{1,2}[./]\d{2,4}(?:\s+\d{1,2}(?::\d{2})?)?", normalized)
+    candidates = [normalized]
+    if date_match:
+        candidates.insert(0, date_match.group(0))
+
     for fmt in (
         "%d.%m.%Y",
+        "%d.%m.%y",
+        "%d.%m.%Y %H",
+        "%d.%m.%y %H",
+        "%d.%m.%Y %H:%M",
+        "%d.%m.%y %H:%M",
         "%d/%m/%Y",
+        "%d/%m/%y",
+        "%d/%m/%Y %H",
+        "%d/%m/%y %H",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%y %H:%M",
         "%Y-%m-%d",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%dT%H:%M:%S%z",
     ):
-        try:
-            return datetime.strptime(normalized, fmt).timestamp()
-        except ValueError:
-            pass
+        for candidate in candidates:
+            try:
+                return datetime.strptime(candidate, fmt).timestamp()
+            except ValueError:
+                pass
 
     try:
         return datetime.fromisoformat(normalized).timestamp()
     except ValueError:
         return None
+
+
+def _backfill_missing_episode_timestamps(con: sqlite3.Connection) -> int:
+    rows = con.execute(
+        """
+        SELECT id, title, published
+        FROM keshet_episodes
+        WHERE published_timestamp IS NULL
+          AND (
+              TRIM(COALESCE(published, '')) != ''
+              OR TRIM(COALESCE(title, '')) != ''
+          )
+        """
+    ).fetchall()
+
+    updated = 0
+    for row in rows:
+        timestamp = _parse_published_timestamp(row["published"]) or _parse_published_timestamp(row["title"])
+        if timestamp is None:
+            continue
+
+        con.execute(
+            "UPDATE keshet_episodes SET published_timestamp = ? WHERE id = ?",
+            (timestamp, row["id"]),
+        )
+        updated += 1
+
+    if updated:
+        con.commit()
+
+    return updated
 
 
 def _normalize_url(url: str, base: str = MAKO_BASE_URL) -> str:
@@ -784,6 +832,7 @@ def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) ->
         image = image or program.image
 
         published = _clean_text(vod.get("date") or vod.get("created") or vod.get("airDate") or vod.get("publishDate"))
+        published_timestamp = _parse_published_timestamp(published) or _parse_published_timestamp(title)
         play_url = f"{MAKO_BASE_URL}/VodPlaylist?vcmid={quote(vcmid)}&videoChannelId={quote(str(video_channel_id))}"
         episodes.append(
             KeshetEpisode(
@@ -796,7 +845,7 @@ def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) ->
                 image=image,
                 play_url=play_url,
                 published=published,
-                published_timestamp=_parse_published_timestamp(published),
+                published_timestamp=published_timestamp,
                 display_order=display_order,
             )
         )
@@ -1007,6 +1056,11 @@ def get_keshet_vod_series(
             try:
                 _with_retries(lambda: _enrich_existing_program_categories(con))
                 categories = _get_program_categories(con)
+            except Exception as ex:
+                error = error or str(ex)
+        if has_programs:
+            try:
+                _backfill_missing_episode_timestamps(con)
             except Exception as ex:
                 error = error or str(ex)
 
