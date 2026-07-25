@@ -75,6 +75,11 @@ const isReshetVodChannel = (channel: VodChannel) => {
     return channel.id === "vod_reshet13" || name === "רשת 13";
 };
 
+const isC14VodChannel = (channel: VodChannel) => {
+    const name = channel.name.trim();
+    return channel.id === "vod_14tv" || channel.module === "c14-vod" || name === "עכשיו 14";
+};
+
 type VodNode = {
     name: string;
     module: string;
@@ -386,6 +391,11 @@ export default function VodPage() {
             return;
         }
 
+        if (isC14VodChannel(channel)) {
+            router.push("/c14-vod");
+            return;
+        }
+
         const nextStack = [toVodNode(channel)];
         setSearchQuery("");
         setNavigationStack(nextStack);
@@ -441,6 +451,12 @@ export default function VodPage() {
         if (item.module === "reshet-vod" && programId) {
             play(itemToChannel(item, stack));
             router.push(`/reshet-vod/${encodeURIComponent(programId)}`);
+            return;
+        }
+
+        if (item.module === "c14-vod" && programId) {
+            play(itemToChannel(item, stack));
+            router.push(`/c14-vod/${encodeURIComponent(programId)}`);
             return;
         }
 

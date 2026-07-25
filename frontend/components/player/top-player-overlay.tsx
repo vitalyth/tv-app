@@ -54,6 +54,10 @@ const resolveChannelLogo = (channel: Channel): string => {
         return "/ch/13.jpg";
     }
 
+    if (channel.module === "c14-vod") {
+        return "/ch/14tv.png";
+    }
+
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {
         return "/ch/vod.jpg";
     }

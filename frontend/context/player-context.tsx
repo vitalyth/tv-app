@@ -22,6 +22,7 @@ import {
 } from "@/lib/services/kan-vod-service";
 import { keshetVodService } from "@/lib/services/keshet-vod-service";
 import { reshetVodService } from "@/lib/services/reshet-vod-service";
+import { c14VodService } from "@/lib/services/c14-vod-service";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then((m) => m.VideoPlayer),
@@ -156,6 +157,17 @@ const getVodProviderSettings = (module: string) => {
             module: "reshet-vod",
             referer: "https://13tv.co.il/",
             vpn: true,
+        };
+    }
+
+    if (module === "c14-vod") {
+        return {
+            category: "c14-vod",
+            channelImage: "/ch/14tv.png",
+            channelName: "ערוץ 14 VOD",
+            module: "c14-vod",
+            referer: "https://vod.c14.co.il/",
+            vpn: false,
         };
     }
 
@@ -304,7 +316,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             autoNextInProgressRef.current ||
             isAutoNextCancelled ||
             !channel ||
-            !["kan-vod", "keshet-vod", "reshet-vod"].includes(channelModule)
+            !["kan-vod", "keshet-vod", "reshet-vod", "c14-vod"].includes(channelModule)
         ) {
             return;
         }
@@ -324,7 +336,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                     ? keshetVodService
                     : channelModule === "reshet-vod"
                         ? reshetVodService
-                        : kanVodService;
+                        : channelModule === "c14-vod"
+                            ? c14VodService
+                            : kanVodService;
             const next = await service.getNextEpisode(channel.id);
             if (next) {
                 const series = await service.getSeriesDetails(next.programId);

@@ -119,6 +119,11 @@ const isReshetVodChannel = (channel: VodChannel) => {
   return channel.id === "vod_reshet13" || name === "רשת 13";
 };
 
+const isC14VodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim();
+  return channel.id === "vod_14tv" || channel.module === "c14-vod" || name === "עכשיו 14";
+};
+
 const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
   const channelNode = stack[0];
   const contentNodes = stack.slice(1).filter((node) => !isVodGroupingNode(node.name));
@@ -316,6 +321,7 @@ const LandingPage = () => {
       { key: "kan", match: isKanVodChannel },
       { key: "keshet", match: isKeshetVodChannel },
       { key: "reshet", match: isReshetVodChannel },
+      { key: "c14", match: isC14VodChannel },
     ];
 
     return wantedChannels
@@ -407,6 +413,11 @@ const LandingPage = () => {
         return;
       }
 
+      if (item.module === "c14-vod" && programId) {
+        router.push(`/c14-vod/${encodeURIComponent(programId)}`);
+        return;
+      }
+
       if (stack.length > 0) {
         const params = new URLSearchParams({
           [VOD_PATH_PARAM]: JSON.stringify(stack),
@@ -435,6 +446,11 @@ const LandingPage = () => {
 
       if (isReshetVodChannel(channel)) {
         router.push("/reshet-vod");
+        return;
+      }
+
+      if (isC14VodChannel(channel)) {
+        router.push("/c14-vod");
         return;
       }
 
