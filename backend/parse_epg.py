@@ -16,7 +16,6 @@ from epg_parsers.walla33 import parse_walla33_epg
 from epg_parsers.kabbalah import parse_kabbalah_epg
 from epg_parsers.hidabroot import parse_hidabroot_epg
 from epg_parsers.kan33 import parse_kan11_epg, parse_kan23_epg, parse_kan33_epg
-from epg_parsers.kan_worldcup import parse_kan_worldcup_epg
 from epg_parsers.mako12 import parse_mako12_epg
 from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.reshet13 import parse_reshet13_epg
@@ -68,7 +67,6 @@ FORMAL_EPG_CHANNEL_IDS = {
     "i24newsfr",
     "i24newsar",
     "ftv",
-    "kan_worldcup",
     *FISHENZON_CHANNEL_IDS,
     *KESHET_THEMATIC_CHANNELS,
     *LOCAL_US_CHANNEL_IDS,
@@ -460,9 +458,6 @@ def main():
                 replace_existing_programs = True
             else:
                 replace_existing_programs = True
-
-        elif args.channel == "kan_worldcup":
-            programs = parse_kan_worldcup_epg()
 
         elif args.channel == "ftv":
             programs = parse_ftv_epg()
@@ -967,23 +962,6 @@ def main():
         if ftv_programs:
             persist_channel_programs("ftv", ftv_programs, output_dir)
             print(f"Stored {len(ftv_programs)} programs for ftv")
-
-        print("\nParsing Kan World Cup from official calendar")
-        try:
-            kan_worldcup_programs = parse_kan_worldcup_epg()
-        except Exception as ex:
-            failed_channels.append("kan_worldcup")
-            print(f"Failed parsing Kan World Cup: {ex}")
-            traceback.print_exc()
-            kan_worldcup_programs = read_existing_channel_programs(output_dir, "kan_worldcup")
-            if not kan_worldcup_programs:
-                kan_worldcup_programs = []
-
-        kan_worldcup_programs = merge_with_existing_channel(output_dir, "kan_worldcup", kan_worldcup_programs)
-        combined_epg["kan_worldcup"] = kan_worldcup_programs
-        if kan_worldcup_programs:
-            persist_channel_programs("kan_worldcup", kan_worldcup_programs, output_dir)
-            print(f"Stored {len(kan_worldcup_programs)} programs for kan_worldcup")
 
         print("\nParsing local US channels from public TV guides")
         for channel_id in LOCAL_US_CHANNEL_IDS:

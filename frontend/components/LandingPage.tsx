@@ -23,11 +23,12 @@ import {
   ContinueWatchingVodCarousel,
   NewVodCarousel,
 } from "@/components/vod-content-carousels";
-import { ChevronLeft, Clapperboard, Play, RotateCcw } from "lucide-react";
+import { getDetailImageSrc, getGridImageSrc, resolveImageSrc } from "@/lib/image-urls";
+import { Clapperboard, Play, RotateCcw } from "lucide-react";
 
 const VOD_RECENT_KEY = "vod_recently_watched";
 const VOD_PATH_PARAM = "path";
-const QUICK_LIVE_CHANNEL_KEYS = ["11", "kan_worldcup", "12", "13", "14", "i24news"];
+const QUICK_LIVE_CHANNEL_KEYS = ["11", "12", "13", "14", "i24news"];
 const LIVE_NOW_LIMIT = 12;
 const RECENT_LIVE_LIMIT = 12;
 
@@ -82,9 +83,7 @@ const saveRecentVodItem = (item: VodItem, stack: VodNode[]) => {
 };
 
 const getVodImageSrc = (logo: string) => {
-  if (!logo) return "/ch/vod.jpg";
-  if (logo.startsWith("http://") || logo.startsWith("https://")) return logo;
-  return `/ch/${logo}`;
+  return resolveImageSrc(logo) || "/ch/vod.jpg";
 };
 
 const isVodGroupingNode = (name?: string) => {
@@ -107,7 +106,17 @@ const isSeasonNode = (name?: string) => {
 
 const isKanVodChannel = (channel: VodChannel) => {
   const name = channel.name.trim();
-  return channel.id === "kan" || name === "כאן 11";
+  return channel.id === "vod_kan11" || channel.id === "kan" || name === "כאן 11";
+};
+
+const isKeshetVodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim();
+  return channel.id === "vod_keshet12" || name === "קשת 12";
+};
+
+const isReshetVodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim();
+  return channel.id === "vod_reshet13" || name === "רשת 13";
 };
 
 const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
@@ -302,7 +311,17 @@ const LandingPage = () => {
       .map(({ channel }) => channel);
   }, [liveChannels]);
 
-  const recommendedVodChannels = useMemo(() => vodChannels.slice(0, 20), [vodChannels]);
+  const recommendedVodChannels = useMemo(() => {
+    const wantedChannels = [
+      { key: "kan", match: isKanVodChannel },
+      { key: "keshet", match: isKeshetVodChannel },
+      { key: "reshet", match: isReshetVodChannel },
+    ];
+
+    return wantedChannels
+      .map(({ match }) => vodChannels.find(match))
+      .filter((channel): channel is VodChannel => Boolean(channel));
+  }, [vodChannels]);
   const recentlyAddedVodItems = useMemo(
     () => vodRecentItems,
     [vodRecentItems]
@@ -378,6 +397,16 @@ const LandingPage = () => {
         return;
       }
 
+      if (item.module === "keshet-vod" && programId) {
+        router.push(`/keshet-vod/${encodeURIComponent(programId)}`);
+        return;
+      }
+
+      if (item.module === "reshet-vod" && programId) {
+        router.push(`/reshet-vod/${encodeURIComponent(programId)}`);
+        return;
+      }
+
       if (stack.length > 0) {
         const params = new URLSearchParams({
           [VOD_PATH_PARAM]: JSON.stringify(stack),
@@ -396,6 +425,16 @@ const LandingPage = () => {
     (channel: VodChannel) => {
       if (isKanVodChannel(channel)) {
         router.push("/kan-vod");
+        return;
+      }
+
+      if (isKeshetVodChannel(channel)) {
+        router.push("/keshet-vod");
+        return;
+      }
+
+      if (isReshetVodChannel(channel)) {
+        router.push("/reshet-vod");
         return;
       }
 
@@ -441,26 +480,19 @@ const LandingPage = () => {
     </div>
   );
 
-  const VodCard = ({ channel, onClick }: { channel: VodChannel; onClick: () => void }) => (
+  const VodLibraryButton = ({ channel, onClick }: { channel: VodChannel; onClick: () => void }) => (
     <button
       type="button"
       onClick={onClick}
-      className="group flex min-h-28 w-full items-center gap-4 rounded-lg border border-border bg-card p-4 text-right transition-colors hover:border-primary/60 hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+      aria-label={`פתח ${channel.name}`}
+      title={channel.name}
+      className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/45 shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition hover:border-white/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white sm:h-12 sm:w-12"
     >
-      <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
-        <img
-          src={getVodImageSrc(channel.logo)}
-          alt=""
-          className="h-full w-full object-contain p-2 transition-transform duration-300 group-hover:scale-105"
-        />
-      </div>
-      <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-base font-semibold text-foreground">{channel.name}</h3>
-          <p className="mt-1 truncate text-xs text-muted-foreground">{channel.module}</p>
-        </div>
-        <ChevronLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-1 group-hover:text-primary" />
-      </div>
+      <img
+        src={getGridImageSrc(getVodImageSrc(channel.logo))}
+        alt=""
+        className="h-8 w-8 rounded-full object-contain transition-transform duration-300 group-hover:scale-105 sm:h-9 sm:w-9"
+      />
     </button>
   );
 
@@ -519,7 +551,7 @@ const LandingPage = () => {
     : [];
   const heroVodMeta = heroItem ? buildVodMeta(heroItem, heroStack) : null;
   const heroImage = heroVodMeta
-    ? getVodImageSrc(heroVodMeta.episodeImage || heroVodMeta.programImage || heroItem?.logo || "")
+    ? getDetailImageSrc(heroVodMeta.episodeImage || heroVodMeta.programImage || heroItem?.logo || "") || "/ch/vod.jpg"
     : "/ch/vod.jpg";
   const getHeroSlideOffset = (index: number) => {
     if (heroItems.length <= 1) return 0;
@@ -561,9 +593,9 @@ const LandingPage = () => {
                 description: item.description,
               }];
               const itemMeta = buildVodMeta(item, itemStack);
-              const image = getVodImageSrc(
+              const image = getDetailImageSrc(
                 itemMeta.episodeImage || itemMeta.programImage || item.logo,
-              );
+              ) || "/ch/vod.jpg";
 
               return (
                 <img
@@ -621,23 +653,48 @@ const LandingPage = () => {
             )}
           </div>
 
-          {quickLiveChannels.length > 0 && (
-            <div className="absolute left-1 top-1 z-10 flex max-w-[calc(100%-0.5rem)] items-center gap-2 overflow-x-auto p-2 scrollbar-hide md:left-2 md:top-2">
-              {quickLiveChannels.map((channel) => (
-                <button
-                  key={channel.id}
-                  type="button"
-                  aria-label={`פתח ${channel.name}`}
-                  onClick={() => handlePlayLiveChannel(channel)}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/35 transition hover:border-white/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white sm:h-12 sm:w-12"
-                >
-                  <img
-                    src={`/ch/${channel.logo}`}
-                    alt={channel.name}
-                    className="h-8 w-8 rounded-full object-contain sm:h-9 sm:w-9"
-                  />
-                </button>
-              ))}
+          {(quickLiveChannels.length > 0 || recommendedVodChannels.length > 0) && (
+            <div className="absolute left-1 top-1 z-10 flex max-w-[calc(100%-0.5rem)] flex-col gap-1.5 rounded-2xl border border-white/10 bg-black/35 p-2 shadow-[0_8px_26px_rgba(0,0,0,0.32)] backdrop-blur-sm md:left-2 md:top-2">
+              {quickLiveChannels.length > 0 && (
+                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2">
+                  <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-white/80 drop-shadow-sm">
+                    שידורים חיים
+                  </span>
+                  <div className="flex min-w-0 items-center gap-2 overflow-x-auto scrollbar-hide">
+                    {quickLiveChannels.map((channel) => (
+                      <button
+                        key={channel.id}
+                        type="button"
+                        aria-label={`פתח ${channel.name}`}
+                        onClick={() => handlePlayLiveChannel(channel)}
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/25 bg-black/35 transition hover:border-white/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white sm:h-12 sm:w-12"
+                      >
+                        <img
+                          src={`/ch/${channel.logo}`}
+                          alt={channel.name}
+                          className="h-8 w-8 rounded-full object-contain sm:h-9 sm:w-9"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {recommendedVodChannels.length > 0 && (
+                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2">
+                  <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-white/80 drop-shadow-sm">
+                    VOD
+                  </span>
+                  <div className="flex min-w-0 items-center gap-2 overflow-x-auto scrollbar-hide">
+                    {recommendedVodChannels.map((channel) => (
+                      <VodLibraryButton
+                        key={channel.id}
+                        channel={channel}
+                        onClick={() => handleOpenVodChannel(channel)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
@@ -706,17 +763,6 @@ const LandingPage = () => {
               getImageSrc={getVodImageSrc}
               onPlay={handleContinueVodItem}
             />
-
-            {recommendedVodChannels.length > 0 && (
-              <section className="space-y-4">
-                <SectionHeader title="ספריות VOD" />
-                <HorizontalCarousel itemClassName={carouselCompactCardClass}>
-                  {recommendedVodChannels.map((channel) => (
-                    <VodCard key={channel.id} channel={channel} onClick={() => handleOpenVodChannel(channel)} />
-                  ))}
-                </HorizontalCarousel>
-              </section>
-            )}
 
             {!hasAnyContent && !hasVodError && !hasLiveError && (
               <section className="mx-auto max-w-md rounded-lg border border-border bg-card p-8 text-center">

@@ -49,6 +49,7 @@ export interface Channel {
   playerSubtitle?: string
   vodProgramId?: string
   vodSeasonId?: string
+  streamEndpoint?: string
   resumeTime?: number
   vodMeta?: VodPlaybackMeta
 }

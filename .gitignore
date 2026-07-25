@@ -29,6 +29,7 @@ backend/profile/
 backend/build/
 backend/cache/
 backend/db/
+db/
 backend/tv_channels.egg-info/
 backend/tv-channels/
 

@@ -9,6 +9,7 @@ import { TopProgramCard, type TopProgramPanel } from "@/components/player/top-pl
 import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 import { useNowSec } from "@/hooks/use-now-sec";
 import { type Channel, type Program } from "@/lib/channels-data";
+import { getDetailImageSrc, resolveImageSrc } from "@/lib/image-urls";
 import { Cast, Clapperboard, X } from "lucide-react";
 
 const getPageTitle = (pathname: string) => {
@@ -16,6 +17,8 @@ const getPageTitle = (pathname: string) => {
     if (pathname.startsWith("/vod")) return "VOD";
     if (pathname.startsWith("/local-series")) return "סדרות";
     if (pathname.startsWith("/kan-vod")) return "כאן VOD";
+    if (pathname.startsWith("/keshet-vod")) return "קשת VOD";
+    if (pathname.startsWith("/reshet-vod")) return "רשת VOD";
     if (pathname.startsWith("/guide")) return "שידורים חיים";
     return "שידורים חיים";
 };
@@ -32,14 +35,6 @@ function formatProgramTimeRange(start: number, end: number): string {
     return `${formatProgramTime(start)} - ${formatProgramTime(end)}`;
 }
 
-function resolvePanelImage(image?: string): string {
-    if (!image) return "";
-    if (image.startsWith("http://") || image.startsWith("https://")) return image;
-    if (image.startsWith("//")) return `https:${image}`;
-    if (image.startsWith("/")) return image;
-    return `/ch/${image}`;
-}
-
 function resolveChannelLogo(channel: Channel | null): string {
     if (!channel) return "";
 
@@ -47,11 +42,19 @@ function resolveChannelLogo(channel: Channel | null): string {
         return "/ch/kan.jpg";
     }
 
+    if (channel.module === "keshet-vod") {
+        return "/ch/mako.png";
+    }
+
+    if (channel.module === "reshet-vod") {
+        return "/ch/13.jpg";
+    }
+
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {
         return "/ch/vod.jpg";
     }
 
-    return resolvePanelImage(channel.logo || "");
+    return resolveImageSrc(channel.logo || "");
 }
 
 function useDesktopSidePanel() {
@@ -73,6 +76,42 @@ function useDesktopSidePanel() {
 function findLiveProgram(channel: Channel | null, nowSec: number): Program | null {
     if (!channel?.programs?.length) return null;
     return channel.programs.find((program) => nowSec >= program.start && nowSec < program.end) ?? null;
+}
+
+function ProgramPanelImage({
+    className,
+    fallbackSrc,
+    src,
+}: {
+    className: string;
+    fallbackSrc?: string;
+    src: string;
+}) {
+    const [imageSrc, setImageSrc] = useState(src);
+
+    useEffect(() => {
+        setImageSrc(src);
+    }, [src]);
+
+    if (!imageSrc) return null;
+
+    return (
+        <img
+            key={`${className}-${imageSrc}`}
+            src={imageSrc}
+            alt=""
+            className={className}
+            loading="lazy"
+            onError={() => {
+                if (fallbackSrc && imageSrc !== fallbackSrc) {
+                    setImageSrc(fallbackSrc);
+                    return;
+                }
+
+                setImageSrc("");
+            }}
+        />
+    );
 }
 
 function ShellContent({
@@ -103,13 +142,14 @@ function ShellContent({
     );
     const panelChannel = programDetails?.channel ?? currentChannel;
     const panelProgram = programDetails?.program ?? liveProgram;
-    const panelImage = resolvePanelImage(
+    const panelRawImage =
         panelProgram?.image ||
         currentChannel?.vodMeta?.episodeImage ||
         currentChannel?.vodMeta?.programImage ||
         currentChannel?.playerLogo ||
-        currentChannel?.logo
-    );
+        currentChannel?.logo;
+    const panelImage = getDetailImageSrc(panelRawImage);
+    const panelImageFallback = resolveImageSrc(panelRawImage);
     const channelLogo = resolveChannelLogo(panelChannel);
     const panelTitle =
         panelProgram?.name ||
@@ -134,6 +174,7 @@ function ShellContent({
         channelName: panelChannel?.name || "",
         description: panelDescription,
         image: panelImage,
+        imageFallback: panelImageFallback,
         isLive: Boolean(currentChannel?.type !== "vod" && panelProgram && nowSec >= panelProgram.start && nowSec < panelProgram.end),
         subtitle: panelSubtitle,
         timeRange: panelTimeRange,
@@ -299,23 +340,15 @@ function ShellContent({
                             <section className={`program-side-panel__hero ${isPlaybackPanel ? "program-side-panel__hero--playback" : ""}`}>
                                 {panelImage && (
                                     <>
-                                        <img
-                                            key={`${panelImage}-fill`}
+                                        <ProgramPanelImage
                                             src={panelImage}
-                                            alt=""
+                                            fallbackSrc={panelImageFallback}
                                             className="program-side-panel__image-fill"
-                                            loading="lazy"
-                                            onLoad={(event) => { (event.currentTarget as HTMLImageElement).style.display = ""; }}
-                                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
                                         />
-                                        <img
-                                            key={`${panelImage}-main`}
+                                        <ProgramPanelImage
                                             src={panelImage}
-                                            alt=""
+                                            fallbackSrc={panelImageFallback}
                                             className={`program-side-panel__image-main ${isLivePlaybackPanel ? "program-side-panel__image-main--live" : ""}`}
-                                            loading="lazy"
-                                            onLoad={(event) => { (event.currentTarget as HTMLImageElement).style.display = ""; }}
-                                            onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }}
                                         />
                                     </>
                                 )}

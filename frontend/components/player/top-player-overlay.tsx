@@ -5,11 +5,13 @@ import { Cast, X } from "lucide-react";
 import { useCurrentProgram } from "@/hooks/useCurrentProgram";
 import { type Channel, type Program } from "@/lib/channels-data";
 import { type DockedCastControl } from "@/context/player-context";
+import { getDetailImageSrc, resolveImageSrc } from "@/lib/image-urls";
 
 export type TopProgramPanel = {
     channelName: string;
     description: string;
     image: string;
+    imageFallback?: string;
     isLive: boolean;
     subtitle: string;
     timeRange: string;
@@ -39,24 +41,24 @@ type TopProgramCardProps = {
     panel: TopProgramPanel;
 };
 
-const resolvePanelImage = (image?: string): string => {
-    if (!image) return "";
-    if (image.startsWith("http://") || image.startsWith("https://")) return image;
-    if (image.startsWith("//")) return `https:${image}`;
-    if (image.startsWith("/")) return image;
-    return `/ch/${image}`;
-};
-
 const resolveChannelLogo = (channel: Channel): string => {
     if (channel.module === "kan-vod") {
         return "/ch/kan.jpg";
+    }
+
+    if (channel.module === "keshet-vod") {
+        return "/ch/mako.png";
+    }
+
+    if (channel.module === "reshet-vod") {
+        return "/ch/13.jpg";
     }
 
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {
         return "/ch/vod.jpg";
     }
 
-    return resolvePanelImage(channel.logo || "");
+    return resolveImageSrc(channel.logo || "");
 };
 
 const formatTime = (ts: number): string => {
@@ -107,16 +109,18 @@ const resolveProgramPanel = (channel: Channel, program: Program | null): TopProg
             ? [channel.vodMeta.channelName, channel.vodMeta.seasonName].filter(Boolean).join(" · ")
             : channel.name || "";
 
+    const rawImage =
+        program?.image ||
+        channel.vodMeta?.episodeImage ||
+        channel.vodMeta?.programImage ||
+        channel.playerLogo ||
+        channel.logo;
+
     return {
         channelName: channel.vodMeta?.channelName || channel.name || "",
         description,
-        image: resolvePanelImage(
-            program?.image ||
-            channel.vodMeta?.episodeImage ||
-            channel.vodMeta?.programImage ||
-            channel.playerLogo ||
-            channel.logo
-        ),
+        image: getDetailImageSrc(rawImage),
+        imageFallback: resolveImageSrc(rawImage),
         isLive: Boolean(channel.type !== "vod" && program),
         subtitle,
         timeRange: formatTimeRange(program),
@@ -188,12 +192,27 @@ export function TopProgramCard({
     onClose,
     panel,
 }: TopProgramCardProps) {
+    const [imageSrc, setImageSrc] = useState(panel.image);
+
+    useEffect(() => {
+        setImageSrc(panel.image);
+    }, [panel.image]);
+
+    const handleImageError = () => {
+        if (panel.imageFallback && imageSrc !== panel.imageFallback) {
+            setImageSrc(panel.imageFallback);
+            return;
+        }
+
+        setImageSrc("");
+    };
+
     return (
         <aside dir="rtl" className={`top-program-card ${className}`}>
-            {panel.image && (
+            {imageSrc && (
                 <>
-                    <img src={panel.image} alt="" className="top-program-card__image-fill" loading="lazy" />
-                    <img src={panel.image} alt="" className="top-program-card__image-main" loading="lazy" />
+                    <img src={imageSrc} alt="" className="top-program-card__image-fill" loading="lazy" onError={handleImageError} />
+                    <img src={imageSrc} alt="" className="top-program-card__image-main" loading="lazy" onError={handleImageError} />
                 </>
             )}
             <div className="top-program-card__scrim" />

@@ -16,6 +16,7 @@ dependencies = [
     "beautifulsoup4",
     "cloudscraper",
     "curl-cffi",
+    "Pillow",
     "yt-dlp",
 ]
 
