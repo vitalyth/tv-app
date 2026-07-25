@@ -5,7 +5,7 @@ import { Play } from "lucide-react";
 
 import { HorizontalCarousel } from "@/components/horizontal-carousel";
 import { type VodItem, type VodPlaybackMeta } from "@/lib/channels-data";
-import { getGridImageSrc } from "@/lib/image-urls";
+import { getVodCardImageSrc } from "@/lib/image-urls";
 import { getVodProgressPercent } from "@/lib/vod-progress";
 
 export type VodCarouselNode = {
@@ -81,7 +81,7 @@ function VodContentCarousel({
             >
               <div className="relative aspect-video overflow-hidden bg-background">
                 <img
-                  src={getGridImageSrc(getImageSrc(meta.episodeImage || meta.programImage || item.logo))}
+                  src={getVodCardImageSrc(getImageSrc(meta.episodeImage || meta.programImage || item.logo))}
                   alt=""
                   className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                 />

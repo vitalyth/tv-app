@@ -20,7 +20,7 @@ import {
     ContinueWatchingVodCarousel,
     NewVodCarousel,
 } from "@/components/vod-content-carousels";
-import { getGridImageSrc, resolveImageSrc } from "@/lib/image-urls";
+import { getVodCardImageSrc, resolveImageSrc } from "@/lib/image-urls";
 
 const VOD_PATH_PARAM = "path";
 const VOD_PLAY_PARAM = "play";
@@ -625,7 +625,7 @@ export default function VodPage() {
                                         >
                                             <div className="relative aspect-video overflow-hidden bg-background">
                                                 <img
-                                                    src={getGridImageSrc(getImageSrc(item.logo))}
+                                                    src={getVodCardImageSrc(getImageSrc(item.logo))}
                                                     alt=""
                                                     className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                                                 />

@@ -2,7 +2,7 @@
 
 import { type ReactNode, type Ref } from "react";
 import { Clapperboard, Play, Search, ChevronLeft } from "lucide-react";
-import { getDetailImageSrc, getGridImageSrc, resolveImageSrc } from "@/lib/image-urls";
+import { getDetailImageSrc, getGridImageSrc, getVodCardImageSrc, resolveImageSrc } from "@/lib/image-urls";
 
 export type VodDetailMetaItem = {
   key: string;
@@ -354,7 +354,7 @@ export function VodEpisodeGrid({
           <div className="relative aspect-video overflow-hidden bg-background">
             {episode.image ? (
               <img
-                src={getGridImageSrc(episode.image)}
+                src={getVodCardImageSrc(episode.image)}
                 alt=""
                 className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
               />

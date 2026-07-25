@@ -9,7 +9,7 @@ import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { getGridImageSrc, getPosterImageSrc } from "@/lib/image-urls";
+import { getPosterImageSrc, getVodCardImageSrc } from "@/lib/image-urls";
 import {
   type VodProviderSeries,
   type VodProviderSeriesResponse,
@@ -25,7 +25,7 @@ const getEpisodeCountText = (count: number) => {
 };
 
 const getSeriesImage = (series: VodProviderSeries, preferPosterImage = false) => (
-  (preferPosterImage ? getPosterImageSrc(series.image) : getGridImageSrc(series.image)) || "/ch/vod.jpg"
+  (preferPosterImage ? getPosterImageSrc(series.image) : getVodCardImageSrc(series.image)) || "/ch/vod.jpg"
 );
 
 export function VodProviderListPage({

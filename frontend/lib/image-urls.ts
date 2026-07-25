@@ -6,9 +6,11 @@ type ImageSize = {
 };
 
 const GRID_IMAGE_SIZE: ImageSize = { width: 96, height: 54 };
+const VOD_CARD_IMAGE_SIZE: ImageSize = { width: 490, height: 276 };
 const DETAIL_IMAGE_SIZE: ImageSize = { width: 1280, height: 720 };
 const POSTER_IMAGE_SIZE: ImageSize = { width: 870, height: 708 };
 const GRID_IMAGE_QUALITY = 50;
+const VOD_CARD_IMAGE_QUALITY = 80;
 const DETAIL_IMAGE_QUALITY = 85;
 const DETAIL_IMAGE_PROXY_HOSTS = new Set([
     "kan.org.il",
@@ -200,6 +202,22 @@ function getDirectSmallImageSrc(src: string): string {
 
 export function getGridImageSrc(image?: string | null): string {
     return getSizedImageSrc(image, GRID_IMAGE_SIZE, GRID_IMAGE_QUALITY);
+}
+
+export function getVodCardImageSrc(image?: string | null): string {
+    const src = resolveImageSrc(image);
+    if (!src || src.startsWith("/")) return src;
+
+    try {
+        const host = new URL(src).hostname.toLowerCase();
+        if (DETAIL_IMAGE_PROXY_HOSTS.has(host)) {
+            return src;
+        }
+    } catch {
+        return src;
+    }
+
+    return getSizedImageSrc(src, VOD_CARD_IMAGE_SIZE, VOD_CARD_IMAGE_QUALITY);
 }
 
 export function getProgramGuideImageSrc(image?: string | null): string {
