@@ -25,8 +25,43 @@ const getEpisodeCountText = (count: number) => {
 };
 
 const getSeriesImage = (series: VodProviderSeries, preferPosterImage = false) => (
-  (preferPosterImage ? getPosterImageSrc(series.image) : getVodCardImageSrc(series.image)) || "/ch/vod.jpg"
+  preferPosterImage ? getPosterImageSrc(series.image) : getVodCardImageSrc(series.image)
 );
+
+function VodProviderSeriesImage({
+  image,
+  title,
+  preferPosterImage,
+}: {
+  image?: string | null;
+  title: string;
+  preferPosterImage: boolean;
+}) {
+  const [hasError, setHasError] = useState(false);
+  const src = image && !hasError ? image : "";
+
+  if (!src) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-muted">
+        <Clapperboard className="h-10 w-10 text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt=""
+      onError={() => setHasError(true)}
+      className={`h-full w-full transition-transform duration-300 group-hover:scale-105 ${
+        preferPosterImage
+          ? "object-cover object-center"
+          : "object-cover object-top"
+      }`}
+      title={title}
+    />
+  );
+}
 
 export function VodProviderListPage({
   title,
@@ -336,21 +371,7 @@ export function VodProviderListPage({
                         preferPosterImages ? "aspect-[3/4]" : "aspect-[2/3]"
                       }`}
                     >
-                      {image ? (
-                        <img
-                          src={image}
-                          alt=""
-                          className={`h-full w-full transition-transform duration-300 group-hover:scale-105 ${
-                            preferPosterImages
-                              ? "object-cover object-center"
-                              : "object-cover object-top"
-                          }`}
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-muted">
-                          <Clapperboard className="h-10 w-10 text-muted-foreground" />
-                        </div>
-                      )}
+                      <VodProviderSeriesImage image={image} title={item.title} preferPosterImage={preferPosterImages} />
                       <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/10 to-transparent" />
                       <div className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-xs text-white">
                         <Play className="h-3.5 w-3.5" />

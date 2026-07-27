@@ -22,6 +22,7 @@ import {
 } from "@/lib/services/kan-vod-service";
 import { keshetVodService } from "@/lib/services/keshet-vod-service";
 import { reshetVodService } from "@/lib/services/reshet-vod-service";
+import { c14VodService } from "@/lib/services/c14-vod-service";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then((m) => m.VideoPlayer),
@@ -159,6 +160,17 @@ const getVodProviderSettings = (module: string) => {
         };
     }
 
+    if (module === "c14-vod") {
+        return {
+            category: "c14-vod",
+            channelImage: "/ch/14tv.png",
+            channelName: "ערוץ 14 VOD",
+            module: "c14-vod",
+            referer: "https://tv.c14.co.il/",
+            vpn: false,
+        };
+    }
+
     return {
         category: "kan-vod",
         channelImage: "/ch/kan.jpg",
@@ -178,6 +190,7 @@ const kanEpisodeToChannel = (
     const episodeName = episode.episodeName || episode.title || `פרק ${episode.id}`;
     const seasonName = getKanSeasonTitle(series, episode.season_id);
     const settings = getVodProviderSettings(module);
+    const playableUrl = episode.streamUrl || episode.playUrl || (settings.module === "c14-vod" ? "" : episode.url);
 
     return {
         id: episode.id,
@@ -185,11 +198,11 @@ const kanEpisodeToChannel = (
         name: series.title,
         logo: settings.channelImage || image,
         category: settings.category,
-        channelID: episode.streamUrl || episode.playUrl || episode.url,
+        channelID: playableUrl,
         module: settings.module,
         mode: 0,
         linkDetails: {
-            link: episode.streamUrl || episode.playUrl || episode.url,
+            link: playableUrl,
             referer: settings.referer,
             manifest_type: "hls",
             vpn: Boolean(settings.vpn),
@@ -304,7 +317,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             autoNextInProgressRef.current ||
             isAutoNextCancelled ||
             !channel ||
-            !["kan-vod", "keshet-vod", "reshet-vod"].includes(channelModule)
+            !["kan-vod", "keshet-vod", "reshet-vod", "c14-vod"].includes(channelModule)
         ) {
             return;
         }
@@ -324,7 +337,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                     ? keshetVodService
                     : channelModule === "reshet-vod"
                         ? reshetVodService
-                        : kanVodService;
+                        : channelModule === "c14-vod"
+                            ? c14VodService
+                            : kanVodService;
             const next = await service.getNextEpisode(channel.id);
             if (next) {
                 const series = await service.getSeriesDetails(next.programId);

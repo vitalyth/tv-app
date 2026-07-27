@@ -41,6 +41,8 @@ export type VodProviderSeason = {
   title: string;
   url: string;
   season_number?: number | null;
+  latest_episode_timestamp?: number | null;
+  latest_episode_published?: string | null;
 };
 
 export type VodProviderEpisode = {
@@ -60,6 +62,8 @@ export type VodProviderEpisode = {
   episodeImage: string;
   streamEndpoint: string;
   published?: string | null;
+  sourceType?: string | null;
+  isCatchup?: boolean;
 };
 
 export type VodProviderSeriesDetails = VodProviderSeries & {

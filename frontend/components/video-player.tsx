@@ -519,6 +519,7 @@ export function VideoPlayer({
 
     const keepLocalPaused = isCastingRef.current;
     const isLocalSeriesStream = activeStreamUrl.includes("/stream/local-series");
+    const isMp4Stream = activeStreamUrl.toLowerCase().split("?")[0].endsWith(".mp4");
     const isLocalSeriesHls =
       isLocalSeriesStream &&
       (activeStreamUrl.toLowerCase().includes(".m3u8") ||
@@ -535,7 +536,7 @@ export function VideoPlayer({
           )}&referer=${encodeURIComponent(referer)}${vpnParam}`,
         );
 
-    const sourceType = isLocalSeriesStream && !isLocalSeriesHls
+    const sourceType = (isLocalSeriesStream && !isLocalSeriesHls) || isMp4Stream
       ? "video/mp4"
       : isDash
         ? "application/dash+xml"

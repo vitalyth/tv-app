@@ -1,5 +1,35 @@
 import { apiFetch } from "@/lib/api-client";
 
+const VOD_STREAM_CACHE_TTL_MS = 3000;
+
+const vodStreamInFlight = new Map<string, Promise<any>>();
+const vodStreamCache = new Map<string, { expiresAt: number; data: any }>();
+
+const dedupeVodStreamRequest = (key: string, request: () => Promise<any>) => {
+  const cached = vodStreamCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve(cached.data);
+  }
+
+  const inFlight = vodStreamInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const promise = request()
+    .then((data) => {
+      vodStreamCache.set(key, {
+        data,
+        expiresAt: Date.now() + VOD_STREAM_CACHE_TTL_MS,
+      });
+      return data;
+    })
+    .finally(() => {
+      vodStreamInFlight.delete(key);
+    });
+
+  vodStreamInFlight.set(key, promise);
+  return promise;
+};
+
 export const channelService = {
   getLiveChannels() {
     return apiFetch("/live_channels");
@@ -55,23 +85,25 @@ export const channelService = {
   getVodStream(item: any) {
     if (item?.streamEndpoint) {
       const endpoint = String(item.streamEndpoint).replace(/^\/api(?=\/)/, "");
-      return apiFetch(endpoint);
+      return dedupeVodStreamRequest(endpoint, () => apiFetch(endpoint));
     }
 
     if (item?.module === "reshet-vod") {
       const episodeId = item?.episodeId || item?.id || "";
       if (episodeId) {
-        return apiFetch(`/reshet-vod/stream?episode_id=${encodeURIComponent(episodeId)}`);
+        const endpoint = `/reshet-vod/stream?episode_id=${encodeURIComponent(episodeId)}`;
+        return dedupeVodStreamRequest(endpoint, () => apiFetch(endpoint));
       }
     }
 
-    return apiFetch("/vod_stream", {
+    const key = `/vod_stream:${item?.module || ""}:${item?.episodeId || item?.id || item?.url || ""}`;
+    return dedupeVodStreamRequest(key, () => apiFetch("/vod_stream", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(item),
-    });
+    }));
   },
 
   getLiveChannel(channel: any) {
