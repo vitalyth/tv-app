@@ -20,6 +20,7 @@ const getPageTitle = (pathname: string) => {
     if (pathname.startsWith("/keshet-vod")) return "קשת VOD";
     if (pathname.startsWith("/reshet-vod")) return "רשת VOD";
     if (pathname.startsWith("/c14-vod")) return "ערוץ 14 VOD";
+    if (pathname.startsWith("/i24-vod")) return "i24NEWS VOD";
     if (pathname.startsWith("/guide")) return "שידורים חיים";
     return "שידורים חיים";
 };
@@ -53,6 +54,10 @@ function resolveChannelLogo(channel: Channel | null): string {
 
     if (channel.module === "c14-vod") {
         return "/ch/14tv.png";
+    }
+
+    if (channel.module === "i24-vod") {
+        return "/ch/i24news.png";
     }
 
     if (channel.module === "local-series" || (channel.type === "vod" && !channel.logo)) {

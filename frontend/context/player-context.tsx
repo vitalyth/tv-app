@@ -23,6 +23,7 @@ import {
 import { keshetVodService } from "@/lib/services/keshet-vod-service";
 import { reshetVodService } from "@/lib/services/reshet-vod-service";
 import { c14VodService } from "@/lib/services/c14-vod-service";
+import { i24VodService } from "@/lib/services/i24-vod-service";
 
 const VideoPlayer = dynamic(
     () => import("@/components/video-player").then((m) => m.VideoPlayer),
@@ -167,6 +168,17 @@ const getVodProviderSettings = (module: string) => {
             channelName: "ערוץ 14 VOD",
             module: "c14-vod",
             referer: "https://tv.c14.co.il/",
+            vpn: false,
+        };
+    }
+
+    if (module === "i24-vod") {
+        return {
+            category: "i24-vod",
+            channelImage: "/ch/i24news.png",
+            channelName: "i24NEWS VOD",
+            module: "i24-vod",
+            referer: "https://www.i24news.tv/",
             vpn: false,
         };
     }
@@ -317,7 +329,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             autoNextInProgressRef.current ||
             isAutoNextCancelled ||
             !channel ||
-            !["kan-vod", "keshet-vod", "reshet-vod", "c14-vod"].includes(channelModule)
+            !["kan-vod", "keshet-vod", "reshet-vod", "c14-vod", "i24-vod"].includes(channelModule)
         ) {
             return;
         }
@@ -339,7 +351,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                         ? reshetVodService
                         : channelModule === "c14-vod"
                             ? c14VodService
-                            : kanVodService;
+                            : channelModule === "i24-vod"
+                                ? i24VodService
+                                : kanVodService;
             const next = await service.getNextEpisode(channel.id);
             if (next) {
                 const series = await service.getSeriesDetails(next.programId);

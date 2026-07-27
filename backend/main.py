@@ -38,6 +38,12 @@ from services.c14_vod_service import (
     get_c14_vod_series_details,
     get_c14_vod_stream,
 )
+from services.i24_vod_service import (
+    get_i24_vod_next_episode,
+    get_i24_vod_series,
+    get_i24_vod_series_details,
+    get_i24_vod_stream,
+)
 import os
 import socket
 from models.schemas import Channel
@@ -242,6 +248,15 @@ def vod_stream(request: Request, item: dict):
 
         if not stream_url and episode_id:
             stream_url = get_c14_vod_stream(episode_id) or ""
+
+        return {"stream": stream_url}
+
+    if item.get("module") == "i24-vod":
+        episode_id = item.get("episodeId") or item.get("id") or ""
+        stream_url = item.get("streamUrl") or ""
+
+        if not stream_url and episode_id:
+            stream_url = get_i24_vod_stream(episode_id) or ""
 
         return {"stream": stream_url}
 
@@ -655,6 +670,62 @@ def c14_vod_details(
 
     if details is None:
         return Response("C14 VOD program not found", status_code=404)
+
+    return details
+
+@app.get("/i24-vod")
+def i24_vod(
+    refresh: bool = False,
+    q: str = "",
+    category: list[str] = Query(default=[]),
+    limit: int = Query(60, ge=1, le=120),
+    offset: int = Query(0, ge=0),
+):
+    return get_i24_vod_series(
+        refresh=refresh,
+        query=q,
+        category=category,
+        limit=limit,
+        offset=offset,
+    )
+
+@app.get("/i24-vod/stream")
+def i24_vod_stream(episode_id: str = Query(..., min_length=1)):
+    stream_url = get_i24_vod_stream(episode_id)
+    if not stream_url:
+        return Response("i24 VOD stream not found", status_code=404)
+
+    return {"stream": stream_url}
+
+@app.get("/i24-vod/next")
+def i24_vod_next(request: Request, episode_id: str = Query(..., min_length=1)):
+    result = get_i24_vod_next_episode(
+        episode_id,
+        api_prefix=get_request_api_prefix(request),
+    )
+    if not result:
+        return Response(status_code=204)
+
+    return result
+
+@app.get("/i24-vod/{program_id}")
+def i24_vod_details(
+    request: Request,
+    program_id: str,
+    refresh: bool = False,
+    with_streams: bool = False,
+    stream_limit: int = 20,
+):
+    details = get_i24_vod_series_details(
+        program_id,
+        api_prefix=get_request_api_prefix(request),
+        refresh=refresh,
+        with_streams=with_streams,
+        stream_limit=stream_limit,
+    )
+
+    if details is None:
+        return Response("i24 VOD program not found", status_code=404)
 
     return details
 

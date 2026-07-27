@@ -211,8 +211,43 @@ def _run_c14_scan(args: argparse.Namespace) -> dict:
     }
 
 
+def _run_i24_scan(args: argparse.Namespace) -> dict:
+    os.environ["I24_VOD_DB_PATH"] = args.db
+    os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
+
+    from services.i24_vod_service import (
+        refresh_i24_vod_catalog,
+        scan_i24_vod_programs_without_episodes,
+    )
+
+    result = refresh_i24_vod_catalog(
+        with_details=not args.catalog_only,
+        limit_programs=args.limit_programs or None,
+        with_streams=args.with_streams,
+        verbose=args.verbose,
+    )
+    ensure_result = None
+    if args.ensure_episodes and not args.catalog_only:
+        ensure_result = scan_i24_vod_programs_without_episodes(
+            limit=args.ensure_episodes_limit,
+            with_streams=args.with_streams,
+            verbose=args.verbose,
+        )
+
+    return_code = result.get("returnCode", 0)
+    if ensure_result and ensure_result.get("returnCode") != 0:
+        return_code = ensure_result["returnCode"]
+
+    return {
+        "provider": "i24",
+        "returnCode": return_code,
+        **result,
+        **({"ensureEpisodes": ensure_result} if ensure_result else {}),
+    }
+
+
 def command_scan(args: argparse.Namespace) -> int:
-    providers = ["kan", "keshet", "reshet", "c14"] if args.provider == "all" else [args.provider]
+    providers = ["kan", "keshet", "reshet", "c14", "i24"] if args.provider == "all" else [args.provider]
     results = []
 
     for provider in providers:
@@ -224,6 +259,8 @@ def command_scan(args: argparse.Namespace) -> int:
             result = _run_reshet_scan(args)
         elif provider == "c14":
             result = _run_c14_scan(args)
+        elif provider == "i24":
+            result = _run_i24_scan(args)
         else:
             raise ValueError(f"Unsupported VOD provider: {provider}")
 
@@ -242,7 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan = sub.add_parser("scan", help="Scan VOD providers into SQLite")
     scan.add_argument(
         "--provider",
-        choices=["kan", "keshet", "reshet", "c14", "all"],
+        choices=["kan", "keshet", "reshet", "c14", "i24", "all"],
         default="all",
         help="Which VOD provider to scan. Default: all.",
     )
