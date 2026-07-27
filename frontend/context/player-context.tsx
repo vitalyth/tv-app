@@ -166,7 +166,7 @@ const getVodProviderSettings = (module: string) => {
             channelImage: "/ch/14tv.png",
             channelName: "ערוץ 14 VOD",
             module: "c14-vod",
-            referer: "https://vod.c14.co.il/",
+            referer: "https://tv.c14.co.il/",
             vpn: false,
         };
     }
@@ -190,6 +190,7 @@ const kanEpisodeToChannel = (
     const episodeName = episode.episodeName || episode.title || `פרק ${episode.id}`;
     const seasonName = getKanSeasonTitle(series, episode.season_id);
     const settings = getVodProviderSettings(module);
+    const playableUrl = episode.streamUrl || episode.playUrl || (settings.module === "c14-vod" ? "" : episode.url);
 
     return {
         id: episode.id,
@@ -197,11 +198,11 @@ const kanEpisodeToChannel = (
         name: series.title,
         logo: settings.channelImage || image,
         category: settings.category,
-        channelID: episode.streamUrl || episode.playUrl || episode.url,
+        channelID: playableUrl,
         module: settings.module,
         mode: 0,
         linkDetails: {
-            link: episode.streamUrl || episode.playUrl || episode.url,
+            link: playableUrl,
             referer: settings.referer,
             manifest_type: "hls",
             vpn: Boolean(settings.vpn),

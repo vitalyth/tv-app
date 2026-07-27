@@ -243,9 +243,6 @@ def vod_stream(request: Request, item: dict):
         if not stream_url and episode_id:
             stream_url = get_c14_vod_stream(episode_id) or ""
 
-        if not stream_url:
-            stream_url = item.get("url") or ""
-
         return {"stream": stream_url}
 
     return {"stream": get_vod_stream(item)}

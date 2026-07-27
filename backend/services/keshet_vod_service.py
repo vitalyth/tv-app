@@ -297,6 +297,20 @@ def _normalize_url(url: str, base: str = MAKO_BASE_URL) -> str:
     return urljoin(base, url)
 
 
+def _is_generic_mako_vod_image(url: str | None) -> bool:
+    if not url:
+        return False
+    normalized = re.sub(r"[^a-z0-9]+", "", url.lower())
+    return "makovod" in normalized
+
+
+def _normalize_image_url(url: str | None, base: str = MAKO_BASE_URL) -> str | None:
+    image = _normalize_url(url or "", base)
+    if not image or _is_generic_mako_vod_image(image):
+        return None
+    return image
+
+
 def _fetch_json(url: str, timeout: int = 30) -> dict:
     response = requests.get(url, headers=MAKO_HEADERS, timeout=timeout)
     response.raise_for_status()
@@ -449,7 +463,7 @@ def _program_from_index_item(item: dict, category_labels: list[str] | None = Non
         title=title,
         description=_clean_text(item.get("altText") or item.get("subtitle")),
         url=page_url,
-        image=_normalize_url(item.get("pic") or "") or None,
+        image=_normalize_image_url(item.get("pic")),
         program_format=_pick_first_labels(
             item,
             ("programFormat", "format", "contentType", "type"),
@@ -544,7 +558,11 @@ def _upsert_program(con: sqlite3.Connection, program: KeshetProgram) -> None:
             title = excluded.title,
             description = excluded.description,
             url = excluded.url,
-            image = excluded.image,
+            image = CASE
+                WHEN excluded.image IS NOT NULL AND excluded.image != '' THEN excluded.image
+                WHEN lower(COALESCE(keshet_programs.image, '')) LIKE '%makovod%' THEN NULL
+                ELSE keshet_programs.image
+            END,
             program_format = excluded.program_format,
             program_genre = excluded.program_genre,
             updated_at = CURRENT_TIMESTAMP
@@ -828,7 +846,7 @@ def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) ->
         pics = vod.get("pics") or []
         image = None
         if pics and isinstance(pics[0], dict):
-            image = _normalize_url(pics[0].get("picUrl") or "") or None
+            image = _normalize_image_url(pics[0].get("picUrl"))
         image = image or program.image
 
         published = _clean_text(vod.get("date") or vod.get("created") or vod.get("airDate") or vod.get("publishDate"))
@@ -987,7 +1005,9 @@ def _scan_program(
     if data.get("seo"):
         seo = data["seo"]
         program.description = program.description or _clean_text(seo.get("description"))
-        program.image = program.image or (_normalize_url(seo.get("image") or "") or None)
+        seo_image = _normalize_image_url(seo.get("image"))
+        if not program.image or _is_generic_mako_vod_image(program.image):
+            program.image = seo_image
         _upsert_program(con, program)
 
     resolved_streams = 0
@@ -1078,8 +1098,8 @@ def get_keshet_vod_series(
             LEFT JOIN keshet_episodes e ON e.program_id = p.id
             {where_sql}
             GROUP BY p.id
+            HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
-                CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
                 latest_episode_timestamp IS NULL,
                 latest_episode_timestamp DESC,
                 latest_episode_published IS NULL,

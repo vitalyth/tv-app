@@ -74,6 +74,7 @@ const episodeToVodItem = (
   config: VodProviderDetailsConfig,
 ): VodItem => {
   const image = getEpisodeImage(series, episode);
+  const playableUrl = episode.streamUrl || episode.playUrl || (config.module === "c14-vod" ? "" : episode.url);
 
   return {
     id: episode.id,
@@ -84,7 +85,7 @@ const episodeToVodItem = (
     mode: 0,
     logo: image,
     module: config.module,
-    url: episode.streamUrl || episode.playUrl || episode.url,
+    url: playableUrl,
     streamUrl: episode.streamUrl,
     playUrl: episode.playUrl,
     moreData: "",
@@ -192,6 +193,7 @@ const episodeToChannel = (
 ): Channel => {
   const vodMeta = buildVodMeta(series, episode, config);
   const image = getEpisodeImage(series, episode);
+  const playableUrl = episode.streamUrl || episode.playUrl || (config.module === "c14-vod" ? "" : episode.url);
 
   return {
     id: episode.id,
@@ -199,11 +201,11 @@ const episodeToChannel = (
     name: series.title,
     logo: config.channelLogo || image,
     category: config.module,
-    channelID: episode.streamUrl || episode.playUrl || episode.url,
+    channelID: playableUrl,
     module: config.module,
     mode: 0,
     linkDetails: {
-      link: episode.streamUrl || episode.playUrl || episode.url,
+      link: playableUrl,
       referer: config.referer,
       manifest_type: "hls",
     },
@@ -269,7 +271,10 @@ export function VodProviderDetailsPage({ config }: { config: VodProviderDetailsC
     if (!series) return [] as Array<[string, VodProviderEpisode[]]>;
 
     const seasonOrder = new Map(
-      series.seasons.map((season, index) => [season.season_id, season.season_number ?? index])
+      series.seasons.map((season, index) => [
+        season.season_id,
+        season.latest_episode_timestamp ?? season.season_number ?? -index,
+      ])
     );
 
     return Object.entries(episodesBySeason).sort(([a], [b]) => {
@@ -431,6 +436,7 @@ export function VodProviderDetailsPage({ config }: { config: VodProviderDetailsC
     title: getEpisodeTitle(episode),
     meta: getEpisodeMetaText(episode),
     description: episode.episodeOverview,
+    badges: episode.isCatchup ? ["Catch-up"] : undefined,
     isPlaying: episode.id === playingEpisodeId,
   }));
 
