@@ -656,21 +656,23 @@ def refresh_i24_vod_catalog(
 
     with _connect() as con:
         for locale in I24_VOD_SCAN_LOCALES:
-            try:
-                shows = _fetch_i24_shows(locale)
-            except Exception as ex:
-                errors.append(f"{locale}: {ex}")
-                shows = []
-
-            fallback_programs: list[dict] = []
-            if not shows and locale in I24_PAGE_IDS_BY_LOCALE:
+            page_programs: list[dict] = []
+            if locale in I24_PAGE_IDS_BY_LOCALE:
                 try:
-                    fallback_programs = _fetch_i24_page_programs(locale)
+                    page_programs = _fetch_i24_page_programs(locale)
                 except Exception as ex:
-                    errors.append(f"{locale}: page fallback {ex}")
-                    fallback_programs = []
+                    errors.append(f"{locale}: page source {ex}")
+                    page_programs = []
 
-            items = shows if shows else fallback_programs
+            shows: list[dict] = []
+            if not page_programs:
+                try:
+                    shows = _fetch_i24_shows(locale)
+                except Exception as ex:
+                    errors.append(f"{locale}: {ex}")
+                    shows = []
+
+            items = page_programs if page_programs else shows
 
             if limit_programs:
                 remaining = max(limit_programs - programs_scanned, 0)
@@ -679,7 +681,7 @@ def refresh_i24_vod_catalog(
                 items = items[:remaining]
 
             for item in items:
-                if fallback_programs and "episodes" in item:
+                if page_programs and "episodes" in item:
                     program = {
                         "id": item["id"],
                         "locale": locale,
