@@ -124,6 +124,11 @@ const isC14VodChannel = (channel: VodChannel) => {
   return channel.id === "vod_14tv" || channel.module === "c14-vod" || name === "עכשיו 14";
 };
 
+const isI24VodChannel = (channel: VodChannel) => {
+  const name = channel.name.trim().toLowerCase();
+  return channel.id === "vod_i24news" || channel.module === "i24-vod" || name === "i24news";
+};
+
 const buildVodMeta = (item: VodItem, stack: VodNode[]): VodPlaybackMeta => {
   const channelNode = stack[0];
   const contentNodes = stack.slice(1).filter((node) => !isVodGroupingNode(node.name));
@@ -322,6 +327,7 @@ const LandingPage = () => {
       { key: "keshet", match: isKeshetVodChannel },
       { key: "reshet", match: isReshetVodChannel },
       { key: "c14", match: isC14VodChannel },
+      { key: "i24", match: isI24VodChannel },
     ];
 
     return wantedChannels
@@ -418,6 +424,11 @@ const LandingPage = () => {
         return;
       }
 
+      if (item.module === "i24-vod" && programId) {
+        router.push(`/i24-vod/${encodeURIComponent(programId)}`);
+        return;
+      }
+
       if (stack.length > 0) {
         const params = new URLSearchParams({
           [VOD_PATH_PARAM]: JSON.stringify(stack),
@@ -451,6 +462,11 @@ const LandingPage = () => {
 
       if (isC14VodChannel(channel)) {
         router.push("/c14-vod");
+        return;
+      }
+
+      if (isI24VodChannel(channel)) {
+        router.push("/i24-vod");
         return;
       }
 

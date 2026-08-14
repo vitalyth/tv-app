@@ -80,6 +80,11 @@ const isC14VodChannel = (channel: VodChannel) => {
     return channel.id === "vod_14tv" || channel.module === "c14-vod" || name === "עכשיו 14";
 };
 
+const isI24VodChannel = (channel: VodChannel) => {
+    const name = channel.name.trim().toLowerCase();
+    return channel.id === "vod_i24news" || channel.module === "i24-vod" || name === "i24news";
+};
+
 type VodNode = {
     name: string;
     module: string;
@@ -103,6 +108,19 @@ const toVodNode = (channel: VodChannel): VodNode => ({
     moreData: "",
     description: "",
 });
+
+const reorderChannelsForVodPage = (channels: VodChannel[]) => {
+    const result = [...channels];
+    const i24Index = result.findIndex((channel) => isI24VodChannel(channel));
+    if (i24Index === -1) return result;
+
+    const i24Channel = result.splice(i24Index, 1)[0];
+    // Find the C14 (channel 14) and insert i24 right after it
+    const c14Index = result.findIndex((channel) => isC14VodChannel(channel));
+    const insertIndex = c14Index !== -1 ? c14Index + 1 : Math.min(14, result.length);
+    result.splice(insertIndex, 0, i24Channel);
+    return result;
+};
 
 const itemToVodNode = (item: VodItem): VodNode => ({
     name: item.name,
@@ -264,14 +282,16 @@ export default function VodPage() {
 
     const filteredChannels = useMemo(() => {
         const query = searchQuery.trim().toLowerCase();
-        if (!query) return channels;
+        const matchingChannels = query
+            ? channels.filter((channel) => {
+                return (
+                    channel.name.toLowerCase().includes(query) ||
+                    channel.module.toLowerCase().includes(query)
+                );
+            })
+            : channels;
 
-        return channels.filter((channel) => {
-            return (
-                channel.name.toLowerCase().includes(query) ||
-                channel.module.toLowerCase().includes(query)
-            );
-        });
+        return reorderChannelsForVodPage(matchingChannels);
     }, [channels, searchQuery]);
 
     const filteredItems = useMemo(() => {
@@ -396,6 +416,11 @@ export default function VodPage() {
             return;
         }
 
+        if (isI24VodChannel(channel)) {
+            router.push("/i24-vod");
+            return;
+        }
+
         const nextStack = [toVodNode(channel)];
         setSearchQuery("");
         setNavigationStack(nextStack);
@@ -457,6 +482,12 @@ export default function VodPage() {
         if (item.module === "c14-vod" && programId) {
             play(itemToChannel(item, stack));
             router.push(`/c14-vod/${encodeURIComponent(programId)}`);
+            return;
+        }
+
+        if (item.module === "i24-vod" && programId) {
+            play(itemToChannel(item, stack));
+            router.push(`/i24-vod/${encodeURIComponent(programId)}`);
             return;
         }
 

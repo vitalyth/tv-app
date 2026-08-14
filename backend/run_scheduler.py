@@ -13,6 +13,7 @@ KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
 KESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("KESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 RESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("RESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 C14_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("C14_VOD_SCAN_LIMIT_PROGRAMS", "40")
+I24_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("I24_VOD_SCAN_LIMIT_PROGRAMS", "40")
 
 
 @dataclass
@@ -160,6 +161,26 @@ def main() -> int:
             ],
             interval_seconds=read_interval(
                 "C14_VOD_SCAN_INTERVAL_SECONDS",
+                read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+            ),
+        ),
+        ScheduledJob(
+            name="i24_vod_scan",
+            command=[
+                python,
+                "scripts/vod_db_scanner.py",
+                "scan",
+                "--provider",
+                "i24",
+                "--db",
+                KAN_VOD_DB_PATH,
+                "--limit-programs",
+                I24_VOD_SCAN_LIMIT_PROGRAMS,
+                "--incremental",
+                "--verbose",
+            ],
+            interval_seconds=read_interval(
+                "I24_VOD_SCAN_INTERVAL_SECONDS",
                 read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
             ),
         ),

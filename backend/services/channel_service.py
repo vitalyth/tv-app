@@ -21,6 +21,7 @@ from services.kan_vod_service import get_kan_vod_recent_episodes
 from services.keshet_vod_service import get_keshet_vod_recent_episodes
 from services.reshet_vod_service import get_reshet_vod_recent_episodes
 from services.c14_vod_service import get_c14_vod_recent_episodes
+from services.i24_vod_service import get_i24_vod_recent_episodes
 from services.vod_recent_common import VodRecentSourceContext
 from services.vod_recent_sources import fetch_direct_vod_recent_items
 
@@ -93,8 +94,8 @@ IDANPLUS_VOD_CHANNELS = [
         "name": "i24news",
         "mode": -1,
         "logo": "i24news.png",
-        "module": "i24news",
-        "url": "",
+        "module": "i24-vod",
+        "url": "/i24-vod",
         "type": "vod",
     },
     {
@@ -1243,6 +1244,64 @@ def _fetch_c14_vod_recent_items(limit: int) -> list[dict]:
     return recent_items
 
 
+def _fetch_i24_vod_recent_items(limit: int) -> list[dict]:
+    recent_items: list[dict] = []
+
+    for index, episode in enumerate(get_i24_vod_recent_episodes(limit)):
+        episode_id = str(episode.get("id") or "")
+        if not episode_id:
+            continue
+
+        title = clean_kodi_label(episode.get("title") or "")
+        description = clean_kodi_label(episode.get("description") or "")
+        program_name = clean_kodi_label(episode.get("program_title") or "")
+        program_description = clean_kodi_label(episode.get("program_description") or "")
+        season_title = clean_kodi_label(episode.get("season_title") or "")
+        published = episode.get("published") or ""
+        source_timestamp = episode.get("published_timestamp") or _parse_aired_timestamp(published)
+        episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
+        program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
+        recent_item = {
+            "id": f"i24-vod:{episode_id}",
+            "episodeId": episode_id,
+            "name": title,
+            "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
+            "streamUrl": episode.get("stream_url") or "",
+            "playUrl": episode.get("play_url") or episode.get("url") or "",
+            "mode": 0,
+            "logo": episode_image or program_image or normalize_vod_image("i24news.png"),
+            "module": "i24-vod",
+            "moreData": "",
+            "description": description,
+            "title": title,
+            "plot": description,
+            "aired": published,
+            "season": "",
+            "episode": episode_id,
+            "programId": episode.get("program_id") or "",
+            "programName": program_name,
+            "programDescription": program_description,
+            "programImage": program_image,
+            "seasonName": season_title,
+            "channelName": "i24NEWS VOD",
+            "channelImage": normalize_vod_image("i24news.png"),
+            "episodeName": title,
+            "episodeDescription": description,
+            "episodeImage": episode_image,
+            "isFolder": False,
+            "isPlayable": True,
+            "sourceTimestamp": source_timestamp,
+            "sourceOrder": index,
+        }
+
+        if _is_vod_recent_placeholder_item(recent_item):
+            continue
+
+        recent_items.append(recent_item)
+
+    return recent_items
+
+
 def _fetch_direct_vod_recent_items(channel: dict, limit: int, use_cache: bool) -> list[dict]:
     if channel["id"] == "vod_kan11":
         return _fetch_kan_vod_recent_items(limit)
@@ -1255,6 +1314,9 @@ def _fetch_direct_vod_recent_items(channel: dict, limit: int, use_cache: bool) -
 
     if channel["id"] == "vod_14tv":
         return _fetch_c14_vod_recent_items(limit)
+
+    if channel["id"] == "vod_i24news":
+        return _fetch_i24_vod_recent_items(limit)
 
     return fetch_direct_vod_recent_items(
         channel,
