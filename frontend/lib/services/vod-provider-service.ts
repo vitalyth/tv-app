@@ -77,6 +77,12 @@ export type VodProviderNextEpisode = {
   episode: VodProviderEpisode;
 };
 
+export type VodProviderCategory = {
+  name: string;
+  image?: string | null;
+  count?: number;
+};
+
 export type VodProviderSeriesResponse = {
   db: string;
   provider?: string;
@@ -89,6 +95,7 @@ export type VodProviderSeriesResponse = {
   category?: string;
   selectedCategories?: string[];
   categories?: string[];
+  categoryOptions?: VodProviderCategory[];
   series: VodProviderSeries[];
   error?: string | null;
 };

@@ -3,6 +3,7 @@ from urllib.parse import urlencode
 from plugin_video_idanplus.resources import main as idan_main
 from models.schemas import Channel
 from services.custom_channel_service import merge_custom_channels
+from services.channel_service import get_channel_logo
 
 
 def remove_api_prefix(url: str) -> str:
@@ -23,7 +24,7 @@ def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
             index=channel["index"],
             name=channel["name"],
             mode=channel["mode"],
-            logo=channel["image"],
+            logo=get_channel_logo(channel),
             category='',
             module=channel["module"],
             channelID=channel["channelID"],

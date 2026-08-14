@@ -613,6 +613,49 @@ def _get_program_categories(con: sqlite3.Connection) -> list[str]:
     )
 
 
+def _get_program_category_options(con: sqlite3.Connection, categories: list[str]) -> list[dict]:
+    category_options = {
+        category.casefold(): {"name": category, "image": None, "count": 0}
+        for category in categories
+    }
+    if not category_options:
+        return []
+
+    rows = con.execute(
+        """
+        SELECT
+            p.program_genre,
+            p.program_format,
+            NULLIF(p.image, '') AS image,
+            MAX(e.published_timestamp) AS latest_episode_timestamp,
+            MAX(NULLIF(e.published, '')) AS latest_episode_published
+        FROM reshet_programs p
+        LEFT JOIN reshet_episodes e ON e.program_id = p.id
+        WHERE TRIM(COALESCE(p.program_genre, '')) != ''
+           OR TRIM(COALESCE(p.program_format, '')) != ''
+        GROUP BY p.id
+        ORDER BY
+            CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
+            latest_episode_timestamp IS NULL,
+            latest_episode_timestamp DESC,
+            latest_episode_published IS NULL,
+            latest_episode_published DESC,
+            p.title COLLATE NOCASE
+        """
+    ).fetchall()
+
+    for row in rows:
+        for category in _split_program_categories(row["program_genre"], row["program_format"]):
+            option = category_options.get(category.casefold())
+            if not option:
+                continue
+            option["count"] += 1
+            if not option["image"] and row["image"]:
+                option["image"] = row["image"]
+
+    return [category_options[category.casefold()] for category in categories]
+
+
 def _normalize_selected_categories(category: object) -> list[str]:
     values = category if isinstance(category, (list, tuple)) else [category]
     categories: list[str] = []
@@ -977,6 +1020,7 @@ def get_reshet_vod_series(
             "category": ",".join(selected_categories),
             "selectedCategories": selected_categories,
             "categories": categories,
+            "categoryOptions": _get_program_category_options(con, categories),
             "series": [_program_to_dict(row) for row in rows],
             "error": error,
         }

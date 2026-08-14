@@ -9,8 +9,9 @@ import { DebouncedSearchInput } from "@/components/debounced-search-input";
 import { PageMain } from "@/components/page-main";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { getPosterImageSrc, getVodCardImageSrc } from "@/lib/image-urls";
+import { getGridImageSrc, getPosterImageSrc, getVodCardImageSrc } from "@/lib/image-urls";
 import {
+  type VodProviderCategory,
   type VodProviderSeries,
   type VodProviderSeriesResponse,
   type VodProviderService,
@@ -27,6 +28,23 @@ const getEpisodeCountText = (count: number) => {
 const getSeriesImage = (series: VodProviderSeries, preferPosterImage = false) => (
   preferPosterImage ? getPosterImageSrc(series.image) : getVodCardImageSrc(series.image)
 );
+
+function CategoryImage({
+  image,
+  className = "h-8 w-8 rounded-md",
+}: {
+  image?: string | null;
+  className?: string;
+}) {
+  const src = getGridImageSrc(image);
+  if (!src) return null;
+
+  return (
+    <span className={`${className} shrink-0 overflow-hidden border border-border bg-background`}>
+      <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+    </span>
+  );
+}
 
 function VodProviderSeriesImage({
   image,
@@ -77,7 +95,7 @@ export function VodProviderListPage({
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<VodProviderCategory[]>([]);
   const [categorySearch, setCategorySearch] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -107,10 +125,13 @@ export function VodProviderListPage({
   });
 
   const visibleSeries = useMemo(() => pages?.flatMap((page) => page.series || []) || [], [pages]);
-  const categories = useMemo(
-    () => pages?.find((page) => page.categories?.length)?.categories || [],
-    [pages]
-  );
+  const categories = useMemo(() => {
+    const pageWithOptions = pages?.find((page) => page.categoryOptions?.length);
+    if (pageWithOptions?.categoryOptions?.length) return pageWithOptions.categoryOptions;
+
+    const pageWithCategories = pages?.find((page) => page.categories?.length);
+    return (pageWithCategories?.categories || []).map((name) => ({ name }));
+  }, [pages]);
   const lastPage = pages?.[pages.length - 1];
   const hasMore = Boolean(lastPage?.hasMore);
   const preferPosterImages = providerPath === "reshet-vod";
@@ -149,8 +170,16 @@ export function VodProviderListPage({
   const filteredCategories = useMemo(() => {
     const normalizedSearch = categorySearch.trim().toLocaleLowerCase("he");
     if (!normalizedSearch) return availableCategories;
-    return availableCategories.filter((category) => category.toLocaleLowerCase("he").includes(normalizedSearch));
+    return availableCategories.filter((category) => category.name.toLocaleLowerCase("he").includes(normalizedSearch));
   }, [availableCategories, categorySearch]);
+
+  const categoryImageByName = useMemo(() => {
+    return new Map(
+      availableCategories
+        .filter((category) => category.image)
+        .map((category) => [category.name.toLocaleLowerCase("he"), category.image])
+    );
+  }, [availableCategories]);
 
   const categoryLabel = useMemo(() => {
     if (selectedCategories.length === 0) return "כל הקטגוריות";
@@ -193,6 +222,16 @@ export function VodProviderListPage({
         ? current.filter((item) => item !== category)
         : [...current, category]
     ));
+  };
+
+  const getGenreImage = (genre?: string | null) => {
+    if (!genre) return "";
+    return genre
+      .split(/[,\u2022|/]/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => categoryImageByName.get(part.toLocaleLowerCase("he")))
+      .find(Boolean) || "";
   };
 
   return (
@@ -282,6 +321,7 @@ export function VodProviderListPage({
                           title={`הסר ${category}`}
                         >
                           <X className="h-3 w-3 shrink-0" />
+                          <CategoryImage image={getGenreImage(category)} className="h-5 w-5 rounded-full" />
                           <span className="truncate">{category}</span>
                         </button>
                       ))}
@@ -291,21 +331,22 @@ export function VodProviderListPage({
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {filteredCategories.length > 0 ? (
                     filteredCategories.map((category, index) => {
-                      const checked = selectedCategories.includes(category);
+                      const checked = selectedCategories.includes(category.name);
                       const categoryId = `${providerPath}-category-${index}`;
                       return (
                         <div
-                          key={category}
+                          key={category.name}
                           className="flex min-h-12 w-full items-center gap-3 rounded-md px-2 py-2 text-right text-base transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary sm:min-h-10 sm:gap-2 sm:text-sm"
                         >
                           <Checkbox
                             id={categoryId}
                             checked={checked}
-                            onCheckedChange={() => toggleCategory(category)}
+                            onCheckedChange={() => toggleCategory(category.name)}
                             className="size-5 sm:size-4"
                           />
+                          <CategoryImage image={category.image} />
                           <label htmlFor={categoryId} className="min-w-0 flex-1 cursor-pointer truncate">
-                            {category}
+                            {category.name}
                           </label>
                         </div>
                       );
@@ -390,7 +431,8 @@ export function VodProviderListPage({
                         </p>
                       ) : null}
                       {item.program_genre ? (
-                        <div className="mt-3 inline-flex max-w-full rounded-full border border-border bg-background/60 px-2 py-1 text-[11px] text-muted-foreground">
+                        <div className="mt-3 inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-background/60 px-2 py-1 text-[11px] text-muted-foreground">
+                          <CategoryImage image={getGenreImage(item.program_genre)} className="h-5 w-5 rounded-full" />
                           <span className="truncate">{item.program_genre}</span>
                         </div>
                       ) : null}

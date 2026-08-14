@@ -25,6 +25,13 @@ from services.i24_vod_service import get_i24_vod_recent_episodes
 from services.vod_recent_common import VodRecentSourceContext
 from services.vod_recent_sources import fetch_direct_vod_recent_items
 
+CHANNEL_LOGO_FALLBACKS = {
+    "ch_free_comedy": "freetv-comedy.webp",
+    "ch_free_drama": "freetv-drama.webp",
+    "ch_free_music": "freetv-music.webp",
+    "ch_free_food": "freetv-food.webp",
+}
+
 IDANPLUS_VOD_CHANNELS = [
     {
         "id": "vod_kan11",
@@ -281,6 +288,15 @@ def get_category_from_reverse(channel_id):
             return category
     return "general"
 
+
+def get_channel_logo(channel: dict) -> str:
+    channel_id = channel.get("channelID") or channel.get("id") or ""
+    image = str(channel.get("image") or channel.get("logo") or "").strip()
+    if image:
+        return image
+    return CHANNEL_LOGO_FALLBACKS.get(channel_id, "live.jpg")
+
+
 def get_live_channels():
     nowEPG = get_now_epg()
     channels = merge_custom_channels(idan_main.GetUserChannels(type='tv'))
@@ -295,7 +311,7 @@ def get_live_channels():
             index=channel["index"],
             name=channel["name"],
             mode=channel["mode"],
-            logo=channel["image"],
+            logo=get_channel_logo(channel),
             category=get_category_from_reverse(channel["channelID"]),
             module=channel["module"],
             channelID=channel["channelID"],

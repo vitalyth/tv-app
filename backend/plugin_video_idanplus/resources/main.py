@@ -34,7 +34,7 @@ def GetCategoriesList():
 	name = common.GetLabelColor("פודקאסטים", bold=True, color="none")
 	common.addDir(name, '', 13, icon, infos={"title": name})
 	name = common.GetLabelColor("מוזיקה", bold=True, color="none")
-	common.addDir(name, '', 14, icon, infos={"title": name})
+	common.addDir(name, '', 14, common.GetIconFullPath("music.png"), infos={"title": name})
 	name = common.GetLabelColor("הגדרות", bold=True, color="none")
 	common.addDir(name, 'Addon.OpenSettings', 6, icon, infos={"title": name}, moreData=common.AddonID, isFolder=False)
 
