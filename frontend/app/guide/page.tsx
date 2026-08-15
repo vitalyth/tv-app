@@ -111,10 +111,14 @@ export default function GuidePage() {
     }, []);
 
     const channelsWithEpg = useMemo(
-        () => channels.map((channel) => ({
-            ...channel,
-            programs: channel.tvgID ? epgByChannel[channel.tvgID] ?? channel.programs : channel.programs,
-        })),
+        () => channels.map((channel) => {
+            const loadedPrograms = channel.tvgID ? epgByChannel[channel.tvgID] : undefined;
+
+            return {
+                ...channel,
+                programs: loadedPrograms?.length ? loadedPrograms : channel.programs,
+            };
+        }),
         [channels, epgByChannel]
     );
 
