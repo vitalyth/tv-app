@@ -129,6 +129,7 @@ export function VideoPlayer({
     channel?.type === "vod"
       ? "טוען את הפרק..."
       : "טוען את הערוץ...";
+  const shouldKeepExpandedForVod = channel?.type === "vod" && isExpanded;
 
   const setPlayerLoading = useCallback((value: boolean) => {
     setIsLoading((current) => (current === value ? current : value));
@@ -221,8 +222,10 @@ export function VideoPlayer({
     };
   }, [clearLoadingTimer, clearOverlayTimer]);
 
-  const resetViewMode = useCallback(() => {
-    setIsExpanded(false);
+  const resetViewMode = useCallback((options?: { keepExpanded?: boolean }) => {
+    if (!options?.keepExpanded) {
+      setIsExpanded(false);
+    }
     setIsFullscreen(document.fullscreenElement === containerRef.current);
     showControls();
   }, [showControls]);
@@ -442,7 +445,9 @@ export function VideoPlayer({
     setPlayerInstance(null);
     restoreExpandedAfterFullscreenRef.current = false;
     lastVodProgressSaveRef.current = 0;
-    setIsExpanded(false);
+    if (!shouldKeepExpandedForVod) {
+      setIsExpanded(false);
+    }
     setAutoNextCountdown(null);
     showControls();
 
@@ -478,7 +483,9 @@ export function VideoPlayer({
     setHasError(false);
     setPlayerLoading(true);
     clearLoadingTimer();
-    setIsExpanded(false);
+    if (!shouldKeepExpandedForVod) {
+      setIsExpanded(false);
+    }
     showControls();
 
     if (isCasting) {
@@ -758,7 +765,7 @@ export function VideoPlayer({
     );
 
     player.ready(() => {
-      resetViewMode();
+      resetViewMode({ keepExpanded: shouldKeepExpandedForVod });
 
       if (isCastingRef.current) {
         pauseLocalPlayerForCasting(player);
@@ -775,12 +782,16 @@ export function VideoPlayer({
     });
 
     player.on("loadstart", () => {
-      setIsExpanded(false);
+      if (!shouldKeepExpandedForVod) {
+        setIsExpanded(false);
+      }
       showControls();
     });
 
     player.on("loadedmetadata", () => {
-      setIsExpanded(false);
+      if (!shouldKeepExpandedForVod) {
+        setIsExpanded(false);
+      }
       if (channel.type === "vod") {
         const progressKey = getVodProgressKey(channel);
         const savedProgress = getVodProgress(progressKey);

@@ -193,6 +193,14 @@ const getVodProviderSettings = (module: string) => {
     };
 };
 
+const getVodProviderService = (module: string) => {
+    if (module === "keshet-vod") return keshetVodService;
+    if (module === "reshet-vod") return reshetVodService;
+    if (module === "c14-vod") return c14VodService;
+    if (module === "i24-vod") return i24VodService;
+    return kanVodService;
+};
+
 const kanEpisodeToChannel = (
     series: KanVodSeriesDetails,
     episode: KanVodEpisode,
@@ -344,16 +352,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            const service =
-                channelModule === "keshet-vod"
-                    ? keshetVodService
-                    : channelModule === "reshet-vod"
-                        ? reshetVodService
-                        : channelModule === "c14-vod"
-                            ? c14VodService
-                            : channelModule === "i24-vod"
-                                ? i24VodService
-                                : kanVodService;
+            const service = getVodProviderService(channelModule);
             const next = await service.getNextEpisode(channel.id);
             if (next) {
                 const series = await service.getSeriesDetails(next.programId);
@@ -367,6 +366,51 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             autoNextInProgressRef.current = false;
         }
     }, [isAutoNextCancelled, isFullscreen, nextEpisodePreview, play]);
+
+    useEffect(() => {
+        const channel = currentChannel;
+        const channelModule = channel?.module || "";
+        if (
+            !channel ||
+            channel.type !== "vod" ||
+            isAutoNextCancelled ||
+            endedHandlerRef.current ||
+            !["kan-vod", "keshet-vod", "reshet-vod", "c14-vod", "i24-vod"].includes(channelModule)
+        ) {
+            setNextEpisodePreview(null);
+            return;
+        }
+
+        let isActive = true;
+        const service = getVodProviderService(channelModule);
+
+        service.getNextEpisode(channel.id)
+            .then(async (next) => {
+                if (!isActive) return;
+
+                if (!next) {
+                    setNextEpisodePreview(null);
+                    return;
+                }
+
+                const series = await service.getSeriesDetails(next.programId);
+                if (!isActive) return;
+
+                setNextEpisodePreview({
+                    series,
+                    episode: next.episode,
+                });
+            })
+            .catch((error) => {
+                if (!isActive) return;
+                console.error("Failed to preload next VOD episode:", error);
+                setNextEpisodePreview(null);
+            });
+
+        return () => {
+            isActive = false;
+        };
+    }, [currentChannel, isAutoNextCancelled]);
 
     useEffect(() => {
         if (!currentChannel) return;
