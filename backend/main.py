@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from urllib.parse import quote
-from services.channel_service import get_live_channels, get_vod_channels, get_vod_items, get_vod_recent_items
+from services.channel_service import get_live_channels, get_radio_channels, get_vod_channels, get_vod_items, get_vod_recent_items
 from services.epg_service import get_now_epg
 from services.stream_service import get_custom_channel_stream, get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy, handle_image_proxy
@@ -146,6 +146,10 @@ def get_version():
 @app.get('/live_channels')
 def live_channels():
     return get_live_channels()
+
+@app.get('/radio_channels')
+def radio_channels():
+    return get_radio_channels()
 
 @app.get('/vod_channels')
 def vod_channels():

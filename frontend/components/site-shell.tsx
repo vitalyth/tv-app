@@ -22,6 +22,7 @@ const getPageTitle = (pathname: string) => {
     if (pathname.startsWith("/c14-vod")) return "ערוץ 14 VOD";
     if (pathname.startsWith("/i24-vod")) return "i24NEWS VOD";
     if (pathname.startsWith("/guide")) return "שידורים חיים";
+    if (pathname.startsWith("/radio")) return "רדיו";
     return "שידורים חיים";
 };
 

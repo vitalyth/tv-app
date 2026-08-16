@@ -3,11 +3,12 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Clapperboard, Home, Library, Tv, type LucideIcon } from "lucide-react"
+import { Clapperboard, Home, Library, Radio, Tv, type LucideIcon } from "lucide-react"
 
 export const NAV_ITEMS: Array<{ href: string; label: string; icon: LucideIcon }> = [
     { href: "/", label: "בית", icon: Home },
     { href: "/guide", label: "שידורים חיים", icon: Tv },
+    { href: "/radio", label: "רדיו", icon: Radio },
     { href: "/vod", label: "VOD", icon: Clapperboard },
     { href: "/local-series", label: "סדרות", icon: Library },
 ]

@@ -54,6 +54,18 @@ const shouldUseVpnProxy = (channel: Channel) => {
   );
 };
 
+const isRadioAudioStream = (streamUrl: string, channel?: Channel | null) => {
+  if (channel?.type !== "radio") return false;
+
+  const lowerStreamUrl = streamUrl.toLowerCase();
+  return (
+    !lowerStreamUrl.includes(".m3u8") &&
+    !lowerStreamUrl.includes("/hls/") &&
+    !lowerStreamUrl.includes("/livedash/") &&
+    !lowerStreamUrl.endsWith(".mpd")
+  );
+};
+
 type IOSFullscreenVideo = HTMLVideoElement & {
   webkitEnterFullscreen?: () => void;
   webkitExitFullscreen?: () => void;
@@ -109,6 +121,7 @@ export function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [autoNextCountdown, setAutoNextCountdown] = useState<number | null>(null);
+  const isRadioChannel = channel?.type === "radio";
   const shouldHideTopControls = hideTopControls && !isExpanded && !isFullscreen;
 
   onEndedRef.current = onEnded;
@@ -527,6 +540,7 @@ export function VideoPlayer({
     const keepLocalPaused = isCastingRef.current;
     const isLocalSeriesStream = activeStreamUrl.includes("/stream/local-series");
     const isMp4Stream = activeStreamUrl.toLowerCase().split("?")[0].endsWith(".mp4");
+    const isRadioAudio = isRadioAudioStream(activeStreamUrl, channel);
     const isLocalSeriesHls =
       isLocalSeriesStream &&
       (activeStreamUrl.toLowerCase().includes(".m3u8") ||
@@ -543,7 +557,9 @@ export function VideoPlayer({
           )}&referer=${encodeURIComponent(referer)}${vpnParam}`,
         );
 
-    const sourceType = (isLocalSeriesStream && !isLocalSeriesHls) || isMp4Stream
+    const sourceType = isRadioAudio
+      ? "audio/mpeg"
+      : (isLocalSeriesStream && !isLocalSeriesHls) || isMp4Stream
       ? "video/mp4"
       : isDash
         ? "application/dash+xml"
@@ -1041,7 +1057,7 @@ export function VideoPlayer({
       data-mobile-device={isMobileDevice ? "true" : "false"}
       data-touch-device={isTouchDevice ? "true" : "false"}
       className={`
-        relative overflow-hidden bg-black
+        relative overflow-hidden ${isRadioChannel ? "bg-zinc-950" : "bg-black"}
         ${isExpanded && !isFullscreen ? "rounded-none" : "rounded-xl"}
         ${className || ""}
       `}
@@ -1050,17 +1066,47 @@ export function VideoPlayer({
       onTouchStart={showControls}
     >
       <div
-        className="relative w-full h-full bg-black"
+        className={`relative w-full h-full ${isRadioChannel ? "bg-zinc-950" : "bg-black"}`}
         onClick={toggleControls}
         onDoubleClick={handlePlayerDoubleClick}
         dir="ltr"
       >
         <div
           data-vjs-player
-          className={`absolute inset-0 ${isCasting ? "opacity-0 pointer-events-none" : ""}`}
+          className={`absolute inset-0 ${isCasting || isRadioChannel ? "opacity-0 pointer-events-none" : ""}`}
         >
           <div ref={videoRef} className="video-js-container w-full h-full" />
         </div>
+
+        {isRadioChannel && !isCasting && (
+          <div
+            dir="rtl"
+            className="absolute inset-x-0 top-0 bottom-16 flex flex-col items-center justify-center gap-3 px-5 text-white"
+            aria-hidden="true"
+          >
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-lg shadow-black/30 sm:h-24 sm:w-24">
+              {isLoading ? (
+                <div className="flex h-full w-full items-center justify-center bg-primary/20">
+                  <Radio className="h-10 w-10 animate-pulse text-primary" aria-hidden="true" />
+                </div>
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-white p-3">
+                  <img
+                    src={getPlayerImageSrc(channel.playerLogo || channel.logo)}
+                    alt=""
+                    className="h-full w-full object-contain"
+                  />
+                </div>
+              )}
+            </div>
+            <div className={`h-12 max-w-full text-center ${isLoading ? "invisible" : ""}`}>
+              <p className="truncate text-lg font-bold sm:text-xl">
+                {channel.playerTitle || channel.name}
+              </p>
+              <p className="mt-1 text-xs font-medium text-white/60">רדיו חי</p>
+            </div>
+          </div>
+        )}
 
         {isCasting && !isCastConnecting ? (
           <div
@@ -1127,7 +1173,7 @@ export function VideoPlayer({
             player={playerInstance}
             channel={channel}
             currentProgram={currentProgram}
-            show={showOverlay}
+            show={isRadioChannel ? true : showOverlay}
             isExpanded={isExpanded && !isFullscreen}
             isFullscreen={isFullscreen}
             isCasting={isCasting}
@@ -1147,20 +1193,20 @@ export function VideoPlayer({
             }}
             bottomControls={{
               showPlay: true,
-              showSeek: true,
-              showTime: true,
+              showSeek: !isRadioChannel,
+              showTime: !isRadioChannel,
               showVolume: true,
-              showLive: channel.type !== "vod",
-              showQuality: true,
+              showLive: channel.type !== "vod" && !isRadioChannel,
+              showQuality: !isRadioChannel,
               showCast: false,
-              showExpand: true,
-              showFullscreen: true,
+              showExpand: !isRadioChannel,
+              showFullscreen: !isRadioChannel,
             }}
           />
         )}
       </div>
 
-      {isLoading && !hasError && !isCasting && (
+      {isLoading && !hasError && !isCasting && !isRadioChannel && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <div className="text-center space-y-4">
             <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-primary/20 flex items-center justify-center mx-auto animate-pulse overflow-hidden">

@@ -297,6 +297,24 @@ def get_channel_logo(channel: dict) -> str:
     return CHANNEL_LOGO_FALLBACKS.get(channel_id, "live.jpg")
 
 
+def _build_channel(channel: dict, programs: list | None = None) -> Channel:
+    return Channel(
+        id=channel["channelID"],
+        index=channel["index"],
+        name=channel["name"],
+        mode=channel["mode"],
+        logo=get_channel_logo(channel),
+        category=get_category_from_reverse(channel["channelID"]),
+        module=channel["module"],
+        channelID=channel["channelID"],
+        type=channel["type"],
+        linkDetails=channel["linkDetails"],
+        programs=programs or [],
+        tvgID=channel["tvgID"],
+        channelNumber=channel.get("channelNumber"),
+    )
+
+
 def get_live_channels():
     nowEPG = get_now_epg()
     channels = merge_custom_channels(idan_main.GetUserChannels(type='tv'))
@@ -305,26 +323,15 @@ def get_live_channels():
 
     for channel in channels:
         programs = [] if channel['tvgID'] == '' else nowEPG.get(channel['tvgID'], [])
-
-        ch = Channel(
-            id=channel["channelID"],
-            index=channel["index"],
-            name=channel["name"],
-            mode=channel["mode"],
-            logo=get_channel_logo(channel),
-            category=get_category_from_reverse(channel["channelID"]),
-            module=channel["module"],
-            channelID=channel["channelID"],
-            type=channel["type"],
-            linkDetails=channel["linkDetails"],
-            programs=programs,
-            tvgID=channel["tvgID"],
-            channelNumber=channel.get("channelNumber"),
-        )
-
-        results.append(ch)
+        results.append(_build_channel(channel, programs))
 
     return results
+
+
+def get_radio_channels():
+    # Radio currently comes from Idan Plus. Keep this service boundary so more
+    # radio providers can be merged here later, like TV channels.
+    return [_build_channel(channel) for channel in idan_main.GetUserChannels(type='radio')]
 
 def get_vod_channels():
     return IDANPLUS_VOD_CHANNELS

@@ -177,7 +177,23 @@ const isLocalSeriesHlsStream = (streamUrl: string, channel?: Channel) => {
     )
 }
 
+const isRadioAudioStream = (streamUrl: string, channel?: Channel) => {
+    if (channel?.type !== "radio") return false
+
+    const lowerStreamUrl = streamUrl.toLowerCase()
+    return (
+        !lowerStreamUrl.includes(".m3u8") &&
+        !lowerStreamUrl.includes("/hls/") &&
+        !lowerStreamUrl.includes("/livedash/") &&
+        !lowerStreamUrl.endsWith(".mpd")
+    )
+}
+
 const getCastContentType = (castSourceUrl: string, channel: Channel) => {
+    if (isRadioAudioStream(castSourceUrl, channel)) {
+        return "audio/mpeg"
+    }
+
     if (isLocalSeriesHlsStream(castSourceUrl, channel)) {
         return "application/x-mpegURL"
     }
