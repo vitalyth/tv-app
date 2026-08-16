@@ -264,10 +264,7 @@ def _backfill_missing_episode_timestamps(con: sqlite3.Connection) -> int:
         SELECT id, title, published
         FROM keshet_episodes
         WHERE published_timestamp IS NULL
-          AND (
-              TRIM(COALESCE(published, '')) != ''
-              OR TRIM(COALESCE(title, '')) != ''
-          )
+          AND (TRIM(COALESCE(published, '')) != '' OR TRIM(COALESCE(title, '')) != '')
         """
     ).fetchall()
 
@@ -684,6 +681,7 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
             p.program_genre,
             p.program_format,
             NULLIF(p.image, '') AS image,
+            COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
             MAX(e.published_timestamp) AS latest_episode_timestamp,
             MAX(NULLIF(e.published, '')) AS latest_episode_published
         FROM keshet_programs p
@@ -692,8 +690,7 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
            OR TRIM(COALESCE(p.program_format, '')) != ''
         GROUP BY p.id
         ORDER BY
-            latest_episode_timestamp IS NULL,
-            latest_episode_timestamp DESC,
+            latest_episode_sort_key DESC,
             latest_episode_published IS NULL,
             latest_episode_published DESC,
             p.title COLLATE NOCASE
@@ -799,6 +796,7 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["seasonCount"] = int(item.pop("season_count", 0) or 0)
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["latestKanEpisodeId"] = 0
+    item.pop("latest_episode_sort_key", None)
     item.pop("latest_episode_timestamp", None)
     item["latestEpisodePublished"] = item.pop("latest_episode_published", None)
     return item
@@ -1133,6 +1131,7 @@ def get_keshet_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
+                COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
                 MAX(e.published_timestamp) AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published
             FROM keshet_programs p
@@ -1142,8 +1141,7 @@ def get_keshet_vod_series(
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
-                latest_episode_timestamp IS NULL,
-                latest_episode_timestamp DESC,
+                latest_episode_sort_key DESC,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,
                 p.title COLLATE NOCASE
@@ -1333,6 +1331,8 @@ def get_keshet_vod_recent_episodes(limit: int = 10) -> list[dict]:
             JOIN keshet_programs p ON p.id = e.program_id
             LEFT JOIN keshet_seasons s ON s.season_id = e.season_id
             ORDER BY
+                e.published_timestamp IS NULL,
+                e.published_timestamp DESC,
                 CASE WHEN e.published IS NULL OR e.published = '' THEN 1 ELSE 0 END,
                 e.published DESC,
                 e.updated_at DESC,

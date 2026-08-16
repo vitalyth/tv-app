@@ -627,6 +627,7 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
             p.program_genre,
             p.program_format,
             NULLIF(p.image, '') AS image,
+            COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
             MAX(e.published_timestamp) AS latest_episode_timestamp,
             MAX(NULLIF(e.published, '')) AS latest_episode_published
         FROM reshet_programs p
@@ -636,8 +637,7 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
         GROUP BY p.id
         ORDER BY
             CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
-            latest_episode_timestamp IS NULL,
-            latest_episode_timestamp DESC,
+            latest_episode_sort_key DESC,
             latest_episode_published IS NULL,
             latest_episode_published DESC,
             p.title COLLATE NOCASE
@@ -680,6 +680,7 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["seasonCount"] = int(item.pop("season_count", 0) or 0)
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["latestKanEpisodeId"] = 0
+    item.pop("latest_episode_sort_key", None)
     item.pop("latest_episode_timestamp", None)
     item["latestEpisodePublished"] = item.pop("latest_episode_published", None)
     return item
@@ -980,6 +981,7 @@ def get_reshet_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
+                COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
                 MAX(e.published_timestamp) AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published
             FROM reshet_programs p
@@ -989,8 +991,7 @@ def get_reshet_vod_series(
             GROUP BY p.id
             ORDER BY
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
-                latest_episode_timestamp IS NULL,
-                latest_episode_timestamp DESC,
+                latest_episode_sort_key DESC,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,
                 p.title COLLATE NOCASE
