@@ -1,6 +1,7 @@
 import importlib
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import requests
@@ -9,9 +10,10 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from bs4 import BeautifulSoup
-from config import CACHE_DIR
+from config import BASE_DIR, CACHE_DIR
 from plugin_video_idanplus.resources import main as idan_main
 from resources.lib import cache as addon_cache
 from services.epg_service import get_now_epg
@@ -31,6 +33,25 @@ CHANNEL_LOGO_FALLBACKS = {
     "ch_free_music": "freetv-music.webp",
     "ch_free_food": "freetv-food.webp",
 }
+CHANNEL_LOGO_PUBLIC_DIR = BASE_DIR.parent / "frontend" / "public" / "ch"
+IDANPLUS_LOGO_PUBLIC_SUBDIR = "idanplus"
+IDANPLUS_LOGO_CACHE_DIR = CHANNEL_LOGO_PUBLIC_DIR / IDANPLUS_LOGO_PUBLIC_SUBDIR
+IDANPLUS_LOGO_TIMEOUT_SECONDS = 10
+IDANPLUS_LOGO_MAX_BYTES = 3 * 1024 * 1024
+IDANPLUS_LOGO_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+}
+IMAGE_EXTENSION_BY_CONTENT_TYPE = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/svg+xml": ".svg",
+}
+_channel_logo_cache_lock = threading.Lock()
+_channel_logo_memory_cache: dict[str, str] = {}
 
 IDANPLUS_VOD_CHANNELS = [
     {
@@ -289,10 +310,132 @@ def get_category_from_reverse(channel_id):
     return "general"
 
 
+def _is_remote_image(image: str) -> bool:
+    parsed = urlparse(image)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _safe_logo_stem(channel_id: str, image_url: str) -> str:
+    parsed = urlparse(image_url)
+    basename = unquote(os.path.basename(parsed.path)).strip()
+    stem = os.path.splitext(basename)[0] if basename else channel_id
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_")
+    if not stem:
+        stem = channel_id or "channel"
+    return stem[:80]
+
+
+def _logo_extension(image_url: str, content_type: str = "") -> str:
+    parsed = urlparse(image_url)
+    path_extension = os.path.splitext(unquote(parsed.path))[1].lower()
+    if path_extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}:
+        return ".jpg" if path_extension == ".jpeg" else path_extension
+
+    clean_content_type = content_type.split(";", 1)[0].strip().lower()
+    return IMAGE_EXTENSION_BY_CONTENT_TYPE.get(clean_content_type) or mimetypes.guess_extension(clean_content_type) or ".jpg"
+
+
+def _local_logo_relative_path(filename: str) -> str:
+    return f"{IDANPLUS_LOGO_PUBLIC_SUBDIR}/{filename}"
+
+
+def _existing_local_channel_logo(image_url: str) -> str:
+    basename = os.path.basename(unquote(urlparse(image_url).path)).strip()
+    if not basename:
+        return ""
+
+    direct_path = CHANNEL_LOGO_PUBLIC_DIR / basename
+    if direct_path.is_file():
+        return basename
+
+    cached_path = IDANPLUS_LOGO_CACHE_DIR / basename
+    if cached_path.is_file():
+        return _local_logo_relative_path(basename)
+
+    return ""
+
+
+def cache_remote_channel_logo(channel_id: str, image_url: str) -> str:
+    if not _is_remote_image(image_url):
+        return image_url
+
+    cached = _channel_logo_memory_cache.get(image_url)
+    if cached:
+        return cached
+
+    existing = _existing_local_channel_logo(image_url)
+    if existing:
+        _channel_logo_memory_cache[image_url] = existing
+        return existing
+
+    stem = _safe_logo_stem(channel_id, image_url)
+    url_hash = hashlib.sha1(image_url.encode("utf-8")).hexdigest()[:10]
+    cached_filename = f"{stem}-{url_hash}{_logo_extension(image_url)}"
+    cached_path = IDANPLUS_LOGO_CACHE_DIR / cached_filename
+    if cached_path.is_file():
+        local_path = _local_logo_relative_path(cached_filename)
+        _channel_logo_memory_cache[image_url] = local_path
+        return local_path
+
+    with _channel_logo_cache_lock:
+        cached = _channel_logo_memory_cache.get(image_url)
+        if cached:
+            return cached
+
+        if cached_path.is_file():
+            local_path = _local_logo_relative_path(cached_filename)
+            _channel_logo_memory_cache[image_url] = local_path
+            return local_path
+
+        existing = _existing_local_channel_logo(image_url)
+        if existing:
+            _channel_logo_memory_cache[image_url] = existing
+            return existing
+
+        try:
+            response = requests.get(
+                image_url,
+                headers=IDANPLUS_LOGO_HEADERS,
+                timeout=IDANPLUS_LOGO_TIMEOUT_SECONDS,
+                stream=True,
+            )
+            response.raise_for_status()
+
+            content_type = response.headers.get("Content-Type") or ""
+            if not content_type.split(";", 1)[0].strip().lower().startswith("image/"):
+                raise ValueError(f"not an image: {content_type}")
+
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                content.extend(chunk)
+                if len(content) > IDANPLUS_LOGO_MAX_BYTES:
+                    raise ValueError("image is too large")
+
+            extension = _logo_extension(image_url, content_type)
+            filename = f"{stem}-{url_hash}{extension}"
+            IDANPLUS_LOGO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            target_path = IDANPLUS_LOGO_CACHE_DIR / filename
+            tmp_path = target_path.with_suffix(f"{target_path.suffix}.tmp")
+            tmp_path.write_bytes(bytes(content))
+            tmp_path.replace(target_path)
+
+            local_path = _local_logo_relative_path(filename)
+            _channel_logo_memory_cache[image_url] = local_path
+            return local_path
+        except Exception as ex:
+            print(f"Channel logo download failed for {channel_id} ({image_url}): {ex}", flush=True)
+
+    return CHANNEL_LOGO_FALLBACKS.get(channel_id, "live.jpg")
+
+
 def get_channel_logo(channel: dict) -> str:
     channel_id = channel.get("channelID") or channel.get("id") or ""
     image = str(channel.get("image") or channel.get("logo") or "").strip()
     if image:
+        if _is_remote_image(image):
+            return cache_remote_channel_logo(channel_id, image)
         return image
     return CHANNEL_LOGO_FALLBACKS.get(channel_id, "live.jpg")
 
