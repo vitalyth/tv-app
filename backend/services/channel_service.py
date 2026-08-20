@@ -33,9 +33,13 @@ CHANNEL_LOGO_FALLBACKS = {
     "ch_free_music": "freetv-music.webp",
     "ch_free_food": "freetv-food.webp",
 }
-CHANNEL_LOGO_PUBLIC_DIR = BASE_DIR.parent / "frontend" / "public" / "ch"
-IDANPLUS_LOGO_PUBLIC_SUBDIR = "idanplus"
-IDANPLUS_LOGO_CACHE_DIR = CHANNEL_LOGO_PUBLIC_DIR / IDANPLUS_LOGO_PUBLIC_SUBDIR
+CHANNEL_LOGO_PUBLIC_DIR = Path(os.getenv("CHANNEL_LOGO_PUBLIC_DIR", BASE_DIR.parent / "frontend" / "public" / "ch"))
+IDANPLUS_LOGO_DEFAULT_CACHE_DIR = (
+    CHANNEL_LOGO_PUBLIC_DIR
+    if CHANNEL_LOGO_PUBLIC_DIR.exists()
+    else CACHE_DIR / "channel_logos" / "ch"
+)
+IDANPLUS_LOGO_CACHE_DIR = Path(os.getenv("IDANPLUS_LOGO_CACHE_DIR", IDANPLUS_LOGO_DEFAULT_CACHE_DIR))
 IDANPLUS_LOGO_TIMEOUT_SECONDS = 10
 IDANPLUS_LOGO_MAX_BYTES = 3 * 1024 * 1024
 IDANPLUS_LOGO_HEADERS = {
@@ -335,10 +339,6 @@ def _logo_extension(image_url: str, content_type: str = "") -> str:
     return IMAGE_EXTENSION_BY_CONTENT_TYPE.get(clean_content_type) or mimetypes.guess_extension(clean_content_type) or ".jpg"
 
 
-def _local_logo_relative_path(filename: str) -> str:
-    return f"{IDANPLUS_LOGO_PUBLIC_SUBDIR}/{filename}"
-
-
 def _existing_local_channel_logo(image_url: str) -> str:
     basename = os.path.basename(unquote(urlparse(image_url).path)).strip()
     if not basename:
@@ -350,7 +350,7 @@ def _existing_local_channel_logo(image_url: str) -> str:
 
     cached_path = IDANPLUS_LOGO_CACHE_DIR / basename
     if cached_path.is_file():
-        return _local_logo_relative_path(basename)
+        return basename
 
     return ""
 
@@ -370,12 +370,14 @@ def cache_remote_channel_logo(channel_id: str, image_url: str) -> str:
 
     stem = _safe_logo_stem(channel_id, image_url)
     url_hash = hashlib.sha1(image_url.encode("utf-8")).hexdigest()[:10]
-    cached_filename = f"{stem}-{url_hash}{_logo_extension(image_url)}"
+    basename = os.path.basename(unquote(urlparse(image_url).path)).strip()
+    cached_filename = re.sub(r"[^A-Za-z0-9._-]+", "-", basename).strip(".-_") if basename else ""
+    if not cached_filename:
+        cached_filename = f"{stem}-{url_hash}{_logo_extension(image_url)}"
     cached_path = IDANPLUS_LOGO_CACHE_DIR / cached_filename
     if cached_path.is_file():
-        local_path = _local_logo_relative_path(cached_filename)
-        _channel_logo_memory_cache[image_url] = local_path
-        return local_path
+        _channel_logo_memory_cache[image_url] = cached_filename
+        return cached_filename
 
     with _channel_logo_cache_lock:
         cached = _channel_logo_memory_cache.get(image_url)
@@ -383,9 +385,8 @@ def cache_remote_channel_logo(channel_id: str, image_url: str) -> str:
             return cached
 
         if cached_path.is_file():
-            local_path = _local_logo_relative_path(cached_filename)
-            _channel_logo_memory_cache[image_url] = local_path
-            return local_path
+            _channel_logo_memory_cache[image_url] = cached_filename
+            return cached_filename
 
         existing = _existing_local_channel_logo(image_url)
         if existing:
@@ -413,17 +414,15 @@ def cache_remote_channel_logo(channel_id: str, image_url: str) -> str:
                 if len(content) > IDANPLUS_LOGO_MAX_BYTES:
                     raise ValueError("image is too large")
 
-            extension = _logo_extension(image_url, content_type)
-            filename = f"{stem}-{url_hash}{extension}"
+            filename = cached_filename
             IDANPLUS_LOGO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
             target_path = IDANPLUS_LOGO_CACHE_DIR / filename
             tmp_path = target_path.with_suffix(f"{target_path.suffix}.tmp")
             tmp_path.write_bytes(bytes(content))
             tmp_path.replace(target_path)
 
-            local_path = _local_logo_relative_path(filename)
-            _channel_logo_memory_cache[image_url] = local_path
-            return local_path
+            _channel_logo_memory_cache[image_url] = filename
+            return filename
         except Exception as ex:
             print(f"Channel logo download failed for {channel_id} ({image_url}): {ex}", flush=True)
 

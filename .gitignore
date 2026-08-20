@@ -32,7 +32,6 @@ backend/db/
 db/
 backend/tv_channels.egg-info/
 backend/tv-channels/
-frontend/public/ch/idanplus/
 
 # =========================
 # CI / Temp
