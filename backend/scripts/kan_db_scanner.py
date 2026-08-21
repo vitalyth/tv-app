@@ -872,7 +872,88 @@ def normalize_master_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, ""))
 
 
+def normalize_stream_candidate(value: str) -> str:
+    value = (
+        (value or "")
+        .strip()
+        .replace("\\u0026", "&")
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
+    )
+    if value.startswith("https://api.bynetcdn.com/Redirector"):
+        value = value.replace("https://", "http://", 1)
+    return normalize_master_url(value)
+
+
+def extract_redge_stream_from_html(html: str) -> Optional[str]:
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.select("script[type='application/json'][data-redge-config]"):
+        raw_config = script.string or script.get_text() or ""
+        if not raw_config.strip():
+            continue
+
+        try:
+            config = json.loads(raw_config)
+        except json.JSONDecodeError:
+            continue
+
+        file_config = config.get("file") if isinstance(config, dict) else None
+        if isinstance(file_config, dict):
+            for key in ("hls", "dash"):
+                value = file_config.get(key)
+                if value:
+                    return normalize_stream_candidate(str(value))
+
+        for key in ("src", "sourceUrl"):
+            value = config.get(key) if isinstance(config, dict) else None
+            if value:
+                return normalize_stream_candidate(str(value))
+
+        source_urls = config.get("sourceUrls") if isinstance(config, dict) else None
+        if isinstance(source_urls, list):
+            for source in source_urls:
+                if isinstance(source, str) and source:
+                    return normalize_stream_candidate(source)
+                if isinstance(source, dict):
+                    value = source.get("url") or source.get("src")
+                    if value:
+                        return normalize_stream_candidate(str(value))
+
+    return None
+
+
+def extract_schema_stream_from_html(html: str) -> Optional[str]:
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.select("script[type='application/ld+json']"):
+        raw_data = script.string or script.get_text() or ""
+        if not raw_data.strip():
+            continue
+
+        try:
+            data = json.loads(raw_data)
+        except json.JSONDecodeError:
+            continue
+
+        candidates = data if isinstance(data, list) else [data]
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("contentUrl") or item.get("embedUrl")
+            if value:
+                return normalize_stream_candidate(str(value))
+
+    return None
+
+
 def extract_direct_stream_from_html(html: str) -> Optional[str]:
+    redge_stream = extract_redge_stream_from_html(html)
+    if redge_stream:
+        return redge_stream
+
+    schema_stream = extract_schema_stream_from_html(html)
+    if schema_stream:
+        return schema_stream
+
     patterns = [
         r'data-hls-url="([^"]+)"',
         r"data-hls-url='([^']+)'",
@@ -888,15 +969,7 @@ def extract_direct_stream_from_html(html: str) -> Optional[str]:
     for pattern in patterns:
         m = re.search(pattern, html, re.I | re.S)
         if m:
-            value = (
-                m.group(1)
-                .replace("\\u0026", "&")
-                .replace("\\/", "/")
-                .replace("&amp;", "&")
-            )
-            if value.startswith("https://api.bynetcdn.com/Redirector"):
-                value = value.replace("https://", "http://", 1)
-            return normalize_master_url(value)
+            return normalize_stream_candidate(m.group(1))
 
     return None
 
