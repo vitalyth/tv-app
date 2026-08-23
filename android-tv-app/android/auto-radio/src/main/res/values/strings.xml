@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">TV App Radio</string>
+    <string name="radio_root_title">תחנות רדיו</string>
+    <string name="radio_error">לא ניתן לטעון תחנות רדיו כרגע</string>
+    <string name="loading_radio">טוען תחנות רדיו...</string>
+    <string name="retry">נסה שוב</string>
+</resources>
