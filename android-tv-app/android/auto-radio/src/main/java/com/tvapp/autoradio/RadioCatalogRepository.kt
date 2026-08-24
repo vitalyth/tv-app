@@ -1,6 +1,7 @@
 package com.tvapp.autoradio
 
 import android.net.Uri
+import androidx.media3.common.MimeTypes
 import org.json.JSONArray
 import java.io.BufferedReader
 import java.net.HttpURLConnection
@@ -48,10 +49,62 @@ class RadioCatalogRepository(
     }
 
     fun streamUriFor(stationId: String): Uri {
+        directStreamUrlFor(stationId)?.let { return Uri.parse(it) }
+
         return Uri.parse("${baseUrl.trimEnd('/')}/stream")
             .buildUpon()
             .appendQueryParameter("channel_id", stationId)
             .build()
+    }
+
+    fun streamMimeTypeFor(stationId: String): String? {
+        return when (stationId) {
+            "rd_88",
+            "rd_bet",
+            "rd_gimel",
+            "rd_culture",
+            "rd_music",
+            "rd_moreshet",
+            "rd_kankids",
+            "rd_reka",
+            "rd_makan" -> MimeTypes.APPLICATION_MPD
+
+            "rd_100",
+            "rd_sport5",
+            "rd_1064" -> MimeTypes.APPLICATION_M3U8
+
+            "rd_97",
+            "rd_103",
+            "rd_1045",
+            "rd_glz",
+            "rd_glglz" -> MimeTypes.AUDIO_MPEG
+
+            "rd_90",
+            "rd_91",
+            "rd_1015",
+            "rd_102",
+            "rd_102Eilat",
+            "rd_1075",
+            "rd_gly",
+            "rd_fm995" -> MimeTypes.AUDIO_AAC
+
+            else -> null
+        }
+    }
+
+    private fun directStreamUrlFor(stationId: String): String? {
+        return when (stationId) {
+            "rd_90" -> "https://cdn.cybercdn.live/Emtza_Haderech/Live_Audio/icecast.audio"
+            "rd_91" -> "https://cdn.cybercdn.live/Lev_Hamedina/Audio/icecast.audio"
+            "rd_97" -> "https://cdn.cybercdn.live/Darom_97FM/Live/icecast.audio"
+            "rd_101" -> "https://radio.streamgates.net/stream/101fm"
+            "rd_102" -> "https://cdn88.mediacast.co.il/102-tlv-live/102fm_aac/icecast.audio"
+            "rd_102Eilat" -> "https://cdn.cybercdn.live/Eilat_Radio/Live/icecast.audio"
+            "rd_1075" -> "https://1075.livecdn.biz/radiohaifa"
+            "rd_gly" -> "https://cdn.cybercdn.live/Galei_Israel/Live/icecast.audio"
+            "rd_fm995" -> "https://995.livecdn.biz/995fm"
+            else -> null
+        }
     }
 
     private fun parseStations(body: String): List<RadioStation> {

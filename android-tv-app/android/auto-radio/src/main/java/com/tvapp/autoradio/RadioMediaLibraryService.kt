@@ -4,10 +4,13 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -25,8 +28,21 @@ class RadioMediaLibraryService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
 
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider(this).apply {
+                setSmallIcon(R.drawable.ic_notification_radio)
+            }
+        )
+
         repository = RadioCatalogRepository(BuildConfig.RADIO_API_BASE_URL)
         player = ExoPlayer.Builder(this).build().apply {
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                true,
+            )
             setHandleAudioBecomingNoisy(true)
             repeatMode = Player.REPEAT_MODE_OFF
         }
@@ -123,11 +139,14 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
         logo?.let { metadataBuilder.setArtworkUri(resolveArtworkUri(it)) }
 
-        return MediaItem.Builder()
+        val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(id)
             .setUri(repository.streamUriFor(id))
             .setMediaMetadata(metadataBuilder.build())
-            .build()
+
+        repository.streamMimeTypeFor(id)?.let { mediaItemBuilder.setMimeType(it) }
+
+        return mediaItemBuilder.build()
     }
 
     private fun resolveArtworkUri(logo: String): Uri {

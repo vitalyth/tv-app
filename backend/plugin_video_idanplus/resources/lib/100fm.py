@@ -46,7 +46,8 @@ def WatchLive(channelID, name='', iconimage='', quality='best'):
 	link = linkDetails['link']
 	try:
 		playlist = common.OpenURL(linkDetails['ch'], headers={"User-Agent": userAgent}, responseMethod='json')
-		link = playlist['stations'][0]['audio']
+		station = playlist['stations'][0]
+		link = station.get('audioA') or station.get('audio') or link
 	except Exception as ex:
 		xbmc.log(str(ex), xbmc.LOGERROR)
 	final = '{0}|User-Agent={1}'.format(link, userAgent)
