@@ -442,5 +442,125 @@
       "link": "https://ch16israel-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8",
       "manifest_type": "hls"
     }
+  },
+  {
+    "id": "rd_kab_heb",
+    "channelID": "rd_kab_heb",
+    "index": 104,
+    "name": "קבלה לעם - עברית",
+    "mode": 0,
+    "image": "https://kabtv.co.il/wp-content/uploads/2023/11/cropped-KL_Tree_New4-270x270.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "https://icecast.kab.tv/heb.mp3",
+    "linkDetails": {
+      "link": "https://icecast.kab.tv/heb.mp3"
+    }
+  },
+  {
+    "id": "rd_kab_rus",
+    "channelID": "rd_kab_rus",
+    "index": 105,
+    "name": "Каббала ТВ - Русский",
+    "mode": 0,
+    "image": "https://kabtv.co.il/wp-content/uploads/2023/11/cropped-KL_Tree_New4-270x270.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "https://icecast.kab.tv/rus.mp3",
+    "linkDetails": {
+      "link": "https://icecast.kab.tv/rus.mp3"
+    }
+  },
+  {
+    "id": "rd_kol_rega",
+    "channelID": "rd_kol_rega",
+    "index": 109,
+    "name": "קול רגע 96FM",
+    "mode": 0,
+    "image": "https://96fm.co.il/wp-content/uploads/2022/10/cropped-Logo-270x270.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "http://radio.96fm.co.il/96fm",
+    "linkDetails": {
+      "link": "http://radio.96fm.co.il/96fm"
+    }
+  },
+  {
+    "id": "rd_toker",
+    "channelID": "rd_toker",
+    "index": 112,
+    "name": "Toker FM",
+    "mode": 0,
+    "image": "https://toker.fm/_nuxt/logo.B8Y0VrIT.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "http://live.toker.fm:6060",
+    "linkDetails": {
+      "link": "http://live.toker.fm:6060"
+    }
+  },
+  {
+    "id": "rd_joint_blues",
+    "channelID": "rd_joint_blues",
+    "index": 114,
+    "name": "Joint Radio Blues",
+    "mode": 0,
+    "image": "https://www.jointil.com/broadcast/images/logo-joint-radio-blues-03.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "http://radio.jointil.net:9992",
+    "linkDetails": {
+      "link": "http://radio.jointil.net:9992"
+    }
+  },
+  {
+    "id": "rd_100_oldies",
+    "channelID": "rd_100_oldies",
+    "index": 116,
+    "name": "רדיוס 100FM Oldies",
+    "mode": 0,
+    "image": "https://d203uamca1bsc4.cloudfront.net/app/thumbnails/t-oldies.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "http://gb25.streamgates.net/radios-audio/100Oldies/icecast.audio",
+    "linkDetails": {
+      "link": "http://gb25.streamgates.net/radios-audio/100Oldies/icecast.audio"
+    }
+  },
+  {
+    "id": "rd_100_hits",
+    "channelID": "rd_100_hits",
+    "index": 117,
+    "name": "רדיוס 100FM Hits",
+    "mode": 0,
+    "image": "https://d203uamca1bsc4.cloudfront.net/app/thumbnails/t-hits.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "http://gb25.streamgates.net/radios-audio/100Hits/icecast.audio",
+    "linkDetails": {
+      "link": "http://gb25.streamgates.net/radios-audio/100Hits/icecast.audio"
+    }
+  },
+  {
+    "id": "rd_100_israeli",
+    "channelID": "rd_100_israeli",
+    "index": 118,
+    "name": "רדיוס 100FM ישראלי",
+    "mode": 0,
+    "image": "https://d203uamca1bsc4.cloudfront.net/app/thumbnails/t-israeli.png",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "streamUrl": "http://gb25.streamgates.net/radios-audio/100Israeli/icecast.audio",
+    "linkDetails": {
+      "link": "http://gb25.streamgates.net/radios-audio/100Israeli/icecast.audio"
+    }
   }
 ]

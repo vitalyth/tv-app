@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -12,11 +13,25 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import com.google.android.gms.cast.MediaInfo
+import com.google.android.gms.cast.MediaLoadRequestData
+import com.google.android.gms.cast.MediaMetadata as CastMediaMetadata
+import com.google.android.gms.cast.SessionState
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.Session
+import com.google.android.gms.cast.framework.SessionManagerListener
+import com.google.android.gms.cast.framework.SessionTransferCallback
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
+import com.google.android.gms.common.images.WebImage
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import java.text.Normalizer
+import java.util.Locale
 import java.util.concurrent.Executors
 
 class RadioMediaLibraryService : MediaLibraryService() {
@@ -24,6 +39,91 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private lateinit var session: MediaLibrarySession
     private lateinit var repository: RadioCatalogRepository
     private val executor = Executors.newSingleThreadExecutor()
+    private var castContext: CastContext? = null
+    private var castSession: CastSession? = null
+    private var remoteToLocalStation: RadioStation? = null
+    private var remoteClientToStop: RemoteMediaClient? = null
+    private var isRemoteToLocalTransferInProgress = false
+    private var isMovingPlaybackToRemote = false
+    private var isStoppingPlayback = false
+    private val castSessionListener = object : SessionManagerListener<CastSession> {
+        override fun onSessionStarting(session: CastSession) {
+            Log.d(LOG_TAG, "Cast session starting")
+        }
+
+        override fun onSessionStartFailed(session: CastSession, error: Int) {
+            Log.d(LOG_TAG, "Cast session start failed: $error")
+            isMovingPlaybackToRemote = false
+        }
+
+        override fun onSessionStarted(session: CastSession, sessionId: String) {
+            Log.d(LOG_TAG, "Cast session started: $sessionId")
+            attachCastSession(session)
+            moveLocalPlaybackToCast(session)
+        }
+
+        override fun onSessionEnding(session: CastSession) {
+            Log.d(LOG_TAG, "Cast session ending, remoteToLocal=$isRemoteToLocalTransferInProgress")
+            remoteClientToStop = session.remoteMediaClient ?: remoteClientToStop
+        }
+
+        override fun onSessionEnded(session: CastSession, error: Int) {
+            Log.d(LOG_TAG, "Cast session ended: error=$error remoteToLocal=$isRemoteToLocalTransferInProgress")
+            val remoteClient = session.remoteMediaClient ?: remoteClientToStop
+            detachCastSession()
+            if (!isRemoteToLocalTransferInProgress) {
+                stopRemotePlayback(remoteClient)
+                stopLocalPlayback()
+                clearCastTransferState()
+            }
+        }
+
+        override fun onSessionResuming(session: CastSession, sessionId: String) = Unit
+
+        override fun onSessionResumeFailed(session: CastSession, error: Int) {
+            Log.d(LOG_TAG, "Cast session resume failed: $error")
+            detachCastSession()
+            clearCastTransferState()
+        }
+
+        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) {
+            Log.d(LOG_TAG, "Cast session resumed, suspended=$wasSuspended")
+            attachCastSession(session)
+            moveLocalPlaybackToCast(session)
+        }
+
+        override fun onSessionSuspended(session: CastSession, reason: Int) {
+            Log.d(LOG_TAG, "Cast session suspended: $reason")
+        }
+    }
+    private val sessionTransferCallback = object : SessionTransferCallback() {
+        override fun onTransferring(transferType: Int) {
+            Log.d(LOG_TAG, "Session transferring: type=$transferType")
+            if (transferType == TRANSFER_TYPE_FROM_REMOTE_TO_LOCAL) {
+                isRemoteToLocalTransferInProgress = true
+                remoteToLocalStation = currentCastStation() ?: currentLocalStation()
+                remoteClientToStop =
+                    castSession?.remoteMediaClient ?: castContext?.sessionManager?.currentCastSession?.remoteMediaClient
+            }
+        }
+
+        override fun onTransferred(transferType: Int, sessionState: SessionState) {
+            Log.d(LOG_TAG, "Session transferred: type=$transferType")
+            if (transferType == TRANSFER_TYPE_FROM_REMOTE_TO_LOCAL) {
+                val station = stationFromSessionState(sessionState) ?: remoteToLocalStation ?: currentLocalStation()
+                stopRemotePlayback(remoteClientToStop)
+                clearCastTransferState()
+                station?.let(::resumeLocalPlayback)
+            }
+        }
+
+        override fun onTransferFailed(transferType: Int, transferFailedReason: Int) {
+            Log.d(LOG_TAG, "Session transfer failed: type=$transferType reason=$transferFailedReason")
+            if (transferType == TRANSFER_TYPE_FROM_REMOTE_TO_LOCAL) {
+                clearCastTransferState()
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -34,7 +134,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             }
         )
 
-        repository = RadioCatalogRepository(BuildConfig.RADIO_API_BASE_URL)
+        repository = RadioCatalogRepository(this, BuildConfig.RADIO_API_BASE_URL)
         player = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
@@ -45,23 +145,297 @@ class RadioMediaLibraryService : MediaLibraryService() {
             )
             setHandleAudioBecomingNoisy(true)
             repeatMode = Player.REPEAT_MODE_OFF
+            addListener(object : Player.Listener {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    moveCurrentStationToCastIfConnected()
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    when (playbackState) {
+                        Player.STATE_READY -> moveCurrentStationToCastIfConnected()
+                        Player.STATE_IDLE,
+                        Player.STATE_ENDED -> stopActivePlaybackIfRemoteIsConnected()
+                    }
+                }
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) {
+                        moveCurrentStationToCastIfConnected()
+                    }
+                }
+            })
         }
 
         session = MediaLibrarySession.Builder(this, player, RadioLibraryCallback())
             .setId("tv-app-radio")
             .setSessionActivity(mainActivityPendingIntent())
             .build()
+
+        initializeOutputSwitcher()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession {
         return session
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_DISCONNECT_OUTPUT -> stopActivePlayback(stopService = true)
+            ACTION_PAUSE_ACTIVE -> pauseActivePlayback()
+            ACTION_PLAY_ACTIVE -> playActivePlayback()
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        stopActivePlayback(stopService = true)
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        if (!isStoppingPlayback && !isRemoteToLocalTransferInProgress) {
+            disconnectCast()
+        }
+        castContext?.removeSessionTransferCallback(sessionTransferCallback)
+        castContext?.sessionManager?.removeSessionManagerListener(castSessionListener, CastSession::class.java)
+        detachCastSession()
         session.release()
         player.release()
         executor.shutdown()
         super.onDestroy()
+    }
+
+    private fun initializeOutputSwitcher() {
+        try {
+            castContext = CastContext.getSharedInstance(this).also { context ->
+                Log.d(LOG_TAG, "Output Switcher initialized")
+                context.addSessionTransferCallback(sessionTransferCallback)
+                context.sessionManager.addSessionManagerListener(castSessionListener, CastSession::class.java)
+                context.sessionManager.currentCastSession?.takeIf { it.isConnected }?.let(::attachCastSession)
+            }
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Output Switcher Cast context is not available", error)
+        }
+    }
+
+    private fun attachCastSession(session: CastSession) {
+        castSession = session
+        remoteClientToStop = session.remoteMediaClient
+    }
+
+    private fun detachCastSession() {
+        castSession = null
+    }
+
+    private fun moveLocalPlaybackToCast(session: CastSession) {
+        if (isRemoteToLocalTransferInProgress || isMovingPlaybackToRemote) {
+            return
+        }
+
+        val station = currentLocalStation() ?: return
+        val remoteClient = session.remoteMediaClient ?: return
+        Log.d(LOG_TAG, "Moving local playback to Cast: ${station.id}")
+        remoteClientToStop = remoteClient
+        isMovingPlaybackToRemote = true
+
+        if (loadStationOnCast(remoteClient, station)) {
+            Log.d(LOG_TAG, "Cast load succeeded, pausing local playback")
+            pauseLocalPlaybackForCast()
+        }
+
+        isMovingPlaybackToRemote = false
+    }
+
+    private fun moveCurrentStationToCastIfConnected() {
+        val session = castSession?.takeIf { it.isConnected }
+            ?: castContext?.sessionManager?.currentCastSession?.takeIf { it.isConnected }
+            ?: return
+
+        attachCastSession(session)
+        moveLocalPlaybackToCast(session)
+    }
+
+    private fun loadStationOnCast(remoteClient: RemoteMediaClient, station: RadioStation): Boolean {
+        val metadata = CastMediaMetadata(CastMediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
+            putString(CastMediaMetadata.KEY_TITLE, station.name)
+            putString(CastMediaMetadata.KEY_ARTIST, getString(R.string.radio_root_title))
+            station.logo?.takeIf { it.isNotBlank() }?.let { logo ->
+                addImage(WebImage(resolveArtworkUri(logo)))
+            }
+        }
+
+        val mediaInfo = MediaInfo.Builder(repository.streamUriFor(station.id).toString())
+            .setStreamType(MediaInfo.STREAM_TYPE_LIVE)
+            .setContentType(repository.streamMimeTypeFor(station.id) ?: "audio/mpeg")
+            .setMetadata(metadata)
+            .build()
+
+        val request = MediaLoadRequestData.Builder()
+            .setMediaInfo(mediaInfo)
+            .setAutoplay(true)
+            .build()
+
+        return try {
+            remoteClient.load(request)
+            true
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to load station on Cast", error)
+            false
+        }
+    }
+
+    private fun currentLocalStation(): RadioStation? {
+        val mediaId = player.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return null
+        return stationById(mediaId)
+    }
+
+    private fun currentCastStation(): RadioStation? {
+        val contentId = castSession?.remoteMediaClient?.mediaInfo?.contentId ?: return null
+        return stationByStreamUrl(contentId)
+    }
+
+    private fun stationFromSessionState(sessionState: SessionState): RadioStation? {
+        val contentId = sessionState.loadRequestData?.mediaInfo?.contentId ?: return null
+        return stationByStreamUrl(contentId)
+    }
+
+    private fun stationById(stationId: String): RadioStation? {
+        return try {
+            repository.getStations().firstOrNull { it.id == stationId }
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to find station by id", error)
+            null
+        }
+    }
+
+    private fun stationByStreamUrl(streamUrl: String): RadioStation? {
+        return try {
+            repository.getStations().firstOrNull { station ->
+                repository.streamUriFor(station.id).toString() == streamUrl
+            }
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to find station by stream URL", error)
+            null
+        }
+    }
+
+    private fun resumeLocalPlayback(station: RadioStation) {
+        Log.d(LOG_TAG, "Resuming local playback: ${station.id}")
+        player.setMediaItem(station.toMediaItem())
+        player.prepare()
+        player.play()
+    }
+
+    private fun stopLocalPlayback() {
+        Log.d(LOG_TAG, "Stopping local playback")
+        player.pause()
+        player.stop()
+        player.clearMediaItems()
+    }
+
+    private fun pauseLocalPlaybackForCast() {
+        Log.d(LOG_TAG, "Pausing local playback for Cast")
+        player.pause()
+        player.playWhenReady = false
+    }
+
+    private fun stopActivePlaybackIfRemoteIsConnected() {
+        if (isStoppingPlayback || isRemoteToLocalTransferInProgress || isMovingPlaybackToRemote) {
+            return
+        }
+
+        val hasRemoteSession = castSession?.isConnected == true ||
+            castContext?.sessionManager?.currentCastSession?.isConnected == true ||
+            remoteClientToStop != null
+
+        if (hasRemoteSession) {
+            Log.d(LOG_TAG, "Local playback stopped while remote is connected; stopping remote output")
+            stopActivePlayback(stopService = true)
+        }
+    }
+
+    private fun stopActivePlayback(stopService: Boolean) {
+        if (isStoppingPlayback) {
+            return
+        }
+
+        isStoppingPlayback = true
+        disconnectCast()
+        stopLocalPlayback()
+        if (stopService) {
+            stopSelf()
+        }
+        isStoppingPlayback = false
+    }
+
+    private fun pauseActivePlayback() {
+        Log.d(LOG_TAG, "Pausing active playback")
+        try {
+            val remoteClient = castSession?.remoteMediaClient
+                ?: castContext?.sessionManager?.currentCastSession?.remoteMediaClient
+            remoteClient?.pause()
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to pause remote playback", error)
+        }
+        player.pause()
+        player.playWhenReady = false
+    }
+
+    private fun playActivePlayback() {
+        Log.d(LOG_TAG, "Playing active playback")
+        val activeCastSession = castSession?.takeIf { it.isConnected }
+            ?: castContext?.sessionManager?.currentCastSession?.takeIf { it.isConnected }
+
+        if (activeCastSession != null) {
+            attachCastSession(activeCastSession)
+            val remoteClient = activeCastSession.remoteMediaClient
+            val station = currentCastStation() ?: currentLocalStation()
+            if (remoteClient != null && station != null) {
+                try {
+                    if (remoteClient.mediaInfo == null) {
+                        loadStationOnCast(remoteClient, station)
+                    } else {
+                        remoteClient.play()
+                    }
+                    pauseLocalPlaybackForCast()
+                    return
+                } catch (error: Exception) {
+                    Log.w(LOG_TAG, "Failed to resume remote playback", error)
+                }
+            }
+        }
+
+        if (player.currentMediaItem != null) {
+            player.prepare()
+            player.play()
+        }
+    }
+
+    private fun stopRemotePlayback(remoteClient: RemoteMediaClient?) {
+        try {
+            Log.d(LOG_TAG, "Stopping remote playback: hasClient=${remoteClient != null}")
+            remoteClient?.stop()
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to stop Cast playback", error)
+        }
+    }
+
+    private fun disconnectCast() {
+        stopRemotePlayback(castSession?.remoteMediaClient ?: remoteClientToStop)
+        try {
+            castContext?.sessionManager?.endCurrentSession(true)
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to end Cast session", error)
+        }
+        detachCastSession()
+        clearCastTransferState()
+    }
+
+    private fun clearCastTransferState() {
+        isRemoteToLocalTransferInProgress = false
+        isMovingPlaybackToRemote = false
+        remoteToLocalStation = null
+        remoteClientToStop = null
     }
 
     private inner class RadioLibraryCallback : MediaLibrarySession.Callback {
@@ -81,17 +455,128 @@ class RadioMediaLibraryService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            if (parentId != ROOT_ID) {
-                return Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
+            if (parentId == ROOT_ID) {
+                return Futures.immediateFuture(
+                    LibraryResult.ofItemList(
+                        ImmutableList.of(stationsItem(), favoritesItem(), recentlyPlayedItem(), settingsItem()),
+                        params,
+                    )
+                )
+            }
+
+            if (parentId == FAVORITES_ID) {
+                return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
+                    {
+                        val favoriteIds = favoriteStationIds()
+                        val items = repository.getStations()
+                            .filter { it.id in favoriteIds }
+                            .map {
+                                it.toMediaItem(
+                                    contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+                                )
+                            }
+                            .let { applyPaging(it, page, pageSize) }
+
+                        LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
+                    },
+                    executor,
+                )
+            }
+
+            if (parentId == RECENTLY_PLAYED_ID) {
+                return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
+                    {
+                        val recentIds = recentStationIds()
+                        val items = repository.getStations()
+                            .associateBy { it.id }
+                            .let { stationById ->
+                                recentIds.mapNotNull { stationById[it] }
+                            }
+                            .map {
+                                it.toMediaItem(
+                                    contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+                                )
+                            }
+                            .let { applyPaging(it, page, pageSize) }
+
+                        LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
+                    },
+                    executor,
+                )
+            }
+
+            if (parentId != STATIONS_ID) {
+                return handleSettingsChildren(parentId, params)
             }
 
             return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
                 {
                     val stations = repository.getStations()
-                    val items = stations
-                        .map { it.toMediaItem() }
+                    val favoriteIds = favoriteStationIds()
+                    val favoriteStations = stations.filter { it.id in favoriteIds }
+                    val otherStations = stations.filterNot { it.id in favoriteIds }
+                    val items = buildList {
+                        addAll(
+                            favoriteStations.map {
+                                it.toMediaItem(
+                                    contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+                                    groupTitle = FAVORITES_GROUP_TITLE,
+                                )
+                            }
+                        )
+                        addAll(
+                            otherStations.map {
+                                it.toMediaItem(
+                                    contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+                                    groupTitle = ALL_STATIONS_GROUP_TITLE,
+                                )
+                            }
+                        )
+                    }
                         .let { applyPaging(it, page, pageSize) }
 
+                    LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
+                },
+                executor,
+            )
+        }
+
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> {
+            return Futures.submit<LibraryResult<Void>>(
+                {
+                    val itemCount = searchStations(query).size
+                    Log.d(LOG_TAG, "Search query='$query' itemCount=$itemCount")
+                    session.notifySearchResultChanged(browser, query, itemCount, params)
+                    LibraryResult.ofVoid(params)
+                },
+                executor,
+            )
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
+                {
+                    val items = searchStations(query)
+                        .map {
+                            it.toMediaItem(
+                                contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                        .let { applyPaging(it, page, pageSize) }
+
+                    Log.d(LOG_TAG, "Search results query='$query' page=$page pageSize=$pageSize count=${items.size}")
                     LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
                 },
                 executor,
@@ -108,11 +593,35 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     val stations = repository.getStations()
                     mediaItems.mapNotNull { requested ->
                         val station = stations.firstOrNull { it.id == requested.mediaId }
-                        station?.toMediaItem() ?: requested.takeIf { it.localConfiguration != null }
+                        if (station != null) {
+                            rememberStation(station)
+                            station.toMediaItem()
+                        } else {
+                            requested.takeIf { it.localConfiguration != null }
+                        }
                     }.toMutableList()
                 },
                 executor,
             )
+        }
+    }
+
+    private fun handleSettingsChildren(
+        parentId: String,
+        params: LibraryParams?,
+    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+        return when (parentId) {
+            SETTINGS_ID -> Futures.immediateFuture(
+                LibraryResult.ofItemList(
+                    ImmutableList.of(openSettingsOnPhoneItem()),
+                    params,
+                )
+            )
+            OPEN_SETTINGS_ON_PHONE_ID -> {
+                openSettingsOnPhone()
+                Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
+            }
+            else -> Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
         }
     }
 
@@ -124,18 +633,176 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     .setTitle(getString(R.string.radio_root_title))
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
                     .build()
             )
             .build()
     }
 
-    private fun RadioStation.toMediaItem(): MediaItem {
+    private fun recentlyPlayedItem(): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(RECENTLY_PLAYED_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("לאחרונה")
+                    .setSubtitle("תחנות שנוגנו לאחרונה")
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_history}"))
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun stationsItem(): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(STATIONS_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("ראשי")
+                    .setSubtitle("כל תחנות הרדיו")
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_home}"))
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun favoritesItem(): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(FAVORITES_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("מועדפים")
+                    .setSubtitle("תחנות שסומנו בטלפון")
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_star}"))
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun settingsItem(): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(SETTINGS_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("הגדרות")
+                    .setSubtitle("ניהול ההגדרות מתבצע בטלפון")
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(settingsIconUri())
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun openSettingsOnPhoneItem(): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(OPEN_SETTINGS_ON_PHONE_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle("פתח הגדרות בטלפון")
+                    .setSubtitle("ניהול הגדרות האפליקציה מתבצע במכשיר הטלפון שלך")
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(settingsIconUri())
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun openSettingsOnPhone() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = ACTION_SHOW_CATALOG_SETTINGS
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+
+        try {
+            startActivity(intent)
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to open settings on phone", error)
+        }
+    }
+
+    private fun settingsIconUri(): Uri {
+        return Uri.parse("android.resource://$packageName/${R.drawable.ic_settings}")
+    }
+
+    private fun RadioStation.toMediaItem(
+        contentStyle: Int = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+        groupTitle: String? = null,
+    ): MediaItem {
         val metadataBuilder = MediaMetadata.Builder()
             .setTitle(name)
             .setArtist(getString(R.string.radio_root_title))
             .setIsBrowsable(false)
             .setIsPlayable(true)
-            .setExtras(Bundle().apply { putBoolean("is_live", true) })
+            .setExtras(
+                Bundle().apply {
+                    putBoolean("is_live", true)
+                    putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM, contentStyle)
+                    groupTitle?.let {
+                        putString(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_GROUP_TITLE, it)
+                    }
+                }
+            )
 
         logo?.let { metadataBuilder.setArtworkUri(resolveArtworkUri(it)) }
 
@@ -149,17 +816,47 @@ class RadioMediaLibraryService : MediaLibraryService() {
         return mediaItemBuilder.build()
     }
 
+    private fun favoriteStationIds(): Set<String> {
+        return getSharedPreferences(FAVORITE_STATIONS_PREFS, MODE_PRIVATE)
+            .all
+            .filterValues { it == true }
+            .keys
+    }
+
+    private fun recentStationIds(): List<String> {
+        return getSharedPreferences(RECENT_STATIONS_PREFS, MODE_PRIVATE)
+            .all
+            .mapNotNull { (stationId, playedAt) ->
+                (playedAt as? Long)?.let { stationId to it }
+            }
+            .sortedByDescending { it.second }
+            .take(MAX_RECENT_STATIONS)
+            .map { it.first }
+    }
+
+    private fun rememberStation(station: RadioStation) {
+        getSharedPreferences(RECENT_STATIONS_PREFS, MODE_PRIVATE)
+            .edit()
+            .putLong(station.id, System.currentTimeMillis())
+            .apply()
+    }
+
     private fun resolveArtworkUri(logo: String): Uri {
         if (logo.startsWith("http://") || logo.startsWith("https://")) {
             return Uri.parse(logo)
         }
 
-        return Uri.parse("${BuildConfig.RADIO_API_BASE_URL.trimEnd('/')}/ch/$logo")
+        return repository.artworkUriFor(logo)
     }
 
     private fun mainActivityPendingIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
         }
 
         return PendingIntent.getActivity(
@@ -183,7 +880,65 @@ class RadioMediaLibraryService : MediaLibraryService() {
         return items.subList(fromIndex, minOf(fromIndex + pageSize, items.size))
     }
 
+    private fun searchStations(query: String): List<RadioStation> {
+        val normalizedQuery = query.normalizedSearchText()
+        if (normalizedQuery.isBlank()) {
+            return emptyList()
+        }
+
+        val favoriteIds = favoriteStationIds()
+        return repository.getStations()
+            .filter { station ->
+                station.name.normalizedSearchText().contains(normalizedQuery) ||
+                    station.id.normalizedSearchText().contains(normalizedQuery)
+            }
+            .sortedWith(
+                compareByDescending<RadioStation> { it.id in favoriteIds }
+                    .thenBy { it.name }
+            )
+    }
+
+    private fun String?.normalizedSearchText(): String {
+        if (this.isNullOrBlank()) {
+            return ""
+        }
+
+        return Normalizer.normalize(this, Normalizer.Form.NFKD)
+            .lowercase(Locale.ROOT)
+            .replace(HEBREW_DIACRITICS_REGEX, "")
+            .map { char ->
+                when (char) {
+                    'ך' -> 'כ'
+                    'ם' -> 'מ'
+                    'ן' -> 'נ'
+                    'ף' -> 'פ'
+                    'ץ' -> 'צ'
+                    else -> char
+                }
+            }
+            .joinToString("")
+            .replace(SEARCH_IGNORED_CHARS_REGEX, "")
+            .trim()
+    }
+
     private companion object {
+        const val ACTION_DISCONNECT_OUTPUT = "com.tvapp.autoradio.DISCONNECT_OUTPUT"
+        const val ACTION_PAUSE_ACTIVE = "com.tvapp.autoradio.PAUSE_ACTIVE"
+        const val ACTION_PLAY_ACTIVE = "com.tvapp.autoradio.PLAY_ACTIVE"
+        const val LOG_TAG = "TVAppRadioService"
         const val ROOT_ID = "radio_root"
+        const val STATIONS_ID = "radio_stations"
+        const val FAVORITES_ID = "radio_favorites"
+        const val RECENTLY_PLAYED_ID = "radio_recently_played"
+        const val SETTINGS_ID = "radio_settings"
+        const val OPEN_SETTINGS_ON_PHONE_ID = "radio_open_settings_on_phone"
+        const val ACTION_SHOW_CATALOG_SETTINGS = "com.tvapp.autoradio.SHOW_CATALOG_SETTINGS"
+        const val FAVORITE_STATIONS_PREFS = "favorite_stations"
+        const val RECENT_STATIONS_PREFS = "recent_stations"
+        const val MAX_RECENT_STATIONS = 20
+        const val FAVORITES_GROUP_TITLE = "מועדפים"
+        const val ALL_STATIONS_GROUP_TITLE = "כל השאר"
+        val HEBREW_DIACRITICS_REGEX = Regex("[\\u0591-\\u05C7]")
+        val SEARCH_IGNORED_CHARS_REGEX = Regex("[\\u200E\\u200F\\u202A-\\u202E'\"`׳״\\-_.\\s]+")
     }
 }

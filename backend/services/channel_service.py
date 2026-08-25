@@ -471,9 +471,8 @@ def get_live_channels():
 
 
 def get_radio_channels():
-    # Radio currently comes from Idan Plus. Keep this service boundary so more
-    # radio providers can be merged here later, like TV channels.
-    return [_build_channel(channel) for channel in idan_main.GetUserChannels(type='radio')]
+    channels = merge_custom_channels(idan_main.GetUserChannels(type='radio'))
+    return [_build_channel(channel) for channel in channels if channel.get("type") == "radio"]
 
 def get_vod_channels():
     return IDANPLUS_VOD_CHANNELS

@@ -34,10 +34,13 @@ android {
 
 dependencies {
     implementation "androidx.core:core-ktx:1.17.0"
+    implementation "androidx.appcompat:appcompat:1.8.0"
+    implementation "androidx.fragment:fragment-ktx:1.8.9"
     implementation "androidx.media3:media3-exoplayer:1.8.0"
     implementation "androidx.media3:media3-exoplayer-dash:1.8.0"
     implementation "androidx.media3:media3-exoplayer-hls:1.8.0"
     implementation "androidx.media3:media3-session:1.8.0"
     implementation "androidx.media3:media3-common:1.8.0"
+    implementation "com.google.android.gms:play-services-cast-framework:22.3.1"
     implementation "com.google.guava:guava:33.4.8-android"
 }

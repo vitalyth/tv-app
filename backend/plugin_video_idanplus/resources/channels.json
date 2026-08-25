@@ -760,8 +760,8 @@
 		"tvgID": "103fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "http://103fm.maariv.co.il/include/OnLineView.aspx",
-			"regex": "data-file=\"(.*?)\""
+			"link": "https://cdn.cybercdn.live/103FM/Live/icecast.audio",
+			"final": true
 		}
 	},
 	"rd_1045": {

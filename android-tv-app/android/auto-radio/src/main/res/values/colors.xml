@@ -1,0 +1,5 @@
+<resources>
+    <color name="radio_app_background">#252F40</color>
+    <color name="radio_app_background_dark">#12111F</color>
+    <color name="radio_accent">#F2C94C</color>
+</resources>

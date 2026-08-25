@@ -1,6 +1,22 @@
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
+        <item name="android:windowBackground">@color/radio_app_background</item>
+        <item name="android:colorBackground">@color/radio_app_background</item>
+        <item name="android:colorAccent">@color/radio_accent</item>
+        <item name="colorPrimary">@color/radio_app_background</item>
+        <item name="colorPrimaryDark">@color/radio_app_background_dark</item>
+        <item name="colorAccent">@color/radio_accent</item>
+        <item name="mediaRouteTheme">@style/CastButtonTheme</item>
+    </style>
+
+    <style name="CastButtonTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/radio_app_background</item>
+        <item name="android:colorBackground">@color/radio_app_background</item>
+        <item name="android:colorAccent">@color/radio_accent</item>
+        <item name="colorPrimary">@color/radio_app_background</item>
+        <item name="colorPrimaryDark">@color/radio_app_background_dark</item>
+        <item name="colorAccent">@color/radio_accent</item>
     </style>
 </resources>

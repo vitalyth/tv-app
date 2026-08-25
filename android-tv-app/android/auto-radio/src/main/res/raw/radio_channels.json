@@ -1,0 +1,346 @@
+[
+  {
+    "id": "rd_glglz",
+    "name": "גלגל\"צ",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/glglz.jpg",
+    "streamUrl": "http://glzwizzlv.bynetcdn.com/glglz_mp3?awCollectionId=misc&awEpisodeId=glglz",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_88",
+    "name": "כאן 88",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/88fm.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/kan_88/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_90",
+    "name": "90FM רדיו תשעים",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/90fm.jpg",
+    "streamUrl": "https://cdn.cybercdn.live/Emtza_Haderech/Live_Audio/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_91",
+    "name": "91FM רדיו לב המדינה",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/91fm.jpg",
+    "streamUrl": "https://cdn.cybercdn.live/Lev_Hamedina/Audio/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_97",
+    "name": "97FM רדיו דרום",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/97fm.jpg",
+    "streamUrl": "https://cdn.cybercdn.live/Darom_97FM/Live/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_99",
+    "name": "ECO 99FM",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/99fm.png",
+    "streamUrl": "http://eco-live.mediacast.co.il/99fm_aac",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_100",
+    "name": "100FM רדיוס",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/100fm.jpg",
+    "streamUrl": "https://cdn.cybercdn.live/Radios_100FM/Audio/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_101",
+    "name": "101FM רדיו ירושלים",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/101fm.png",
+    "streamUrl": "https://radio.streamgates.net/stream/101fm",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_1015",
+    "name": "101.5FM רדיו דרום",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/1015fm.jpg",
+    "streamUrl": "http://radio.2net.co.il/hatahana",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_102",
+    "name": "102FM רדיו תל אביב",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/102fm.jpg",
+    "streamUrl": "https://102.livecdn.biz/102fm_aac",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_102Eilat",
+    "name": "102FM רדיו קול הים האדום",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/102Eilatfm.jpg",
+    "streamUrl": "https://cdn.cybercdn.live/Eilat_Radio/Live/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_103",
+    "name": "103FM רדיו ללא הפסקה",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/103fm.png",
+    "streamUrl": "https://cdn.cybercdn.live/103FM/Live/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_1045",
+    "name": "104.5FM רדיו צפון",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/1045fm.jpg",
+    "streamUrl": "https://1045fm.maariv.co.il/include/OnLineView.aspx",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_1075",
+    "name": "107.5FM רדיו חיפה",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/1075fm.jpg",
+    "streamUrl": "https://1075.livecdn.biz/radiohaifa",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_glz",
+    "name": "גלי צה\"ל",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/glz.jpg",
+    "streamUrl": "http://glzwizzlv.bynetcdn.com/glz_mp3?awCollectionId=misc&awEpisodeId=glz",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_bet",
+    "name": "כאן ב",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/bet.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/kan_reshet_bet/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_gimel",
+    "name": "כאן גימל",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/gimel.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/kan_gimel/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_culture",
+    "name": "כאן תרבות",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/culture.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/kan_tarbut/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_music",
+    "name": "כאן קול המוסיקה",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/music.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/kan_kol_hamuzika/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_moreshet",
+    "name": "כאן מורשת",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/moreshet.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/kan_moreshet/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_kankids",
+    "name": "כאן ילדים",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/23tv.jpg",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/radio_kan_hinuchit/live.livx",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_sport5",
+    "name": "ספורט 5 אתר",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/Sport5.png",
+    "streamUrl": "https://rgelive.akamaized.net/hls/live/2043150/radio5/playlist.m3u8",
+    "mimeType": "application/x-mpegURL"
+  },
+  {
+    "id": "rd_reka",
+    "name": "כאן Reka",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/reka.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/kan_reka/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_891",
+    "name": "Первое Радио 89.1FM",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/891fm.png",
+    "streamUrl": "http://www.891fm.co.il/",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_1064",
+    "name": "Лучшее Радио 106.4FM",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/1064fm.jpg",
+    "streamUrl": "https://cdna.streamgates.net/TheBest/live/playlist.m3u8",
+    "mimeType": "application/x-mpegURL"
+  },
+  {
+    "id": "rd_makan",
+    "name": "כאן مكان",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/makan.png",
+    "streamUrl": "https://r.il.cdn-redge.media/livedash/oil/kancdn-live/live/radio/radio_makan/live.livx?dvr=14400000",
+    "mimeType": "application/dash+xml"
+  },
+  {
+    "id": "rd_mizrahit",
+    "name": "קול הים התיכון",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/mizrahit.png",
+    "streamUrl": "https://rs.mizrahit.fm:7777",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_kolhay",
+    "name": "93FM קול חי",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/kolhay.jpg",
+    "streamUrl": "https://media2.93fm.co.il/live-new",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_kolhaymusic",
+    "name": "קול חי מיוזיק",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/kolhaymusic.jpg",
+    "streamUrl": "https://media2.93fm.co.il/livemusic",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_kolbarama",
+    "name": "קול ברמה",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/kolbarama.jpg",
+    "streamUrl": "https://cdn.cybercdn.live/Kol_Barama/Live_Audio/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_kolplay",
+    "name": "קול Play",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/kolplay.png",
+    "streamUrl": "https://cdn.cybercdn.live/Kol_Barama/Music/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_gly",
+    "name": "גלי ישראל",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/gly.jpg",
+    "streamUrl": "https://cdn.cybercdn.live/Galei_Israel/Live/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_fm995",
+    "name": "99.5FM רדיו",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/fm95.5.png",
+    "streamUrl": "https://995.livecdn.biz/995fm",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_noshmim_mizrahit",
+    "name": "רדיו נושמים מזרחית",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/noshmim.jpg",
+    "streamUrl": "https://rs.mizrahit.fm:7777",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_diki",
+    "name": "רדיו שירי דיכאון",
+    "type": "radio",
+    "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/diki.jpg",
+    "streamUrl": "https://radio.diki-mizrahit.co.il",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_kab_heb",
+    "name": "קבלה לעם - עברית",
+    "type": "radio",
+    "logo": "https://kabtv.co.il/wp-content/uploads/2023/11/cropped-KL_Tree_New4-270x270.png",
+    "streamUrl": "https://icecast.kab.tv/heb.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_kab_rus",
+    "name": "Каббала ТВ - Русский",
+    "type": "radio",
+    "logo": "https://kabtv.co.il/wp-content/uploads/2023/11/cropped-KL_Tree_New4-270x270.png",
+    "streamUrl": "https://icecast.kab.tv/rus.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_kol_rega",
+    "name": "קול רגע 96FM",
+    "type": "radio",
+    "logo": "https://96fm.co.il/wp-content/uploads/2022/10/cropped-Logo-270x270.png",
+    "streamUrl": "http://radio.96fm.co.il/96fm",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_toker",
+    "name": "Toker FM",
+    "type": "radio",
+    "logo": "https://toker.fm/_nuxt/logo.B8Y0VrIT.png",
+    "streamUrl": "http://live.toker.fm:6060",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_joint_blues",
+    "name": "Joint Radio Blues",
+    "type": "radio",
+    "logo": "https://www.jointil.com/broadcast/images/logo-joint-radio-blues-03.png",
+    "streamUrl": "http://radio.jointil.net:9992",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_100_oldies",
+    "name": "רדיוס 100FM Oldies",
+    "type": "radio",
+    "logo": "https://d203uamca1bsc4.cloudfront.net/app/thumbnails/t-oldies.png",
+    "streamUrl": "http://gb25.streamgates.net/radios-audio/100Oldies/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_100_hits",
+    "name": "רדיוס 100FM Hits",
+    "type": "radio",
+    "logo": "https://d203uamca1bsc4.cloudfront.net/app/thumbnails/t-hits.png",
+    "streamUrl": "http://gb25.streamgates.net/radios-audio/100Hits/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_100_israeli",
+    "name": "רדיוס 100FM ישראלי",
+    "type": "radio",
+    "logo": "https://d203uamca1bsc4.cloudfront.net/app/thumbnails/t-israeli.png",
+    "streamUrl": "http://gb25.streamgates.net/radios-audio/100Israeli/icecast.audio",
+    "mimeType": "audio/mpeg"
+  }
+]

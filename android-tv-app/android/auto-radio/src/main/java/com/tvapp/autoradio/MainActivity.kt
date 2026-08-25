@@ -4,9 +4,9 @@ import android.Manifest
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
-import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.content.pm.PackageManager
@@ -29,6 +29,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -39,12 +41,19 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import java.net.HttpURLConnection
@@ -55,10 +64,15 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.sin
 
-class MainActivity : Activity() {
+class MainActivity : AppCompatActivity() {
     private companion object {
         private const val STATE_ACTIVE_STATION_ID = "active_station_id"
         private const val STATE_PLAY_STARTED_AT_MS = "play_started_at_ms"
+        private const val ACTION_DISCONNECT_OUTPUT = "com.tvapp.autoradio.DISCONNECT_OUTPUT"
+        private const val ACTION_PAUSE_ACTIVE = "com.tvapp.autoradio.PAUSE_ACTIVE"
+        private const val ACTION_PLAY_ACTIVE = "com.tvapp.autoradio.PLAY_ACTIVE"
+        private const val ACTION_SHOW_CATALOG_SETTINGS = "com.tvapp.autoradio.SHOW_CATALOG_SETTINGS"
+        private const val LOG_TAG = "TVAppRadio"
     }
 
     private val bgColor = Color.rgb(37, 47, 64)
@@ -79,6 +93,27 @@ class MainActivity : Activity() {
             mainHandler.postDelayed(this, 1_000)
         }
     }
+    private val outputSessionListener = object : SessionManagerListener<CastSession> {
+        override fun onSessionStarting(session: CastSession) = Unit
+        override fun onSessionStartFailed(session: CastSession, error: Int) {
+            updateConnectedOutput(null)
+        }
+        override fun onSessionStarted(session: CastSession, sessionId: String) {
+            updateConnectedOutput(session)
+        }
+        override fun onSessionEnding(session: CastSession) = Unit
+        override fun onSessionEnded(session: CastSession, error: Int) {
+            updateConnectedOutput(null)
+        }
+        override fun onSessionResuming(session: CastSession, sessionId: String) = Unit
+        override fun onSessionResumeFailed(session: CastSession, error: Int) {
+            updateConnectedOutput(null)
+        }
+        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) {
+            updateConnectedOutput(session)
+        }
+        override fun onSessionSuspended(session: CastSession, reason: Int) = Unit
+    }
 
     private lateinit var repository: RadioCatalogRepository
     private lateinit var recentPrefs: SharedPreferences
@@ -90,9 +125,11 @@ class MainActivity : Activity() {
     private lateinit var statusPanel: LinearLayout
     private lateinit var statusText: TextView
     private lateinit var retryButton: Button
+    private lateinit var sourceButton: ImageView
     private lateinit var playerContainer: LinearLayout
     private lateinit var stationsContainer: LinearLayout
     private lateinit var scrollView: ScrollView
+    private var castContext: CastContext? = null
     private var landscapePlayerPane: LinearLayout? = null
     private var landscapeListPane: LinearLayout? = null
 
@@ -101,13 +138,18 @@ class MainActivity : Activity() {
     private var playStartedAtMs: Long = 0L
     private var activeElapsedText: TextView? = null
     private var isCatalogLoading = false
+    private var isActiveStationLoading = false
+    private var isActiveStationPaused = false
     private var isSwitchingStation = false
     private var isPlayerHiding = false
+    private var isUserStoppingPlayback = false
+    private var connectedOutputName: String? = null
     private var restoredStationId: String? = null
+    private var catalogSourceDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = RadioCatalogRepository(BuildConfig.RADIO_API_BASE_URL)
+        repository = RadioCatalogRepository(this, BuildConfig.RADIO_API_BASE_URL)
         recentPrefs = getSharedPreferences("recent_stations", MODE_PRIVATE)
         favoritePrefs = getSharedPreferences("favorite_stations", MODE_PRIVATE)
         restoredStationId = savedInstanceState?.getString(STATE_ACTIVE_STATION_ID)
@@ -115,8 +157,28 @@ class MainActivity : Activity() {
 
         requestNotificationPermissionIfNeeded()
         buildLayout()
+        initializeOutputConnectionMonitor()
         connectMediaController()
         loadStations()
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        syncControllerStateIntoUi()
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == ACTION_SHOW_CATALOG_SETTINGS) {
+            mainHandler.post { showCatalogSourceSettings() }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        syncControllerStateIntoUi()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -129,6 +191,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacks(timerRunnable)
+        castContext?.sessionManager?.removeSessionManagerListener(outputSessionListener, CastSession::class.java)
         if (::controllerFuture.isInitialized) {
             MediaController.releaseFuture(controllerFuture)
         }
@@ -144,12 +207,16 @@ class MainActivity : Activity() {
                 controller = controllerFuture.get().apply {
                     addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
-                            if (playbackState == Player.STATE_READY && playWhenReady) {
-                                syncPlayingFromController()
-                                startElapsedTimer()
-                            } else if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
-                                if (!isSwitchingStation) {
-                                    syncStoppedPlaybackFromController()
+                            when (playbackState) {
+                                Player.STATE_BUFFERING -> syncLoadingFromController()
+                                Player.STATE_READY -> {
+                                    syncReadyFromController()
+                                }
+                                Player.STATE_ENDED,
+                                Player.STATE_IDLE -> {
+                                    if (!isSwitchingStation) {
+                                        syncStoppedPlaybackFromController()
+                                    }
                                 }
                             }
                         }
@@ -159,6 +226,12 @@ class MainActivity : Activity() {
                             if (isPlaying) {
                                 syncPlayingFromController()
                                 startElapsedTimer()
+                            } else if (
+                                activeStation != null &&
+                                mediaController.currentMediaItem != null &&
+                                mediaController.playbackState == Player.STATE_READY
+                            ) {
+                                syncPausedButActiveFromController()
                             } else if (
                                 !isSwitchingStation &&
                                 activeStation != null &&
@@ -182,6 +255,39 @@ class MainActivity : Activity() {
             },
             MoreExecutors.directExecutor(),
         )
+    }
+
+    private fun initializeOutputConnectionMonitor() {
+        try {
+            castContext = CastContext.getSharedInstance(this).also { context ->
+                context.sessionManager.addSessionManagerListener(outputSessionListener, CastSession::class.java)
+                updateConnectedOutput(context.sessionManager.currentCastSession?.takeIf { it.isConnected })
+            }
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Output connection monitor is not available", error)
+        }
+    }
+
+    private fun updateConnectedOutput(session: CastSession?) {
+        connectedOutputName = session
+            ?.takeIf { it.isConnected }
+            ?.castDevice
+            ?.friendlyName
+            ?.takeIf { it.isNotBlank() }
+
+        if (!isCatalogLoading && activeStation != null) {
+            mainHandler.post { renderStations(animatePlayerIn = false) }
+        }
+    }
+
+    private fun syncControllerStateIntoUi() {
+        val mediaController = controller ?: return
+        if (mediaController.currentMediaItem != null && mediaController.hasRestorablePlayback()) {
+            syncPlayingFromController()
+            startElapsedTimer()
+        } else if (mediaController.currentMediaItem == null && activeStation != null) {
+            syncStoppedPlaybackFromController()
+        }
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -392,7 +498,87 @@ class MainActivity : Activity() {
                 })
 
             })
+
+            sourceButton = ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_settings)
+                setColorFilter(accentColor)
+                scaleType = ImageView.ScaleType.CENTER
+                setPadding(dp(9), dp(9), dp(9), dp(9))
+                background = roundedRect(Color.rgb(43, 37, 20), 18f, Color.rgb(92, 78, 38), 1)
+                updateCatalogSourceButtonDescription()
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showCatalogSourceSettings() }
+                layoutParams = LinearLayout.LayoutParams(
+                    dp(42),
+                    dp(42),
+                ).apply {
+                    marginStart = dp(10)
+                    marginEnd = dp(4)
+                }
+            }
+            addView(sourceButton)
         }
+    }
+
+    private fun ImageView.updateCatalogSourceButtonDescription() {
+        val sourceName = when (RadioCatalogSettings.getSource(this@MainActivity)) {
+            RadioCatalogSource.ApiProxy -> "API proxy"
+            RadioCatalogSource.StaticFile -> "Static JSON file"
+        }
+        contentDescription = "Radio source settings: $sourceName"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            tooltipText = contentDescription
+        }
+    }
+
+    private fun showCatalogSourceSettings() {
+        catalogSourceDialog?.takeIf { it.isShowing }?.let {
+            return
+        }
+
+        val currentSource = RadioCatalogSettings.getSource(this)
+        val sources = arrayOf(
+            "API proxy",
+            "Static JSON file",
+        )
+        val selectedIndex = when (currentSource) {
+            RadioCatalogSource.ApiProxy -> 0
+            RadioCatalogSource.StaticFile -> 1
+        }
+
+        catalogSourceDialog = AlertDialog.Builder(this)
+            .setTitle("Radio source")
+            .setSingleChoiceItems(sources, selectedIndex) { dialog, which ->
+                val nextSource = when (which) {
+                    1 -> RadioCatalogSource.StaticFile
+                    else -> RadioCatalogSource.ApiProxy
+                }
+                updateCatalogSource(nextSource)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+            .apply {
+                setOnDismissListener { catalogSourceDialog = null }
+                show()
+            }
+    }
+
+    private fun updateCatalogSource(source: RadioCatalogSource) {
+        if (RadioCatalogSettings.getSource(this) == source) {
+            return
+        }
+
+        stopPlayback()
+        RadioCatalogSettings.setSource(this, source)
+        repository.clearCache()
+        if (::sourceButton.isInitialized) {
+            sourceButton.updateCatalogSourceButtonDescription()
+        }
+        activeStation = null
+        restoredStationId = null
+        loadStations()
     }
 
     private fun loadStations() {
@@ -713,6 +899,8 @@ class MainActivity : Activity() {
     private fun clearActivePlaybackState() {
         activeStation = null
         playStartedAtMs = 0L
+        isActiveStationLoading = false
+        isActiveStationPaused = false
         stopElapsedTimer(resetText = true)
         hideStatus()
     }
@@ -890,7 +1078,7 @@ class MainActivity : Activity() {
                 })
 
                 activeElapsedText = TextView(this@MainActivity).apply {
-                    text = "00:00"
+                    text = if (isActiveStationLoading) "טוען..." else "00:00"
                     textSize = 17f
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(accentColor)
@@ -905,6 +1093,25 @@ class MainActivity : Activity() {
                     }
                 }
                 addView(activeElapsedText)
+
+                connectedOutputName?.let { outputName ->
+                    addView(TextView(this@MainActivity).apply {
+                        text = "מחובר אל $outputName"
+                        textSize = 13f
+                        typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(Color.rgb(214, 221, 232))
+                        gravity = Gravity.CENTER
+                        setPadding(dp(12), dp(5), dp(12), dp(5))
+                        background = roundedRect(Color.argb(96, 15, 20, 28), 15f, Color.argb(120, 242, 201, 76), 1)
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        ).apply {
+                            gravity = Gravity.CENTER_HORIZONTAL
+                            topMargin = dp(8)
+                        }
+                    })
+                }
             })
 
             addView(playerControlsPanel(station))
@@ -957,23 +1164,41 @@ class MainActivity : Activity() {
                 dp(92),
             )
 
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
+            addView(FrameLayout(this@MainActivity).apply {
+                clipChildren = false
+                clipToPadding = false
 
-                addView(controlFavoriteButton(isFavorite(station)) { toggleFavorite(station) }, LinearLayout.LayoutParams(dp(52), dp(58)).apply {
-                    marginStart = dp(10)
-                    marginEnd = dp(14)
-                })
-                addView(roundIconButton("▶") { playStation(station, refreshLive = true) }, LinearLayout.LayoutParams(dp(58), dp(58)).apply {
-                    marginStart = dp(14)
-                    marginEnd = dp(14)
-                })
-                addView(roundIconButton("×") { stopPlayback() }, LinearLayout.LayoutParams(dp(46), dp(46)).apply {
-                    marginStart = dp(14)
-                    marginEnd = dp(10)
-                })
-            })
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+
+                    addView(controlFavoriteButton(isFavorite(station)) { toggleFavorite(station) }, LinearLayout.LayoutParams(dp(52), dp(58)).apply {
+                        marginEnd = dp(12)
+                    })
+                    addView(outputSwitcherButton(), LinearLayout.LayoutParams(dp(48), dp(48)))
+                }, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.START or Gravity.CENTER_VERTICAL,
+                ))
+
+                addView(roundIconButton(if (isActiveStationPaused) "▶" else "Ⅱ") {
+                    toggleActivePlayback(station)
+                }, FrameLayout.LayoutParams(
+                    dp(58),
+                    dp(58),
+                    Gravity.CENTER,
+                ))
+
+                addView(roundIconButton("×") { stopPlayback() }, FrameLayout.LayoutParams(
+                    dp(46),
+                    dp(46),
+                    Gravity.END or Gravity.CENTER_VERTICAL,
+                ))
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+            ))
         }
     }
 
@@ -1060,20 +1285,65 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun outputSwitcherButton(): FrameLayout {
+        val routeButton = MediaRouteButton(ContextThemeWrapper(this, R.style.CastButtonTheme)).apply {
+            alpha = 0f
+            setAlwaysVisible(true)
+            contentDescription = "Output switcher"
+            try {
+                CastButtonFactory.setUpMediaRouteButton(this@MainActivity.applicationContext, this)
+            } catch (error: Exception) {
+                Log.w(LOG_TAG, "Output switcher button is not available", error)
+            }
+        }
+
+        return FrameLayout(this).apply {
+            background = null
+            elevation = dp(5).toFloat()
+            translationZ = dp(2).toFloat()
+            isClickable = true
+            isFocusable = true
+            foreground = selectableItemBackground()
+            contentDescription = "בחר מכשיר ניגון"
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+
+            addView(ImageView(this@MainActivity).apply {
+                setImageDrawable(OutputSwitcherIconDrawable(Color.rgb(214, 221, 232)))
+                scaleType = ImageView.ScaleType.CENTER
+            }, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ))
+            addView(routeButton, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ))
+
+            setOnClickListener {
+                if (!routeButton.performClick()) {
+                    showStatus("פתח את בחירת הפלט מנגן המדיה של Android.", showRetry = false)
+                }
+            }
+        }
+    }
+
     private fun roundIconButton(icon: String, onClick: () -> Unit): TextView {
+        val isPrimary = icon == "▶" || icon == "Ⅱ"
         return TextView(this).apply {
             text = icon
-            textSize = if (icon == "▶") 28f else 24f
+            textSize = if (isPrimary) 28f else 24f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(inkColor)
             gravity = Gravity.CENTER
-            background = if (icon == "▶") {
+            background = if (isPrimary) {
                 roundedRect(Color.rgb(17, 22, 30), 32f, accentColor, 2)
             } else {
                 roundedRect(Color.rgb(17, 22, 30), 25f, Color.rgb(99, 109, 124), 1)
             }
-            elevation = dp(if (icon == "▶") 8 else 5).toFloat()
-            translationZ = dp(if (icon == "▶") 3 else 2).toFloat()
+            elevation = dp(if (isPrimary) 8 else 5).toFloat()
+            translationZ = dp(if (isPrimary) 3 else 2).toFloat()
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
@@ -1081,12 +1351,29 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun toggleActivePlayback(station: RadioStation) {
+        activeStation = station
+        if (isActiveStationPaused) {
+            isActiveStationPaused = false
+            startService(Intent(this, RadioMediaLibraryService::class.java).setAction(ACTION_PLAY_ACTIVE))
+            startElapsedTimer()
+        } else {
+            isActiveStationPaused = true
+            startService(Intent(this, RadioMediaLibraryService::class.java).setAction(ACTION_PAUSE_ACTIVE))
+            stopElapsedTimer(resetText = false)
+        }
+        renderStations()
+    }
+
     private fun playStation(station: RadioStation, refreshLive: Boolean = false) {
         hideStatus()
         rememberStation(station)
         val shouldAnimatePlayerIn = activeStation == null || playerContainer.visibility != View.VISIBLE
         activeStation = station
-        playStartedAtMs = System.currentTimeMillis()
+        playStartedAtMs = 0L
+        isActiveStationLoading = true
+        isActiveStationPaused = false
+        stopElapsedTimer(resetText = false)
         renderStations(animatePlayerIn = shouldAnimatePlayerIn)
 
         if (refreshLive) {
@@ -1100,6 +1387,21 @@ class MainActivity : Activity() {
         }
 
         isSwitchingStation = true
+        mediaController.setMediaItem(mediaItemFor(station))
+        mediaController.prepare()
+        mediaController.play()
+        mainHandler.postDelayed({
+            isSwitchingStation = false
+            if (controller?.isPlaying == true) {
+                syncPlayingFromController()
+            }
+        }, 1_000)
+        if (!refreshLive) {
+            hideStatus()
+        }
+    }
+
+    private fun mediaItemFor(station: RadioStation): MediaItem {
         val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(station.id)
             .setUri(repository.streamUriFor(station.id))
@@ -1115,21 +1417,7 @@ class MainActivity : Activity() {
             )
 
         repository.streamMimeTypeFor(station.id)?.let { mediaItemBuilder.setMimeType(it) }
-
-        mediaController.setMediaItem(
-            mediaItemBuilder.build()
-        )
-        mediaController.prepare()
-        mediaController.play()
-        mainHandler.postDelayed({
-            isSwitchingStation = false
-            if (controller?.isPlaying == true) {
-                syncPlayingFromController()
-            }
-        }, 1_000)
-        if (!refreshLive) {
-            hideStatus()
-        }
+        return mediaItemBuilder.build()
     }
 
     private fun rememberStation(station: RadioStation) {
@@ -1150,20 +1438,22 @@ class MainActivity : Activity() {
     }
 
     private fun stopPlayback() {
+        isUserStoppingPlayback = true
+        isActiveStationPaused = false
+        startService(Intent(this, RadioMediaLibraryService::class.java).setAction(ACTION_DISCONNECT_OUTPUT))
         controller?.run {
             pause()
             stop()
             clearMediaItems()
         }
         hideActivePlayerWithAnimation()
+        mainHandler.postDelayed({ isUserStoppingPlayback = false }, 1_000)
     }
 
     private fun MediaController.hasRestorablePlayback(): Boolean {
         return currentMediaItem != null &&
-            (isPlaying ||
-                (playWhenReady &&
-                    playbackState != Player.STATE_IDLE &&
-                    playbackState != Player.STATE_ENDED))
+            playbackState != Player.STATE_IDLE &&
+            playbackState != Player.STATE_ENDED
     }
 
     private fun syncStoppedPlaybackFromController() {
@@ -1172,7 +1462,40 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun syncLoadingFromController() {
+        val mediaId = controller?.currentMediaItem?.mediaId ?: return
+        val station = allStations.firstOrNull { it.id == mediaId } ?: return
+        activeStation = station
+        isActiveStationLoading = true
+        isActiveStationPaused = false
+        hideStatus()
+        renderStations(animatePlayerIn = playerContainer.visibility != View.VISIBLE)
+        showActiveStationLoading()
+    }
+
+    private fun syncReadyFromController() {
+        isActiveStationLoading = false
+        if (controller?.isPlaying == true || !isActiveStationPaused) {
+            syncPlayingFromController()
+            startElapsedTimer()
+        } else {
+            syncActiveStationFromController()
+        }
+    }
+
+    private fun syncPausedButActiveFromController() {
+        if (!isActiveStationLoading) {
+            syncActiveStationFromController()
+            stopElapsedTimer(resetText = false)
+        }
+    }
+
     private fun syncPlayingFromController() {
+        isActiveStationPaused = false
+        syncActiveStationFromController()
+    }
+
+    private fun syncActiveStationFromController() {
         val mediaId = controller?.currentMediaItem?.mediaId ?: return
         val station = allStations.firstOrNull { it.id == mediaId } ?: return
         val previousId = activeStation?.id
@@ -1182,6 +1505,7 @@ class MainActivity : Activity() {
         if (playStartedAtMs <= 0L || previousId != station.id) {
             playStartedAtMs = System.currentTimeMillis()
         }
+        isActiveStationLoading = false
         hideStatus()
         renderStations(animatePlayerIn = previousId == null || playerContainer.visibility != View.VISIBLE)
     }
@@ -1264,6 +1588,10 @@ class MainActivity : Activity() {
 
     private fun updateElapsedTime() {
         val station = activeStation
+        if (isActiveStationLoading) {
+            showActiveStationLoading()
+            return
+        }
         if (playStartedAtMs <= 0L || station == null) {
             activeElapsedText?.text = "00:00"
             return
@@ -1273,6 +1601,10 @@ class MainActivity : Activity() {
         val minutes = elapsedSeconds / 60
         val seconds = elapsedSeconds % 60
         activeElapsedText?.text = "%02d:%02d".format(minutes, seconds)
+    }
+
+    private fun showActiveStationLoading() {
+        activeElapsedText?.text = "טוען..."
     }
 
     private fun roundedRect(fill: Int, radiusDp: Float, stroke: Int? = null, strokeWidthDp: Int = 0): GradientDrawable {
@@ -1582,4 +1914,47 @@ class MainActivity : Activity() {
 
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
+
+    private class OutputSwitcherIconDrawable(color: Int) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            style = Paint.Style.STROKE
+            strokeWidth = 2.2f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val rect = RectF()
+
+        override fun draw(canvas: Canvas) {
+            val bounds = bounds
+            if (bounds.width() <= 0 || bounds.height() <= 0) return
+
+            val scale = minOf(bounds.width(), bounds.height()) / 48f
+            paint.strokeWidth = 2.2f * scale
+
+            val left = bounds.left.toFloat()
+            val top = bounds.top.toFloat()
+
+            rect.set(left + 5f * scale, top + 13f * scale, left + 27f * scale, top + 29f * scale)
+            canvas.drawRoundRect(rect, 1.6f * scale, 1.6f * scale, paint)
+            canvas.drawLine(left + 13f * scale, top + 33f * scale, left + 20f * scale, top + 33f * scale, paint)
+            canvas.drawLine(left + 16.5f * scale, top + 29f * scale, left + 16.5f * scale, top + 33f * scale, paint)
+
+            rect.set(left + 29f * scale, top + 9f * scale, left + 43f * scale, top + 37f * scale)
+            canvas.drawRoundRect(rect, 1.9f * scale, 1.9f * scale, paint)
+            canvas.drawCircle(left + 36f * scale, top + 18f * scale, 2.3f * scale, paint)
+            canvas.drawCircle(left + 36f * scale, top + 30f * scale, 2.3f * scale, paint)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            paint.colorFilter = colorFilter
+        }
+
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
 }

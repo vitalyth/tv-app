@@ -1,24 +1,44 @@
 package com.tvapp.autoradio
 
+import android.content.Context
 import android.net.Uri
 import androidx.media3.common.MimeTypes
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicReference
 
 class RadioCatalogRepository(
+    context: Context,
     private val baseUrl: String,
 ) {
+    private val appContext = context.applicationContext
     private val cachedStations = AtomicReference<List<RadioStation>>(emptyList())
+    private val cachedSource = AtomicReference<RadioCatalogSource?>(null)
 
     fun getStations(forceRefresh: Boolean = false): List<RadioStation> {
+        val source = RadioCatalogSettings.getSource(appContext)
         val cached = cachedStations.get()
-        if (!forceRefresh && cached.isNotEmpty()) {
+        if (!forceRefresh && cachedSource.get() == source && cached.isNotEmpty()) {
             return cached
         }
 
+        return when (source) {
+            RadioCatalogSource.ApiProxy -> getApiProxyStations(cached)
+            RadioCatalogSource.StaticFile -> getStaticFileStations(cached)
+        }.also {
+            cachedSource.set(source)
+        }
+    }
+
+    fun clearCache() {
+        cachedStations.set(emptyList())
+        cachedSource.set(null)
+    }
+
+    private fun getApiProxyStations(cached: List<RadioStation>): List<RadioStation> {
         val fallbackStations = fallbackStations()
         return try {
             val connection = URL("${baseUrl.trimEnd('/')}/radio_channels").openConnection() as HttpURLConnection
@@ -28,17 +48,17 @@ class RadioCatalogRepository(
             connection.setRequestProperty("Accept", "application/json")
 
             try {
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) {
                     return cached.ifEmpty { fallbackStations }
-            }
+                }
 
-            val body = connection.inputStream.bufferedReader().use(BufferedReader::readText)
-            val stations = parseStations(body)
-            if (stations.isEmpty()) {
+                val body = connection.inputStream.bufferedReader().use(BufferedReader::readText)
+                val stations = parseStations(body)
+                if (stations.isEmpty()) {
                     return cached.ifEmpty { fallbackStations }
-            }
-            cachedStations.set(stations)
+                }
+                cachedStations.set(stations)
                 stations
             } finally {
                 connection.disconnect()
@@ -48,7 +68,25 @@ class RadioCatalogRepository(
         }
     }
 
+    private fun getStaticFileStations(cached: List<RadioStation>): List<RadioStation> {
+        return try {
+            val body = appContext.resources.openRawResource(R.raw.radio_channels)
+                .bufferedReader()
+                .use(BufferedReader::readText)
+            val stations = parseStations(body)
+            if (stations.isEmpty()) {
+                cached.ifEmpty { fallbackStations() }
+            } else {
+                cachedStations.set(stations)
+                stations
+            }
+        } catch (_: Exception) {
+            cached.ifEmpty { fallbackStations() }
+        }
+    }
+
     fun streamUriFor(stationId: String): Uri {
+        stationById(stationId)?.streamUrl?.takeIf { it.isNotBlank() }?.let { return Uri.parse(it) }
         directStreamUrlFor(stationId)?.let { return Uri.parse(it) }
 
         return Uri.parse("${baseUrl.trimEnd('/')}/stream")
@@ -58,6 +96,8 @@ class RadioCatalogRepository(
     }
 
     fun streamMimeTypeFor(stationId: String): String? {
+        stationById(stationId)?.mimeType?.takeIf { it.isNotBlank() }?.let { return it }
+
         return when (stationId) {
             "rd_88",
             "rd_bet",
@@ -92,6 +132,18 @@ class RadioCatalogRepository(
         }
     }
 
+    fun artworkUriFor(logo: String): Uri {
+        if (logo.startsWith("http://") || logo.startsWith("https://")) {
+            return Uri.parse(logo)
+        }
+
+        return Uri.parse("${baseUrl.trimEnd('/')}/ch/$logo")
+    }
+
+    private fun stationById(stationId: String): RadioStation? {
+        return getStations().firstOrNull { it.id == stationId }
+    }
+
     private fun directStreamUrlFor(stationId: String): String? {
         return when (stationId) {
             "rd_90" -> "https://cdn.cybercdn.live/Emtza_Haderech/Live_Audio/icecast.audio"
@@ -108,7 +160,7 @@ class RadioCatalogRepository(
     }
 
     private fun parseStations(body: String): List<RadioStation> {
-        val array = JSONArray(body)
+        val array = parseStationArray(body)
         val stations = mutableListOf<RadioStation>()
 
         for (index in 0 until array.length()) {
@@ -116,19 +168,43 @@ class RadioCatalogRepository(
             val id = item.optString("id").ifBlank { item.optString("channelID") }
             val name = item.optString("name")
             val type = item.optString("type")
+            val streamUrl = item.optString("streamUrl")
+                .ifBlank { item.optString("stream_url") }
+                .ifBlank { item.optString("url") }
+                .ifBlank { item.optString("link") }
+                .ifBlank { item.optJSONObject("linkDetails")?.optString("link").orEmpty() }
+                .ifBlank { item.optJSONObject("linkDetails")?.optString("live").orEmpty() }
+            val mimeType = item.optString("mimeType")
+                .ifBlank { item.optString("mime_type") }
+                .ifBlank { item.optString("contentType") }
 
-            if (id.isBlank() || name.isBlank() || type != "radio") {
+            if (id.isBlank() || name.isBlank() || (type.isNotBlank() && type != "radio")) {
                 continue
             }
 
             stations += RadioStation(
                 id = id,
                 name = name,
-                logo = item.optString("logo").ifBlank { null },
+                logo = item.optString("logo").ifBlank { item.optString("image") }.ifBlank { null },
+                streamUrl = streamUrl.ifBlank { null },
+                mimeType = mimeType.ifBlank { null },
             )
         }
 
         return stations.sortedBy { it.name }
+    }
+
+    private fun parseStationArray(body: String): JSONArray {
+        val trimmed = body.trim()
+        if (trimmed.startsWith("[")) {
+            return JSONArray(trimmed)
+        }
+
+        val root = JSONObject(trimmed)
+        return root.optJSONArray("radio_channels")
+            ?: root.optJSONArray("channels")
+            ?: root.optJSONArray("stations")
+            ?: JSONArray()
     }
 
     private fun fallbackStations(): List<RadioStation> {
