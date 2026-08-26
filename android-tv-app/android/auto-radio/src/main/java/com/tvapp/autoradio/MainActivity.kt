@@ -73,6 +73,7 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         private const val STATE_ACTIVE_STATION_ID = "active_station_id"
         private const val STATE_PLAY_STARTED_AT_MS = "play_started_at_ms"
+        private const val STATE_ACTIVE_STATION_PAUSED = "active_station_paused"
         private const val ACTION_DISCONNECT_OUTPUT = "com.tvapp.autoradio.DISCONNECT_OUTPUT"
         private const val ACTION_PAUSE_ACTIVE = "com.tvapp.autoradio.PAUSE_ACTIVE"
         private const val ACTION_PLAY_ACTIVE = "com.tvapp.autoradio.PLAY_ACTIVE"
@@ -194,6 +195,7 @@ class MainActivity : AppCompatActivity() {
     private var isUserStoppingPlayback = false
     private var connectedOutputName: String? = null
     private var restoredStationId: String? = null
+    private var restoredStationWasPaused = false
     private var requestedStationId: String? = null
     private var catalogSourceDialog: AlertDialog? = null
     private var pendingVoicePlaybackQuery: String? = null
@@ -210,6 +212,7 @@ class MainActivity : AppCompatActivity() {
         restoredStationId = savedInstanceState?.getString(STATE_ACTIVE_STATION_ID)
         requestedStationId = restoredStationId
         playStartedAtMs = savedInstanceState?.getLong(STATE_PLAY_STARTED_AT_MS, 0L) ?: 0L
+        restoredStationWasPaused = savedInstanceState?.getBoolean(STATE_ACTIVE_STATION_PAUSED, false) == true
 
         requestNotificationPermissionIfNeeded()
         buildLayout()
@@ -255,6 +258,7 @@ class MainActivity : AppCompatActivity() {
                 ?: activeStation?.id
             stationId?.let { outState.putString(STATE_ACTIVE_STATION_ID, it) }
             outState.putLong(STATE_PLAY_STARTED_AT_MS, playStartedAtMs)
+            outState.putBoolean(STATE_ACTIVE_STATION_PAUSED, isActiveStationPaused)
         }
     }
 
@@ -814,10 +818,13 @@ class MainActivity : AppCompatActivity() {
             playStartedAtMs = System.currentTimeMillis()
         }
         restoredStationId = null
-        isActiveStationPaused = mediaController?.currentMediaItem != null &&
-            mediaController.hasRestorablePlayback() &&
-            mediaController.isPlaying != true &&
-            mediaController.playWhenReady != true
+        isActiveStationPaused = restoredStationWasPaused || (
+            mediaController?.currentMediaItem != null &&
+                mediaController.hasRestorablePlayback() &&
+                mediaController.isPlaying != true &&
+                mediaController.playWhenReady != true
+            )
+        restoredStationWasPaused = false
         if (mediaController?.isPlaying == true || mediaController?.playWhenReady == true) {
             startElapsedTimer()
         }
@@ -1239,6 +1246,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun activePlayerCard(station: RadioStation): LinearLayout {
+        val landscape = isLandscape()
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -1254,7 +1262,12 @@ class MainActivity : AppCompatActivity() {
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(dp(12), dp(8), dp(12), dp(12))
+                setPadding(
+                    dp(if (landscape) 10 else 12),
+                    dp(if (landscape) 6 else 8),
+                    dp(if (landscape) 10 else 12),
+                    dp(if (landscape) 8 else 12),
+                )
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1267,44 +1280,50 @@ class MainActivity : AppCompatActivity() {
 
                 addView(TextView(this@MainActivity).apply {
                     text = station.name
-                    textSize = 21f
+                    textSize = if (landscape) 18f else 21f
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(inkColor)
                     applyStationTextDirection(station.name, alignHebrewRight = false)
                     includeFontPadding = false
+                    maxLines = if (landscape) 1 else 2
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                     ).apply {
-                        bottomMargin = dp(6)
+                        bottomMargin = dp(if (landscape) 4 else 6)
                     }
                 })
 
                 activeNowPlayingText = TextView(this@MainActivity).apply {
                     text = nowPlayingTextFor(station) ?: "בודק מה משודר עכשיו..."
-                    textSize = 15f
+                    textSize = if (landscape) 13f else 15f
                     setTextColor(mutedColor)
                     gravity = Gravity.CENTER
-                    maxLines = 2
+                    maxLines = if (landscape) 1 else 2
                     applyStationTextDirection(text.toString(), alignHebrewRight = false)
                     includeFontPadding = false
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                     ).apply {
-                        bottomMargin = dp(8)
+                        bottomMargin = dp(if (landscape) 5 else 8)
                     }
                 }
                 addView(activeNowPlayingText)
 
                 activeElapsedText = TextView(this@MainActivity).apply {
                     text = if (isActiveStationLoading) "טוען..." else "00:00"
-                    textSize = 17f
+                    textSize = if (landscape) 15f else 17f
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(accentColor)
                     gravity = Gravity.CENTER
                     background = roundedRect(Color.rgb(15, 20, 28), 20f, Color.rgb(63, 72, 86), 1)
-                    setPadding(dp(20), dp(7), dp(20), dp(7))
+                    setPadding(
+                        dp(if (landscape) 16 else 20),
+                        dp(if (landscape) 5 else 7),
+                        dp(if (landscape) 16 else 20),
+                        dp(if (landscape) 5 else 7),
+                    )
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1334,7 +1353,7 @@ class MainActivity : AppCompatActivity() {
                 }
             })
 
-            addView(playerControlsPanel(station))
+            addView(playerControlsPanel(station, compact = landscape))
         }
 
         return LinearLayout(this).apply {
@@ -1373,15 +1392,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun playerControlsPanel(station: RadioStation): LinearLayout {
+    private fun playerControlsPanel(station: RadioStation, compact: Boolean): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(20), dp(14), dp(20), dp(14))
-            background = bottomPlayerPanelBackground()
+            setPadding(
+                dp(if (compact) 18 else 20),
+                dp(if (compact) 10 else 14),
+                dp(if (compact) 18 else 20),
+                dp(if (compact) 10 else 14),
+            )
+            background = bottomPlayerPanelBackground(compact)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(92),
+                dp(if (compact) 78 else 92),
             )
 
             addView(FrameLayout(this@MainActivity).apply {
@@ -1392,10 +1416,10 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
 
-                    addView(controlFavoriteButton(isFavorite(station)) { toggleFavorite(station) }, LinearLayout.LayoutParams(dp(52), dp(58)).apply {
-                        marginEnd = dp(12)
+                    addView(controlFavoriteButton(isFavorite(station)) { toggleFavorite(station) }, LinearLayout.LayoutParams(dp(if (compact) 48 else 52), dp(if (compact) 52 else 58)).apply {
+                        marginEnd = dp(if (compact) 10 else 12)
                     })
-                    addView(outputSwitcherButton(), LinearLayout.LayoutParams(dp(48), dp(48)))
+                    addView(outputSwitcherButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 48), dp(if (compact) 44 else 48)))
                 }, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1405,14 +1429,14 @@ class MainActivity : AppCompatActivity() {
                 addView(roundIconButton(if (isActiveStationPaused) "▶" else "Ⅱ") {
                     toggleActivePlayback(station)
                 }, FrameLayout.LayoutParams(
-                    dp(58),
-                    dp(58),
+                    dp(if (compact) 54 else 58),
+                    dp(if (compact) 54 else 58),
                     Gravity.CENTER,
                 ))
 
                 addView(roundIconButton("×") { stopPlayback() }, FrameLayout.LayoutParams(
-                    dp(46),
-                    dp(46),
+                    dp(if (compact) 43 else 46),
+                    dp(if (compact) 43 else 46),
                     Gravity.END or Gravity.CENTER_VERTICAL,
                 ))
             }, LinearLayout.LayoutParams(
@@ -1423,21 +1447,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun heroArtwork(station: RadioStation): FrameLayout {
+        val landscape = isLandscape()
         return FrameLayout(this).apply {
             clipChildren = false
             clipToPadding = false
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(120),
+                dp(if (landscape) 102 else 120),
             ).apply {
-                bottomMargin = dp(8)
+                bottomMargin = dp(if (landscape) 7 else 8)
             }
 
-            addView(playerScale().apply {
+            addView(playerScale(isAnimating = shouldAnimateEqualizer()).apply {
                 alpha = 0.95f
             }, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                dp(88),
+                dp(if (landscape) 76 else 88),
                 Gravity.CENTER,
             ))
 
@@ -1458,11 +1483,23 @@ class MainActivity : AppCompatActivity() {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     Gravity.CENTER,
                 ))
-            }, FrameLayout.LayoutParams(dp(94), dp(94), Gravity.CENTER))
+            }, FrameLayout.LayoutParams(dp(if (landscape) 84 else 94), dp(if (landscape) 84 else 94), Gravity.CENTER))
         }
     }
 
-    private fun playerScale(): View = AnimatedEqualizerView(this, accentColor, Color.rgb(235, 64, 64))
+    private fun shouldAnimateEqualizer(): Boolean {
+        return activeStation != null &&
+            !isActiveStationPaused &&
+            !isActiveStationLoading
+    }
+
+    private fun playerScale(isAnimating: Boolean): View = AnimatedEqualizerView(
+        context = this,
+        low = Color.rgb(58, 190, 92),
+        mid = Color.rgb(126, 226, 80),
+        peak = Color.rgb(206, 255, 96),
+        isAnimating = isAnimating,
+    )
 
     private fun TextView.applyStationTextDirection(textValue: String, alignHebrewRight: Boolean) {
         val isHebrew = textValue.any { it in '\u0590'..'\u05FF' }
@@ -1980,13 +2017,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun bottomPlayerPanelBackground(): GradientDrawable {
+    private fun bottomPlayerPanelBackground(compact: Boolean): GradientDrawable {
         return roundedCorners(
             fill = Color.rgb(18, 17, 31),
             topLeftDp = 34f,
             topRightDp = 34f,
-            bottomRightDp = 0f,
-            bottomLeftDp = 0f,
+            bottomRightDp = if (compact) 28f else 0f,
+            bottomLeftDp = if (compact) 28f else 0f,
         )
     }
 
@@ -2081,23 +2118,27 @@ class MainActivity : AppCompatActivity() {
 
     private class AnimatedEqualizerView(
         context: Context,
-        private val accent: Int,
-        private val hot: Int,
+        private val low: Int,
+        private val mid: Int,
+        private val peak: Int,
+        private val isAnimating: Boolean,
     ) : View(context) {
         private val density = resources.displayMetrics.density
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
         private val barCount = 31
-        private var isRunning = false
+        private var isAttached = false
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
-            isRunning = true
-            postInvalidateOnAnimation()
+            isAttached = true
+            if (isAnimating) {
+                postInvalidateOnAnimation()
+            }
         }
 
         override fun onDetachedFromWindow() {
-            isRunning = false
+            isAttached = false
             super.onDetachedFromWindow()
         }
 
@@ -2118,19 +2159,31 @@ class MainActivity : AppCompatActivity() {
                     index % 3 == 0 -> 0.64f
                     else -> 0.42f
                 }
-                val wave = (
-                    abs(sin(time + index * 0.52f)) * 0.62f +
-                        abs(sin(time * 0.63f + index * 0.31f)) * 0.38f
-                    ).toFloat()
-                val barHeight = minBarHeight + (maxBarHeight - minBarHeight) * (0.24f + wave * basePattern * 0.76f)
+                val wave = if (isAnimating) {
+                    (
+                        abs(sin(time + index * 0.52f)) * 0.62f +
+                            abs(sin(time * 0.63f + index * 0.31f)) * 0.38f
+                        ).toFloat()
+                } else {
+                    0f
+                }
+                val barHeight = if (isAnimating) {
+                    minBarHeight + (maxBarHeight - minBarHeight) * (0.24f + wave * basePattern * 0.76f)
+                } else {
+                    4f * density
+                }
                 val left = index * (barWidth + gap)
                 val top = (height - barHeight) / 2f
                 rect.set(left, top, left + barWidth, top + barHeight)
-                paint.color = if (index % 2 == 0) accent else hot
+                paint.color = when {
+                    barHeight > height * 0.66f -> peak
+                    barHeight > height * 0.42f -> mid
+                    else -> low
+                }
                 canvas.drawRoundRect(rect, 4f * density, 4f * density, paint)
             }
 
-            if (isRunning) {
+            if (isAttached && isAnimating) {
                 postInvalidateOnAnimation()
             }
         }

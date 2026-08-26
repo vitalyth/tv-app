@@ -20,6 +20,7 @@ from epg_parsers.mako12 import parse_mako12_epg
 from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.reshet13 import parse_reshet13_epg
 from epg_parsers.ftv import parse_ftv_epg
+from epg_parsers.glglz import parse_glglz_epg
 from epg_parsers.fishenzon import (
     FISHENZON_CHANNEL_IDS,
     fetch_fishenzon_epg,
@@ -62,6 +63,7 @@ FORMAL_EPG_CHANNEL_IDS = {
     "97",
     "99",
     "100fm",
+    "glglz",
     "i24news",
     "i24newsen",
     "i24newsfr",
@@ -80,7 +82,9 @@ IDAN_PLUS_EPG_LOAD_FAILED = False
 def _collect_channel_epg_ids(channels: list[dict]) -> set[str]:
     epg_ids = set()
     for channel in channels:
-        if channel.get("type") not in (None, "tv"):
+        channel_type = channel.get("type")
+        tvg_id = str(channel.get("tvgID") or "").strip()
+        if channel_type not in (None, "tv") and tvg_id not in FORMAL_EPG_CHANNEL_IDS:
             continue
 
         channel_index = channel.get("my_index", channel.get("index"))
@@ -426,6 +430,10 @@ def main():
 
         elif args.channel == "100fm":
             programs = parse_100fm_epg()
+
+        elif args.channel == "glglz":
+            programs = parse_glglz_epg()
+            replace_existing_programs = True
 
         elif args.channel == "99":
             programs = parse_knesset_epg()
@@ -875,6 +883,22 @@ def main():
         if radio100fm_programs:
             persist_channel_programs("100fm", radio100fm_programs, output_dir)
             print(f"Stored {len(radio100fm_programs)} programs for 100fm")
+
+        print("\nParsing Galgalatz from official schedule")
+        try:
+            glglz_programs = parse_glglz_epg()
+        except Exception as ex:
+            failed_channels.append("glglz")
+            print(f"Failed parsing Galgalatz: {ex}")
+            traceback.print_exc()
+            glglz_programs = read_existing_channel_programs(output_dir, "glglz")
+            if not glglz_programs:
+                glglz_programs = []
+
+        combined_epg["glglz"] = glglz_programs
+        if glglz_programs:
+            persist_channel_programs("glglz", glglz_programs, output_dir)
+            print(f"Stored {len(glglz_programs)} programs for glglz")
 
         if not args.skip_i24:
             print("\nParsing i24news Hebrew from official schedule API")
