@@ -86,8 +86,8 @@ class RadioCatalogRepository(
     }
 
     fun streamUriFor(stationId: String): Uri {
-        stationById(stationId)?.streamUrl?.takeIf { it.isNotBlank() }?.let { return Uri.parse(it) }
         directStreamUrlFor(stationId)?.let { return Uri.parse(it) }
+        stationById(stationId)?.streamUrl?.takeIf { it.isNotBlank() }?.let { return Uri.parse(it) }
 
         return Uri.parse("${baseUrl.trimEnd('/')}/stream")
             .buildUpon()

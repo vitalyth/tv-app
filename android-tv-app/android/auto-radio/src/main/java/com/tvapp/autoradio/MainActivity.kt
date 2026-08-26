@@ -81,6 +81,7 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_MEDIA_PLAY_FROM_SEARCH = "android.media.action.MEDIA_PLAY_FROM_SEARCH"
         private const val LOG_TAG = "TVAppRadio"
         private const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
+        private const val NOW_PLAYING_REFRESH_INTERVAL_MS = 60_000L
         private val STATION_ALIASES = mapOf(
             "rd_glglz" to listOf(
                 "galgalaz",
@@ -175,6 +176,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playerContainer: LinearLayout
     private lateinit var stationsContainer: LinearLayout
     private lateinit var scrollView: ScrollView
+    private lateinit var nowPlayingRepository: NowPlayingRepository
     private var castContext: CastContext? = null
     private var landscapePlayerPane: LinearLayout? = null
     private var landscapeListPane: LinearLayout? = null
@@ -183,6 +185,7 @@ class MainActivity : AppCompatActivity() {
     private var activeStation: RadioStation? = null
     private var playStartedAtMs: Long = 0L
     private var activeElapsedText: TextView? = null
+    private var activeNowPlayingText: TextView? = null
     private var isCatalogLoading = false
     private var isActiveStationLoading = false
     private var isActiveStationPaused = false
@@ -195,10 +198,13 @@ class MainActivity : AppCompatActivity() {
     private var catalogSourceDialog: AlertDialog? = null
     private var pendingVoicePlaybackQuery: String? = null
     private var pendingControllerStationId: String? = null
+    private val nowPlayingCache = ConcurrentHashMap<String, NowPlayingInfo>()
+    private val nowPlayingLoadedAtMs = ConcurrentHashMap<String, Long>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = RadioCatalogRepository(this, BuildConfig.RADIO_API_BASE_URL)
+        nowPlayingRepository = NowPlayingRepository(repository)
         recentPrefs = getSharedPreferences("recent_stations", MODE_PRIVATE)
         favoritePrefs = getSharedPreferences("favorite_stations", MODE_PRIVATE)
         restoredStationId = savedInstanceState?.getString(STATE_ACTIVE_STATION_ID)
@@ -620,20 +626,20 @@ class MainActivity : AppCompatActivity() {
 
         val currentSource = RadioCatalogSettings.getSource(this)
         val sources = arrayOf(
-            "API proxy",
             "Static JSON file",
+            "API proxy",
         )
         val selectedIndex = when (currentSource) {
-            RadioCatalogSource.ApiProxy -> 0
-            RadioCatalogSource.StaticFile -> 1
+            RadioCatalogSource.StaticFile -> 0
+            RadioCatalogSource.ApiProxy -> 1
         }
 
         catalogSourceDialog = AlertDialog.Builder(this)
             .setTitle("Radio source")
             .setSingleChoiceItems(sources, selectedIndex) { dialog, which ->
                 val nextSource = when (which) {
-                    1 -> RadioCatalogSource.StaticFile
-                    else -> RadioCatalogSource.ApiProxy
+                    1 -> RadioCatalogSource.ApiProxy
+                    else -> RadioCatalogSource.StaticFile
                 }
                 updateCatalogSource(nextSource)
                 dialog.dismiss()
@@ -833,6 +839,7 @@ class MainActivity : AppCompatActivity() {
         stationsContainer.removeAllViews()
         playerContainer.removeAllViews()
         activeElapsedText = null
+        activeNowPlayingText = null
         if (!animatePlayerIn) {
             updateFilterPanelChrome(if (activeStation == null) 0 else 255)
         }
@@ -851,6 +858,7 @@ class MainActivity : AppCompatActivity() {
         activeStation?.let { station ->
             playerContainer.visibility = View.VISIBLE
             playerContainer.addView(activePlayerCard(station))
+            refreshNowPlaying(station)
             if (animatePlayerIn) {
                 if (isLandscape()) {
                     prepareLandscapePlayerIn()
@@ -1272,6 +1280,23 @@ class MainActivity : AppCompatActivity() {
                     }
                 })
 
+                activeNowPlayingText = TextView(this@MainActivity).apply {
+                    text = nowPlayingTextFor(station) ?: "בודק מה משודר עכשיו..."
+                    textSize = 15f
+                    setTextColor(mutedColor)
+                    gravity = Gravity.CENTER
+                    maxLines = 2
+                    applyStationTextDirection(text.toString(), alignHebrewRight = false)
+                    includeFontPadding = false
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply {
+                        bottomMargin = dp(8)
+                    }
+                }
+                addView(activeNowPlayingText)
+
                 activeElapsedText = TextView(this@MainActivity).apply {
                     text = if (isActiveStationLoading) "טוען..." else "00:00"
                     textSize = 17f
@@ -1598,7 +1623,61 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun refreshNowPlaying(station: RadioStation) {
+        val loadedAtMs = nowPlayingLoadedAtMs[station.id] ?: 0L
+        val cached = nowPlayingCache[station.id]
+        val isFresh = cached != null && System.currentTimeMillis() - loadedAtMs < NOW_PLAYING_REFRESH_INTERVAL_MS
+        if (isFresh) {
+            updateActiveNowPlayingText(station)
+            return
+        }
+
+        executor.execute {
+            val info = try {
+                nowPlayingRepository.nowPlayingFor(station)
+            } catch (error: Exception) {
+                Log.w(LOG_TAG, "Failed to load now playing for ${station.id}", error)
+                null
+            }
+
+            mainHandler.post {
+                if (info != null) {
+                    nowPlayingCache[station.id] = info
+                    nowPlayingLoadedAtMs[station.id] = System.currentTimeMillis()
+                } else {
+                    nowPlayingCache.remove(station.id)
+                    nowPlayingLoadedAtMs[station.id] = System.currentTimeMillis()
+                }
+
+                if (activeStation?.id == station.id) {
+                    updateActiveNowPlayingText(station)
+                }
+            }
+        }
+    }
+
+    private fun updateActiveNowPlayingText(station: RadioStation) {
+        val text = nowPlayingTextFor(station)
+        activeNowPlayingText?.run {
+            this.text = text ?: "אין מידע על התוכנית כרגע"
+            applyStationTextDirection(this.text.toString(), alignHebrewRight = false)
+        }
+    }
+
+    private fun nowPlayingTextFor(station: RadioStation): String? {
+        val info = nowPlayingCache[station.id] ?: return null
+        return buildString {
+            append("עכשיו: ")
+            append(info.title)
+            info.detail?.takeIf { it.isNotBlank() }?.let {
+                append(" · ")
+                append(it)
+            }
+        }
+    }
+
     private fun mediaItemFor(station: RadioStation): MediaItem {
+        val nowPlaying = nowPlayingCache[station.id]
         val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(station.id)
             .setUri(repository.streamUriFor(station.id))
@@ -1607,6 +1686,8 @@ class MainActivity : AppCompatActivity() {
                     .setTitle(station.name)
                     .setArtist(getString(R.string.app_name))
                     .setAlbumTitle("רדיו חי")
+                    .setSubtitle(nowPlaying?.title)
+                    .setDescription(nowPlayingTextFor(station))
                     .setArtworkUri(station.logo?.takeIf { it.isNotBlank() }?.let(Uri::parse))
                     .setIsBrowsable(false)
                     .setIsPlayable(true)

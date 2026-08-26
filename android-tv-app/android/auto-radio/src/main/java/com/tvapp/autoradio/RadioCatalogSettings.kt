@@ -15,7 +15,7 @@ object RadioCatalogSettings {
 
     fun getSource(context: Context): RadioCatalogSource {
         val value = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_SOURCE, SOURCE_API_PROXY)
+            .getString(KEY_SOURCE, SOURCE_STATIC_FILE)
 
         return when (value) {
             SOURCE_STATIC_FILE -> RadioCatalogSource.StaticFile
@@ -33,6 +33,6 @@ object RadioCatalogSettings {
                     RadioCatalogSource.StaticFile -> SOURCE_STATIC_FILE
                 }
             )
-            .apply()
+            .commit()
     }
 }
