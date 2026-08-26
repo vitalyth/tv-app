@@ -721,8 +721,8 @@
 		"tvgID": "1015fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "http://radio.2net.co.il/hatahana",
-			"regex": "width=\"100%\" src=\"(.*?)\""
+			"link": "https://cdn.cybercdn.live/Darom_1015FM/Live/icecast.audio",
+			"final": true
 		}
 	},
 	"rd_102": {
@@ -773,8 +773,8 @@
 		"tvgID": "1045fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "https://1045fm.maariv.co.il/include/OnLineView.aspx",
-			"regex": "data-file=\"(.*?)\""
+			"link": "https://cdn.cybercdn.live/Tzafon_NonStop/Live_Audio/icecast.audio",
+			"final": true
 		}
 	},
 	"rd_1075": {
@@ -916,8 +916,8 @@
 		"tvgID": "891fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "http://www.891fm.co.il/",
-			"regex": "data-mp3=\"(.*?)\""
+			"link": "https://cdn.cybercdn.live/Pervoia/Audio/icecast.audio",
+			"final": true
 		}
 	},
 	"rd_1064": {

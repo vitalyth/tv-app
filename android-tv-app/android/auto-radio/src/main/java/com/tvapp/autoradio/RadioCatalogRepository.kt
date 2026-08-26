@@ -114,16 +114,17 @@ class RadioCatalogRepository(
             "rd_1064" -> MimeTypes.APPLICATION_M3U8
 
             "rd_97",
+            "rd_1015",
             "rd_103",
-            "rd_1045",
             "rd_glz",
-            "rd_glglz" -> MimeTypes.AUDIO_MPEG
+            "rd_glglz",
+            "rd_891" -> MimeTypes.AUDIO_MPEG
 
             "rd_90",
             "rd_91",
-            "rd_1015",
             "rd_102",
             "rd_102Eilat",
+            "rd_1045",
             "rd_1075",
             "rd_gly",
             "rd_fm995" -> MimeTypes.AUDIO_AAC
@@ -150,9 +151,12 @@ class RadioCatalogRepository(
             "rd_91" -> "https://cdn.cybercdn.live/Lev_Hamedina/Audio/icecast.audio"
             "rd_97" -> "https://cdn.cybercdn.live/Darom_97FM/Live/icecast.audio"
             "rd_101" -> "https://radio.streamgates.net/stream/101fm"
+            "rd_1015" -> "https://cdn.cybercdn.live/Darom_1015FM/Live/icecast.audio"
             "rd_102" -> "https://cdn88.mediacast.co.il/102-tlv-live/102fm_aac/icecast.audio"
             "rd_102Eilat" -> "https://cdn.cybercdn.live/Eilat_Radio/Live/icecast.audio"
+            "rd_1045" -> "https://cdn.cybercdn.live/Tzafon_NonStop/Live_Audio/icecast.audio"
             "rd_1075" -> "https://1075.livecdn.biz/radiohaifa"
+            "rd_891" -> "https://cdn.cybercdn.live/Pervoia/Audio/icecast.audio"
             "rd_gly" -> "https://cdn.cybercdn.live/Galei_Israel/Live/icecast.audio"
             "rd_fm995" -> "https://995.livecdn.biz/995fm"
             else -> null

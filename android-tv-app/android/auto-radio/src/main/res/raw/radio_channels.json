@@ -68,8 +68,8 @@
     "name": "101.5FM רדיו דרום",
     "type": "radio",
     "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/1015fm.jpg",
-    "streamUrl": "http://radio.2net.co.il/hatahana",
-    "mimeType": "audio/aac"
+    "streamUrl": "https://cdn.cybercdn.live/Darom_1015FM/Live/icecast.audio",
+    "mimeType": "audio/mpeg"
   },
   {
     "id": "rd_102",
@@ -100,8 +100,8 @@
     "name": "104.5FM רדיו צפון",
     "type": "radio",
     "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/1045fm.jpg",
-    "streamUrl": "https://1045fm.maariv.co.il/include/OnLineView.aspx",
-    "mimeType": "audio/mpeg"
+    "streamUrl": "https://cdn.cybercdn.live/Tzafon_NonStop/Live_Audio/icecast.audio",
+    "mimeType": "audio/aac"
   },
   {
     "id": "rd_1075",
@@ -188,7 +188,7 @@
     "name": "Первое Радио 89.1FM",
     "type": "radio",
     "logo": "https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/images/891fm.png",
-    "streamUrl": "http://www.891fm.co.il/",
+    "streamUrl": "https://cdn.cybercdn.live/Pervoia/Audio/icecast.audio",
     "mimeType": "audio/mpeg"
   },
   {

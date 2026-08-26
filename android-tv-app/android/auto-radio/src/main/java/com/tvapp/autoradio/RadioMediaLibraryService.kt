@@ -16,6 +16,7 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionResult
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
 import com.google.android.gms.cast.MediaMetadata as CastMediaMetadata
@@ -128,6 +129,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
 
+        setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_NEVER)
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider(this).apply {
                 setSmallIcon(R.drawable.ic_notification_radio)
@@ -362,10 +364,19 @@ class RadioMediaLibraryService : MediaLibraryService() {
         isStoppingPlayback = true
         disconnectCast()
         stopLocalPlayback()
+        notifyPlaybackStopped()
         if (stopService) {
             stopSelf()
         }
         isStoppingPlayback = false
+    }
+
+    private fun notifyPlaybackStopped() {
+        sendBroadcast(
+            Intent(ACTION_PLAYBACK_STOPPED).apply {
+                setPackage(packageName)
+            }
+        )
     }
 
     private fun pauseActivePlayback() {
@@ -439,6 +450,20 @@ class RadioMediaLibraryService : MediaLibraryService() {
     }
 
     private inner class RadioLibraryCallback : MediaLibrarySession.Callback {
+        override fun onPlayerCommandRequest(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            playerCommand: Int,
+        ): Int {
+            if (playerCommand == Player.COMMAND_STOP) {
+                Log.d(LOG_TAG, "Received stop command from controller=${controller.packageName}")
+                stopActivePlayback(stopService = true)
+                return SessionResult.RESULT_SUCCESS
+            }
+
+            return SessionResult.RESULT_SUCCESS
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -592,14 +617,54 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 {
                     val stations = repository.getStations()
                     mediaItems.mapNotNull { requested ->
-                        val station = stations.firstOrNull { it.id == requested.mediaId }
+                        val station = resolveRequestedStation(requested, stations)
                         if (station != null) {
+                            Log.d(LOG_TAG, "Resolved requested media item '${requested.mediaId}' to station '${station.id}'")
                             rememberStation(station)
                             station.toMediaItem()
                         } else {
                             requested.takeIf { it.localConfiguration != null }
                         }
                     }.toMutableList()
+                },
+                executor,
+            )
+        }
+
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            return Futures.submit<MediaSession.MediaItemsWithStartPosition>(
+                {
+                    val stations = repository.getStations()
+                    val resolvedItems = mediaItems.mapNotNull { requested ->
+                        val station = resolveRequestedStation(requested, stations)
+                        if (station != null) {
+                            Log.d(LOG_TAG, "Resolved setMediaItems request '${requested.mediaId}' to station '${station.id}'")
+                            rememberStation(station)
+                            station.toMediaItem()
+                        } else {
+                            requested.takeIf { it.localConfiguration != null }
+                        }
+                    }
+
+                    val playableItems = resolvedItems.ifEmpty {
+                        defaultVoiceStation(stations)?.let { station ->
+                            Log.d(LOG_TAG, "Using default voice station '${station.id}'")
+                            rememberStation(station)
+                            listOf(station.toMediaItem())
+                        } ?: emptyList()
+                    }
+
+                    MediaSession.MediaItemsWithStartPosition(
+                        playableItems,
+                        if (playableItems.isEmpty()) C.INDEX_UNSET else 0,
+                        C.TIME_UNSET,
+                    )
                 },
                 executor,
             )
@@ -888,14 +953,64 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
         val favoriteIds = favoriteStationIds()
         return repository.getStations()
-            .filter { station ->
-                station.name.normalizedSearchText().contains(normalizedQuery) ||
-                    station.id.normalizedSearchText().contains(normalizedQuery)
-            }
+            .filter { station -> station.matchesSearchQuery(normalizedQuery) }
             .sortedWith(
                 compareByDescending<RadioStation> { it.id in favoriteIds }
                     .thenBy { it.name }
             )
+    }
+
+    private fun resolveRequestedStation(requested: MediaItem, stations: List<RadioStation>): RadioStation? {
+        stations.firstOrNull { it.id == requested.mediaId }?.let { return it }
+
+        val queries = requested.searchQueryCandidates()
+            .map { it.normalizedSearchText() }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        if (queries.isEmpty()) {
+            return null
+        }
+
+        Log.d(LOG_TAG, "Resolving media request '${requested.mediaId}' queries=$queries")
+
+        return queries.firstNotNullOfOrNull { query ->
+            stations.firstOrNull { station -> station.matchesSearchQuery(query) }
+        }
+    }
+
+    private fun defaultVoiceStation(stations: List<RadioStation>): RadioStation? {
+        val stationById = stations.associateBy { it.id }
+        return recentStationIds().firstNotNullOfOrNull { stationById[it] }
+            ?: stationById[DEFAULT_VOICE_STATION_ID]
+            ?: stations.firstOrNull()
+    }
+
+    private fun MediaItem.searchQueryCandidates(): List<String> {
+        val metadata = mediaMetadata
+        return listOfNotNull(
+            requestMetadata.searchQuery,
+            metadata.title?.toString(),
+            metadata.displayTitle?.toString(),
+            metadata.station?.toString(),
+            metadata.artist?.toString(),
+            metadata.albumArtist?.toString(),
+            metadata.subtitle?.toString(),
+            metadata.description?.toString(),
+            mediaId.takeIf { it.isNotBlank() },
+        )
+    }
+
+    private fun RadioStation.matchesSearchQuery(normalizedQuery: String): Boolean {
+        val normalizedValues = buildList {
+            add(id.normalizedSearchText())
+            add(name.normalizedSearchText())
+            addAll(STATION_ALIASES[id].orEmpty().map { it.normalizedSearchText() })
+        }.filter { it.isNotBlank() }
+
+        return normalizedValues.any { value ->
+            value.contains(normalizedQuery) || normalizedQuery.contains(value)
+        }
     }
 
     private fun String?.normalizedSearchText(): String {
@@ -925,6 +1040,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val ACTION_DISCONNECT_OUTPUT = "com.tvapp.autoradio.DISCONNECT_OUTPUT"
         const val ACTION_PAUSE_ACTIVE = "com.tvapp.autoradio.PAUSE_ACTIVE"
         const val ACTION_PLAY_ACTIVE = "com.tvapp.autoradio.PLAY_ACTIVE"
+        const val ACTION_PLAYBACK_STOPPED = "com.tvapp.autoradio.PLAYBACK_STOPPED"
         const val LOG_TAG = "TVAppRadioService"
         const val ROOT_ID = "radio_root"
         const val STATIONS_ID = "radio_stations"
@@ -936,8 +1052,38 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val FAVORITE_STATIONS_PREFS = "favorite_stations"
         const val RECENT_STATIONS_PREFS = "recent_stations"
         const val MAX_RECENT_STATIONS = 20
+        const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
         const val FAVORITES_GROUP_TITLE = "מועדפים"
         const val ALL_STATIONS_GROUP_TITLE = "כל השאר"
+        val STATION_ALIASES = mapOf(
+            "rd_glglz" to listOf(
+                "galgalaz",
+                "galgalatz",
+                "glglz",
+                "גלגלצ",
+                "גלגל״צ",
+                "גלגל צ",
+            ),
+            "rd_glz" to listOf(
+                "galei tzahal",
+                "glz",
+                "גלי צהל",
+                "גלי צה״ל",
+                "גלצ",
+            ),
+            "rd_103" to listOf(
+                "103fm",
+                "103 fm",
+                "radio lelo hafsaka",
+                "רדיו ללא הפסקה",
+                "ללא הפסקה",
+            ),
+            "rd_88" to listOf(
+                "kan 88",
+                "kan eighty eight",
+                "כאן שמונים ושמונה",
+            ),
+        )
         val HEBREW_DIACRITICS_REGEX = Regex("[\\u0591-\\u05C7]")
         val SEARCH_IGNORED_CHARS_REGEX = Regex("[\\u200E\\u200F\\u202A-\\u202E'\"`׳״\\-_.\\s]+")
     }

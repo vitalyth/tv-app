@@ -4,9 +4,11 @@ import android.Manifest
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.content.pm.PackageManager
@@ -27,6 +29,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.MediaStore
+import android.app.SearchManager
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
@@ -58,6 +62,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -71,8 +76,42 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_DISCONNECT_OUTPUT = "com.tvapp.autoradio.DISCONNECT_OUTPUT"
         private const val ACTION_PAUSE_ACTIVE = "com.tvapp.autoradio.PAUSE_ACTIVE"
         private const val ACTION_PLAY_ACTIVE = "com.tvapp.autoradio.PLAY_ACTIVE"
+        private const val ACTION_PLAYBACK_STOPPED = "com.tvapp.autoradio.PLAYBACK_STOPPED"
         private const val ACTION_SHOW_CATALOG_SETTINGS = "com.tvapp.autoradio.SHOW_CATALOG_SETTINGS"
+        private const val ACTION_MEDIA_PLAY_FROM_SEARCH = "android.media.action.MEDIA_PLAY_FROM_SEARCH"
         private const val LOG_TAG = "TVAppRadio"
+        private const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
+        private val STATION_ALIASES = mapOf(
+            "rd_glglz" to listOf(
+                "galgalaz",
+                "galgalatz",
+                "glglz",
+                "גלגלצ",
+                "גלגל״צ",
+                "גלגל צ",
+            ),
+            "rd_glz" to listOf(
+                "galei tzahal",
+                "glz",
+                "גלי צהל",
+                "גלי צה״ל",
+                "גלצ",
+            ),
+            "rd_103" to listOf(
+                "103fm",
+                "103 fm",
+                "radio lelo hafsaka",
+                "רדיו ללא הפסקה",
+                "ללא הפסקה",
+            ),
+            "rd_88" to listOf(
+                "kan 88",
+                "kan eighty eight",
+                "כאן שמונים ושמונה",
+            ),
+        )
+        private val HEBREW_DIACRITICS_REGEX = Regex("[\\u0591-\\u05C7]")
+        private val SEARCH_IGNORED_CHARS_REGEX = Regex("[\\u200E\\u200F\\u202A-\\u202E'\"`׳״\\-_.\\s]+")
     }
 
     private val bgColor = Color.rgb(37, 47, 64)
@@ -114,6 +153,13 @@ class MainActivity : AppCompatActivity() {
         }
         override fun onSessionSuspended(session: CastSession, reason: Int) = Unit
     }
+    private val playbackStoppedReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_PLAYBACK_STOPPED) {
+                handleExternalPlaybackStopped()
+            }
+        }
+    }
 
     private lateinit var repository: RadioCatalogRepository
     private lateinit var recentPrefs: SharedPreferences
@@ -145,7 +191,10 @@ class MainActivity : AppCompatActivity() {
     private var isUserStoppingPlayback = false
     private var connectedOutputName: String? = null
     private var restoredStationId: String? = null
+    private var requestedStationId: String? = null
     private var catalogSourceDialog: AlertDialog? = null
+    private var pendingVoicePlaybackQuery: String? = null
+    private var pendingControllerStationId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -153,45 +202,63 @@ class MainActivity : AppCompatActivity() {
         recentPrefs = getSharedPreferences("recent_stations", MODE_PRIVATE)
         favoritePrefs = getSharedPreferences("favorite_stations", MODE_PRIVATE)
         restoredStationId = savedInstanceState?.getString(STATE_ACTIVE_STATION_ID)
+        requestedStationId = restoredStationId
         playStartedAtMs = savedInstanceState?.getLong(STATE_PLAY_STARTED_AT_MS, 0L) ?: 0L
 
         requestNotificationPermissionIfNeeded()
         buildLayout()
+        registerPlaybackStoppedReceiver()
         initializeOutputConnectionMonitor()
         connectMediaController()
         loadStations()
-        handleIntent(intent)
+        handleIntent(intent, allowPlaybackIntent = savedInstanceState == null)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         syncControllerStateIntoUi()
-        handleIntent(intent)
+        handleIntent(intent, allowPlaybackIntent = true)
     }
 
-    private fun handleIntent(intent: Intent?) {
-        if (intent?.action == ACTION_SHOW_CATALOG_SETTINGS) {
-            mainHandler.post { showCatalogSourceSettings() }
+    private fun handleIntent(intent: Intent?, allowPlaybackIntent: Boolean) {
+        when (intent?.action) {
+            ACTION_SHOW_CATALOG_SETTINGS -> mainHandler.post { showCatalogSourceSettings() }
+            ACTION_MEDIA_PLAY_FROM_SEARCH -> {
+                if (allowPlaybackIntent) {
+                    handleVoicePlaybackIntent(intent)
+                } else {
+                    Log.d(LOG_TAG, "Ignoring stale playback intent during activity recreation")
+                }
+            }
         }
     }
 
     override fun onResume() {
         super.onResume()
         syncControllerStateIntoUi()
+        consumePendingVoicePlayback()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        if (shouldRestorePlayerState()) {
-            activeStation?.let { outState.putString(STATE_ACTIVE_STATION_ID, it.id) }
+        if (!isPlayerHiding && !isUserStoppingPlayback) {
+            val stationId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
+                ?: pendingControllerStationId
+                ?: requestedStationId
+                ?: activeStation?.id
+            stationId?.let { outState.putString(STATE_ACTIVE_STATION_ID, it) }
             outState.putLong(STATE_PLAY_STARTED_AT_MS, playStartedAtMs)
         }
     }
 
     override fun onDestroy() {
+        if (isFinishing && !isChangingConfigurations && !isUserStoppingPlayback) {
+            startService(Intent(this, RadioMediaLibraryService::class.java).setAction(ACTION_DISCONNECT_OUTPUT))
+        }
         mainHandler.removeCallbacks(timerRunnable)
         castContext?.sessionManager?.removeSessionManagerListener(outputSessionListener, CastSession::class.java)
+        unregisterReceiver(playbackStoppedReceiver)
         if (::controllerFuture.isInitialized) {
             MediaController.releaseFuture(controllerFuture)
         }
@@ -206,6 +273,14 @@ class MainActivity : AppCompatActivity() {
             {
                 controller = controllerFuture.get().apply {
                     addListener(object : Player.Listener {
+                        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                            if (mediaItem != null) {
+                                syncActiveStationFromController()
+                            } else if (!isSwitchingStation) {
+                                syncStoppedPlaybackFromController()
+                            }
+                        }
+
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             when (playbackState) {
                                 Player.STATE_BUFFERING -> syncLoadingFromController()
@@ -248,9 +323,8 @@ class MainActivity : AppCompatActivity() {
                             stopElapsedTimer(resetText = false)
                         }
                     })
-                    if (isPlaying || playWhenReady) {
-                        syncPlayingFromController()
-                    }
+                    syncControllerStateIntoUi()
+                    consumePendingVoicePlayback()
                 }
             },
             MoreExecutors.directExecutor(),
@@ -282,10 +356,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncControllerStateIntoUi() {
         val mediaController = controller ?: return
-        if (mediaController.currentMediaItem != null && mediaController.hasRestorablePlayback()) {
-            syncPlayingFromController()
-            startElapsedTimer()
-        } else if (mediaController.currentMediaItem == null && activeStation != null) {
+        if (mediaController.currentMediaItem != null) {
+            when {
+                mediaController.isPlaying || mediaController.playWhenReady -> {
+                    syncPlayingFromController()
+                    startElapsedTimer()
+                }
+                mediaController.playbackState == Player.STATE_BUFFERING -> syncLoadingFromController()
+                mediaController.hasRestorablePlayback() -> syncPausedButActiveFromController()
+                else -> syncActiveStationFromController()
+            }
+        } else if (activeStation != null) {
             syncStoppedPlaybackFromController()
         }
     }
@@ -578,6 +659,8 @@ class MainActivity : AppCompatActivity() {
         }
         activeStation = null
         restoredStationId = null
+        requestedStationId = null
+        pendingControllerStationId = null
         loadStations()
     }
 
@@ -600,8 +683,112 @@ class MainActivity : AppCompatActivity() {
                 hideStatus()
                 restoreActiveStationAfterCatalogLoad()
                 renderStations()
+                syncControllerStateIntoUi()
+                consumePendingVoicePlayback()
             }
         }
+    }
+
+    private fun handleVoicePlaybackIntent(intent: Intent) {
+        val query = intent.voiceSearchCandidates()
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+
+        Log.d(LOG_TAG, "Received voice playback intent query='$query'")
+        setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+        pendingVoicePlaybackQuery = query
+        consumePendingVoicePlayback()
+        listOf(500L, 1_500L, 3_000L, 6_000L).forEach { delayMs ->
+            mainHandler.postDelayed({ consumePendingVoicePlayback() }, delayMs)
+        }
+    }
+
+    private fun consumePendingVoicePlayback() {
+        val query = pendingVoicePlaybackQuery ?: return
+        if (controller == null || isCatalogLoading || allStations.isEmpty()) {
+            Log.d(
+                LOG_TAG,
+                "Deferring voice playback query='$query' controllerReady=${controller != null} " +
+                    "catalogLoading=$isCatalogLoading stationCount=${allStations.size}",
+            )
+            return
+        }
+
+        pendingVoicePlaybackQuery = null
+        val station = resolveVoiceStation(query) ?: defaultVoiceStation()
+        if (station == null) {
+            Log.d(LOG_TAG, "Voice playback request had no station match and no default station")
+            showStatus("לא נמצאה תחנה מתאימה לפקודה הקולית.", showRetry = false)
+            return
+        }
+
+        Log.d(LOG_TAG, "Voice playback resolved query='$query' station='${station.id}'")
+        playStation(station)
+    }
+
+    private fun Intent.voiceSearchCandidates(): List<String> {
+        return listOfNotNull(
+            getStringExtra(SearchManager.QUERY),
+            getStringExtra(MediaStore.EXTRA_MEDIA_TITLE),
+            getStringExtra(MediaStore.EXTRA_MEDIA_ARTIST),
+            getStringExtra(MediaStore.EXTRA_MEDIA_ALBUM),
+            getStringExtra(MediaStore.EXTRA_MEDIA_GENRE),
+            dataString,
+        )
+    }
+
+    private fun resolveVoiceStation(query: String): RadioStation? {
+        val normalizedQuery = query.normalizedVoiceSearchText()
+        if (normalizedQuery.isBlank()) {
+            return null
+        }
+
+        return allStations.firstOrNull { station -> station.matchesVoiceSearchQuery(normalizedQuery) }
+    }
+
+    private fun defaultVoiceStation(): RadioStation? {
+        val stationById = allStations.associateBy { it.id }
+        return recentPrefs.all
+            .mapNotNull { (stationId, playedAt) -> (playedAt as? Long)?.let { stationId to it } }
+            .sortedByDescending { it.second }
+            .firstNotNullOfOrNull { stationById[it.first] }
+            ?: stationById[DEFAULT_VOICE_STATION_ID]
+            ?: allStations.firstOrNull()
+    }
+
+    private fun RadioStation.matchesVoiceSearchQuery(normalizedQuery: String): Boolean {
+        val normalizedValues = buildList {
+            add(id.normalizedVoiceSearchText())
+            add(name.normalizedVoiceSearchText())
+            addAll(STATION_ALIASES[id].orEmpty().map { it.normalizedVoiceSearchText() })
+        }.filter { it.isNotBlank() }
+
+        return normalizedValues.any { value ->
+            value.contains(normalizedQuery) || normalizedQuery.contains(value)
+        }
+    }
+
+    private fun String?.normalizedVoiceSearchText(): String {
+        if (this.isNullOrBlank()) {
+            return ""
+        }
+
+        return Normalizer.normalize(this, Normalizer.Form.NFKD)
+            .lowercase(Locale.ROOT)
+            .replace(HEBREW_DIACRITICS_REGEX, "")
+            .map { char ->
+                when (char) {
+                    'ך' -> 'כ'
+                    'ם' -> 'מ'
+                    'ן' -> 'נ'
+                    'ף' -> 'פ'
+                    'ץ' -> 'צ'
+                    else -> char
+                }
+            }
+            .joinToString("")
+            .replace(SEARCH_IGNORED_CHARS_REGEX, "")
+            .trim()
     }
 
     private fun restoreActiveStationAfterCatalogLoad() {
@@ -609,17 +796,23 @@ class MainActivity : AppCompatActivity() {
         val controllerStationId = mediaController
             ?.currentMediaItem
             ?.mediaId
-            ?.takeIf { mediaController.hasRestorablePlayback() }
+            ?.takeIf { it.isNotBlank() }
 
-        val stationId = controllerStationId ?: restoredStationId?.takeIf { shouldRestorePlayerState() }
+        val stationId = controllerStationId ?: pendingControllerStationId ?: requestedStationId ?: restoredStationId
         val station = allStations.firstOrNull { it.id == stationId } ?: return
 
+        pendingControllerStationId = null
+        requestedStationId = station.id
         activeStation = station
         if (playStartedAtMs <= 0L) {
             playStartedAtMs = System.currentTimeMillis()
         }
         restoredStationId = null
-        if (mediaController?.isPlaying == true) {
+        isActiveStationPaused = mediaController?.currentMediaItem != null &&
+            mediaController.hasRestorablePlayback() &&
+            mediaController.isPlaying != true &&
+            mediaController.playWhenReady != true
+        if (mediaController?.isPlaying == true || mediaController?.playWhenReady == true) {
             startElapsedTimer()
         }
     }
@@ -898,6 +1091,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearActivePlaybackState() {
         activeStation = null
+        requestedStationId = null
+        pendingControllerStationId = null
         playStartedAtMs = 0L
         isActiveStationLoading = false
         isActiveStationPaused = false
@@ -1369,6 +1564,8 @@ class MainActivity : AppCompatActivity() {
         hideStatus()
         rememberStation(station)
         val shouldAnimatePlayerIn = activeStation == null || playerContainer.visibility != View.VISIBLE
+        requestedStationId = station.id
+        pendingControllerStationId = station.id
         activeStation = station
         playStartedAtMs = 0L
         isActiveStationLoading = true
@@ -1450,6 +1647,27 @@ class MainActivity : AppCompatActivity() {
         mainHandler.postDelayed({ isUserStoppingPlayback = false }, 1_000)
     }
 
+    private fun registerPlaybackStoppedReceiver() {
+        val filter = IntentFilter(ACTION_PLAYBACK_STOPPED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(playbackStoppedReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(playbackStoppedReceiver, filter)
+        }
+    }
+
+    private fun handleExternalPlaybackStopped() {
+        if (isUserStoppingPlayback) {
+            return
+        }
+
+        clearActivePlaybackState()
+        if (::playerContainer.isInitialized && ::stationsContainer.isInitialized && !isCatalogLoading) {
+            renderStations()
+        }
+    }
+
     private fun MediaController.hasRestorablePlayback(): Boolean {
         return currentMediaItem != null &&
             playbackState != Player.STATE_IDLE &&
@@ -1463,8 +1681,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncLoadingFromController() {
-        val mediaId = controller?.currentMediaItem?.mediaId ?: return
-        val station = allStations.firstOrNull { it.id == mediaId } ?: return
+        val mediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
+        val station = allStations.firstOrNull { it.id == mediaId }
+        if (station == null) {
+            pendingControllerStationId = mediaId
+            Log.d(LOG_TAG, "Deferring loading station sync for mediaId='$mediaId' stationCount=${allStations.size}")
+            return
+        }
+        pendingControllerStationId = null
+        requestedStationId = station.id
         activeStation = station
         isActiveStationLoading = true
         isActiveStationPaused = false
@@ -1496,10 +1721,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncActiveStationFromController() {
-        val mediaId = controller?.currentMediaItem?.mediaId ?: return
-        val station = allStations.firstOrNull { it.id == mediaId } ?: return
+        val mediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
+        val station = allStations.firstOrNull { it.id == mediaId }
+        if (station == null) {
+            pendingControllerStationId = mediaId
+            Log.d(LOG_TAG, "Deferring controller station sync for mediaId='$mediaId' stationCount=${allStations.size}")
+            return
+        }
         val previousId = activeStation?.id
 
+        pendingControllerStationId = null
+        requestedStationId = station.id
         activeStation = station
         rememberStation(station)
         if (playStartedAtMs <= 0L || previousId != station.id) {
