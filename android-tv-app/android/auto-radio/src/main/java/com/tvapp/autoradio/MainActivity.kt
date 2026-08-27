@@ -10,16 +10,19 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
-import android.content.res.Configuration
+import android.content.res.ColorStateList
 import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.ColorFilter
+import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -36,17 +39,21 @@ import android.text.TextWatcher
 import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.annotation.DrawableRes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -83,6 +90,9 @@ class MainActivity : AppCompatActivity() {
         private const val LOG_TAG = "TVAppRadio"
         private const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
         private const val NOW_PLAYING_REFRESH_INTERVAL_MS = 60_000L
+        private const val LIBRARY_TAB_HOME = "home"
+        private const val LIBRARY_TAB_FAVORITES = "favorites"
+        private const val LIBRARY_TAB_RECENT = "recent"
         private val STATION_ALIASES = mapOf(
             "rd_glglz" to listOf(
                 "galgalaz",
@@ -116,13 +126,14 @@ class MainActivity : AppCompatActivity() {
         private val SEARCH_IGNORED_CHARS_REGEX = Regex("[\\u200E\\u200F\\u202A-\\u202E'\"`׳״\\-_.\\s]+")
     }
 
-    private val bgColor = Color.rgb(37, 47, 64)
-    private val inkColor = Color.rgb(244, 247, 250)
-    private val mutedColor = Color.rgb(154, 164, 178)
-    private val surfaceColor = Color.rgb(22, 28, 38)
-    private val elevatedSurfaceColor = Color.rgb(30, 38, 50)
-    private val borderColor = Color.rgb(48, 58, 72)
-    private val accentColor = Color.rgb(242, 201, 76)
+    private val bgColor = Color.rgb(28, 29, 36)
+    private val inkColor = Color.WHITE
+    private val mutedColor = Color.rgb(165, 165, 173)
+    private val surfaceColor = Color.rgb(36, 37, 45)
+    private val elevatedSurfaceColor = Color.rgb(42, 43, 51)
+    private val borderColor = Color.argb(22, 255, 255, 255)
+    private val accentColor = Color.rgb(255, 159, 28)
+    private val accentSoftColor = Color.rgb(255, 179, 71)
     private val liveColor = Color.rgb(235, 64, 64)
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -173,14 +184,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusPanel: LinearLayout
     private lateinit var statusText: TextView
     private lateinit var retryButton: Button
-    private lateinit var sourceButton: ImageView
+    private lateinit var headerContainer: LinearLayout
+    private lateinit var bottomNavContainer: LinearLayout
+    private lateinit var miniPlayerShortcut: FrameLayout
     private lateinit var playerContainer: LinearLayout
     private lateinit var stationsContainer: LinearLayout
     private lateinit var scrollView: ScrollView
     private lateinit var nowPlayingRepository: NowPlayingRepository
     private var castContext: CastContext? = null
-    private var landscapePlayerPane: LinearLayout? = null
-    private var landscapeListPane: LinearLayout? = null
 
     private var allStations: List<RadioStation> = emptyList()
     private var activeStation: RadioStation? = null
@@ -197,6 +208,10 @@ class MainActivity : AppCompatActivity() {
     private var restoredStationId: String? = null
     private var restoredStationWasPaused = false
     private var requestedStationId: String? = null
+    private var isPlayerPageVisible = false
+    private var isPlayerOpening = false
+    private var isPlayerPageDismissedByUser = false
+    private var selectedLibraryTab = LIBRARY_TAB_HOME
     private var catalogSourceDialog: AlertDialog? = null
     private var pendingVoicePlaybackQuery: String? = null
     private var pendingControllerStationId: String? = null
@@ -228,6 +243,15 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         syncControllerStateIntoUi()
         handleIntent(intent, allowPlaybackIntent = true)
+    }
+
+    override fun onBackPressed() {
+        if (isPlayerPageVisible) {
+            closePlayerPageWithAnimation()
+            return
+        }
+        @Suppress("DEPRECATION")
+        super.onBackPressed()
     }
 
     private fun handleIntent(intent: Intent?, allowPlaybackIntent: Boolean) {
@@ -390,11 +414,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildLayout() {
-        val landscape = isLandscape()
+        val shell = FrameLayout(this).apply {
+            background = appBackground()
+            clipChildren = false
+            clipToPadding = false
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_LTR
-            setPadding(0, if (landscape) dp(22) else dp(52), 0, if (landscape) dp(14) else dp(28))
+            setPadding(dp(18), dp(42), dp(18), dp(24))
             background = appBackground()
             clipToPadding = false
             layoutParams = ViewGroup.LayoutParams(
@@ -403,68 +435,27 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        root.addView(headerView())
+        headerContainer = headerView()
+        root.addView(headerContainer)
 
-        val playerParent: LinearLayout
-        val listParent: LinearLayout
-
-        if (landscape) {
-            val content = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutDirection = View.LAYOUT_DIRECTION_LTR
-                clipChildren = false
-                clipToPadding = false
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    0,
-                    1f,
-                )
-            }
-
-            playerParent = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.TOP
-                visibility = View.GONE
-                clipChildren = false
-                clipToPadding = false
-                setPadding(dp(8), 0, dp(6), 0)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 0f)
-            }
-
-            listParent = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                clipChildren = true
-                clipToPadding = true
-                setPadding(dp(6), 0, dp(8), 0)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-            }
-
-            landscapePlayerPane = playerParent
-            landscapeListPane = listParent
-            content.addView(playerParent)
-            content.addView(listParent)
-            root.addView(content)
-        } else {
-            playerParent = root
-            listParent = root
-        }
+        val listParent = root
 
         playerContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                if (landscape) LinearLayout.LayoutParams.MATCH_PARENT else LinearLayout.LayoutParams.WRAP_CONTENT,
+            background = null
+            clipChildren = false
+            clipToPadding = false
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
             )
         }
-        playerParent.addView(playerContainer)
 
         filterPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), if (landscape) 0 else dp(10), dp(20), dp(10))
+            setPadding(0, dp(4), 0, dp(18))
             background = null
-            elevation = dp(12).toFloat()
-            translationZ = dp(4).toFloat()
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -475,13 +466,16 @@ class MainActivity : AppCompatActivity() {
 
         filterInput = EditText(this).apply {
             hint = "סנן תחנות"
-            textSize = 18f
+            textSize = 16f
             setSingleLine(true)
             setTextColor(inkColor)
             setHintTextColor(mutedColor)
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-            background = roundedRect(Color.rgb(20, 26, 36), 18f, Color.rgb(55, 65, 82), 1)
-            elevation = dp(8).toFloat()
+            setPadding(dp(18), dp(13), dp(18), dp(13))
+            compoundDrawablePadding = dp(10)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_search, 0, 0, 0)
+            compoundDrawableTintList = ColorStateList.valueOf(mutedColor)
+            background = roundedRect(Color.rgb(22, 22, 29), 18f, borderColor, 1)
+            elevation = dp(5).toFloat()
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -532,7 +526,7 @@ class MainActivity : AppCompatActivity() {
 
         stationsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(18))
+            setPadding(0, dp(4), 0, dp(18))
             clipToPadding = false
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -541,7 +535,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         scrollView = ScrollView(this).apply {
-            background = SideRailsDrawable(Color.rgb(18, 17, 31), 2f)
+            background = null
             clipChildren = true
             clipToPadding = true
             isFillViewport = false
@@ -553,14 +547,25 @@ class MainActivity : AppCompatActivity() {
             )
         }
         listParent.addView(scrollView)
-        setContentView(root)
+        root.addView(bottomNavigationView())
+        shell.addView(root, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        ))
+        shell.addView(playerContainer, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        ))
+        miniPlayerShortcut = miniPlayerShortcutContainer()
+        shell.addView(miniPlayerShortcut)
+        setContentView(shell)
     }
 
     private fun headerView(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(18))
+            setPadding(0, 0, 0, dp(20))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -568,9 +573,9 @@ class MainActivity : AppCompatActivity() {
 
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_radio)
-                background = roundedRect(Color.rgb(66, 80, 105), 14f, Color.rgb(101, 118, 146), 1)
+                background = roundedRect(elevatedSurfaceColor, 16f, borderColor, 1)
                 setPadding(dp(8), dp(8), dp(8), dp(8))
-                layoutParams = LinearLayout.LayoutParams(dp(56), dp(56)).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply {
                     marginEnd = dp(14)
                 }
             })
@@ -582,44 +587,254 @@ class MainActivity : AppCompatActivity() {
 
                 addView(TextView(this@MainActivity).apply {
                     text = getString(R.string.app_name)
-                    textSize = 24f
+                    textSize = 30f
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(inkColor)
                     includeFontPadding = false
                 })
 
             })
-
-            sourceButton = ImageView(this@MainActivity).apply {
-                setImageResource(R.drawable.ic_settings)
-                setColorFilter(accentColor)
-                scaleType = ImageView.ScaleType.CENTER
-                setPadding(dp(9), dp(9), dp(9), dp(9))
-                background = roundedRect(Color.rgb(43, 37, 20), 18f, Color.rgb(92, 78, 38), 1)
-                updateCatalogSourceButtonDescription()
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { showCatalogSourceSettings() }
-                layoutParams = LinearLayout.LayoutParams(
-                    dp(42),
-                    dp(42),
-                ).apply {
-                    marginStart = dp(10)
-                    marginEnd = dp(4)
-                }
-            }
-            addView(sourceButton)
         }
     }
 
-    private fun ImageView.updateCatalogSourceButtonDescription() {
-        val sourceName = when (RadioCatalogSettings.getSource(this@MainActivity)) {
-            RadioCatalogSource.ApiProxy -> "API proxy"
-            RadioCatalogSource.StaticFile -> "Static JSON file"
+    private data class BottomNavItem(
+        @DrawableRes val iconRes: Int,
+        val label: String,
+        val target: String,
+    )
+
+    private fun bottomNavigationView(): LinearLayout {
+        bottomNavContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(7), dp(8), dp(7))
+            background = roundedRect(Color.argb(235, 36, 37, 45), 24f, borderColor, 1)
+            elevation = dp(14).toFloat()
+            translationZ = dp(5).toFloat()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(66),
+            ).apply {
+                topMargin = dp(10)
+            }
         }
-        contentDescription = "Radio source settings: $sourceName"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            tooltipText = contentDescription
+        bottomNavContainer.populateBottomNavigation()
+        return bottomNavContainer
+    }
+
+    private fun miniPlayerShortcutContainer(): FrameLayout {
+        return FrameLayout(this).apply {
+            visibility = View.GONE
+            clipChildren = false
+            clipToPadding = false
+            layoutParams = FrameLayout.LayoutParams(
+                dp(66),
+                dp(66),
+                Gravity.RIGHT or Gravity.BOTTOM,
+            ).apply {
+                rightMargin = dp(18)
+                bottomMargin = dp(116)
+            }
+        }
+    }
+
+    private fun updateMiniPlayerShortcut(station: RadioStation?) {
+        if (!::miniPlayerShortcut.isInitialized) {
+            return
+        }
+
+        val shouldShow = station != null && !isPlayerPageVisible
+        if (!shouldShow) {
+            miniPlayerShortcut.animate().cancel()
+            miniPlayerShortcut.removeAllViews()
+            miniPlayerShortcut.visibility = View.GONE
+            return
+        }
+
+        val wasHidden = miniPlayerShortcut.visibility != View.VISIBLE
+        miniPlayerShortcut.removeAllViews()
+        miniPlayerShortcut.visibility = View.VISIBLE
+        miniPlayerShortcut.addView(miniPlayerShortcutButton(station!!), FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            Gravity.CENTER,
+        ))
+
+        if (wasHidden) {
+            miniPlayerShortcut.alpha = 0f
+            miniPlayerShortcut.scaleX = 0.84f
+            miniPlayerShortcut.scaleY = 0.84f
+            miniPlayerShortcut.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(180L)
+                .start()
+        } else {
+            miniPlayerShortcut.alpha = 1f
+            miniPlayerShortcut.scaleX = 1f
+            miniPlayerShortcut.scaleY = 1f
+        }
+    }
+
+    private fun miniPlayerShortcutButton(station: RadioStation): FrameLayout {
+        return FrameLayout(this).apply {
+            contentDescription = "חזור לנגן"
+            background = roundedRect(Color.rgb(38, 39, 47), 18f, accentColor, 2)
+            elevation = dp(14).toFloat()
+            translationZ = dp(5).toFloat()
+            isClickable = true
+            isFocusable = true
+            foreground = selectableItemBackground()
+            setOnClickListener {
+                isPlayerPageDismissedByUser = false
+                isPlayerPageVisible = true
+                renderStations(animatePlayerIn = true)
+            }
+
+            addView(RoundedLogoView(this@MainActivity).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                alpha = 0.26f
+                background = roundedRect(elevatedSurfaceColor, 18f)
+                loadStationLogo(station, this)
+            }, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ))
+
+            addView(View(this@MainActivity).apply {
+                background = roundedRect(Color.argb(128, 18, 19, 25), 18f)
+            }, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ))
+
+            addView(playerScale(isAnimating = shouldAnimateEqualizer()).apply {
+                alpha = 1f
+            }, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ).apply {
+                leftMargin = dp(7)
+                rightMargin = dp(7)
+                topMargin = dp(10)
+                bottomMargin = dp(10)
+            })
+        }
+    }
+
+    private fun LinearLayout.populateBottomNavigation() {
+        removeAllViews()
+        val items = listOf(
+            BottomNavItem(R.drawable.ic_home, "בית", LIBRARY_TAB_HOME),
+            BottomNavItem(R.drawable.ic_star, "מועדפים", LIBRARY_TAB_FAVORITES),
+            BottomNavItem(R.drawable.ic_history, "לאחרונה", LIBRARY_TAB_RECENT),
+            BottomNavItem(R.drawable.ic_settings, "הגדרות", "settings"),
+        )
+
+        items.forEach { item ->
+            addView(bottomNavigationItem(item), LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                1f,
+            ))
+        }
+    }
+
+    private fun bottomNavigationItem(item: BottomNavItem): LinearLayout {
+        val isSettings = item.target == "settings"
+        val isSelected = !isSettings && selectedLibraryTab == item.target
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            foreground = selectableItemBackground()
+            setOnClickListener {
+                if (isSettings) {
+                    showCatalogSourceSettings()
+                    return@setOnClickListener
+                }
+
+                selectedLibraryTab = item.target
+                isPlayerPageVisible = false
+                if (::bottomNavContainer.isInitialized) {
+                    bottomNavContainer.populateBottomNavigation()
+                }
+                renderStations()
+            }
+
+            addView(FrameLayout(this@MainActivity).apply {
+                background = roundedRect(
+                    if (isSelected) Color.argb(42, 255, 159, 28) else Color.argb(18, 255, 255, 255),
+                    999f,
+                    if (isSelected) Color.argb(92, 255, 159, 28) else Color.argb(18, 255, 255, 255),
+                    1,
+                )
+                elevation = dp(if (isSelected) 7 else 3).toFloat()
+                translationZ = dp(if (isSelected) 3 else 1).toFloat()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    outlineProvider = ViewOutlineProvider.BACKGROUND
+                }
+
+                addView(View(this@MainActivity).apply {
+                    background = if (isSelected) {
+                        roundedRect(Color.argb(18, 255, 220, 150), 999f)
+                    } else {
+                        null
+                    }
+                }, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    dp(14),
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+                ).apply {
+                    leftMargin = dp(8)
+                    rightMargin = dp(8)
+                    topMargin = dp(3)
+                })
+
+                addView(ImageView(this@MainActivity).apply {
+                    setImageResource(item.iconRes)
+                    setColorFilter(if (isSelected) accentColor else mutedColor)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                }, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(42), dp(30)))
+
+            addView(TextView(this@MainActivity).apply {
+                text = item.label
+                textSize = 10f
+                typeface = if (isSelected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                setTextColor(if (isSelected) accentColor else Color.rgb(111, 112, 122))
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                maxLines = 1
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(3)
+                }
+            })
+        }
+    }
+
+    private fun topCastButton(): FrameLayout {
+        return FrameLayout(this).apply {
+            background = null
+            elevation = 0f
+            translationZ = 0f
+            contentDescription = "בחר מכשיר ניגון"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                tooltipText = contentDescription
+            }
+            addView(outputSwitcherButton(), FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ))
         }
     }
 
@@ -664,9 +879,6 @@ class MainActivity : AppCompatActivity() {
         stopPlayback()
         RadioCatalogSettings.setSource(this, source)
         repository.clearCache()
-        if (::sourceButton.isInitialized) {
-            sourceButton.updateCatalogSourceButtonDescription()
-        }
         activeStation = null
         restoredStationId = null
         requestedStationId = null
@@ -843,15 +1055,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        stationsContainer.removeAllViews()
-        playerContainer.removeAllViews()
+        val keepOpeningPlayer = isPlayerOpening && isPlayerPageVisible && activeStation != null && !animatePlayerIn
+        if (!keepOpeningPlayer) {
+            playerContainer.removeAllViews()
+        }
         activeElapsedText = null
         activeNowPlayingText = null
-        if (!animatePlayerIn) {
-            updateFilterPanelChrome(if (activeStation == null) 0 else 255)
-        }
-        updateLandscapePanes(activeStation != null)
-
         val query = filterInput.text?.toString()?.trim()?.lowercase(Locale.getDefault()).orEmpty()
         val visibleStations = (if (query.isBlank()) {
             allStations
@@ -860,53 +1069,168 @@ class MainActivity : AppCompatActivity() {
                 station.name.lowercase(Locale.getDefault()).contains(query) ||
                     station.id.lowercase(Locale.US).contains(query)
             }
-        }).sortedByDescending { isFavorite(it) }
+        }).let { applyLibraryTabFilter(it) }
+            .sortedByDescending { isFavorite(it) }
 
-        activeStation?.let { station ->
-            playerContainer.visibility = View.VISIBLE
-            playerContainer.addView(activePlayerCard(station))
-            refreshNowPlaying(station)
+        if (::bottomNavContainer.isInitialized) {
+            bottomNavContainer.populateBottomNavigation()
+        }
+
+        if (isPlayerPageVisible && activeStation != null) {
+            updateMiniPlayerShortcut(null)
+            val station = activeStation ?: return
+            if (keepOpeningPlayer) {
+                refreshNowPlaying(station)
+                updateElapsedTime()
+                return
+            }
+            bottomNavContainer.visibility = View.VISIBLE
+            playerContainer.animate().cancel()
+            playerContainer.layoutParams = playerContainer.layoutParams.apply {
+                width = ViewGroup.LayoutParams.MATCH_PARENT
+                height = ViewGroup.LayoutParams.MATCH_PARENT
+            }
             if (animatePlayerIn) {
-                if (isLandscape()) {
-                    prepareLandscapePlayerIn()
-                    animateLandscapePlayerIn()
-                } else {
-                    val targetHeight = measuredPlayerHeight()
-                    playerContainer.layoutParams = playerContainer.layoutParams.apply {
-                        height = 0
-                    }
-                    playerContainer.alpha = 0f
-                    playerContainer.translationY = -targetHeight.toFloat()
-                    updateFilterPanelChrome(0)
-                    animatePlayerIn(targetHeight)
-                }
+                isPlayerOpening = true
+                playerContainer.alpha = 1f
+                playerContainer.translationY = resources.displayMetrics.heightPixels * 0.72f
             } else {
-                playerContainer.layoutParams = playerContainer.layoutParams.apply {
-                    height = LinearLayout.LayoutParams.WRAP_CONTENT
-                }
+                isPlayerOpening = false
                 playerContainer.alpha = 1f
                 playerContainer.translationY = 0f
             }
-        } ?: run {
-            playerContainer.visibility = View.GONE
-            playerContainer.layoutParams = playerContainer.layoutParams.apply {
-                height = LinearLayout.LayoutParams.WRAP_CONTENT
+            playerContainer.addView(activePlayerCard(station))
+            playerContainer.visibility = View.VISIBLE
+            refreshNowPlaying(station)
+            if (animatePlayerIn) {
+                animatePlayerPageIn()
             }
-            playerContainer.alpha = 1f
-            playerContainer.translationY = 0f
+            updateElapsedTime()
+            return
         }
 
+        isPlayerPageVisible = false
+        headerContainer.visibility = View.VISIBLE
+        filterPanel.visibility = View.VISIBLE
+        scrollView.visibility = View.VISIBLE
+        bottomNavContainer.visibility = View.VISIBLE
+        playerContainer.visibility = View.GONE
+        playerContainer.layoutParams = playerContainer.layoutParams.apply {
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = ViewGroup.LayoutParams.MATCH_PARENT
+        }
+        playerContainer.alpha = 1f
+        playerContainer.translationY = 0f
+        updateMiniPlayerShortcut(activeStation)
+
+        stationsContainer.removeAllViews()
         if (visibleStations.isEmpty()) {
             stationsContainer.addView(emptyState("אין תחנות שמתאימות לסינון"))
             updateElapsedTime()
             return
         }
 
-        visibleStations.forEach { station ->
-            stationsContainer.addView(stationRow(station))
-        }
+        stationsContainer.addView(stationGrid(visibleStations))
 
         updateElapsedTime()
+    }
+
+    private fun animatePlayerPageIn() {
+        playerContainer.animate().cancel()
+        playerContainer.post {
+            playerContainer.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(360L)
+                .withEndAction {
+                    isPlayerOpening = false
+                }
+                .start()
+        }
+    }
+
+    private fun closePlayerPageWithAnimation(horizontalDirection: Float = 0f) {
+        if (!isPlayerPageVisible || activeStation == null || !::playerContainer.isInitialized) {
+            isPlayerPageVisible = false
+            renderStations()
+            return
+        }
+
+        playerContainer.animate().cancel()
+        isPlayerOpening = false
+        isPlayerPageDismissedByUser = true
+        val targetX = when {
+            horizontalDirection > dp(42) -> resources.displayMetrics.widthPixels.toFloat()
+            horizontalDirection < -dp(42) -> -resources.displayMetrics.widthPixels.toFloat()
+            else -> 0f
+        }
+        val targetY = if (targetX == 0f) {
+            resources.displayMetrics.heightPixels.toFloat()
+        } else {
+            playerContainer.translationY
+        }
+
+        playerContainer.animate()
+            .translationX(targetX)
+            .translationY(targetY)
+            .alpha(0f)
+            .setDuration(240L)
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    playerContainer.animate().setListener(null)
+                    playerContainer.translationX = 0f
+                    playerContainer.translationY = 0f
+                    playerContainer.alpha = 1f
+                    isPlayerPageVisible = false
+                    renderStations()
+                }
+            })
+            .start()
+    }
+
+    private fun applyLibraryTabFilter(stations: List<RadioStation>): List<RadioStation> {
+        return when (selectedLibraryTab) {
+            LIBRARY_TAB_FAVORITES -> stations.filter { isFavorite(it) }
+            LIBRARY_TAB_RECENT -> stations
+                .filter { recentPrefs.contains(it.id) }
+                .sortedByDescending { recentPrefs.getLong(it.id, 0L) }
+            else -> stations
+        }
+    }
+
+    private fun stationGrid(stations: List<RadioStation>): GridLayout {
+        val columns = stationGridColumnCount()
+        return GridLayout(this).apply {
+            columnCount = columns
+            useDefaultMargins = false
+            alignmentMode = GridLayout.ALIGN_BOUNDS
+            clipChildren = false
+            clipToPadding = false
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+
+            stations.forEachIndexed { index, station ->
+                addView(stationTile(station), GridLayout.LayoutParams(
+                    GridLayout.spec(GridLayout.UNDEFINED, 1f),
+                    GridLayout.spec(index % columns, 1f),
+                ).apply {
+                    width = 0
+                    height = GridLayout.LayoutParams.WRAP_CONTENT
+                    setMargins(dp(2), dp(3), dp(2), dp(6))
+                })
+            }
+        }
+    }
+
+    private fun stationGridColumnCount(): Int {
+        val widthDp = resources.configuration.screenWidthDp
+        return when {
+            widthDp >= 900 -> 4
+            widthDp >= 620 -> 3
+            else -> 2
+        }
     }
 
     private fun measuredPlayerHeight(): Int {
@@ -914,74 +1238,6 @@ class MainActivity : AppCompatActivity() {
         val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         playerContainer.measure(widthSpec, heightSpec)
         return playerContainer.measuredHeight.coerceAtLeast(dp(220))
-    }
-
-    private fun updateLandscapePanes(hasActivePlayer: Boolean) {
-        val playerPane = landscapePlayerPane ?: return
-        val listPane = landscapeListPane ?: return
-
-        if (hasActivePlayer) {
-            playerPane.visibility = View.VISIBLE
-            playerPane.layoutParams = (playerPane.layoutParams as LinearLayout.LayoutParams).apply {
-                width = 0
-                weight = 0.95f
-            }
-            listPane.layoutParams = (listPane.layoutParams as LinearLayout.LayoutParams).apply {
-                width = 0
-                weight = 1.05f
-            }
-        } else {
-            playerPane.visibility = View.GONE
-            listPane.layoutParams = (listPane.layoutParams as LinearLayout.LayoutParams).apply {
-                width = 0
-                weight = 1f
-            }
-        }
-    }
-
-    private fun prepareLandscapePlayerIn() {
-        val playerPane = landscapePlayerPane ?: return
-        val listPane = landscapeListPane ?: return
-
-        playerPane.visibility = View.VISIBLE
-        playerPane.layoutParams = (playerPane.layoutParams as LinearLayout.LayoutParams).apply {
-            width = 0
-            weight = 0f
-        }
-        listPane.layoutParams = (listPane.layoutParams as LinearLayout.LayoutParams).apply {
-            width = 0
-            weight = 1f
-        }
-        playerContainer.alpha = 0f
-        playerContainer.translationX = -resources.displayMetrics.widthPixels.toFloat()
-        playerContainer.translationY = 0f
-    }
-
-    private fun animateLandscapePlayerIn() {
-        val playerPane = landscapePlayerPane ?: return
-        val listPane = landscapeListPane ?: return
-
-        ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 280L
-            addUpdateListener { animation ->
-                val progress = animation.animatedValue as Float
-                playerPane.layoutParams = (playerPane.layoutParams as LinearLayout.LayoutParams).apply {
-                    width = 0
-                    weight = 0.95f * progress
-                }
-                listPane.layoutParams = (listPane.layoutParams as LinearLayout.LayoutParams).apply {
-                    width = 0
-                    weight = 1f + (0.05f * progress)
-                }
-            }
-            start()
-        }
-
-        playerContainer.animate()
-            .translationX(0f)
-            .alpha(1f)
-            .setDuration(280L)
-            .start()
     }
 
     private fun animatePlayerIn(targetHeight: Int) {
@@ -1026,11 +1282,6 @@ class MainActivity : AppCompatActivity() {
         isPlayerHiding = true
         playerContainer.animate().cancel()
 
-        if (isLandscape()) {
-            hideLandscapePlayerWithAnimation()
-            return
-        }
-
         val startHeight = playerContainer.height.takeIf { it > 0 } ?: measuredPlayerHeight()
         animateFilterPanelChrome(255, 0, 220L, clearAtEnd = false)
         val heightAnimator = ValueAnimator.ofInt(startHeight, 0).apply {
@@ -1062,48 +1313,6 @@ class MainActivity : AppCompatActivity() {
             .start()
     }
 
-    private fun hideLandscapePlayerWithAnimation() {
-        val playerPane = landscapePlayerPane
-        val listPane = landscapeListPane
-        if (playerPane == null || listPane == null) {
-            clearActivePlaybackState()
-            isPlayerHiding = false
-            renderStations()
-            return
-        }
-
-        ValueAnimator.ofFloat(1f, 0f).apply {
-            duration = 240L
-            addUpdateListener { animation ->
-                val progress = animation.animatedValue as Float
-                playerPane.layoutParams = (playerPane.layoutParams as LinearLayout.LayoutParams).apply {
-                    width = 0
-                    weight = 0.95f * progress
-                }
-                listPane.layoutParams = (listPane.layoutParams as LinearLayout.LayoutParams).apply {
-                    width = 0
-                    weight = 1f + (0.05f * progress)
-                }
-            }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    clearActivePlaybackState()
-                    isPlayerHiding = false
-                    playerContainer.translationX = 0f
-                    playerContainer.alpha = 1f
-                    renderStations()
-                }
-            })
-            start()
-        }
-
-        playerContainer.animate()
-            .translationX(-resources.displayMetrics.widthPixels.toFloat())
-            .alpha(0f)
-            .setDuration(240L)
-            .start()
-    }
-
     private fun clearActivePlaybackState() {
         activeStation = null
         requestedStationId = null
@@ -1111,19 +1320,12 @@ class MainActivity : AppCompatActivity() {
         playStartedAtMs = 0L
         isActiveStationLoading = false
         isActiveStationPaused = false
+        isPlayerPageVisible = false
         stopElapsedTimer(resetText = true)
         hideStatus()
     }
 
     private fun updateFilterPanelChrome(alpha: Int = 255) {
-        if (isLandscape()) {
-            filterPanel.layoutParams = (filterPanel.layoutParams as LinearLayout.LayoutParams).apply {
-                topMargin = 0
-            }
-            filterPanel.background = null
-            return
-        }
-
         filterPanel.layoutParams = (filterPanel.layoutParams as LinearLayout.LayoutParams).apply {
             topMargin = if (alpha <= 0) 0 else -dp(2)
         }
@@ -1150,6 +1352,128 @@ class MainActivity : AppCompatActivity() {
                 }
             })
             start()
+        }
+    }
+
+    private fun stationTile(station: RadioStation): LinearLayout {
+        val isActive = activeStation?.id == station.id
+        val isFavorite = isFavorite(station)
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 0)
+            background = stationCardBackground(isActive)
+            elevation = dp(if (isActive) 8 else 3).toFloat()
+            translationZ = dp(if (isActive) 3 else 1).toFloat()
+            clipChildren = true
+            clipToPadding = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                clipToOutline = true
+            }
+            foreground = selectableItemBackground()
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                isPlayerPageDismissedByUser = false
+                isPlayerPageVisible = true
+                if (isActive) {
+                    renderStations(animatePlayerIn = true)
+                } else {
+                    playStation(station)
+                }
+            }
+
+            addView(FrameLayout(this@MainActivity).apply {
+                clipChildren = true
+                clipToPadding = true
+                background = roundedRect(elevatedSurfaceColor, 28f)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    clipToOutline = true
+                }
+
+                addView(stationLogoView(station).apply {
+                    background = null
+                    foreground = null
+                    setPadding(0, 0, 0, 0)
+                }, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER,
+                ))
+
+                addView(View(this@MainActivity).apply {
+                    background = stationTileOverlay()
+                }, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER,
+                ))
+
+                addView(favoriteButton(isFavorite) {
+                    toggleFavorite(station)
+                }, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.TOP or Gravity.END).apply {
+                    topMargin = dp(8)
+                    rightMargin = dp(8)
+                })
+
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.BOTTOM
+                    setPadding(dp(12), 0, dp(12), dp(12))
+
+                    addView(TextView(this@MainActivity).apply {
+                        text = station.name
+                        textSize = 15f
+                        typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(inkColor)
+                        maxLines = 2
+                        includeFontPadding = false
+                        applyStationTextDirection(station.name, alignHebrewRight = false)
+                    })
+
+                    addView(TextView(this@MainActivity).apply {
+                        text = "Radio"
+                        textSize = 11f
+                        setTextColor(Color.argb(185, 255, 255, 255))
+                        maxLines = 1
+                        includeFontPadding = false
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        ).apply {
+                            topMargin = dp(4)
+                        }
+                    })
+                }, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.BOTTOM,
+                ))
+
+                if (isActive) {
+                    addView(View(this@MainActivity).apply {
+                        background = activeStationTileBorder()
+                    }, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        Gravity.CENTER,
+                    ))
+                }
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(194),
+            ))
+        }
+
+        return StationCardShadowLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(22))
+            background = null
+            clipChildren = false
+            clipToPadding = false
+            addView(tile, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
         }
     }
 
@@ -1246,143 +1570,230 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun activePlayerCard(station: RadioStation): LinearLayout {
-        val landscape = isLandscape()
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, 0, 0, 0)
-            background = null
-            elevation = 0f
-            translationZ = 0f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(
-                    dp(if (landscape) 10 else 12),
-                    dp(if (landscape) 6 else 8),
-                    dp(if (landscape) 10 else 12),
-                    dp(if (landscape) 8 else 12),
-                )
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    marginStart = dp(10)
-                    marginEnd = dp(10)
+        var gestureStartX = 0f
+        var gestureStartY = 0f
+        val closeSwipeListener = View.OnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    gestureStartX = event.rawX
+                    gestureStartY = event.rawY
+                    true
                 }
-
-                addView(heroArtwork(station))
-
-                addView(TextView(this@MainActivity).apply {
-                    text = station.name
-                    textSize = if (landscape) 18f else 21f
-                    typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(inkColor)
-                    applyStationTextDirection(station.name, alignHebrewRight = false)
-                    includeFontPadding = false
-                    maxLines = if (landscape) 1 else 2
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply {
-                        bottomMargin = dp(if (landscape) 4 else 6)
-                    }
-                })
-
-                activeNowPlayingText = TextView(this@MainActivity).apply {
-                    text = nowPlayingTextFor(station) ?: "בודק מה משודר עכשיו..."
-                    textSize = if (landscape) 13f else 15f
-                    setTextColor(mutedColor)
-                    gravity = Gravity.CENTER
-                    maxLines = if (landscape) 1 else 2
-                    applyStationTextDirection(text.toString(), alignHebrewRight = false)
-                    includeFontPadding = false
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply {
-                        bottomMargin = dp(if (landscape) 5 else 8)
+                MotionEvent.ACTION_UP -> {
+                    val deltaX = event.rawX - gestureStartX
+                    val deltaY = event.rawY - gestureStartY
+                    val shouldCloseDown = deltaY > dp(76) && abs(deltaY) > abs(deltaX) * 0.72f
+                    val shouldCloseSide = abs(deltaX) > dp(96) && abs(deltaX) > abs(deltaY) * 0.9f
+                    if (shouldCloseDown || shouldCloseSide) {
+                        closePlayerPageWithAnimation(if (shouldCloseSide) deltaX else 0f)
+                        true
+                    } else {
+                        false
                     }
                 }
-                addView(activeNowPlayingText)
-
-                activeElapsedText = TextView(this@MainActivity).apply {
-                    text = if (isActiveStationLoading) "טוען..." else "00:00"
-                    textSize = if (landscape) 15f else 17f
-                    typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(accentColor)
-                    gravity = Gravity.CENTER
-                    background = roundedRect(Color.rgb(15, 20, 28), 20f, Color.rgb(63, 72, 86), 1)
-                    setPadding(
-                        dp(if (landscape) 16 else 20),
-                        dp(if (landscape) 5 else 7),
-                        dp(if (landscape) 16 else 20),
-                        dp(if (landscape) 5 else 7),
-                    )
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply {
-                        gravity = Gravity.CENTER_HORIZONTAL
-                    }
-                }
-                addView(activeElapsedText)
-
-                connectedOutputName?.let { outputName ->
-                    addView(TextView(this@MainActivity).apply {
-                        text = "מחובר אל $outputName"
-                        textSize = 13f
-                        typeface = Typeface.DEFAULT_BOLD
-                        setTextColor(Color.rgb(214, 221, 232))
-                        gravity = Gravity.CENTER
-                        setPadding(dp(12), dp(5), dp(12), dp(5))
-                        background = roundedRect(Color.argb(96, 15, 20, 28), 15f, Color.argb(120, 242, 201, 76), 1)
-                        layoutParams = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                        ).apply {
-                            gravity = Gravity.CENTER_HORIZONTAL
-                            topMargin = dp(8)
-                        }
-                    })
-                }
-            })
-
-            addView(playerControlsPanel(station, compact = landscape))
+                MotionEvent.ACTION_CANCEL -> false
+                else -> false
+            }
         }
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
             setPadding(0, 0, 0, 0)
             background = null
-            elevation = 0f
-            translationZ = 0f
+            clipChildren = false
+            clipToPadding = false
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                bottomMargin = 0
+                LinearLayout.LayoutParams.MATCH_PARENT,
+            )
+            setOnTouchListener(closeSwipeListener)
+
+            val sheetRadius = dp(34).toFloat()
+            val shadowInsetTop = dp(38)
+            val sheetFrame = FrameLayout(this@MainActivity).apply {
+                background = PlayerSheetShadowDrawable(
+                    shadow = Color.argb(54, 0, 0, 0),
+                    radius = sheetRadius,
+                    contentTop = shadowInsetTop.toFloat(),
+                )
+                setPadding(0, shadowInsetTop, 0, 0)
+                clipChildren = false
+                clipToPadding = false
+                setOnTouchListener(closeSwipeListener)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f,
+                ).apply {
+                    topMargin = dp(76)
+                }
             }
-            addView(card)
+
+            val sheet = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(0, 0, 0, dp(14))
+                background = PlayerSheetBorderDrawable(
+                    fill = Color.rgb(31, 31, 40),
+                    stroke = Color.argb(64, 255, 255, 255),
+                    strokeWidth = dp(1).toFloat(),
+                    radius = sheetRadius,
+                )
+                elevation = 0f
+                translationZ = 0f
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        outline.setRoundRect(
+                            0,
+                            0,
+                            view.width,
+                            view.height + sheetRadius.toInt(),
+                            sheetRadius,
+                        )
+                    }
+                }
+                clipChildren = false
+                clipToPadding = false
+                setOnTouchListener(closeSwipeListener)
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ).apply {
+                    topMargin = 0
+                }
+            }
+
+            sheet.addView(FrameLayout(this@MainActivity).apply {
+                background = null
+                elevation = 0f
+                translationZ = 0f
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(64),
+                )
+
+                addView(FrameLayout(this@MainActivity).apply {
+                    background = null
+                    isClickable = true
+                    isFocusable = true
+                    foreground = selectableItemBackground()
+                    setOnClickListener { closePlayerPageWithAnimation() }
+
+                    addView(ImageView(this@MainActivity).apply {
+                        setImageResource(R.drawable.ic_keyboard_arrow_down)
+                        scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    }, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER))
+                }, FrameLayout.LayoutParams(dp(116), FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER))
+
+                addView(topCastButton(), FrameLayout.LayoutParams(dp(46), dp(46), Gravity.RIGHT or Gravity.CENTER_VERTICAL).apply {
+                    rightMargin = dp(18)
+                })
+            })
+
+            sheet.addView(FrameLayout(this@MainActivity).apply {
+                clipChildren = false
+                clipToPadding = false
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(280),
+                ).apply {
+                    topMargin = dp(22)
+                    bottomMargin = dp(26)
+                }
+
+                addView(ArtworkShadowLayout(this@MainActivity).apply {
+                    setPadding(dp(24), dp(22), dp(24), dp(30))
+                    addView(RoundedLogoView(this@MainActivity).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        background = roundedRect(elevatedSurfaceColor, 28f)
+                        loadStationLogo(station, this)
+                    }, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        Gravity.CENTER,
+                    ))
+                }, FrameLayout.LayoutParams(
+                    dp(286),
+                    dp(286),
+                    Gravity.CENTER,
+                ))
+            })
+
+            activeNowPlayingText = TextView(this@MainActivity).apply {
+                text = nowPlayingTextFor(station) ?: "בודק מה משודר עכשיו..."
+                textSize = 13f
+                setTextColor(mutedColor)
+                gravity = Gravity.CENTER
+                maxLines = 1
+                includeFontPadding = false
+                applyStationTextDirection(text.toString(), alignHebrewRight = false)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    bottomMargin = dp(9)
+                }
+            }
+            sheet.addView(activeNowPlayingText)
+
+            sheet.addView(TextView(this@MainActivity).apply {
+                text = station.name
+                textSize = 29f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(inkColor)
+                gravity = Gravity.CENTER
+                maxLines = 2
+                includeFontPadding = false
+                applyStationTextDirection(station.name, alignHebrewRight = false)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    bottomMargin = dp(34)
+                }
+            })
+
+            sheet.addView(playerScale(isAnimating = shouldAnimateEqualizer()).apply {
+                alpha = 0.95f
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(100),
+            ).apply {
+                marginStart = dp(18)
+                marginEnd = dp(18)
+                bottomMargin = dp(22)
+            })
+
+            activeElapsedText = TextView(this@MainActivity).apply {
+                text = if (isActiveStationLoading) "טוען..." else "00:00"
+                textSize = 13f
+                setTextColor(mutedColor)
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+            }
+            sheet.addView(activeElapsedText)
+
+            sheet.addView(playerControlsPanel(station))
+            sheetFrame.addView(sheet)
+            addView(sheetFrame)
         }
     }
 
     private fun stationLogoView(station: RadioStation): FrameLayout {
         return FrameLayout(this).apply {
-            background = roundedRect(Color.rgb(10, 14, 20), 12f)
-            foreground = roundedRect(Color.TRANSPARENT, 12f, Color.rgb(76, 90, 112), 2)
+            background = roundedRect(Color.rgb(10, 14, 20), 28f)
+            foreground = roundedRect(Color.TRANSPARENT, 28f, Color.rgb(76, 90, 112), 1)
             setPadding(dp(4), dp(4), dp(4), dp(4))
             clipChildren = true
             clipToPadding = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                clipToOutline = true
+            }
 
-            addView(ImageView(this@MainActivity).apply {
+            addView(RoundedLogoView(this@MainActivity).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                background = roundedRect(Color.WHITE, 9f)
+                background = roundedRect(elevatedSurfaceColor, 28f)
                 loadStationLogo(station, this)
             }, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1392,98 +1803,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun playerControlsPanel(station: RadioStation, compact: Boolean): LinearLayout {
+    private fun playerControlsPanel(station: RadioStation): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(
-                dp(if (compact) 18 else 20),
-                dp(if (compact) 10 else 14),
-                dp(if (compact) 18 else 20),
-                dp(if (compact) 10 else 14),
+                0,
+                dp(18),
+                0,
+                0,
             )
-            background = bottomPlayerPanelBackground(compact)
+            background = null
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(if (compact) 78 else 92),
+                dp(112),
             )
 
-            addView(FrameLayout(this@MainActivity).apply {
-                clipChildren = false
-                clipToPadding = false
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
 
-                addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
+                addView(playerNavButton(R.drawable.ic_skip_previous, "Prev Station") {
+                    playAdjacentStation(-1)
+                }, LinearLayout.LayoutParams(dp(82), dp(82)))
 
-                    addView(controlFavoriteButton(isFavorite(station)) { toggleFavorite(station) }, LinearLayout.LayoutParams(dp(if (compact) 48 else 52), dp(if (compact) 52 else 58)).apply {
-                        marginEnd = dp(if (compact) 10 else 12)
-                    })
-                    addView(outputSwitcherButton(), LinearLayout.LayoutParams(dp(if (compact) 44 else 48), dp(if (compact) 44 else 48)))
-                }, FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    Gravity.START or Gravity.CENTER_VERTICAL,
-                ))
-
-                addView(roundIconButton(if (isActiveStationPaused) "▶" else "Ⅱ") {
+                addView(roundIconButton(if (isActiveStationPaused) R.drawable.ic_play else R.drawable.ic_pause) {
                     toggleActivePlayback(station)
-                }, FrameLayout.LayoutParams(
-                    dp(if (compact) 54 else 58),
-                    dp(if (compact) 54 else 58),
-                    Gravity.CENTER,
-                ))
+                }, LinearLayout.LayoutParams(dp(82), dp(82)).apply {
+                    marginStart = dp(22)
+                    marginEnd = dp(22)
+                })
 
-                addView(roundIconButton("×") { stopPlayback() }, FrameLayout.LayoutParams(
-                    dp(if (compact) 43 else 46),
-                    dp(if (compact) 43 else 46),
-                    Gravity.END or Gravity.CENTER_VERTICAL,
-                ))
+                addView(playerNavButton(R.drawable.ic_skip_next, "Next Station") {
+                    playAdjacentStation(1)
+                }, LinearLayout.LayoutParams(dp(82), dp(82)))
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT,
             ))
-        }
-    }
-
-    private fun heroArtwork(station: RadioStation): FrameLayout {
-        val landscape = isLandscape()
-        return FrameLayout(this).apply {
-            clipChildren = false
-            clipToPadding = false
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(if (landscape) 102 else 120),
-            ).apply {
-                bottomMargin = dp(if (landscape) 7 else 8)
-            }
-
-            addView(playerScale(isAnimating = shouldAnimateEqualizer()).apply {
-                alpha = 0.95f
-            }, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                dp(if (landscape) 76 else 88),
-                Gravity.CENTER,
-            ))
-
-            addView(FrameLayout(this@MainActivity).apply {
-                clipChildren = false
-                clipToPadding = false
-                setPadding(dp(2), dp(2), dp(2), dp(2))
-                background = roundedRect(Color.rgb(14, 19, 27), 30f, accentColor, 2)
-                elevation = dp(8).toFloat()
-
-                addView(RoundedLogoView(this@MainActivity).apply {
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    background = roundedRect(Color.WHITE, 32f)
-                    setPadding(0, 0, 0, 0)
-                    loadStationLogo(station, this)
-                }, FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    Gravity.CENTER,
-                ))
-            }, FrameLayout.LayoutParams(dp(if (landscape) 84 else 94), dp(if (landscape) 84 else 94), Gravity.CENTER))
         }
     }
 
@@ -1495,9 +1852,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun playerScale(isAnimating: Boolean): View = AnimatedEqualizerView(
         context = this,
-        low = Color.rgb(58, 190, 92),
-        mid = Color.rgb(126, 226, 80),
-        peak = Color.rgb(206, 255, 96),
+        low = Color.rgb(116, 95, 58),
+        mid = Color.rgb(245, 185, 78),
+        peak = accentColor,
         isAnimating = isAnimating,
     )
 
@@ -1511,34 +1868,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun favoriteButton(isFavorite: Boolean, onClick: () -> Unit): TextView {
-        return TextView(this).apply {
-            text = if (isFavorite) "★" else "☆"
-            textSize = 27f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(if (isFavorite) accentColor else Color.rgb(214, 221, 232))
-            gravity = Gravity.CENTER
-            background = null
+    private fun favoriteButton(isFavorite: Boolean, onClick: () -> Unit): FrameLayout {
+        return FrameLayout(this).apply {
+            background = roundedRect(Color.argb(if (isFavorite) 36 else 20, 18, 19, 25), 999f)
+            elevation = dp(4).toFloat()
+            translationZ = dp(1).toFloat()
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
             setOnClickListener { onClick() }
+
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(if (isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star)
+                setColorFilter(if (isFavorite) accentColor else Color.rgb(214, 221, 232))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+            }, FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER))
         }
     }
 
-    private fun controlFavoriteButton(isFavorite: Boolean, onClick: () -> Unit): TextView {
-        return TextView(this).apply {
-            text = if (isFavorite) "★" else "☆"
-            textSize = 33f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(if (isFavorite) accentColor else Color.rgb(238, 242, 248))
-            gravity = Gravity.CENTER
-            background = null
+    private fun controlFavoriteButton(isFavorite: Boolean, onClick: () -> Unit): FrameLayout {
+        return FrameLayout(this).apply {
+            background = roundedRect(Color.argb(if (isFavorite) 42 else 24, 255, 255, 255), 999f, Color.argb(36, 255, 255, 255), 1)
             elevation = dp(4).toFloat()
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
             setOnClickListener { onClick() }
+
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(if (isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star)
+                setColorFilter(if (isFavorite) accentColor else Color.rgb(238, 242, 248))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+            }, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
         }
     }
 
@@ -1586,26 +1947,95 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun roundIconButton(icon: String, onClick: () -> Unit): TextView {
-        val isPrimary = icon == "▶" || icon == "Ⅱ"
-        return TextView(this).apply {
-            text = icon
-            textSize = if (isPrimary) 28f else 24f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(inkColor)
+    private fun roundIconButton(@DrawableRes iconRes: Int, onClick: () -> Unit): FrameLayout {
+        return FrameLayout(this).apply {
+            background = null
+            elevation = dp(22).toFloat()
+            translationZ = dp(8).toFloat()
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+
+            addView(View(this@MainActivity).apply {
+                background = GlossyPlayButtonDrawable(accentColor)
+                isClickable = false
+                isFocusable = false
+            }, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ).apply {
+                leftMargin = dp(1)
+                topMargin = dp(1)
+                rightMargin = dp(1)
+                bottomMargin = dp(1)
+            })
+
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(iconRes)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+            }, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
+        }
+    }
+
+    private fun playerNavButton(@DrawableRes iconRes: Int, label: String, onClick: () -> Unit): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            background = if (isPrimary) {
-                roundedRect(Color.rgb(17, 22, 30), 32f, accentColor, 2)
-            } else {
-                roundedRect(Color.rgb(17, 22, 30), 25f, Color.rgb(99, 109, 124), 1)
-            }
-            elevation = dp(if (isPrimary) 8 else 5).toFloat()
-            translationZ = dp(if (isPrimary) 3 else 2).toFloat()
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
             setOnClickListener { onClick() }
+
+            addView(FrameLayout(this@MainActivity).apply {
+                background = roundedRect(Color.argb(36, 255, 255, 255), 999f, Color.argb(46, 255, 255, 255), 1)
+                elevation = dp(5).toFloat()
+                translationZ = dp(1).toFloat()
+
+                addView(View(this@MainActivity).apply {
+                    background = roundedRect(Color.argb(18, 255, 255, 255), 999f)
+                }, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    dp(14),
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+                ).apply {
+                    leftMargin = dp(8)
+                    rightMargin = dp(8)
+                    topMargin = dp(5)
+                })
+
+                addView(ImageView(this@MainActivity).apply {
+                    setImageResource(iconRes)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                }, FrameLayout.LayoutParams(dp(25), dp(25), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 8f
+                setTextColor(Color.argb(92, 213, 199, 193))
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(6)
+                }
+            })
         }
+    }
+
+    private fun playAdjacentStation(direction: Int) {
+        if (allStations.isEmpty()) {
+            return
+        }
+        val currentId = activeStation?.id
+        val currentIndex = allStations.indexOfFirst { it.id == currentId }.takeIf { it >= 0 } ?: 0
+        val nextIndex = (currentIndex + direction + allStations.size) % allStations.size
+        isPlayerPageDismissedByUser = false
+        isPlayerPageVisible = true
+        playStation(allStations[nextIndex])
     }
 
     private fun toggleActivePlayback(station: RadioStation) {
@@ -1629,6 +2059,8 @@ class MainActivity : AppCompatActivity() {
         requestedStationId = station.id
         pendingControllerStationId = station.id
         activeStation = station
+        isPlayerPageDismissedByUser = false
+        isPlayerPageVisible = true
         playStartedAtMs = 0L
         isActiveStationLoading = true
         isActiveStationPaused = false
@@ -1809,10 +2241,11 @@ class MainActivity : AppCompatActivity() {
         pendingControllerStationId = null
         requestedStationId = station.id
         activeStation = station
+        isPlayerPageVisible = !isPlayerPageDismissedByUser
         isActiveStationLoading = true
         isActiveStationPaused = false
         hideStatus()
-        renderStations(animatePlayerIn = playerContainer.visibility != View.VISIBLE)
+        renderStations(animatePlayerIn = isPlayerPageVisible && playerContainer.visibility != View.VISIBLE)
         showActiveStationLoading()
     }
 
@@ -1852,12 +2285,13 @@ class MainActivity : AppCompatActivity() {
         requestedStationId = station.id
         activeStation = station
         rememberStation(station)
+        isPlayerPageVisible = !isPlayerPageDismissedByUser
         if (playStartedAtMs <= 0L || previousId != station.id) {
             playStartedAtMs = System.currentTimeMillis()
         }
         isActiveStationLoading = false
         hideStatus()
-        renderStations(animatePlayerIn = previousId == null || playerContainer.visibility != View.VISIBLE)
+        renderStations(animatePlayerIn = isPlayerPageVisible && (previousId == null || playerContainer.visibility != View.VISIBLE))
     }
 
     private fun scrollToTop() {
@@ -1919,7 +2353,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun logoFallback(): Drawable {
-        return roundedRect(Color.rgb(12, 17, 24), 10f, borderColor, 1)
+        return roundedRect(elevatedSurfaceColor, 18f, borderColor, 1)
     }
 
     private fun startElapsedTimer() {
@@ -1994,11 +2428,10 @@ class MainActivity : AppCompatActivity() {
         return GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(
-                Color.rgb(91, 108, 140),
-                Color.rgb(68, 84, 112),
-                Color.rgb(48, 61, 83),
+                Color.rgb(42, 39, 41),
+                Color.rgb(31, 31, 39),
                 bgColor,
-                Color.rgb(31, 39, 52),
+                Color.rgb(20, 20, 27),
             ),
         )
     }
@@ -2007,13 +2440,49 @@ class MainActivity : AppCompatActivity() {
         return GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(
-                Color.rgb(31, 42, 63),
-                Color.rgb(33, 31, 23),
-                Color.rgb(31, 12, 22),
+                Color.rgb(38, 38, 48),
+                Color.rgb(30, 30, 39),
+                Color.rgb(24, 24, 32),
             ),
         ).apply {
-            cornerRadius = dp(38).toFloat()
-            setStroke(dp(2), Color.rgb(242, 201, 76))
+            cornerRadius = dp(30).toFloat()
+            setStroke(dp(1), borderColor)
+        }
+    }
+
+    private fun playerSheetSurface(): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                Color.rgb(35, 35, 44),
+                Color.rgb(31, 31, 40),
+            ),
+        ).apply {
+            cornerRadii = floatArrayOf(
+                dp(28).toFloat(), dp(28).toFloat(),
+                dp(28).toFloat(), dp(28).toFloat(),
+                0f, 0f,
+                0f, 0f,
+            )
+        }
+    }
+
+    private fun playerSheetBackground(): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                Color.rgb(35, 35, 44),
+                Color.rgb(28, 28, 37),
+                Color.rgb(20, 21, 29),
+            ),
+        ).apply {
+            cornerRadii = floatArrayOf(
+                dp(28).toFloat(), dp(28).toFloat(),
+                dp(28).toFloat(), dp(28).toFloat(),
+                0f, 0f,
+                0f, 0f,
+            )
+            setStroke(dp(1), Color.argb(42, 255, 255, 255))
         }
     }
 
@@ -2041,23 +2510,44 @@ class MainActivity : AppCompatActivity() {
 
     private fun stationCardBackground(isActive: Boolean = false): GradientDrawable {
         return GradientDrawable(
-            GradientDrawable.Orientation.LEFT_RIGHT,
+            GradientDrawable.Orientation.TOP_BOTTOM,
             if (isActive) {
                 intArrayOf(
-                    Color.rgb(31, 28, 20),
-                    Color.rgb(42, 37, 24),
-                    Color.rgb(31, 28, 20),
+                    Color.rgb(62, 46, 25),
+                    Color.rgb(42, 34, 28),
+                    elevatedSurfaceColor,
                 )
             } else {
                 intArrayOf(
-                    Color.rgb(18, 24, 34),
-                    Color.rgb(26, 34, 46),
-                    Color.rgb(18, 24, 34),
+                    Color.rgb(50, 51, 61),
+                    elevatedSurfaceColor,
+                    surfaceColor,
                 )
             },
         ).apply {
-            cornerRadius = dp(18).toFloat()
-            setStroke(dp(if (isActive) 2 else 1), if (isActive) accentColor else Color.rgb(49, 59, 74))
+            cornerRadius = dp(28).toFloat()
+            setStroke(dp(if (isActive) 3 else 1), if (isActive) accentColor else Color.argb(12, 255, 255, 255))
+        }
+    }
+
+    private fun stationTileOverlay(): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                Color.argb(5, 0, 0, 0),
+                Color.argb(15, 0, 0, 0),
+                Color.argb(145, 0, 0, 0),
+                Color.argb(225, 0, 0, 0),
+            ),
+        )
+    }
+
+    private fun activeStationTileBorder(): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(Color.TRANSPARENT)
+            cornerRadius = dp(28).toFloat()
+            setStroke(dp(3), accentColor)
         }
     }
 
@@ -2072,19 +2562,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun dp(value: Float): Int = (value * resources.displayMetrics.density).toInt()
 
-    private fun isLandscape(): Boolean {
-        return resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    }
-
     private class RoundedLogoView(context: Context) : ImageView(context) {
         private val clipPath = Path()
         private val rect = RectF()
+        private val density = resources.displayMetrics.density
 
         override fun onDraw(canvas: Canvas) {
             val saveCount = canvas.save()
             rect.set(0f, 0f, width.toFloat(), height.toFloat())
             clipPath.reset()
-            clipPath.addRoundRect(rect, width * 0.36f, height * 0.36f, Path.Direction.CW)
+            val radius = 28f * density
+            clipPath.addRoundRect(rect, radius, radius, Path.Direction.CW)
             canvas.clipPath(clipPath)
             super.onDraw(canvas)
             canvas.restoreToCount(saveCount)
@@ -2095,24 +2583,170 @@ class MainActivity : AppCompatActivity() {
         private val density = resources.displayMetrics.density
         private val rect = RectF()
         private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(42, 0, 0, 0)
-            setShadowLayer(9f * density, 2f * density, 6f * density, Color.argb(150, 0, 0, 0))
+            style = Paint.Style.FILL
         }
 
         init {
             setWillNotDraw(false)
             setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            clipChildren = false
+            clipToPadding = false
         }
 
         override fun onDraw(canvas: Canvas) {
-            rect.set(
-                paddingLeft.toFloat(),
-                paddingTop.toFloat(),
-                (width - paddingRight).toFloat(),
-                (height - paddingBottom).toFloat(),
-            )
-            canvas.drawRoundRect(rect, 18f * density, 18f * density, shadowPaint)
+            val baseLeft = paddingLeft.toFloat()
+            val baseTop = paddingTop.toFloat()
+            val baseRight = (width - paddingRight).toFloat()
+            val baseBottom = (height - paddingBottom).toFloat()
+            val radius = 28f * density
+            val steps = 18
+
+            for (i in steps downTo 1) {
+                val progress = i / steps.toFloat()
+                val spread = 16f * density * progress
+                val yOffset = 8f * density * progress
+                val alpha = (50 * (1f - progress).let { it * it } * 0.72f).toInt().coerceIn(0, 38)
+                shadowPaint.color = Color.argb(alpha, 0, 0, 0)
+                rect.set(
+                    baseLeft - spread,
+                    baseTop - spread + yOffset,
+                    baseRight + spread,
+                    baseBottom + spread + yOffset,
+                )
+                canvas.drawRoundRect(rect, radius + spread, radius + spread, shadowPaint)
+            }
+
             super.onDraw(canvas)
+        }
+    }
+
+    private class ArtworkShadowLayout(context: Context) : FrameLayout(context) {
+        private val density = resources.displayMetrics.density
+        private val rect = RectF()
+        private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+
+        init {
+            setWillNotDraw(false)
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+            clipChildren = false
+            clipToPadding = false
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val baseLeft = paddingLeft.toFloat()
+            val baseTop = paddingTop.toFloat()
+            val baseRight = (width - paddingRight).toFloat()
+            val baseBottom = (height - paddingBottom).toFloat()
+            val radius = 28f * density
+            val steps = 18
+
+            for (i in steps downTo 1) {
+                val progress = i / steps.toFloat()
+                val spread = 22f * density * progress
+                val yOffset = 11f * density * progress
+                val alpha = (54 * (1f - progress).let { it * it } * 0.72f).toInt().coerceIn(0, 42)
+                shadowPaint.color = Color.argb(alpha, 0, 0, 0)
+                rect.set(
+                    baseLeft - spread,
+                    baseTop - spread + yOffset,
+                    baseRight + spread,
+                    baseBottom + spread + yOffset,
+                )
+                canvas.drawRoundRect(rect, radius + spread, radius + spread, shadowPaint)
+            }
+
+            super.onDraw(canvas)
+        }
+    }
+
+    private class GlossyPlayButtonDrawable(
+        private val accent: Int,
+    ) : Drawable() {
+        private val rect = RectF()
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.4f
+            color = Color.argb(72, 255, 255, 255)
+        }
+
+        override fun draw(canvas: Canvas) {
+            val size = minOf(bounds.width(), bounds.height()).toFloat()
+            val cx = bounds.left + bounds.width() / 2f
+            val cy = bounds.top + bounds.height() / 2f
+            val radius = size / 2f
+
+            paint.shader = RadialGradient(
+                cx - radius * 0.22f,
+                cy - radius * 0.32f,
+                radius * 1.2f,
+                intArrayOf(
+                    lighten(accent, 0.42f),
+                    accent,
+                    darken(accent, 0.08f),
+                ),
+                floatArrayOf(0f, 0.58f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawCircle(cx, cy, radius * 0.95f, paint)
+
+            paint.shader = null
+            paint.color = Color.argb(34, 0, 0, 0)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = radius * 0.08f
+            canvas.drawCircle(cx, cy, radius * 0.89f, paint)
+
+            paint.style = Paint.Style.FILL
+            paint.shader = RadialGradient(
+                cx - radius * 0.28f,
+                cy - radius * 0.55f,
+                radius * 0.62f,
+                Color.argb(118, 255, 238, 181),
+                Color.TRANSPARENT,
+                Shader.TileMode.CLAMP,
+            )
+            rect.set(
+                cx - radius * 0.55f,
+                cy - radius * 0.78f,
+                cx + radius * 0.55f,
+                cy - radius * 0.22f,
+            )
+            canvas.drawOval(rect, paint)
+
+            paint.shader = null
+            canvas.drawCircle(cx, cy, radius * 0.94f, strokePaint)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = 255
+            strokePaint.alpha = 255
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            paint.colorFilter = colorFilter
+            strokePaint.colorFilter = colorFilter
+        }
+
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+        private fun lighten(color: Int, amount: Float): Int {
+            return Color.rgb(
+                (Color.red(color) + (255 - Color.red(color)) * amount).toInt().coerceIn(0, 255),
+                (Color.green(color) + (255 - Color.green(color)) * amount).toInt().coerceIn(0, 255),
+                (Color.blue(color) + (255 - Color.blue(color)) * amount).toInt().coerceIn(0, 255),
+            )
+        }
+
+        private fun darken(color: Int, amount: Float): Int {
+            return Color.rgb(
+                (Color.red(color) * (1f - amount)).toInt().coerceIn(0, 255),
+                (Color.green(color) * (1f - amount)).toInt().coerceIn(0, 255),
+                (Color.blue(color) * (1f - amount)).toInt().coerceIn(0, 255),
+            )
         }
     }
 
@@ -2209,6 +2843,112 @@ class MainActivity : AppCompatActivity() {
 
         override fun setColorFilter(colorFilter: ColorFilter?) {
             paint.colorFilter = colorFilter
+        }
+
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    private class PlayerSheetShadowDrawable(
+        private val shadow: Int,
+        private val radius: Float,
+        private val contentTop: Float,
+    ) : Drawable() {
+        private val path = Path()
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = shadow
+            style = Paint.Style.FILL
+        }
+
+        override fun draw(canvas: Canvas) {
+            val bounds = bounds
+            val left = bounds.left.toFloat()
+            val top = bounds.top + contentTop
+            val right = bounds.right.toFloat()
+            val bottom = bounds.bottom.toFloat()
+            val steps = 18
+
+            for (i in steps downTo 1) {
+                val progress = i / steps.toFloat()
+                val spread = contentTop * progress * 1.45f
+                val alpha = (Color.alpha(shadow) * (1f - progress).let { it * it } * 0.72f).toInt().coerceIn(0, 42)
+                paint.alpha = alpha
+
+                path.reset()
+                path.moveTo(left, bottom)
+                path.lineTo(left, top + radius)
+                path.quadTo(left, top - spread, left + radius + spread, top - spread)
+                path.lineTo(right - radius - spread, top - spread)
+                path.quadTo(right, top - spread, right, top + radius)
+                path.lineTo(right, bottom)
+                path.close()
+                canvas.drawPath(path, paint)
+            }
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            paint.colorFilter = colorFilter
+        }
+
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    private class PlayerSheetBorderDrawable(
+        private val fill: Int,
+        private val stroke: Int,
+        private val strokeWidth: Float,
+        private val radius: Float,
+    ) : Drawable() {
+        private val fillPath = Path()
+        private val strokePath = Path()
+        private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = fill
+            style = Paint.Style.FILL
+        }
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = stroke
+            style = Paint.Style.STROKE
+            strokeWidth = this@PlayerSheetBorderDrawable.strokeWidth
+        }
+
+        override fun draw(canvas: Canvas) {
+            val halfStroke = strokeWidth / 2f
+            val left = bounds.left + halfStroke
+            val top = bounds.top + halfStroke
+            val right = bounds.right - halfStroke
+            val bottom = bounds.bottom.toFloat()
+
+            fillPath.reset()
+            fillPath.moveTo(left, bottom)
+            fillPath.lineTo(left, top + radius)
+            fillPath.quadTo(left, top, left + radius, top)
+            fillPath.lineTo(right - radius, top)
+            fillPath.quadTo(right, top, right, top + radius)
+            fillPath.lineTo(right, bottom)
+            fillPath.close()
+            canvas.drawPath(fillPath, fillPaint)
+
+            strokePath.reset()
+            strokePath.moveTo(left, bottom)
+            strokePath.lineTo(left, top + radius)
+            strokePath.quadTo(left, top, left + radius, top)
+            strokePath.lineTo(right - radius, top)
+            strokePath.quadTo(right, top, right, top + radius)
+            strokePath.lineTo(right, bottom)
+            canvas.drawPath(strokePath, strokePaint)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            fillPaint.alpha = alpha
+            strokePaint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            fillPaint.colorFilter = colorFilter
+            strokePaint.colorFilter = colorFilter
         }
 
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
