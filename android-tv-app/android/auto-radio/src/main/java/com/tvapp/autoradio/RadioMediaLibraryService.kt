@@ -4,6 +4,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -11,6 +13,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Metadata
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.metadata.icy.IcyInfo
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -55,6 +58,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private lateinit var repository: RadioCatalogRepository
     private lateinit var nowPlayingRepository: NowPlayingRepository
     private val executor = Executors.newSingleThreadExecutor()
+    private val playbackRetryHandler = Handler(Looper.getMainLooper())
     private val nowPlayingCache = ConcurrentHashMap<String, CachedNowPlaying>()
     private val connectedCarControllers = ConcurrentSkipListSet<String>()
     private var castContext: CastContext? = null
@@ -66,6 +70,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private var isStoppingPlayback = false
     private var previousNowPlayingInfo: NowPlayingInfo? = null
     private var currentMediaItemChangedAtMs: Long = 0L
+    private var playbackRetryCount = 0
+    private var pendingPlaybackRetry: Runnable? = null
     private val castSessionListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarting(session: CastSession) {
             Log.d(LOG_TAG, "Cast session starting")
@@ -156,7 +162,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         )
 
         repository = RadioCatalogRepository(this, BuildConfig.RADIO_API_BASE_URL)
-        nowPlayingRepository = NowPlayingRepository(repository)
+        nowPlayingRepository = NowPlayingRepository()
         player = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
@@ -177,13 +183,20 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     when (playbackState) {
                         Player.STATE_READY -> {
+                            clearPendingPlaybackRetry(resetCount = true)
                             moveCurrentStationToCastIfConnected()
                             notifyPlaybackStateChanged()
                         }
-                        Player.STATE_IDLE,
-                        Player.STATE_ENDED -> {
+                        Player.STATE_IDLE -> {
                             notifyPlaybackStateChanged()
                             stopActivePlaybackIfRemoteIsConnected()
+                        }
+                        Player.STATE_ENDED -> {
+                            val willRetry = schedulePlaybackRetry("stream ended")
+                            if (!willRetry) {
+                                notifyPlaybackStateChanged()
+                                stopActivePlaybackIfRemoteIsConnected()
+                            }
                         }
                     }
                 }
@@ -197,6 +210,14 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
                 override fun onMetadata(metadata: Metadata) {
                     handlePlayerMetadata(metadata)
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    Log.w(LOG_TAG, "Playback error: ${error.errorCodeName}", error)
+                    val willRetry = schedulePlaybackRetry("playback error ${error.errorCodeName}")
+                    if (!willRetry) {
+                        notifyPlaybackStateChanged()
+                    }
                 }
             })
         }
@@ -228,6 +249,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        clearPendingPlaybackRetry(resetCount = true)
         if (!isStoppingPlayback && !isRemoteToLocalTransferInProgress) {
             disconnectCast()
         }
@@ -357,6 +379,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun resumeLocalPlayback(station: RadioStation) {
         Log.d(LOG_TAG, "Resuming local playback: ${station.id}")
+        clearPendingPlaybackRetry(resetCount = true)
         player.setMediaItem(station.toMediaItem())
         player.prepare()
         player.play()
@@ -364,6 +387,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun stopLocalPlayback() {
         Log.d(LOG_TAG, "Stopping local playback")
+        clearPendingPlaybackRetry(resetCount = true)
         player.pause()
         player.stop()
         player.clearMediaItems()
@@ -371,8 +395,65 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun pauseLocalPlaybackForCast() {
         Log.d(LOG_TAG, "Pausing local playback for Cast")
+        clearPendingPlaybackRetry(resetCount = true)
         player.pause()
         player.playWhenReady = false
+    }
+
+    private fun schedulePlaybackRetry(reason: String): Boolean {
+        val station = currentLocalStation() ?: return false
+        if (!shouldRetryLocalPlayback()) {
+            clearPendingPlaybackRetry(resetCount = true)
+            return false
+        }
+        if (playbackRetryCount >= MAX_PLAYBACK_RETRIES) {
+            Log.w(LOG_TAG, "Playback retry limit reached for ${station.id}; reason=$reason")
+            clearPendingPlaybackRetry(resetCount = true)
+            return false
+        }
+
+        pendingPlaybackRetry?.let(playbackRetryHandler::removeCallbacks)
+        playbackRetryCount += 1
+        val retryStationId = station.id
+        val retryDelayMs = PLAYBACK_RETRY_DELAY_MS * playbackRetryCount
+        val retry = Runnable {
+            pendingPlaybackRetry = null
+            val currentStation = currentLocalStation()
+            if (currentStation?.id != retryStationId || !shouldRetryLocalPlayback()) {
+                return@Runnable
+            }
+
+            Log.d(
+                LOG_TAG,
+                "Retrying playback for $retryStationId after $reason (${playbackRetryCount}/$MAX_PLAYBACK_RETRIES)",
+            )
+            player.prepare()
+            player.play()
+        }
+        pendingPlaybackRetry = retry
+        playbackRetryHandler.postDelayed(retry, retryDelayMs)
+        return true
+    }
+
+    private fun shouldRetryLocalPlayback(): Boolean {
+        val hasRemoteSession = castSession?.isConnected == true ||
+            castContext?.sessionManager?.currentCastSession?.isConnected == true ||
+            remoteClientToStop != null
+
+        return player.currentMediaItem != null &&
+            player.playWhenReady &&
+            !hasRemoteSession &&
+            !isStoppingPlayback &&
+            !isRemoteToLocalTransferInProgress &&
+            !isMovingPlaybackToRemote
+    }
+
+    private fun clearPendingPlaybackRetry(resetCount: Boolean = false) {
+        pendingPlaybackRetry?.let(playbackRetryHandler::removeCallbacks)
+        pendingPlaybackRetry = null
+        if (resetCount) {
+            playbackRetryCount = 0
+        }
     }
 
     private fun stopActivePlaybackIfRemoteIsConnected() {
@@ -440,6 +521,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun pauseActivePlayback() {
         Log.d(LOG_TAG, "Pausing active playback")
+        clearPendingPlaybackRetry(resetCount = true)
         try {
             val remoteClient = castSession?.remoteMediaClient
                 ?: castContext?.sessionManager?.currentCastSession?.remoteMediaClient
@@ -481,6 +563,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         }
 
         if (player.currentMediaItem != null) {
+            clearPendingPlaybackRetry(resetCount = true)
             player.prepare()
             player.play()
         }
@@ -1243,6 +1326,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val RECENT_STATIONS_PREFS = "recent_stations"
         const val MAX_RECENT_STATIONS = 20
         const val METADATA_TRANSITION_IGNORE_MS = 2_000L
+        const val PLAYBACK_RETRY_DELAY_MS = 1_500L
+        const val MAX_PLAYBACK_RETRIES = 3
         const val NO_INFO_TEXT = "אין מידע"
         const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
         const val FAVORITES_GROUP_TITLE = "מועדפים"

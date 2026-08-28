@@ -2,11 +2,7 @@ package com.tvapp.autoradio
 
 import android.os.Build
 import android.text.Html
-import java.io.BufferedInputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.Charset
-import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 data class NowPlayingInfo(
@@ -14,83 +10,13 @@ data class NowPlayingInfo(
     val detail: String? = null,
 )
 
-class NowPlayingRepository(
-    private val catalogRepository: RadioCatalogRepository,
-) {
-    fun nowPlayingFor(station: RadioStation): NowPlayingInfo? {
-        return streamMetadataNowPlaying(station)
-    }
-
+class NowPlayingRepository {
     fun nowPlayingFromMetadataText(rawMetadata: String?): NowPlayingInfo? {
         return rawMetadata
             ?.repairMetadataEncoding()
             ?.htmlToPlainText()
             ?.parseIcyStreamInfo()
             ?.takeIf { it.title.isUsefulNowPlayingText() }
-    }
-
-    private fun streamMetadataNowPlaying(station: RadioStation): NowPlayingInfo? {
-        val streamUrl = catalogRepository.streamUriFor(station.id).toString()
-        return fetchIcyStreamInfo(streamUrl)
-            ?.takeIf { it.title.isUsefulNowPlayingText() }
-    }
-
-    private fun fetchIcyStreamInfo(url: String): NowPlayingInfo? {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Icy-MetaData", "1")
-        }
-
-        val metadataInterval = connection.getHeaderField("icy-metaint")?.toIntOrNull() ?: return null
-        if (metadataInterval <= 0) {
-            return null
-        }
-
-        BufferedInputStream(connection.inputStream).use { input ->
-            var remainingAudioBytes = metadataInterval
-            while (remainingAudioBytes > 0) {
-                val skipped = input.skip(remainingAudioBytes.toLong()).toInt()
-                if (skipped <= 0) {
-                    if (input.read() == -1) return null
-                    remainingAudioBytes -= 1
-                } else {
-                    remainingAudioBytes -= skipped
-                }
-            }
-
-            val metadataLength = input.read()
-            if (metadataLength <= 0) {
-                return null
-            }
-
-            val metadataBytes = ByteArray(metadataLength * 16)
-            var offset = 0
-            while (offset < metadataBytes.size) {
-                val read = input.read(metadataBytes, offset, metadataBytes.size - offset)
-                if (read == -1) {
-                    break
-                }
-                offset += read
-            }
-
-            val metadata = metadataBytes.decodeBestEffort().trimEnd(Char(0))
-            return STREAM_TITLE_REGEX.find(metadata)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.let(::nowPlayingFromMetadataText)
-        }
-    }
-
-    private fun ByteArray.decodeBestEffort(): String {
-        val utf8 = String(this, StandardCharsets.UTF_8)
-        return if (utf8.contains('\uFFFD')) {
-            String(this, Charset.forName("windows-1255"))
-        } else {
-            utf8
-        }.repairMetadataEncoding()
     }
 
     private fun String.repairMetadataEncoding(): String {
@@ -188,10 +114,16 @@ class NowPlayingRepository(
             return null
         }
 
-        val fields = STREAM_KEY_VALUE_REGEX.findAll(compact)
+        val rawFields = STREAM_KEY_VALUE_REGEX.findAll(compact)
             .associate { match ->
                 match.groupValues[1].lowercase(Locale.US) to match.groupValues[3].trim()
             }
+        val hasAdvertisementMetadata = rawFields.keys.any { it in ADVERTISEMENT_METADATA_FIELDS } ||
+            TECHNICAL_METADATA_PARTS.any { compact.lowercase(Locale.US).contains(it) }
+        val fields = rawFields
+            .filterKeys { it !in IGNORED_METADATA_FIELDS }
+            .mapValues { (_, value) -> value.cleanDisplayMetadata() }
+            .filterValues { it.isUsefulNowPlayingText() && !it.isLikelyTechnicalMetadataValue() }
         val program = fields.firstValue("program", "show", "showname", "programname", "program_name")
         val song = fields.firstValue("text", "title", "song", "track", "cue_title")
         val artist = fields.firstValue("artist", "trackartist", "track_artist", "cue_artist")
@@ -199,7 +131,7 @@ class NowPlayingRepository(
                 .trim()
                 .trimEnd('-', '–', '—', ':', '|')
                 .trim()
-                .takeIf { it.isUsefulNowPlayingText() }
+                .takeIf { it.isUsefulNowPlayingText() && !it.isLikelyTechnicalMetadataValue() }
 
         if (!song.isNullOrBlank()) {
             val title = listOfNotNull(artist, song)
@@ -216,7 +148,14 @@ class NowPlayingRepository(
             .replace(STREAM_KEY_VALUE_FIELDS_REGEX, "")
             .cleanDisplayMetadata()
         if (cleaned.isBlank()) {
+            if (hasAdvertisementMetadata) {
+                return NowPlayingInfo(title = ADVERTISEMENT_TEXT)
+            }
             return program?.cleanDisplayMetadata()?.let { NowPlayingInfo(title = it) }
+        }
+
+        if (cleaned.isLikelyTechnicalMetadataValue() && hasAdvertisementMetadata) {
+            return NowPlayingInfo(title = ADVERTISEMENT_TEXT)
         }
 
         return NowPlayingInfo(
@@ -244,18 +183,51 @@ class NowPlayingRepository(
             .trim()
     }
 
+    private fun String.isLikelyTechnicalMetadataValue(): Boolean {
+        val normalized = trim()
+        val lower = normalized.lowercase(Locale.US)
+        if (TECHNICAL_METADATA_PARTS.any { lower.contains(it) }) {
+            return true
+        }
+
+        val compact = normalized.replace(Regex("\\s+"), "")
+        val base64LikeChars = compact.count {
+            it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '+' || it == '/' || it == '=' || it == '-' || it == '_'
+        }
+        return compact.length >= 32 && base64LikeChars.toFloat() / compact.length >= 0.95f
+    }
+
     private companion object {
-        private const val CONNECT_TIMEOUT_MS = 5_000
-        private const val READ_TIMEOUT_MS = 7_000
-        private const val USER_AGENT = "TVAppRadio/1.0"
-        private val STREAM_TITLE_REGEX = Regex("StreamTitle='(.*)'", RegexOption.IGNORE_CASE)
         private val STREAM_KEY_VALUE_REGEX = Regex("""\b([A-Za-z_][A-Za-z0-9_]*)=(["'])(.*?)\2""")
-        private val STREAM_KEY_VALUE_FIELDS_REGEX = Regex("""\s+\w+=(["']).*?\1""")
+        private val STREAM_KEY_VALUE_FIELDS_REGEX = Regex("""(?:^|\s+)\w+=(["']).*?\1""")
+        private const val ADVERTISEMENT_TEXT = "Advertisement"
+        private val ADVERTISEMENT_METADATA_FIELDS = setOf(
+            "ad",
+            "adcontext",
+            "adid",
+            "adtitle",
+            "advertisement",
+            "breakid",
+            "commercial",
+            "spot",
+        )
+        private val IGNORED_METADATA_FIELDS = setOf(
+            "duration",
+            "id",
+            "url",
+        ) + ADVERTISEMENT_METADATA_FIELDS
         private val IGNORED_TITLES = setOf("unknown", "live", "radio")
         private val IGNORED_TITLE_PARTS = listOf(
             "powered by",
             "cdn",
             "multix",
+        )
+        private val TECHNICAL_METADATA_PARTS = listOf(
+            "adcontext",
+            "doubleclick",
+            "googlesyndication",
+            "pubads",
+            "vast",
         )
     }
 }
