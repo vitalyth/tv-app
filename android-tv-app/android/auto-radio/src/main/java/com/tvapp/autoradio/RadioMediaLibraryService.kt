@@ -290,7 +290,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         val nowPlaying = nowPlayingCache[station.id]?.info
         val metadata = CastMediaMetadata(CastMediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
             putString(CastMediaMetadata.KEY_TITLE, station.name)
-            putString(CastMediaMetadata.KEY_ARTIST, nowPlaying?.title ?: "Live radio")
+            putString(CastMediaMetadata.KEY_ARTIST, nowPlaying?.title ?: NO_INFO_TEXT)
             station.logo?.takeIf { it.isNotBlank() }?.let { logo ->
                 addImage(WebImage(resolveArtworkUri(logo)))
             }
@@ -913,7 +913,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         } else {
             null
         }
-        val subtitle = nowPlaying?.title ?: if (includeNowPlaying || useNowPlayingOverride) "Live radio" else null
+        val subtitle = nowPlaying?.title ?: if (includeNowPlaying || useNowPlayingOverride) NO_INFO_TEXT else null
         val description = nowPlayingText(nowPlaying) ?: subtitle
         val metadataBuilder = MediaMetadata.Builder()
             .setTitle(name)
@@ -977,6 +977,9 @@ class RadioMediaLibraryService : MediaLibraryService() {
             ?.info
         nowPlayingCache.remove(mediaId)
         currentMediaItemChangedAtMs = System.currentTimeMillis()
+        stationById(mediaId)?.let { station ->
+            updateCurrentMediaItemMetadata(station, null)
+        }
     }
 
     private fun updateCurrentMediaItemMetadata(station: RadioStation, nowPlaying: NowPlayingInfo?) {
@@ -1200,6 +1203,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val RECENT_STATIONS_PREFS = "recent_stations"
         const val MAX_RECENT_STATIONS = 20
         const val METADATA_TRANSITION_IGNORE_MS = 2_000L
+        const val NO_INFO_TEXT = "אין מידע"
         const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
         const val FAVORITES_GROUP_TITLE = "מועדפים"
         const val ALL_STATIONS_GROUP_TITLE = "כל השאר"

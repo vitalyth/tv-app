@@ -43,6 +43,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -96,6 +97,7 @@ class MainActivity : AppCompatActivity() {
         private const val STATION_GROUP_LOCAL = "local"
         private const val STATION_GROUP_ISRAELIS = "israelis"
         private const val STATION_GROUP_WORLD = "world"
+        private const val NO_INFO_TEXT = "אין מידע"
         private const val INITIAL_VISIBLE_STATION_LIMIT = 24
         private const val VISIBLE_STATION_BATCH_SIZE = 24
         private val STATION_ALIASES = mapOf(
@@ -727,7 +729,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateMiniPlayerShortcut(station: RadioStation?) {
+    private fun updateMiniPlayerShortcut(station: RadioStation?, animateIn: Boolean = true) {
         if (!::miniPlayerShortcut.isInitialized) {
             return
         }
@@ -749,7 +751,7 @@ class MainActivity : AppCompatActivity() {
             Gravity.CENTER,
         ))
 
-        if (wasHidden) {
+        if (wasHidden && animateIn) {
             miniPlayerShortcut.alpha = 0f
             miniPlayerShortcut.scaleX = 0.84f
             miniPlayerShortcut.scaleY = 0.84f
@@ -1151,17 +1153,7 @@ class MainActivity : AppCompatActivity() {
         }
         activeElapsedText = null
         activeNowPlayingText = null
-        val query = filterInput.text?.toString()?.trim()?.lowercase(Locale.getDefault()).orEmpty()
-        val filteredStations = (if (query.isBlank()) {
-            allStations
-        } else {
-            allStations.filter { station ->
-                station.name.lowercase(Locale.getDefault()).contains(query) ||
-                    station.id.lowercase(Locale.US).contains(query)
-            }
-        }).let { applyStationGroupFilter(it) }
-            .let { applyLibraryTabFilter(it) }
-            .sortedByDescending { isFavorite(it) }
+        val filteredStations = filteredStationsForCurrentState()
         filteredStationCount = filteredStations.size
         val visibleStations = filteredStations.take(visibleStationLimit)
 
@@ -1234,6 +1226,55 @@ class MainActivity : AppCompatActivity() {
         updateElapsedTime()
     }
 
+    private fun renderCatalogBehindPlayer(animateMiniPlayer: Boolean = true) {
+        if (isCatalogLoading) {
+            return
+        }
+
+        val filteredStations = filteredStationsForCurrentState()
+        filteredStationCount = filteredStations.size
+        val visibleStations = filteredStations.take(visibleStationLimit)
+
+        headerContainer.visibility = View.VISIBLE
+        filterPanel.visibility = View.VISIBLE
+        scrollView.visibility = View.VISIBLE
+        bottomNavContainer.visibility = View.VISIBLE
+
+        if (::bottomNavContainer.isInitialized) {
+            bottomNavContainer.populateBottomNavigation()
+        }
+        if (::stationGroupFilterContainer.isInitialized) {
+            stationGroupFilterContainer.populateStationGroupFilter()
+        }
+
+        updateMiniPlayerShortcut(activeStation, animateIn = animateMiniPlayer)
+
+        stationsContainer.removeAllViews()
+        if (filteredStations.isEmpty()) {
+            stationsContainer.addView(emptyState("אין תחנות שמתאימות לסינון"))
+            return
+        }
+
+        stationsContainer.addView(stationGrid(visibleStations))
+        if (visibleStations.size < filteredStations.size) {
+            stationsContainer.addView(loadMoreStationsButton(filteredStations.size - visibleStations.size))
+        }
+    }
+
+    private fun filteredStationsForCurrentState(): List<RadioStation> {
+        val query = filterInput.text?.toString()?.trim()?.lowercase(Locale.getDefault()).orEmpty()
+        return (if (query.isBlank()) {
+            allStations
+        } else {
+            allStations.filter { station ->
+                station.name.lowercase(Locale.getDefault()).contains(query) ||
+                    station.id.lowercase(Locale.US).contains(query)
+            }
+        }).let { applyStationGroupFilter(it) }
+            .let { applyLibraryTabFilter(it) }
+            .sortedByDescending { isFavorite(it) }
+    }
+
     private fun animatePlayerPageIn() {
         playerContainer.animate().cancel()
         playerContainer.post {
@@ -1257,7 +1298,12 @@ class MainActivity : AppCompatActivity() {
 
         playerContainer.animate().cancel()
         isPlayerOpening = false
+        isPlayerHiding = true
         isPlayerPageDismissedByUser = true
+        playerContainer.visibility = View.VISIBLE
+        playerContainer.alpha = 1f
+        playerContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        playerContainer.bringToFront()
         val targetX = when {
             horizontalDirection > dp(42) -> resources.displayMetrics.widthPixels.toFloat()
             horizontalDirection < -dp(42) -> -resources.displayMetrics.widthPixels.toFloat()
@@ -1269,22 +1315,33 @@ class MainActivity : AppCompatActivity() {
             playerContainer.translationY
         }
 
-        playerContainer.animate()
-            .translationX(targetX)
-            .translationY(targetY)
-            .alpha(0f)
-            .setDuration(240L)
-            .setListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    playerContainer.animate().setListener(null)
-                    playerContainer.translationX = 0f
-                    playerContainer.translationY = 0f
-                    playerContainer.alpha = 1f
-                    isPlayerPageVisible = false
-                    renderStations()
-                }
-            })
-            .start()
+        playerContainer.post {
+            playerContainer.animate()
+                .translationX(targetX)
+                .translationY(targetY)
+                .alpha(1f)
+                .setDuration(320L)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .setListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        playerContainer.animate().setListener(null)
+                        playerContainer.setLayerType(View.LAYER_TYPE_NONE, null)
+                        playerContainer.translationX = 0f
+                        playerContainer.translationY = 0f
+                        playerContainer.alpha = 1f
+                        playerContainer.visibility = View.GONE
+                        isPlayerPageVisible = false
+                        isPlayerHiding = false
+                        renderStations()
+                    }
+
+                    override fun onAnimationCancel(animation: Animator) {
+                        playerContainer.setLayerType(View.LAYER_TYPE_NONE, null)
+                        isPlayerHiding = false
+                    }
+                })
+                .start()
+        }
     }
 
     private fun applyLibraryTabFilter(stations: List<RadioStation>): List<RadioStation> {
@@ -2209,10 +2266,10 @@ class MainActivity : AppCompatActivity() {
         hideStatus()
         rememberStation(station)
         val shouldAnimatePlayerIn = activeStation == null || playerContainer.visibility != View.VISIBLE
-        clearNowPlayingFor(station)
         requestedStationId = station.id
         pendingControllerStationId = station.id
         activeStation = station
+        clearNowPlayingFor(station)
         isPlayerPageDismissedByUser = false
         isPlayerPageVisible = true
         playStartedAtMs = 0L
@@ -2257,11 +2314,15 @@ class MainActivity : AppCompatActivity() {
         val title = metadata
             .artist
             ?.toString()
-            ?.takeIf { it.isNotBlank() && it != "Live radio" }
-            ?: return
+            ?.takeIf { isRealNowPlayingValue(it) }
+        if (title == null) {
+            nowPlayingCache.remove(station.id)
+            updateActiveNowPlayingText(station)
+            return
+        }
         val detail = metadata.subtitle
             ?.toString()
-            ?.takeIf { it.isNotBlank() && it != title && it != "Live radio" }
+            ?.takeIf { isRealNowPlayingValue(it) && it != title }
 
         val info = NowPlayingInfo(title = title, detail = detail)
         if (nowPlayingCache[station.id] == info) {
@@ -2282,9 +2343,13 @@ class MainActivity : AppCompatActivity() {
     private fun updateActiveNowPlayingText(station: RadioStation) {
         val text = nowPlayingTextFor(station)
         activeNowPlayingText?.run {
-            this.text = text ?: "אין מידע על התוכנית כרגע"
+            this.text = text ?: NO_INFO_TEXT
             applyStationTextDirection(this.text.toString(), alignHebrewRight = false)
         }
+    }
+
+    private fun isRealNowPlayingValue(value: String): Boolean {
+        return value.isNotBlank() && value != "Live radio" && value != NO_INFO_TEXT
     }
 
     private fun nowPlayingTextFor(station: RadioStation): String? {
@@ -2305,7 +2370,9 @@ class MainActivity : AppCompatActivity() {
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(station.name)
-                    .setArtist("Live radio")
+                    .setArtist(NO_INFO_TEXT)
+                    .setSubtitle(NO_INFO_TEXT)
+                    .setDescription(NO_INFO_TEXT)
                     .setArtworkUri(station.logo?.takeIf { it.isNotBlank() }?.let(Uri::parse))
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
