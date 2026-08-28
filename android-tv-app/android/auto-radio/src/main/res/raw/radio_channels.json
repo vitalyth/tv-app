@@ -342,5 +342,428 @@
     "logo": "https://d203uamca1bsc4.cloudfront.net/app/thumbnails/t-israeli.png",
     "streamUrl": "http://gb25.streamgates.net/radios-audio/100Israeli/icecast.audio",
     "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_ashams",
+    "name": "רדיו א-שמס",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://s.ashams.com/static/css/images/logo-header.png",
+    "streamUrl": "https://cdna.streamgates.net/Ashams/Live/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_radio_nas",
+    "name": "Radio Nas",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://static2.mytuner.mobi/media/tvos_radios/917/nas-radio-rdyw-lns.c792798c.jpg",
+    "streamUrl": "https://cdna.streamgates.net/RadioNas/Live-Audio/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_kol_hashfela",
+    "name": "קול השפלה 103.6FM",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://static.wixstatic.com/media/cbf57a_82d58bf0f55940b8b288c481497d43c7~mv2.png",
+    "streamUrl": "http://1036kh.cdnwz.net/1036kh",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_kol_ramat_hasharon",
+    "name": "קול רמת השרון 103.6FM",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://radio.streamgates.net/favicon.ico",
+    "streamUrl": "https://radio.streamgates.net/stream/1036",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_radio_nahariya",
+    "name": "רדיו נהריה",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.radionahariya.com/assets/icons/apple-touch-icon.png",
+    "streamUrl": "https://cast.radionahariya.com:8443/main.mp3",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_hatahana",
+    "name": "101.5FM רדיו התחנה",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://hatahana.co.il/wp-content/uploads/2026/06/hand-512-300x300.png",
+    "streamUrl": "https://cdn.cybercdn.live/Hatahana_1015/Live_Audio/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_hakatze",
+    "name": "רדיו הקצה",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.kzradio.net/wp-content/uploads/2018/11/kzlogo.jpg",
+    "streamUrl": "https://kzradio.mediacast.co.il/kzradio_live/kzradio/icecast.audio",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_sahar",
+    "name": "רדיו סהר",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://radiosahar.co.il/images/logo.png",
+    "streamUrl": "https://live.ecast.co.il/stream/sahar/stream",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_wbur",
+    "name": "WBUR 90.9 Boston",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://static.wbur.org/images/icons/favicon.png",
+    "streamUrl": "http://wbur-sc.streamguys.com/wbur",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_gbh",
+    "name": "GBH 89.7 Boston",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://wgbh.org/apple-touch-icon.png",
+    "streamUrl": "https://wgbh-live.streamguys1.com/wgbh.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_wcrb",
+    "name": "Classical 99.5 WCRB",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://www.classicalwcrb.org/apple-touch-icon.png",
+    "streamUrl": "https://wgbh-live.streamguys1.com/classical-hi",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_local_wers",
+    "name": "WERS 88.9 Emerson",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://wers.org/wp-content/uploads/2021/09/cropped-cropped-wers-favicon-1-192x192.png",
+    "streamUrl": "http://marconi.emerson.edu:8000/wers",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_wumb",
+    "name": "WUMB 91.9 Boston",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://cdn-profiles.tunein.com/s23389/images/logog.png?t=1656370789000",
+    "streamUrl": "http://wumb.streamguys1.com/wumb919fast",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_whrb",
+    "name": "WHRB 95.3 Harvard",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://www.whrb.org/icons/icon-144x144.png?v=f4237d2445d95894bb92f02772bca78d",
+    "streamUrl": "http://stream.whrb.org:8000/whrb-mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_wmbr",
+    "name": "WMBR 88.1 Cambridge",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://wmbr.org/images/wmbr_top.gif",
+    "streamUrl": "https://wmbr.org:8002/hi",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_wxrv",
+    "name": "92.5 The River",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://upload.wikimedia.org/wikipedia/en/8/83/The_River_92.5_FM_logo.png",
+    "streamUrl": "http://72.13.83.130:8010/;.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_local_wzlx",
+    "name": "100.7 WZLX Boston",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://i.iheart.com/v3/re/new_assets/5e4febcf88989f180366cffc?ops=gravity(%22center%22),contain(360,360),quality(80)",
+    "streamUrl": "https://stream.revma.ihrhls.com/zc7730",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_local_wrko",
+    "name": "WRKO AM 680 Boston",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://i.iheart.com/v3/re/assets.brands/623b3302f27ef877e7867576?ops=gravity(%22center%22),contain(360,360),quality(80),format(%22png%22)",
+    "streamUrl": "https://stream.revma.ihrhls.com/zc7750",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_local_kiss108",
+    "name": "Kiss 108 Boston",
+    "type": "radio",
+    "group": "local",
+    "logo": "https://i.iheart.com/v3/re/assets.brands/5e5ee49ea6114875b0bda028?ops=gravity(%22center%22),contain(360,360)&quality=80",
+    "streamUrl": "http://stream.revma.ihrhls.com/zc1097",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_kiis",
+    "name": "102.7 KIIS FM",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://i.iheart.com/v3/re/assets.brands/2ebe753539305728784b0f3b178eae45?ops=gravity(%22center%22),contain(360,360),quality(80),format(%22png%22)",
+    "streamUrl": "https://stream.revma.ihrhls.com/zc185",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_z100",
+    "name": "Z100 New York",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://i.iheart.com/v3/re/assets.brands/5e7b5d50bee47a8a2b396059?ops=gravity(%22center%22),contain(360,360)&quality=80",
+    "streamUrl": "http://stream.revma.ihrhls.com/zc1469",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_bbc_radio_1",
+    "name": "BBC Radio 1",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://cdn-radiotime-logos.tunein.com/s24939q.png",
+    "streamUrl": "http://a.files.bbci.co.uk/ms6/live/3441A116-B12E-4D2F-ACA8-C1984642FA4B/audio/simulcast/hls/nonuk/pc_hd_abr_v2/ak/bbc_radio_one.m3u8",
+    "mimeType": "application/x-mpegURL"
+  },
+  {
+    "id": "rd_world_capital_london",
+    "name": "Capital FM London",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://imgs.capitalfm.com/images/573609?format=png&signature=fxgDCsRPRQMvt-WaQM8YWFAMFa8=",
+    "streamUrl": "http://media-ice.musicradio.com/CapitalMP3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_skyrock",
+    "name": "Skyrock",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://play-lh.googleusercontent.com/dPiQ01OUKZVfRZUbbb-EVK5g9miS_K-xrxHgmBbynGG-GQ53yt3GzFKr0zUTnb-xswQ=s200-rw",
+    "streamUrl": "http://icecast.skyrock.net/s/natio_mp3_128k",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_radio_paradise",
+    "name": "Radio Paradise",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://radioparadise.com/apple-touch-icon.png",
+    "streamUrl": "http://stream-uk1.radioparadise.com/aac-320",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_kexp",
+    "name": "KEXP 90.3 Seattle",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://www.kexp.org/static/assets/img/favicon-32x32.png",
+    "streamUrl": "https://kexp.streamguys1.com/kexp160.aac",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_fip",
+    "name": "FIP",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://upload.wikimedia.org/wikipedia/fr/thumb/d/d5/FIP_logo_2005.svg/1024px-FIP_logo_2005.svg.png",
+    "streamUrl": "http://icecast.radiofrance.fr/fip-hifi.aac",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_fun_radio",
+    "name": "Fun Radio France",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fb/Logo_Fun_Radio_%282021%29.svg/1280px-Logo_Fun_Radio_%282021%29.svg.png",
+    "streamUrl": "http://icecast.funradio.fr/fun-1-44-128",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_swr3",
+    "name": "SWR3",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://swr3.de/assets/swr3/icons/apple-touch-icon.png",
+    "streamUrl": "https://liveradio.swr.de/sw282p3/swr3/play.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_classic_fm",
+    "name": "Classic FM UK",
+    "type": "radio",
+    "group": "world",
+    "logo": "http://www.classicfm.com/assets_v4r/classic/img/favicon-196x196.png",
+    "streamUrl": "http://ice-the.musicradio.com/ClassicFMMP3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_virgin_radio_uk",
+    "name": "Virgin Radio UK",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://www.celsoazevedo.com/files/2022/virgin-radio-uk.jpg",
+    "streamUrl": "https://radio.virginradio.co.uk/stream",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_swiss_jazz",
+    "name": "Radio Swiss Jazz",
+    "type": "radio",
+    "group": "world",
+    "logo": "http://www.radioswissjazz.ch/favicon.ico",
+    "streamUrl": "http://stream.srg-ssr.ch/m/rsj/mp3_128",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_ibiza_global",
+    "name": "Ibiza Global Radio",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://static-media.streema.com/media/cache/3f/59/3f598fc0753b556f206a5c9d80d034ea.jpg",
+    "streamUrl": "http://ibizaglobalradio.streaming-pro.com:8024/",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_triple_j",
+    "name": "Triple J",
+    "type": "radio",
+    "group": "world",
+    "logo": "http://www.abc.net.au/core-assets/triplej/favicon-32x32.png",
+    "streamUrl": "http://abc.streamguys1.com/live/triplejnsw/icecast.audio",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_npo_3fm",
+    "name": "NPO 3FM",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://www.npo3fm.nl/apple-touch-icon.png",
+    "streamUrl": "https://icecast.omroep.nl/3fm-bb-mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_radio_x_london",
+    "name": "Radio X London",
+    "type": "radio",
+    "group": "world",
+    "logo": "http://www.radiox.co.uk/assets_v4r/xfm/img/favicon-196x196.png",
+    "streamUrl": "http://media-the.musicradio.com/RadioXLondonMP3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_heart_london",
+    "name": "Heart London",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://cdn-profiles.tunein.com/s2846/images/logoq.jpg",
+    "streamUrl": "http://ice-sov.musicradio.com/HeartLondonMP3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_smooth_london",
+    "name": "Smooth Radio London",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://www.smoothradio.com/assets_v4r/smooth/img/favicon-196x196.png",
+    "streamUrl": "http://media-the.musicradio.com/SmoothLondonMP3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_los_40",
+    "name": "Los 40",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://los40es00.epimg.net/iconos/v1.x/v1.0/touch-apple.png",
+    "streamUrl": "https://playerservices.streamtheworld.com/api/livestream-redirect/Los40.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_cadena_100",
+    "name": "Cadena 100",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://www.cadena100.es/estaticos/apple-touch-icon-192x192.png",
+    "streamUrl": "http://cadena100-streamers-mp3.flumotion.com/cope/cadena100.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_radio_italia",
+    "name": "Radio Italia",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://www.radioitalia.it/images/logo-radioitalia.png",
+    "streamUrl": "https://radioitaliasmi.akamaized.net/hls/live/2093120/RISMI/stream01/streamPlaylist.m3u8",
+    "mimeType": "application/x-mpegURL"
+  },
+  {
+    "id": "rd_world_rai_radio_2",
+    "name": "Rai Radio 2",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://i.imgur.com/gWbnr2R.jpg",
+    "streamUrl": "http://icestreaming.rai.it/2.mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_radio_deejay",
+    "name": "Radio Deejay",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://www.deejay.it/favicon.ico",
+    "streamUrl": "https://4c4b867c89244861ac216426883d1ad0.msvdn.net/radiodeejay/radiodeejay/master_ma.m3u8",
+    "mimeType": "application/x-mpegURL"
+  },
+  {
+    "id": "rd_world_groove_salad",
+    "name": "SomaFM Groove Salad",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://somafm.com/img3/groovesalad-400.jpg",
+    "streamUrl": "https://ice6.somafm.com/groovesalad-128-mp3",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_world_indie_pop_rocks",
+    "name": "SomaFM Indie Pop Rocks",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://somafm.com/img3/indiepop-400.jpg",
+    "streamUrl": "https://ice6.somafm.com/indiepop-128-aac",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_jazz24",
+    "name": "Jazz24",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://npr.brightspotcdn.com/dims4/default/032ce25/2147483647/strip/true/crop/900x900+0+0/resize/1760x1760!/format/webp/quality/90/?url=http%3A%2F%2Fnpr-brightspot.s3.amazonaws.com%2F98%2Ff7%2F48229ba341b0b1c8933834130d10%2Fjazz24.jpg",
+    "streamUrl": "https://knkx-live-a.edge.audiocdn.com/6285_256k",
+    "mimeType": "audio/aac"
+  },
+  {
+    "id": "rd_world_rfi_musique",
+    "name": "RFI Musique",
+    "type": "radio",
+    "group": "world",
+    "logo": "https://musique.rfi.fr//mstile-144x144.png",
+    "streamUrl": "http://live02.rfi.fr/rfimusiquemonde-96k.mp3",
+    "mimeType": "audio/mpeg"
   }
 ]

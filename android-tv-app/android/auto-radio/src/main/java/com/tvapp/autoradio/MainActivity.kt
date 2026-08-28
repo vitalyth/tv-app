@@ -89,10 +89,15 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_MEDIA_PLAY_FROM_SEARCH = "android.media.action.MEDIA_PLAY_FROM_SEARCH"
         private const val LOG_TAG = "TVAppRadio"
         private const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
-        private const val NOW_PLAYING_REFRESH_INTERVAL_MS = 60_000L
         private const val LIBRARY_TAB_HOME = "home"
         private const val LIBRARY_TAB_FAVORITES = "favorites"
         private const val LIBRARY_TAB_RECENT = "recent"
+        private const val STATION_GROUP_ALL = "all"
+        private const val STATION_GROUP_LOCAL = "local"
+        private const val STATION_GROUP_ISRAELIS = "israelis"
+        private const val STATION_GROUP_WORLD = "world"
+        private const val INITIAL_VISIBLE_STATION_LIMIT = 24
+        private const val VISIBLE_STATION_BATCH_SIZE = 24
         private val STATION_ALIASES = mapOf(
             "rd_glglz" to listOf(
                 "galgalaz",
@@ -181,6 +186,7 @@ class MainActivity : AppCompatActivity() {
     private var controller: MediaController? = null
     private lateinit var filterPanel: LinearLayout
     private lateinit var filterInput: EditText
+    private lateinit var stationGroupFilterContainer: LinearLayout
     private lateinit var statusPanel: LinearLayout
     private lateinit var statusText: TextView
     private lateinit var retryButton: Button
@@ -190,7 +196,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playerContainer: LinearLayout
     private lateinit var stationsContainer: LinearLayout
     private lateinit var scrollView: ScrollView
-    private lateinit var nowPlayingRepository: NowPlayingRepository
     private var castContext: CastContext? = null
 
     private var allStations: List<RadioStation> = emptyList()
@@ -212,16 +217,17 @@ class MainActivity : AppCompatActivity() {
     private var isPlayerOpening = false
     private var isPlayerPageDismissedByUser = false
     private var selectedLibraryTab = LIBRARY_TAB_HOME
+    private var selectedStationGroup = STATION_GROUP_ALL
+    private var visibleStationLimit = INITIAL_VISIBLE_STATION_LIMIT
+    private var filteredStationCount = 0
     private var catalogSourceDialog: AlertDialog? = null
     private var pendingVoicePlaybackQuery: String? = null
     private var pendingControllerStationId: String? = null
     private val nowPlayingCache = ConcurrentHashMap<String, NowPlayingInfo>()
-    private val nowPlayingLoadedAtMs = ConcurrentHashMap<String, Long>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = RadioCatalogRepository(this, BuildConfig.RADIO_API_BASE_URL)
-        nowPlayingRepository = NowPlayingRepository(repository)
         recentPrefs = getSharedPreferences("recent_stations", MODE_PRIVATE)
         favoritePrefs = getSharedPreferences("favorite_stations", MODE_PRIVATE)
         restoredStationId = savedInstanceState?.getString(STATE_ACTIVE_STATION_ID)
@@ -350,6 +356,10 @@ class MainActivity : AppCompatActivity() {
                             ) {
                                 syncStoppedPlaybackFromController()
                             }
+                        }
+
+                        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                            syncNowPlayingFromControllerMetadata(mediaMetadata)
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
@@ -483,11 +493,14 @@ class MainActivity : AppCompatActivity() {
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    resetStationBatch()
                     renderStations()
                 }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
+        stationGroupFilterContainer = stationGroupFilterView()
+        filterPanel.addView(stationGroupFilterContainer)
         filterPanel.addView(filterInput)
         listParent.addView(filterPanel)
 
@@ -540,6 +553,13 @@ class MainActivity : AppCompatActivity() {
             clipToPadding = true
             isFillViewport = false
             addView(stationsContainer)
+            setOnScrollChangeListener { _, _, scrollY, _, _ ->
+                val content = getChildAt(0) ?: return@setOnScrollChangeListener
+                val distanceToBottom = content.bottom - (scrollY + height)
+                if (distanceToBottom < dp(280)) {
+                    loadNextStationBatch()
+                }
+            }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
@@ -602,6 +622,75 @@ class MainActivity : AppCompatActivity() {
         val label: String,
         val target: String,
     )
+
+    private data class StationGroupFilter(
+        val label: String,
+        val value: String,
+    )
+
+    private fun stationGroupFilterView(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(11), 0, 0)
+            clipChildren = false
+            clipToPadding = false
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                bottomMargin = dp(12)
+            }
+            populateStationGroupFilter()
+        }
+    }
+
+    private fun LinearLayout.populateStationGroupFilter() {
+        removeAllViews()
+        val items = listOf(
+            StationGroupFilter("All", STATION_GROUP_ALL),
+            StationGroupFilter("Local", STATION_GROUP_LOCAL),
+            StationGroupFilter("Israelis", STATION_GROUP_ISRAELIS),
+            StationGroupFilter("World", STATION_GROUP_WORLD),
+        )
+
+        items.forEach { item ->
+            addView(stationGroupChip(item), LinearLayout.LayoutParams(0, dp(38), 1f).apply {
+                leftMargin = dp(4)
+                rightMargin = dp(4)
+            })
+        }
+    }
+
+    private fun stationGroupChip(item: StationGroupFilter): TextView {
+        val isSelected = selectedStationGroup == item.value
+        return TextView(this).apply {
+            text = item.label
+            textSize = 13f
+            typeface = if (isSelected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setTextColor(if (isSelected) Color.rgb(31, 24, 18) else mutedColor)
+            background = roundedRect(
+                if (isSelected) accentColor else Color.argb(42, 255, 255, 255),
+                999f,
+                if (isSelected) Color.argb(118, 255, 205, 111) else Color.argb(22, 255, 255, 255),
+                1,
+            )
+            isClickable = true
+            isFocusable = true
+            foreground = selectableItemBackground()
+            setOnClickListener {
+                if (selectedStationGroup == item.value) {
+                    return@setOnClickListener
+                }
+                selectedStationGroup = item.value
+                resetStationBatch()
+                stationGroupFilterContainer.populateStationGroupFilter()
+                renderStations()
+            }
+        }
+    }
 
     private fun bottomNavigationView(): LinearLayout {
         bottomNavContainer = LinearLayout(this).apply {
@@ -761,6 +850,7 @@ class MainActivity : AppCompatActivity() {
 
                 selectedLibraryTab = item.target
                 isPlayerPageVisible = false
+                resetStationBatch()
                 if (::bottomNavContainer.isInitialized) {
                     bottomNavContainer.populateBottomNavigation()
                 }
@@ -1062,25 +1152,31 @@ class MainActivity : AppCompatActivity() {
         activeElapsedText = null
         activeNowPlayingText = null
         val query = filterInput.text?.toString()?.trim()?.lowercase(Locale.getDefault()).orEmpty()
-        val visibleStations = (if (query.isBlank()) {
+        val filteredStations = (if (query.isBlank()) {
             allStations
         } else {
             allStations.filter { station ->
                 station.name.lowercase(Locale.getDefault()).contains(query) ||
                     station.id.lowercase(Locale.US).contains(query)
             }
-        }).let { applyLibraryTabFilter(it) }
+        }).let { applyStationGroupFilter(it) }
+            .let { applyLibraryTabFilter(it) }
             .sortedByDescending { isFavorite(it) }
+        filteredStationCount = filteredStations.size
+        val visibleStations = filteredStations.take(visibleStationLimit)
 
         if (::bottomNavContainer.isInitialized) {
             bottomNavContainer.populateBottomNavigation()
+        }
+        if (::stationGroupFilterContainer.isInitialized) {
+            stationGroupFilterContainer.populateStationGroupFilter()
         }
 
         if (isPlayerPageVisible && activeStation != null) {
             updateMiniPlayerShortcut(null)
             val station = activeStation ?: return
             if (keepOpeningPlayer) {
-                refreshNowPlaying(station)
+                syncNowPlayingFromControllerMetadata(controller?.mediaMetadata)
                 updateElapsedTime()
                 return
             }
@@ -1101,7 +1197,7 @@ class MainActivity : AppCompatActivity() {
             }
             playerContainer.addView(activePlayerCard(station))
             playerContainer.visibility = View.VISIBLE
-            refreshNowPlaying(station)
+            syncNowPlayingFromControllerMetadata(controller?.mediaMetadata)
             if (animatePlayerIn) {
                 animatePlayerPageIn()
             }
@@ -1124,13 +1220,16 @@ class MainActivity : AppCompatActivity() {
         updateMiniPlayerShortcut(activeStation)
 
         stationsContainer.removeAllViews()
-        if (visibleStations.isEmpty()) {
+        if (filteredStations.isEmpty()) {
             stationsContainer.addView(emptyState("אין תחנות שמתאימות לסינון"))
             updateElapsedTime()
             return
         }
 
         stationsContainer.addView(stationGrid(visibleStations))
+        if (visibleStations.size < filteredStations.size) {
+            stationsContainer.addView(loadMoreStationsButton(filteredStations.size - visibleStations.size))
+        }
 
         updateElapsedTime()
     }
@@ -1195,6 +1294,54 @@ class MainActivity : AppCompatActivity() {
                 .filter { recentPrefs.contains(it.id) }
                 .sortedByDescending { recentPrefs.getLong(it.id, 0L) }
             else -> stations
+        }
+    }
+
+    private fun applyStationGroupFilter(stations: List<RadioStation>): List<RadioStation> {
+        return when (selectedStationGroup) {
+            STATION_GROUP_LOCAL -> stations.filter { it.group == STATION_GROUP_LOCAL }
+            STATION_GROUP_ISRAELIS -> stations.filter { it.group == STATION_GROUP_ISRAELIS }
+            STATION_GROUP_WORLD -> stations.filter { it.group == STATION_GROUP_WORLD }
+            else -> stations
+        }
+    }
+
+    private fun resetStationBatch() {
+        visibleStationLimit = INITIAL_VISIBLE_STATION_LIMIT
+    }
+
+    private fun loadNextStationBatch() {
+        if (isCatalogLoading || isPlayerPageVisible || visibleStationLimit >= filteredStationCount) {
+            return
+        }
+        visibleStationLimit += VISIBLE_STATION_BATCH_SIZE
+        renderStations()
+    }
+
+    private fun loadMoreStationsButton(remainingCount: Int): TextView {
+        val loadCount = minOf(VISIBLE_STATION_BATCH_SIZE, remainingCount)
+        return TextView(this).apply {
+            text = "טען עוד $loadCount תחנות"
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(accentSoftColor)
+            includeFontPadding = false
+            background = roundedRect(Color.argb(46, 255, 159, 28), 18f, Color.argb(80, 255, 159, 28), 1)
+            isClickable = true
+            isFocusable = true
+            foreground = selectableItemBackground()
+            setPadding(dp(18), dp(13), dp(18), dp(13))
+            setOnClickListener { loadNextStationBatch() }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(12)
+                leftMargin = dp(8)
+                rightMargin = dp(8)
+                bottomMargin = dp(18)
+            }
         }
     }
 
@@ -1689,6 +1836,12 @@ class MainActivity : AppCompatActivity() {
                 addView(topCastButton(), FrameLayout.LayoutParams(dp(46), dp(46), Gravity.RIGHT or Gravity.CENTER_VERTICAL).apply {
                     rightMargin = dp(18)
                 })
+
+                addView(favoriteButton(isFavorite(station)) {
+                    toggleFavorite(station)
+                }, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.LEFT or Gravity.CENTER_VERTICAL).apply {
+                    leftMargin = dp(18)
+                })
             })
 
             sheet.addView(FrameLayout(this@MainActivity).apply {
@@ -1720,23 +1873,6 @@ class MainActivity : AppCompatActivity() {
                 ))
             })
 
-            activeNowPlayingText = TextView(this@MainActivity).apply {
-                text = nowPlayingTextFor(station) ?: "בודק מה משודר עכשיו..."
-                textSize = 13f
-                setTextColor(mutedColor)
-                gravity = Gravity.CENTER
-                maxLines = 1
-                includeFontPadding = false
-                applyStationTextDirection(text.toString(), alignHebrewRight = false)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    bottomMargin = dp(9)
-                }
-            }
-            sheet.addView(activeNowPlayingText)
-
             sheet.addView(TextView(this@MainActivity).apply {
                 text = station.name
                 textSize = 29f
@@ -1750,9 +1886,26 @@ class MainActivity : AppCompatActivity() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ).apply {
-                    bottomMargin = dp(34)
+                    bottomMargin = dp(9)
                 }
             })
+
+            activeNowPlayingText = TextView(this@MainActivity).apply {
+                text = nowPlayingTextFor(station) ?: "בודק מה משודר עכשיו..."
+                textSize = 13f
+                setTextColor(mutedColor)
+                gravity = Gravity.CENTER
+                maxLines = 1
+                includeFontPadding = false
+                applyStationTextDirection(text.toString(), alignHebrewRight = false)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    bottomMargin = dp(34)
+                }
+            }
+            sheet.addView(activeNowPlayingText)
 
             sheet.addView(playerScale(isAnimating = shouldAnimateEqualizer()).apply {
                 alpha = 0.95f
@@ -2092,37 +2245,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshNowPlaying(station: RadioStation) {
-        val loadedAtMs = nowPlayingLoadedAtMs[station.id] ?: 0L
-        val cached = nowPlayingCache[station.id]
-        val isFresh = cached != null && System.currentTimeMillis() - loadedAtMs < NOW_PLAYING_REFRESH_INTERVAL_MS
-        if (isFresh) {
-            updateActiveNowPlayingText(station)
+    private fun syncNowPlayingFromControllerMetadata(mediaMetadata: MediaMetadata?) {
+        val station = activeStation ?: return
+        val metadata = mediaMetadata ?: return
+        val title = metadata
+            .artist
+            ?.toString()
+            ?.takeIf { it.isNotBlank() && it != "Live radio" }
+            ?: return
+        val detail = metadata.subtitle
+            ?.toString()
+            ?.takeIf { it.isNotBlank() && it != title && it != "Live radio" }
+
+        val info = NowPlayingInfo(title = title, detail = detail)
+        if (nowPlayingCache[station.id] == info) {
             return
         }
 
-        executor.execute {
-            val info = try {
-                nowPlayingRepository.nowPlayingFor(station)
-            } catch (error: Exception) {
-                Log.w(LOG_TAG, "Failed to load now playing for ${station.id}", error)
-                null
-            }
-
-            mainHandler.post {
-                if (info != null) {
-                    nowPlayingCache[station.id] = info
-                    nowPlayingLoadedAtMs[station.id] = System.currentTimeMillis()
-                } else {
-                    nowPlayingCache.remove(station.id)
-                    nowPlayingLoadedAtMs[station.id] = System.currentTimeMillis()
-                }
-
-                if (activeStation?.id == station.id) {
-                    updateActiveNowPlayingText(station)
-                }
-            }
-        }
+        nowPlayingCache[station.id] = info
+        updateActiveNowPlayingText(station)
     }
 
     private fun updateActiveNowPlayingText(station: RadioStation) {
@@ -2136,7 +2277,6 @@ class MainActivity : AppCompatActivity() {
     private fun nowPlayingTextFor(station: RadioStation): String? {
         val info = nowPlayingCache[station.id] ?: return null
         return buildString {
-            append("עכשיו: ")
             append(info.title)
             info.detail?.takeIf { it.isNotBlank() }?.let {
                 append(" · ")
@@ -2153,8 +2293,7 @@ class MainActivity : AppCompatActivity() {
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(station.name)
-                    .setArtist(getString(R.string.app_name))
-                    .setAlbumTitle("רדיו חי")
+                    .setArtist(nowPlaying?.title ?: "Live radio")
                     .setSubtitle(nowPlaying?.title)
                     .setDescription(nowPlayingTextFor(station))
                     .setArtworkUri(station.logo?.takeIf { it.isNotBlank() }?.let(Uri::parse))

@@ -450,11 +450,42 @@ def _build_channel(channel: dict, programs: list | None = None) -> Channel:
         module=channel["module"],
         channelID=channel["channelID"],
         type=channel["type"],
+        group=channel.get("group") or channel.get("scope") or _infer_radio_group(channel),
         linkDetails=channel["linkDetails"],
         programs=programs or [],
         tvgID=channel["tvgID"],
         channelNumber=channel.get("channelNumber"),
     )
+
+
+def _infer_radio_group(channel: dict) -> str | None:
+    if channel.get("type") != "radio":
+        return None
+
+    channel_id = str(channel.get("channelID") or channel.get("id") or "").lower()
+    name = str(channel.get("name") or "")
+    local_ids = {
+        "rd_local_wbur",
+        "rd_local_gbh",
+        "rd_local_wcrb",
+        "rd_local_wers",
+        "rd_local_wumb",
+        "rd_local_whrb",
+        "rd_local_wmbr",
+        "rd_local_wxrv",
+        "rd_local_wzlx",
+        "rd_local_wrko",
+        "rd_local_kiss108",
+    }
+    local_name_hints = (
+        "Boston",
+        "Cambridge",
+        "Lexington",
+        "Massachusetts",
+    )
+    if channel_id in local_ids or any(hint in name for hint in local_name_hints):
+        return "local"
+    return "israelis"
 
 
 def get_live_channels():

@@ -9,8 +9,10 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Metadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.extractor.metadata.icy.IcyInfo
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaConstants
@@ -33,13 +35,26 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import java.text.Normalizer
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 class RadioMediaLibraryService : MediaLibraryService() {
+    private data class CachedNowPlaying(
+        val info: NowPlayingInfo?,
+        val loadedAtMs: Long,
+    )
+
+    private data class StationMediaEntry(
+        val station: RadioStation,
+        val groupTitle: String? = null,
+    )
+
     private lateinit var player: ExoPlayer
     private lateinit var session: MediaLibrarySession
     private lateinit var repository: RadioCatalogRepository
+    private lateinit var nowPlayingRepository: NowPlayingRepository
     private val executor = Executors.newSingleThreadExecutor()
+    private val nowPlayingCache = ConcurrentHashMap<String, CachedNowPlaying>()
     private var castContext: CastContext? = null
     private var castSession: CastSession? = null
     private var remoteToLocalStation: RadioStation? = null
@@ -137,6 +152,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         )
 
         repository = RadioCatalogRepository(this, BuildConfig.RADIO_API_BASE_URL)
+        nowPlayingRepository = NowPlayingRepository(repository)
         player = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
@@ -154,9 +170,13 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     when (playbackState) {
-                        Player.STATE_READY -> moveCurrentStationToCastIfConnected()
+                        Player.STATE_READY -> {
+                            moveCurrentStationToCastIfConnected()
+                        }
                         Player.STATE_IDLE,
-                        Player.STATE_ENDED -> stopActivePlaybackIfRemoteIsConnected()
+                        Player.STATE_ENDED -> {
+                            stopActivePlaybackIfRemoteIsConnected()
+                        }
                     }
                 }
 
@@ -164,6 +184,10 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     if (isPlaying) {
                         moveCurrentStationToCastIfConnected()
                     }
+                }
+
+                override fun onMetadata(metadata: Metadata) {
+                    handlePlayerMetadata(metadata)
                 }
             })
         }
@@ -258,9 +282,10 @@ class RadioMediaLibraryService : MediaLibraryService() {
     }
 
     private fun loadStationOnCast(remoteClient: RemoteMediaClient, station: RadioStation): Boolean {
+        val nowPlaying = nowPlayingCache[station.id]?.info
         val metadata = CastMediaMetadata(CastMediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
             putString(CastMediaMetadata.KEY_TITLE, station.name)
-            putString(CastMediaMetadata.KEY_ARTIST, getString(R.string.radio_root_title))
+            putString(CastMediaMetadata.KEY_ARTIST, nowPlaying?.title ?: "Live radio")
             station.logo?.takeIf { it.isNotBlank() }?.let { logo ->
                 addImage(WebImage(resolveArtworkUri(logo)))
             }
@@ -495,12 +520,12 @@ class RadioMediaLibraryService : MediaLibraryService() {
                         val favoriteIds = favoriteStationIds()
                         val items = repository.getStations()
                             .filter { it.id in favoriteIds }
+                            .let { applyPaging(it, page, pageSize) }
                             .map {
                                 it.toMediaItem(
                                     contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
                                 )
                             }
-                            .let { applyPaging(it, page, pageSize) }
 
                         LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
                     },
@@ -517,12 +542,12 @@ class RadioMediaLibraryService : MediaLibraryService() {
                             .let { stationById ->
                                 recentIds.mapNotNull { stationById[it] }
                             }
+                            .let { applyPaging(it, page, pageSize) }
                             .map {
                                 it.toMediaItem(
                                     contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
                                 )
                             }
-                            .let { applyPaging(it, page, pageSize) }
 
                         LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
                     },
@@ -540,25 +565,21 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     val favoriteIds = favoriteStationIds()
                     val favoriteStations = stations.filter { it.id in favoriteIds }
                     val otherStations = stations.filterNot { it.id in favoriteIds }
-                    val items = buildList {
+                    val entries = buildList {
                         addAll(
-                            favoriteStations.map {
-                                it.toMediaItem(
-                                    contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
-                                    groupTitle = FAVORITES_GROUP_TITLE,
-                                )
-                            }
+                            favoriteStations.map { StationMediaEntry(it, FAVORITES_GROUP_TITLE) }
                         )
                         addAll(
-                            otherStations.map {
-                                it.toMediaItem(
-                                    contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
-                                    groupTitle = ALL_STATIONS_GROUP_TITLE,
-                                )
-                            }
+                            otherStations.map { StationMediaEntry(it, ALL_STATIONS_GROUP_TITLE) }
                         )
                     }
                         .let { applyPaging(it, page, pageSize) }
+                    val items = entries.map { entry ->
+                        entry.station.toMediaItem(
+                            contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+                            groupTitle = entry.groupTitle,
+                        )
+                    }
 
                     LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
                 },
@@ -594,12 +615,12 @@ class RadioMediaLibraryService : MediaLibraryService() {
             return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
                 {
                     val items = searchStations(query)
+                        .let { applyPaging(it, page, pageSize) }
                         .map {
                             it.toMediaItem(
                                 contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
                             )
                         }
-                        .let { applyPaging(it, page, pageSize) }
 
                     Log.d(LOG_TAG, "Search results query='$query' page=$page pageSize=$pageSize count=${items.size}")
                     LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
@@ -853,10 +874,22 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private fun RadioStation.toMediaItem(
         contentStyle: Int = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
         groupTitle: String? = null,
+        includeNowPlaying: Boolean = false,
+        nowPlayingOverride: NowPlayingInfo? = null,
+        useNowPlayingOverride: Boolean = false,
     ): MediaItem {
+        val nowPlaying = if (useNowPlayingOverride) {
+            nowPlayingOverride
+        } else {
+            null
+        }
+        val subtitle = nowPlaying?.title ?: if (includeNowPlaying || useNowPlayingOverride) "Live radio" else null
+        val description = nowPlayingText(nowPlaying) ?: subtitle
         val metadataBuilder = MediaMetadata.Builder()
             .setTitle(name)
-            .setArtist(getString(R.string.radio_root_title))
+            .setArtist(subtitle)
+            .setSubtitle(nowPlaying?.detail ?: subtitle)
+            .setDescription(description)
             .setIsBrowsable(false)
             .setIsPlayable(true)
             .setExtras(
@@ -879,6 +912,61 @@ class RadioMediaLibraryService : MediaLibraryService() {
         repository.streamMimeTypeFor(id)?.let { mediaItemBuilder.setMimeType(it) }
 
         return mediaItemBuilder.build()
+    }
+
+    private fun handlePlayerMetadata(metadata: Metadata) {
+        val station = currentLocalStation() ?: return
+        val info = (0 until metadata.length())
+            .asSequence()
+            .map { metadata[it] }
+            .filterIsInstance<IcyInfo>()
+            .firstNotNullOfOrNull { icyInfo ->
+                nowPlayingRepository.nowPlayingFromMetadataText(icyInfo.title)
+            } ?: return
+
+        val currentInfo = nowPlayingCache[station.id]?.info
+        if (currentInfo == info) {
+            return
+        }
+
+        nowPlayingCache[station.id] = CachedNowPlaying(info, System.currentTimeMillis())
+        updateCurrentMediaItemMetadata(station, info)
+    }
+
+    private fun updateCurrentMediaItemMetadata(station: RadioStation, nowPlaying: NowPlayingInfo?) {
+        val currentItem = player.currentMediaItem ?: return
+        if (currentItem.mediaId != station.id) {
+            return
+        }
+
+        val updatedItem = station.toMediaItem(
+            includeNowPlaying = true,
+            nowPlayingOverride = nowPlaying,
+            useNowPlayingOverride = true,
+        )
+        val currentDescription = currentItem.mediaMetadata.description?.toString()
+        val updatedDescription = updatedItem.mediaMetadata.description?.toString()
+        val currentSubtitle = currentItem.mediaMetadata.subtitle?.toString()
+        val updatedSubtitle = updatedItem.mediaMetadata.subtitle?.toString()
+        if (currentDescription == updatedDescription && currentSubtitle == updatedSubtitle) {
+            return
+        }
+
+        val currentIndex = player.currentMediaItemIndex
+        if (currentIndex >= 0) {
+            player.replaceMediaItem(currentIndex, updatedItem)
+        }
+    }
+
+    private fun nowPlayingText(info: NowPlayingInfo?): String? {
+        info ?: return null
+        return buildString {
+            append(info.title)
+            info.detail?.takeIf { it.isNotBlank() }?.let {
+                append(" · ")
+                append(it)
+            }
+        }
     }
 
     private fun favoriteStationIds(): Set<String> {
@@ -932,7 +1020,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         )
     }
 
-    private fun applyPaging(items: List<MediaItem>, page: Int, pageSize: Int): List<MediaItem> {
+    private fun <T> applyPaging(items: List<T>, page: Int, pageSize: Int): List<T> {
         if (page < 0 || pageSize <= 0) {
             return items
         }
