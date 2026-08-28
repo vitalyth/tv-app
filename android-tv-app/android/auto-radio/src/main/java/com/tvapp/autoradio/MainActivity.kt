@@ -86,8 +86,15 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_PAUSE_ACTIVE = "com.tvapp.autoradio.PAUSE_ACTIVE"
         private const val ACTION_PLAY_ACTIVE = "com.tvapp.autoradio.PLAY_ACTIVE"
         private const val ACTION_PLAYBACK_STOPPED = "com.tvapp.autoradio.PLAYBACK_STOPPED"
+        private const val ACTION_PLAYBACK_STATE_CHANGED = "com.tvapp.autoradio.PLAYBACK_STATE_CHANGED"
         private const val ACTION_SHOW_CATALOG_SETTINGS = "com.tvapp.autoradio.SHOW_CATALOG_SETTINGS"
         private const val ACTION_MEDIA_PLAY_FROM_SEARCH = "android.media.action.MEDIA_PLAY_FROM_SEARCH"
+        private const val EXTRA_STATION_ID = "station_id"
+        private const val EXTRA_IS_PLAYING = "is_playing"
+        private const val EXTRA_HAS_MEDIA_ITEM = "has_media_item"
+        private const val EXTRA_UPDATED_AT_MS = "updated_at_ms"
+        private const val PLAYBACK_STATE_PREFS = "radio_playback_state"
+        private const val SAVED_PLAYBACK_STATE_MAX_AGE_MS = 6 * 60 * 60 * 1_000L
         private const val LOG_TAG = "TVAppRadio"
         private const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
         private const val LIBRARY_TAB_HOME = "home"
@@ -100,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         private const val NO_INFO_TEXT = "אין מידע"
         private const val INITIAL_VISIBLE_STATION_LIMIT = 24
         private const val VISIBLE_STATION_BATCH_SIZE = 24
+        private const val LOAD_MORE_STATIONS_TAG = "load_more_stations"
         private val STATION_ALIASES = mapOf(
             "rd_glglz" to listOf(
                 "galgalaz",
@@ -144,6 +152,7 @@ class MainActivity : AppCompatActivity() {
     private val liveColor = Color.rgb(235, 64, 64)
 
     private val executor = Executors.newSingleThreadExecutor()
+    private val logoExecutor = Executors.newFixedThreadPool(4)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val logoCache = ConcurrentHashMap<String, android.graphics.Bitmap>()
     private val timerRunnable = object : Runnable {
@@ -175,8 +184,9 @@ class MainActivity : AppCompatActivity() {
     }
     private val playbackStoppedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ACTION_PLAYBACK_STOPPED) {
-                handleExternalPlaybackStopped()
+            when (intent?.action) {
+                ACTION_PLAYBACK_STOPPED -> handleExternalPlaybackStopped()
+                ACTION_PLAYBACK_STATE_CHANGED -> handleExternalPlaybackStateChanged(intent)
             }
         }
     }
@@ -206,6 +216,7 @@ class MainActivity : AppCompatActivity() {
     private var activeElapsedText: TextView? = null
     private var activeNowPlayingText: TextView? = null
     private var isCatalogLoading = false
+    private var isLoadingStationBatch = false
     private var isActiveStationLoading = false
     private var isActiveStationPaused = false
     private var isSwitchingStation = false
@@ -278,6 +289,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         syncControllerStateIntoUi()
+        syncSavedPlaybackStateIntoUi()
+        scheduleControllerStateSync()
         consumePendingVoicePlayback()
     }
 
@@ -305,6 +318,7 @@ class MainActivity : AppCompatActivity() {
             MediaController.releaseFuture(controllerFuture)
         }
         executor.shutdown()
+        logoExecutor.shutdown()
         super.onDestroy()
     }
 
@@ -370,6 +384,8 @@ class MainActivity : AppCompatActivity() {
                         }
                     })
                     syncControllerStateIntoUi()
+                    syncSavedPlaybackStateIntoUi()
+                    scheduleControllerStateSync()
                     consumePendingVoicePlayback()
                 }
             },
@@ -415,6 +431,44 @@ class MainActivity : AppCompatActivity() {
         } else if (activeStation != null) {
             syncStoppedPlaybackFromController()
         }
+    }
+
+    private fun scheduleControllerStateSync() {
+        listOf(120L, 450L, 1_200L).forEach { delayMs ->
+            mainHandler.postDelayed({
+                syncControllerStateIntoUi()
+                syncSavedPlaybackStateIntoUi()
+            }, delayMs)
+        }
+    }
+
+    private fun syncSavedPlaybackStateIntoUi() {
+        if (isUserStoppingPlayback || isSwitchingStation || isCatalogLoading || allStations.isEmpty()) {
+            return
+        }
+
+        val prefs = getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE)
+        if (!prefs.getBoolean(EXTRA_HAS_MEDIA_ITEM, false)) {
+            return
+        }
+
+        val updatedAtMs = prefs.getLong(EXTRA_UPDATED_AT_MS, 0L)
+        if (updatedAtMs <= 0L || System.currentTimeMillis() - updatedAtMs > SAVED_PLAYBACK_STATE_MAX_AGE_MS) {
+            return
+        }
+
+        val stationId = prefs.getString(EXTRA_STATION_ID, null)?.takeIf { it.isNotBlank() } ?: return
+        val station = allStations.firstOrNull { it.id == stationId } ?: run {
+            pendingControllerStationId = stationId
+            return
+        }
+
+        val controllerMediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
+        if (controllerMediaId != null && controllerMediaId != station.id) {
+            return
+        }
+
+        applyExternalPlaybackState(station, prefs.getBoolean(EXTRA_IS_PLAYING, false))
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -996,8 +1050,10 @@ class MainActivity : AppCompatActivity() {
 
                 hideStatus()
                 restoreActiveStationAfterCatalogLoad()
+                syncSavedPlaybackStateIntoUi()
                 renderStations()
                 syncControllerStateIntoUi()
+                scheduleControllerStateSync()
                 consumePendingVoicePlayback()
             }
         }
@@ -1368,16 +1424,74 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadNextStationBatch() {
-        if (isCatalogLoading || isPlayerPageVisible || visibleStationLimit >= filteredStationCount) {
+        if (
+            isCatalogLoading ||
+            isLoadingStationBatch ||
+            isPlayerPageVisible ||
+            visibleStationLimit >= filteredStationCount
+        ) {
             return
         }
-        visibleStationLimit += VISIBLE_STATION_BATCH_SIZE
-        renderStations()
+        isLoadingStationBatch = true
+
+        stationsContainer.post {
+            val filteredStations = filteredStationsForCurrentState()
+            filteredStationCount = filteredStations.size
+            if (visibleStationLimit >= filteredStations.size) {
+                isLoadingStationBatch = false
+                return@post
+            }
+
+            val previousLimit = visibleStationLimit
+            visibleStationLimit = minOf(visibleStationLimit + VISIBLE_STATION_BATCH_SIZE, filteredStations.size)
+            appendStationBatch(filteredStations, previousLimit, visibleStationLimit)
+            isLoadingStationBatch = false
+            updateElapsedTime()
+        }
+    }
+
+    private fun appendStationBatch(filteredStations: List<RadioStation>, fromIndex: Int, toIndex: Int) {
+        val grid = (0 until stationsContainer.childCount)
+            .map { stationsContainer.getChildAt(it) }
+            .filterIsInstance<GridLayout>()
+            .firstOrNull()
+
+        if (grid == null || fromIndex <= 0 || toIndex <= fromIndex) {
+            renderStations()
+            return
+        }
+
+        removeLoadMoreStationsButton()
+        val columns = stationGridColumnCount()
+        filteredStations.subList(fromIndex, toIndex).forEachIndexed { offset, station ->
+            val index = fromIndex + offset
+            grid.addView(stationTile(station), GridLayout.LayoutParams(
+                GridLayout.spec(GridLayout.UNDEFINED, 1f),
+                GridLayout.spec(index % columns, 1f),
+            ).apply {
+                width = 0
+                height = GridLayout.LayoutParams.WRAP_CONTENT
+                setMargins(dp(2), dp(3), dp(2), dp(6))
+            })
+        }
+
+        if (toIndex < filteredStations.size) {
+            stationsContainer.addView(loadMoreStationsButton(filteredStations.size - toIndex))
+        }
+    }
+
+    private fun removeLoadMoreStationsButton() {
+        for (index in stationsContainer.childCount - 1 downTo 0) {
+            if (stationsContainer.getChildAt(index).tag == LOAD_MORE_STATIONS_TAG) {
+                stationsContainer.removeViewAt(index)
+            }
+        }
     }
 
     private fun loadMoreStationsButton(remainingCount: Int): TextView {
         val loadCount = minOf(VISIBLE_STATION_BATCH_SIZE, remainingCount)
         return TextView(this).apply {
+            tag = LOAD_MORE_STATIONS_TAG
             text = "טען עוד $loadCount תחנות"
             textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
@@ -2414,13 +2528,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun registerPlaybackStoppedReceiver() {
-        val filter = IntentFilter(ACTION_PLAYBACK_STOPPED)
+        val filter = IntentFilter().apply {
+            addAction(ACTION_PLAYBACK_STOPPED)
+            addAction(ACTION_PLAYBACK_STATE_CHANGED)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(playbackStoppedReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
             registerReceiver(playbackStoppedReceiver, filter)
         }
+    }
+
+    private fun handleExternalPlaybackStateChanged(intent: Intent) {
+        if (isUserStoppingPlayback || isSwitchingStation || isCatalogLoading) {
+            return
+        }
+
+        val hasMediaItem = intent.getBooleanExtra(EXTRA_HAS_MEDIA_ITEM, false)
+        if (!hasMediaItem) {
+            handleExternalPlaybackStopped()
+            return
+        }
+
+        val stationId = intent.getStringExtra(EXTRA_STATION_ID)?.takeIf { it.isNotBlank() } ?: return
+        val station = allStations.firstOrNull { it.id == stationId }
+        if (station == null) {
+            pendingControllerStationId = stationId
+            return
+        }
+
+        applyExternalPlaybackState(station, intent.getBooleanExtra(EXTRA_IS_PLAYING, false))
+    }
+
+    private fun applyExternalPlaybackState(station: RadioStation, isPlaying: Boolean) {
+        val wasDifferentStation = activeStation?.id != station.id
+        activeStation = station
+        requestedStationId = station.id
+        pendingControllerStationId = null
+        rememberStation(station)
+        isActiveStationPaused = !isPlaying
+        isActiveStationLoading = false
+
+        if (isPlaying && (playStartedAtMs <= 0L || wasDifferentStation)) {
+            playStartedAtMs = System.currentTimeMillis()
+            startElapsedTimer()
+        } else if (!isPlaying) {
+            stopElapsedTimer(resetText = false)
+        }
+
+        renderStations(animatePlayerIn = false)
     }
 
     private fun handleExternalPlaybackStopped() {
@@ -2539,17 +2696,19 @@ class MainActivity : AppCompatActivity() {
     private fun loadStationLogo(station: RadioStation, imageView: ImageView) {
         val logoUrl = station.logo
         if (logoUrl.isNullOrBlank()) {
+            imageView.tag = null
             imageView.setImageDrawable(logoFallback())
             return
         }
 
+        imageView.tag = logoUrl
         logoCache[logoUrl]?.let {
             imageView.setImageBitmap(it)
             return
         }
 
         imageView.setImageDrawable(logoFallback())
-        executor.execute {
+        logoExecutor.execute {
             try {
                 val connection = URL(logoUrl).openConnection() as HttpURLConnection
                 connection.connectTimeout = 8_000
@@ -2558,12 +2717,20 @@ class MainActivity : AppCompatActivity() {
                 connection.inputStream.use { stream ->
                     BitmapFactory.decodeStream(stream)?.let { bitmap ->
                         logoCache[logoUrl] = bitmap
-                        mainHandler.post { imageView.setImageBitmap(bitmap) }
+                        mainHandler.post {
+                            if (imageView.tag == logoUrl) {
+                                imageView.setImageBitmap(bitmap)
+                            }
+                        }
                     }
                 }
                 connection.disconnect()
             } catch (_: Exception) {
-                mainHandler.post { imageView.setImageDrawable(logoFallback()) }
+                mainHandler.post {
+                    if (imageView.tag == logoUrl) {
+                        imageView.setImageDrawable(logoFallback())
+                    }
+                }
             }
         }
     }

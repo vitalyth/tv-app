@@ -23,6 +23,7 @@ class NowPlayingRepository(
 
     fun nowPlayingFromMetadataText(rawMetadata: String?): NowPlayingInfo? {
         return rawMetadata
+            ?.repairMetadataEncoding()
             ?.htmlToPlainText()
             ?.parseIcyStreamInfo()
             ?.takeIf { it.title.isUsefulNowPlayingText() }
@@ -89,7 +90,76 @@ class NowPlayingRepository(
             String(this, Charset.forName("windows-1255"))
         } else {
             utf8
+        }.repairMetadataEncoding()
+    }
+
+    private fun String.repairMetadataEncoding(): String {
+        if (!looksLikeMetadataMojibake()) {
+            return this
         }
+
+        val candidates = mutableListOf(this)
+        for (bytes in metadataByteCandidates()) {
+            candidates.addDecodedCandidate(bytes, "UTF-8")
+            candidates.addDecodedCandidate(bytes, "windows-1255")
+        }
+        return candidates.maxByOrNull { it.metadataTextScore() } ?: this
+    }
+
+    private fun String.looksLikeMetadataMojibake(): Boolean {
+        if (any { it == 'Ã' || it == 'Â' || it == '×' || it == '�' }) {
+            return true
+        }
+
+        val letters = count { it in 'A'..'Z' || it in 'a'..'z' || it in 'À'..'ÿ' }
+        if (letters == 0) {
+            return false
+        }
+
+        val suspiciousLatin = count { it in 'À'..'ÿ' }
+        return suspiciousLatin >= 4 && suspiciousLatin.toFloat() / letters >= 0.35f
+    }
+
+    private fun String.metadataByteCandidates(): List<ByteArray> {
+        val candidates = mutableListOf<ByteArray>()
+        runCatching { candidates += toByteArray(Charset.forName("ISO-8859-1")) }
+        runCatching { candidates += toByteArray(Charset.forName("windows-1252")) }
+
+        val recovered = ByteArray(length)
+        forEachIndexed { index, char ->
+            val codepoint = char.code
+            if (codepoint <= 0xFF) {
+                recovered[index] = codepoint.toByte()
+                return@forEachIndexed
+            }
+
+            val encoded = runCatching {
+                char.toString().toByteArray(Charset.forName("windows-1252"))
+            }.getOrNull()
+            if (encoded?.size != 1 || (char != '?' && encoded[0] == '?'.code.toByte())) {
+                return candidates
+            }
+            recovered[index] = encoded[0]
+        }
+        candidates += recovered
+        return candidates
+    }
+
+    private fun MutableList<String>.addDecodedCandidate(bytes: ByteArray, targetCharset: String) {
+        try {
+            add(String(bytes, Charset.forName(targetCharset)))
+        } catch (_: Exception) {
+            // Ignore invalid charset conversions; the original value stays as a candidate.
+        }
+    }
+
+    private fun String.metadataTextScore(): Int {
+        val hebrew = count { it in '\u0590'..'\u05FF' }
+        val replacements = count { it == '\uFFFD' }
+        val mojibakeMarkers = count { it == 'Ã' || it == 'Â' || it == '×' || it == '�' }
+        val suspiciousLatin = count { it in 'À'..'ÿ' }
+        val readable = count { it.isLetterOrDigit() || it in '\u0590'..'\u05FF' }
+        return hebrew * 8 + readable - replacements * 20 - mojibakeMarkers * 8 - suspiciousLatin * 2
     }
 
     private fun String.htmlToPlainText(): String {
@@ -120,7 +190,7 @@ class NowPlayingRepository(
 
         val fields = STREAM_KEY_VALUE_REGEX.findAll(compact)
             .associate { match ->
-                match.groupValues[1].lowercase(Locale.US) to match.groupValues[2].trim()
+                match.groupValues[1].lowercase(Locale.US) to match.groupValues[3].trim()
             }
         val program = fields.firstValue("program", "show", "showname", "programname", "program_name")
         val song = fields.firstValue("text", "title", "song", "track", "cue_title")
@@ -178,9 +248,9 @@ class NowPlayingRepository(
         private const val CONNECT_TIMEOUT_MS = 5_000
         private const val READ_TIMEOUT_MS = 7_000
         private const val USER_AGENT = "TVAppRadio/1.0"
-        private val STREAM_TITLE_REGEX = Regex("StreamTitle='([^']*)'", RegexOption.IGNORE_CASE)
-        private val STREAM_KEY_VALUE_REGEX = Regex("""\b([A-Za-z_][A-Za-z0-9_]*)=["']([^"']*)["']""")
-        private val STREAM_KEY_VALUE_FIELDS_REGEX = Regex("""\s+\w+=["'][^"']*["']""")
+        private val STREAM_TITLE_REGEX = Regex("StreamTitle='(.*)'", RegexOption.IGNORE_CASE)
+        private val STREAM_KEY_VALUE_REGEX = Regex("""\b([A-Za-z_][A-Za-z0-9_]*)=(["'])(.*?)\2""")
+        private val STREAM_KEY_VALUE_FIELDS_REGEX = Regex("""\s+\w+=(["']).*?\1""")
         private val IGNORED_TITLES = setOf("unknown", "live", "radio")
         private val IGNORED_TITLE_PARTS = listOf(
             "powered by",

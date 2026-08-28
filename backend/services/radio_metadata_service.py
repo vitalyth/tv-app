@@ -64,7 +64,7 @@ def now_playing_from_metadata_text(raw_metadata: Optional[str]) -> Optional[NowP
     if not raw_metadata:
         return None
 
-    info = _parse_icy_stream_info(_html_to_plain_text(raw_metadata))
+    info = _parse_icy_stream_info(_html_to_plain_text(_repair_metadata_encoding(raw_metadata)))
     if not info or not _is_useful_now_playing_text(info.title):
         return None
 
@@ -73,6 +73,66 @@ def now_playing_from_metadata_text(raw_metadata: Optional[str]) -> Optional[NowP
 
 def _html_to_plain_text(value: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE))).strip()
+
+
+def _repair_metadata_encoding(value: str) -> str:
+    if not _looks_like_metadata_mojibake(value):
+        return value
+
+    candidates = [value]
+
+    for raw_bytes in _metadata_byte_candidates(value):
+        for encoding in ("utf-8", "windows-1255"):
+            try:
+                candidates.append(raw_bytes.decode(encoding))
+            except UnicodeDecodeError:
+                pass
+
+    return max(candidates, key=_metadata_text_score)
+
+
+def _looks_like_metadata_mojibake(value: str) -> bool:
+    if any(marker in value for marker in ("Ã", "Â", "×", "�")):
+        return True
+
+    letters = re.findall(r"[A-Za-zÀ-ÿ]", value)
+    if not letters:
+        return False
+
+    suspicious_latin = re.findall(r"[À-ÿ]", value)
+    return len(suspicious_latin) >= 4 and len(suspicious_latin) / len(letters) >= 0.35
+
+
+def _metadata_byte_candidates(value: str) -> list[bytes]:
+    candidates: list[bytes] = []
+    for encoding in ("latin-1", "cp1252"):
+        try:
+            candidates.append(value.encode(encoding))
+        except UnicodeEncodeError:
+            pass
+
+    recovered = bytearray()
+    for char in value:
+        codepoint = ord(char)
+        if codepoint <= 0xFF:
+            recovered.append(codepoint)
+            continue
+        try:
+            recovered.extend(char.encode("cp1252"))
+        except UnicodeEncodeError:
+            return candidates
+
+    candidates.append(bytes(recovered))
+    return candidates
+
+
+def _metadata_text_score(value: str) -> int:
+    hebrew = len(re.findall(r"[\u0590-\u05FF]", value))
+    replacement = value.count("\ufffd")
+    mojibake_markers = sum(value.count(marker) for marker in ("Ã", "Â", "×", "�"))
+    suspicious_latin = len(re.findall(r"[À-ÿ]", value))
+    readable = len(re.findall(r"[\w\u0590-\u05FF]", value))
+    return hebrew * 8 + readable - replacement * 20 - mojibake_markers * 8 - suspicious_latin * 2
 
 
 def _parse_icy_stream_info(value: str) -> Optional[NowPlayingInfo]:

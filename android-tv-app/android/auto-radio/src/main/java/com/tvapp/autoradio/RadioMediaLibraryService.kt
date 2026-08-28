@@ -170,6 +170,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     clearCurrentNowPlaying(mediaItem)
+                    notifyPlaybackStateChanged()
                     moveCurrentStationToCastIfConnected()
                 }
 
@@ -177,9 +178,11 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     when (playbackState) {
                         Player.STATE_READY -> {
                             moveCurrentStationToCastIfConnected()
+                            notifyPlaybackStateChanged()
                         }
                         Player.STATE_IDLE,
                         Player.STATE_ENDED -> {
+                            notifyPlaybackStateChanged()
                             stopActivePlaybackIfRemoteIsConnected()
                         }
                     }
@@ -189,6 +192,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     if (isPlaying) {
                         moveCurrentStationToCastIfConnected()
                     }
+                    notifyPlaybackStateChanged()
                 }
 
                 override fun onMetadata(metadata: Metadata) {
@@ -402,11 +406,36 @@ class RadioMediaLibraryService : MediaLibraryService() {
     }
 
     private fun notifyPlaybackStopped() {
+        savePlaybackState(stationId = null, isPlaying = false, hasMediaItem = false)
         sendBroadcast(
             Intent(ACTION_PLAYBACK_STOPPED).apply {
                 setPackage(packageName)
             }
         )
+    }
+
+    private fun notifyPlaybackStateChanged() {
+        val stationId = player.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
+        val hasMediaItem = player.currentMediaItem != null
+        savePlaybackState(stationId, player.isPlaying, hasMediaItem)
+        sendBroadcast(
+            Intent(ACTION_PLAYBACK_STATE_CHANGED).apply {
+                setPackage(packageName)
+                stationId?.let { putExtra(EXTRA_STATION_ID, it) }
+                putExtra(EXTRA_IS_PLAYING, player.isPlaying)
+                putExtra(EXTRA_HAS_MEDIA_ITEM, hasMediaItem)
+            }
+        )
+    }
+
+    private fun savePlaybackState(stationId: String?, isPlaying: Boolean, hasMediaItem: Boolean) {
+        getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(EXTRA_STATION_ID, stationId)
+            .putBoolean(EXTRA_IS_PLAYING, isPlaying)
+            .putBoolean(EXTRA_HAS_MEDIA_ITEM, hasMediaItem)
+            .putLong(EXTRA_UPDATED_AT_MS, System.currentTimeMillis())
+            .apply()
     }
 
     private fun pauseActivePlayback() {
@@ -420,6 +449,11 @@ class RadioMediaLibraryService : MediaLibraryService() {
         }
         player.pause()
         player.playWhenReady = false
+    }
+
+    private fun pausePlaybackAfterCarDisconnect() {
+        Log.d(LOG_TAG, "Pausing playback after Android Auto disconnect")
+        pauseActivePlayback()
     }
 
     private fun playActivePlayback() {
@@ -501,7 +535,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             connectedCarControllers -= controller.controllerKey()
             Log.d(LOG_TAG, "Android Auto controller disconnected: ${controller.packageName}")
             if (connectedCarControllers.isEmpty()) {
-                stopActivePlayback(stopService = true)
+                pausePlaybackAfterCarDisconnect()
             }
         }
 
@@ -1191,6 +1225,12 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val ACTION_PAUSE_ACTIVE = "com.tvapp.autoradio.PAUSE_ACTIVE"
         const val ACTION_PLAY_ACTIVE = "com.tvapp.autoradio.PLAY_ACTIVE"
         const val ACTION_PLAYBACK_STOPPED = "com.tvapp.autoradio.PLAYBACK_STOPPED"
+        const val ACTION_PLAYBACK_STATE_CHANGED = "com.tvapp.autoradio.PLAYBACK_STATE_CHANGED"
+        const val EXTRA_STATION_ID = "station_id"
+        const val EXTRA_IS_PLAYING = "is_playing"
+        const val EXTRA_HAS_MEDIA_ITEM = "has_media_item"
+        const val EXTRA_UPDATED_AT_MS = "updated_at_ms"
+        const val PLAYBACK_STATE_PREFS = "radio_playback_state"
         const val LOG_TAG = "TVAppRadioService"
         const val ROOT_ID = "radio_root"
         const val STATIONS_ID = "radio_stations"
