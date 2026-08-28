@@ -34,6 +34,10 @@ function mergeEpg(
     return merged;
 }
 
+function isGuideChannel(channel: Channel): boolean {
+    return channel.type !== "radio" && channel.module !== "radio";
+}
+
 export default function GuidePage() {
     const { channels, refresh } = useChannelsContext();
     const { currentChannel, play, programDetails, showProgramDetails } = usePlayer();
@@ -110,8 +114,13 @@ export default function GuidePage() {
         });
     }, []);
 
+    const guideChannels = useMemo(
+        () => channels.filter(isGuideChannel),
+        [channels]
+    );
+
     const channelsWithEpg = useMemo(
-        () => channels.map((channel) => {
+        () => guideChannels.map((channel) => {
             const loadedPrograms = channel.tvgID ? epgByChannel[channel.tvgID] : undefined;
 
             return {
@@ -119,7 +128,7 @@ export default function GuidePage() {
                 programs: loadedPrograms?.length ? loadedPrograms : channel.programs,
             };
         }),
-        [channels, epgByChannel]
+        [guideChannels, epgByChannel]
     );
 
     const filteredChannels = useFilteredChannels(channelsWithEpg, searchQuery, selectedCategory);
@@ -202,8 +211,8 @@ export default function GuidePage() {
                         channels={filteredChannels}
                         sourceChannels={channelsWithEpg}
                         logoBasePath="/ch/"
-                        playingChannelId={currentChannel?.type === "vod" ? undefined : currentChannel?.id}
-                        playingChannelIndex={currentChannel?.type === "vod" ? undefined : currentChannel?.index}
+                        playingChannelId={!currentChannel || !isGuideChannel(currentChannel) ? undefined : currentChannel.id}
+                        playingChannelIndex={!currentChannel || !isGuideChannel(currentChannel) ? undefined : currentChannel.index}
                         selectedProgram={programDetails}
                         onChannelClick={handleChannelClick}
                         onProgramClick={handleProgramClick}
