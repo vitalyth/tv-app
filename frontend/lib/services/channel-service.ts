@@ -39,6 +39,10 @@ export const channelService = {
     return apiFetch("/radio_channels");
   },
 
+  getRadioNowPlaying(channelId: string) {
+    return apiFetch(`/radio_now_playing/${encodeURIComponent(channelId)}`);
+  },
+
   getEpg(params?: { start?: number; end?: number; q?: string }) {
     if (params?.start === undefined && params?.end === undefined && !params?.q) {
       return apiFetch("/epg");

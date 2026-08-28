@@ -11,6 +11,7 @@ import { type Channel } from "@/lib/channels-data";
 import { resolveImageSrc } from "@/lib/image-urls";
 import { cn } from "@/lib/utils";
 import { channelService } from "@/lib/services/channel-service";
+import { radioNowPlayingText, type RadioNowPlaying, useRadioNowPlaying } from "@/hooks/useRadioNowPlaying";
 
 const fetchRadioChannels = async (): Promise<Channel[]> => {
     return await channelService.getRadioChannels();
@@ -19,13 +20,18 @@ const fetchRadioChannels = async (): Promise<Channel[]> => {
 function RadioStationCard({
     station,
     isActive,
+    nowPlaying,
     onPlay,
 }: {
     station: Channel;
     isActive: boolean;
+    nowPlaying?: RadioNowPlaying | null;
     onPlay: (station: Channel) => void;
 }) {
     const logo = resolveImageSrc(station.logo);
+    const stationMeta = isActive
+        ? radioNowPlayingText(nowPlaying)
+        : station.module;
 
     return (
         <button
@@ -59,7 +65,7 @@ function RadioStationCard({
                     {station.name}
                 </h2>
                 <p className="mt-1 text-xs font-medium text-muted-foreground">
-                    {station.module}
+                    {stationMeta}
                 </p>
             </div>
 
@@ -81,6 +87,7 @@ function RadioStationCard({
 export default function RadioPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const { currentChannel, play } = usePlayer();
+    const activeRadioStationId = currentChannel?.type === "radio" && currentChannel.id ? currentChannel.id : null;
     const {
         data: stations = [],
         error,
@@ -91,6 +98,7 @@ export default function RadioPage() {
         refreshInterval: 5 * 60 * 1000,
         revalidateOnFocus: true,
     });
+    const { data: nowPlaying, mutate: refreshNowPlaying } = useRadioNowPlaying(currentChannel);
 
     const filteredStations = useMemo(() => {
         const query = searchQuery.trim().toLowerCase();
@@ -110,8 +118,11 @@ export default function RadioPage() {
     const handlePlay = useCallback(
         (station: Channel) => {
             play(station);
+            if (station.id !== activeRadioStationId) {
+                refreshNowPlaying(undefined, { revalidate: false });
+            }
         },
-        [play]
+        [activeRadioStationId, play, refreshNowPlaying]
     );
 
     return (
@@ -156,6 +167,7 @@ export default function RadioPage() {
                             key={station.id}
                             station={station}
                             isActive={currentChannel?.id === station.id}
+                            nowPlaying={currentChannel?.id === station.id ? nowPlaying : null}
                             onPlay={handlePlay}
                         />
                     ))}

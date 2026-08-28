@@ -9,6 +9,7 @@ import requests
 import re
 import html
 import json
+from services.radio_metadata_service import update_radio_now_playing
 
 try:
     from curl_cffi import requests as curl_requests
@@ -461,6 +462,69 @@ def _stream_response(upstream, content_type, cast=False):
         status_code=upstream.status_code,
         media_type=content_type,
         headers=_response_headers(_response_metadata_headers(upstream))
+    )
+
+
+def _decode_icy_metadata(payload):
+    if not payload:
+        return ""
+
+    for encoding in ("utf-8", "windows-1255", "latin-1"):
+        try:
+            text = payload.decode(encoding)
+            if "\ufffd" not in text:
+                return text.rstrip("\x00").strip()
+        except UnicodeDecodeError:
+            continue
+
+    return payload.decode("utf-8", errors="replace").rstrip("\x00").strip()
+
+
+def _stream_icy_audio_response(upstream, content_type, channel_id):
+    try:
+        metadata_interval = int(upstream.headers.get("icy-metaint") or 0)
+    except (TypeError, ValueError):
+        metadata_interval = 0
+
+    if metadata_interval <= 0:
+        return _stream_response(upstream, content_type)
+
+    def generate():
+        raw = upstream.raw
+        raw.decode_content = False
+
+        try:
+            while True:
+                audio_chunk = raw.read(metadata_interval)
+                if not audio_chunk:
+                    break
+
+                yield audio_chunk
+
+                length_byte = raw.read(1)
+                if not length_byte:
+                    break
+
+                metadata_length = length_byte[0] * 16
+                if metadata_length <= 0:
+                    continue
+
+                metadata = raw.read(metadata_length)
+                update_radio_now_playing(channel_id, _decode_icy_metadata(metadata))
+        except Exception as e:
+            print("ICY stream interrupted:", e)
+        finally:
+            upstream.close()
+
+    response_headers = _response_metadata_headers(upstream)
+    response_headers.pop("Content-Length", None)
+    response_headers["Cache-Control"] = "no-cache"
+
+    return StreamingResponse(
+        generate(),
+        status_code=upstream.status_code,
+        media_type=content_type,
+        headers=_response_headers(response_headers),
     )
 
 
@@ -990,7 +1054,7 @@ def handle_local_file_proxy(request, file_path: str, root_dir: str):
         headers=headers,
     )
 
-def handle_proxy(request, url, referer, cast=False):
+def handle_proxy(request, url, referer, cast=False, channel_id=None):
     url, kodi_headers = _split_kodi_url_props(url)
     url = _resolve_relative_proxy_url(url, referer)
     origin = _origin_for_url(url)
@@ -1008,8 +1072,10 @@ def handle_proxy(request, url, referer, cast=False):
     if _is_pluto_hls_url(url):
         _apply_pluto_headers(headers, referer)
 
-    if "range" in request.headers:
+    if "range" in request.headers and not channel_id:
         headers["Range"] = request.headers["range"]
+    if channel_id:
+        headers["Icy-MetaData"] = "1"
 
     try:
         r = session.get(url, headers=headers, stream=True, timeout=PROXY_REQUEST_TIMEOUT)
@@ -1054,6 +1120,9 @@ def handle_proxy(request, url, referer, cast=False):
                 content_type,
                 retries=KAN_VOD_SEGMENT_RETRIES,
             )
+
+        if channel_id and "audio" in clean_content_type and r.headers.get("icy-metaint"):
+            return _stream_icy_audio_response(r, content_type, channel_id)
 
         return _stream_response(r, content_type, cast=cast)
 

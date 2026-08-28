@@ -12,6 +12,7 @@ import ProgramDisplay from "@/components/program-display";
 import { useCurrentProgram } from "@/hooks/useCurrentProgram";
 import { useGoogleCast } from "@/hooks/useGoogleCast";
 import { useMobileDevice } from "@/hooks/use-mobile-device";
+import { radioNowPlayingText as formatRadioNowPlayingText, useRadioNowPlaying } from "@/hooks/useRadioNowPlaying";
 import CustomPlayerControls from "@/components/custom-player-controls";
 import {
   clearVodProgress,
@@ -129,7 +130,11 @@ export function VideoPlayer({
 
   const { isMobileDevice, isPhoneLike, isTouchDevice } = useMobileDevice();
   const currentProgram = useCurrentProgram(channel?.programs);
+  const { data: radioNowPlaying } = useRadioNowPlaying(channel);
   const activeStreamUrl = channel && streamChannelId === channel.id ? streamUrl : null;
+  const radioNowPlayingDisplay = isRadioChannel
+    ? formatRadioNowPlayingText(radioNowPlaying)
+    : null;
   const loadingImage =
     channel?.type === "vod"
       ? channel.vodMeta?.programImage || channel.vodMeta?.episodeImage || channel.playerLogo || channel.logo
@@ -549,12 +554,15 @@ export function VideoPlayer({
     const useVpnProxy = shouldUseVpnProxy(channel);
     const proxyEndpoint = useVpnProxy ? "/v/proxy" : "/proxy";
     const vpnParam = useVpnProxy ? "&vpn=true" : "";
+    const radioMetadataParam = isRadioAudio && channel?.id
+      ? `&channel_id=${encodeURIComponent(channel.id)}`
+      : "";
     const finalStreamUrl = isLocalSeriesStream && !isLocalSeriesHls
       ? activeStreamUrl
       : api(
           `${proxyEndpoint}?url=${encodeURIComponent(
             activeStreamUrl,
-          )}&referer=${encodeURIComponent(referer)}${vpnParam}`,
+          )}&referer=${encodeURIComponent(referer)}${vpnParam}${radioMetadataParam}`,
         );
 
     const sourceType = isRadioAudio
@@ -1103,7 +1111,9 @@ export function VideoPlayer({
               <p className="truncate text-lg font-bold sm:text-xl">
                 {channel.playerTitle || channel.name}
               </p>
-              <p className="mt-1 text-xs font-medium text-white/60">רדיו חי</p>
+              <p className="mt-1 truncate text-xs font-medium text-white/60">
+                {radioNowPlayingDisplay}
+              </p>
             </div>
           </div>
         )}
@@ -1143,7 +1153,9 @@ export function VideoPlayer({
                 </span>
               )}
               <span className="truncate max-w-[180px]">
-                {channel.playerSubtitle ? (
+                {radioNowPlayingDisplay ? (
+                  radioNowPlayingDisplay
+                ) : channel.playerSubtitle ? (
                   channel.playerSubtitle
                 ) : (
                   <ProgramDisplay
@@ -1173,6 +1185,7 @@ export function VideoPlayer({
             player={playerInstance}
             channel={channel}
             currentProgram={currentProgram}
+            radioNowPlaying={radioNowPlaying}
             show={isRadioChannel ? true : showOverlay}
             isExpanded={isExpanded && !isFullscreen}
             isFullscreen={isFullscreen}
@@ -1193,14 +1206,14 @@ export function VideoPlayer({
             }}
             bottomControls={{
               showPlay: true,
-              showSeek: !isRadioChannel,
-              showTime: !isRadioChannel,
+              showSeek: true,
+              showTime: true,
               showVolume: true,
-              showLive: channel.type !== "vod" && !isRadioChannel,
-              showQuality: !isRadioChannel,
+              showLive: channel.type !== "vod",
+              showQuality: true,
               showCast: false,
-              showExpand: !isRadioChannel,
-              showFullscreen: !isRadioChannel,
+              showExpand: true,
+              showFullscreen: true,
             }}
           />
         )}

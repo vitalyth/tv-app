@@ -8,6 +8,7 @@ import { PlayerProvider, usePlayer } from "@/context/player-context";
 import { TopProgramCard, type TopProgramPanel } from "@/components/player/top-player-overlay";
 import { GlobalLoadingIndicator } from "@/components/global-loading-indicator";
 import { useNowSec } from "@/hooks/use-now-sec";
+import { radioNowPlayingText, useRadioNowPlaying } from "@/hooks/useRadioNowPlaying";
 import { type Channel, type Program } from "@/lib/channels-data";
 import { getDetailImageSrc, resolveImageSrc } from "@/lib/image-urls";
 import { Cast, Clapperboard, X } from "lucide-react";
@@ -146,6 +147,11 @@ function ShellContent({
     const nowSec = useNowSec();
     const isDesktopSidePanel = useDesktopSidePanel();
     const [isSidePanelClosed, setIsSidePanelClosed] = useState(false);
+    const isRadioPlaybackPanel = Boolean(currentChannel?.type === "radio" && !programDetails);
+    const { data: radioNowPlaying } = useRadioNowPlaying(isRadioPlaybackPanel ? currentChannel : null);
+    const currentRadioNowPlayingText = isRadioPlaybackPanel
+        ? radioNowPlayingText(radioNowPlaying)
+        : "";
 
     const liveProgram = useMemo(
         () => findLiveProgram(currentChannel, nowSec),
@@ -162,25 +168,29 @@ function ShellContent({
     const panelImage = getDetailImageSrc(panelRawImage);
     const panelImageFallback = resolveImageSrc(panelRawImage);
     const channelLogo = resolveChannelLogo(panelChannel);
-    const panelTitle =
-        panelProgram?.name ||
-        currentChannel?.vodMeta?.episodeName ||
-        currentChannel?.playerSubtitle ||
-        panelChannel?.name ||
-        "";
+    const panelTitle = isRadioPlaybackPanel
+        ? panelChannel?.name || ""
+        : panelProgram?.name ||
+            currentChannel?.vodMeta?.episodeName ||
+            currentChannel?.playerSubtitle ||
+            panelChannel?.name ||
+            "";
     const panelTimeRange = panelProgram
         ? formatProgramTimeRange(panelProgram.start, panelProgram.end)
         : "";
-    const panelSubtitle = panelProgram
-        ? panelChannel?.name || ""
-        : currentChannel?.vodMeta
-            ? [currentChannel.vodMeta.channelName, currentChannel.vodMeta.seasonName].filter(Boolean).join(" · ")
-            : panelChannel?.name || "";
-    const panelDescription =
-        panelProgram?.description ||
-        currentChannel?.vodMeta?.episodeDescription ||
-        currentChannel?.vodMeta?.programDescription ||
-        "אין תיאור זמין לתוכנית הזו.";
+    const panelSubtitle = isRadioPlaybackPanel
+        ? currentRadioNowPlayingText
+        : panelProgram
+            ? panelChannel?.name || ""
+            : currentChannel?.vodMeta
+                ? [currentChannel.vodMeta.channelName, currentChannel.vodMeta.seasonName].filter(Boolean).join(" · ")
+                : panelChannel?.name || "";
+    const panelDescription = isRadioPlaybackPanel
+        ? currentRadioNowPlayingText
+        : panelProgram?.description ||
+            currentChannel?.vodMeta?.episodeDescription ||
+            currentChannel?.vodMeta?.programDescription ||
+            "אין תיאור זמין לתוכנית הזו.";
     const topProgramPanel: TopProgramPanel = {
         channelName: panelChannel?.name || "",
         description: panelDescription,

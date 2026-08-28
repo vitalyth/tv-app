@@ -1,13 +1,14 @@
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from urllib.parse import quote
-from services.channel_service import IDANPLUS_LOGO_CACHE_DIR, get_live_channels, get_radio_channels, get_vod_channels, get_vod_items, get_vod_recent_items
+from services.channel_service import IDANPLUS_LOGO_CACHE_DIR, get_live_channels, get_radio_channels, get_remote_channel_logo_source, get_vod_channels, get_vod_items, get_vod_recent_items
 from services.epg_service import get_now_epg
 from services.stream_service import get_custom_channel_stream, get_stream, get_vod_stream
 from services.proxy_service import cors_preflight, handle_proxy, handle_local_file_proxy, handle_image_proxy
 from services.epg_service_ext import EPGService
 from services.playlist_service import generate_playlist
+from services.radio_metadata_service import get_radio_now_playing
 from services.local_series_service import (
     LOCAL_VOD_TV_DIR,
     scan_local_series,
@@ -151,6 +152,10 @@ def live_channels():
 def radio_channels():
     return get_radio_channels()
 
+@app.get('/radio_now_playing/{channel_id}')
+def radio_now_playing(channel_id: str):
+    return get_radio_now_playing(channel_id) or {"title": "אין מידע", "detail": None}
+
 @app.get('/ch/{filename:path}')
 @app.head('/ch/{filename:path}')
 def cached_channel_logo(filename: str):
@@ -161,6 +166,14 @@ def cached_channel_logo(filename: str):
         return Response("Invalid logo path", status_code=403)
 
     if not requested_path.is_file():
+        remote_logo = get_remote_channel_logo_source(filename)
+        if remote_logo:
+            return RedirectResponse(
+                remote_logo,
+                status_code=302,
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+
         return Response("Logo not found", status_code=404)
 
     return FileResponse(
@@ -314,14 +327,14 @@ def stream(request: Request, channel_id: str = Query(..., min_length=1, max_leng
 @app.get("/proxy")
 @app.get("/v/proxy")
 @app.get("/vod_proxy")
-def proxy(request: Request, url: str, referer: str = None, cast: bool = False):
-    return handle_proxy(request, url, referer, cast=cast)
+def proxy(request: Request, url: str, referer: str = None, cast: bool = False, channel_id: str = None):
+    return handle_proxy(request, url, referer, cast=cast, channel_id=channel_id)
 
 @app.head("/proxy")
 @app.head("/v/proxy")
 @app.head("/vod_proxy")
-def proxy_head(request: Request, url: str, referer: str = None, cast: bool = False):
-    return handle_proxy(request, url, referer, cast=cast)
+def proxy_head(request: Request, url: str, referer: str = None, cast: bool = False, channel_id: str = None):
+    return handle_proxy(request, url, referer, cast=cast, channel_id=channel_id)
 
 @app.options("/proxy")
 @app.options("/v/proxy")

@@ -18,7 +18,7 @@ from plugin_video_idanplus.resources import main as idan_main
 from resources.lib import cache as addon_cache
 from services.epg_service import get_now_epg
 from models.schemas import Channel
-from services.custom_channel_service import merge_custom_channels
+from services.custom_channel_service import load_custom_channels, merge_custom_channels
 from services.kan_vod_service import get_kan_vod_recent_episodes
 from services.keshet_vod_service import get_keshet_vod_recent_episodes
 from services.reshet_vod_service import get_reshet_vod_recent_episodes
@@ -427,6 +427,30 @@ def cache_remote_channel_logo(channel_id: str, image_url: str) -> str:
             print(f"Channel logo download failed for {channel_id} ({image_url}): {ex}", flush=True)
 
     return CHANNEL_LOGO_FALLBACKS.get(channel_id, "live.jpg")
+
+
+def get_remote_channel_logo_source(filename: str) -> str:
+    requested_filename = os.path.basename(unquote(filename or "")).strip()
+    if not requested_filename:
+        return ""
+
+    for channel in load_custom_channels():
+        image = str(channel.get("image") or channel.get("logo") or "").strip()
+        if not _is_remote_image(image):
+            continue
+
+        channel_id = channel.get("channelID") or channel.get("id") or ""
+        stem = _safe_logo_stem(channel_id, image)
+        url_hash = hashlib.sha1(image.encode("utf-8")).hexdigest()[:10]
+        basename = os.path.basename(unquote(urlparse(image).path)).strip()
+        cached_filename = re.sub(r"[^A-Za-z0-9._-]+", "-", basename).strip(".-_") if basename else ""
+        if not cached_filename:
+            cached_filename = f"{stem}-{url_hash}{_logo_extension(image)}"
+
+        if requested_filename == cached_filename:
+            return image
+
+    return ""
 
 
 def get_channel_logo(channel: dict) -> str:

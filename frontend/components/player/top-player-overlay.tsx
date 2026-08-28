@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Cast, X } from "lucide-react";
 import { useCurrentProgram } from "@/hooks/useCurrentProgram";
+import { type RadioNowPlaying, useRadioNowPlaying } from "@/hooks/useRadioNowPlaying";
 import { type Channel, type Program } from "@/lib/channels-data";
 import { type DockedCastControl } from "@/context/player-context";
 import { getDetailImageSrc, resolveImageSrc } from "@/lib/image-urls";
@@ -98,7 +99,25 @@ function useCanShowTopDetails() {
     return canShowTopDetails;
 }
 
-const resolveProgramPanel = (channel: Channel, program: Program | null): TopProgramPanel => {
+const resolveProgramPanel = (
+    channel: Channel,
+    program: Program | null,
+    radioNowPlaying?: RadioNowPlaying | null,
+): TopProgramPanel => {
+    if (channel.type === "radio") {
+        const metadata = radioNowPlaying?.title || "אין מידע";
+        return {
+            channelName: channel.name || "",
+            description: radioNowPlaying?.detail || "",
+            image: getDetailImageSrc(channel.playerLogo || channel.logo),
+            imageFallback: resolveImageSrc(channel.playerLogo || channel.logo),
+            isLive: true,
+            subtitle: metadata,
+            timeRange: "",
+            title: channel.name || "",
+        };
+    }
+
     const title =
         program?.name ||
         channel.vodMeta?.episodeName ||
@@ -289,6 +308,7 @@ export function TopPlayerOverlay({
 }: TopPlayerOverlayProps) {
     const currentProgram = useCurrentProgram(channel?.programs);
     const canShowTopDetails = useCanShowTopDetails();
+    const { data: radioNowPlaying } = useRadioNowPlaying(channel);
 
     if (!channel || (!isFullscreen && isDocked)) {
         return null;
@@ -302,7 +322,7 @@ export function TopPlayerOverlay({
         );
     }
 
-    const panel = resolveProgramPanel(channel, currentProgram);
+    const panel = resolveProgramPanel(channel, currentProgram, radioNowPlaying);
     const hasDetails = Boolean(panel.title || panel.description);
     const shouldShowDetails = hasDetails && canShowTopDetails;
 

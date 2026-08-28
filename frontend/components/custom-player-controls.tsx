@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { type Channel, type Program } from "@/lib/channels-data";
 import ProgramDisplay from "@/components/program-display";
+import { radioNowPlayingText, type RadioNowPlaying } from "@/hooks/useRadioNowPlaying";
 
 const PLAYER_VOLUME_STORAGE_KEY = "tv-player-volume-state";
 
@@ -47,6 +48,7 @@ interface CustomPlayerControlsProps {
   player: any;
   channel?: Channel | null;
   currentProgram?: Program | null;
+  radioNowPlaying?: RadioNowPlaying | null;
   show: boolean;
   isExpanded: boolean;
   isFullscreen: boolean;
@@ -68,6 +70,7 @@ export default function CustomPlayerControls({
   player,
   channel,
   currentProgram,
+  radioNowPlaying,
   show,
   isExpanded,
   isFullscreen,
@@ -684,6 +687,11 @@ export default function CustomPlayerControls({
     ...bottomControls,
   };
   const canSelectQuality = bottomOptions.showQuality && levels.length > 0;
+  const isRadioChannel = channel?.type === "radio";
+  const hasSeekWindow = seekEnd > seekStart;
+  const showSeekTimeline = bottomOptions.showSeek && (hasSeekWindow || isRadioChannel);
+  const showTimeText = bottomOptions.showTime && (hasSeekWindow || isRadioChannel);
+  const radioElapsedText = formatTime(currentTime);
 
   return (
     <>
@@ -775,7 +783,9 @@ export default function CustomPlayerControls({
                       )}
 
                       <span className="truncate">
-                        {channel.type === "vod" && channel.vodMeta ? (
+                        {channel.type === "radio" ? (
+                          radioNowPlayingText(radioNowPlaying)
+                        ) : channel.type === "vod" && channel.vodMeta ? (
                           [channel.vodMeta.seasonName, channel.vodMeta.episodeName]
                             .filter(Boolean)
                             .join(" · ")
@@ -812,13 +822,19 @@ export default function CustomPlayerControls({
           }
       `}
       >
-        {bottomOptions.showSeek && seekEnd > seekStart && (
+        {showSeekTimeline && (
           <div
             className="relative z-[70] mb-0 flex h-6 w-full min-w-0 items-center gap-2 sm:h-7 sm:gap-3"
             dir="ltr"
           >
             <div className="relative flex h-full min-w-0 flex-1 items-center">
-              {(() => {
+              {isRadioChannel && !hasSeekWindow ? (
+                <>
+                  <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-white/20" />
+                  <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-red-500" />
+                  <div className="pointer-events-none absolute right-0 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full border border-white bg-red-500 shadow" />
+                </>
+              ) : (() => {
                 const clampedTime = Math.min(
                   Math.max(currentTime, seekStart),
                   seekEnd,
@@ -1009,9 +1025,9 @@ export default function CustomPlayerControls({
               </div>
             )}
 
-            {bottomOptions.showTime && seekEnd > seekStart && (
+            {showTimeText && (
               <span className="hidden min-[420px]:inline-flex shrink-0 items-center text-[10px] text-white/80 tabular-nums sm:text-xs">
-                {getTimeDisplayText()}
+                {isRadioChannel && !hasSeekWindow ? radioElapsedText : getTimeDisplayText()}
               </span>
             )}
           </div>
