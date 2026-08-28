@@ -2209,6 +2209,7 @@ class MainActivity : AppCompatActivity() {
         hideStatus()
         rememberStation(station)
         val shouldAnimatePlayerIn = activeStation == null || playerContainer.visibility != View.VISIBLE
+        clearNowPlayingFor(station)
         requestedStationId = station.id
         pendingControllerStationId = station.id
         activeStation = station
@@ -2247,6 +2248,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncNowPlayingFromControllerMetadata(mediaMetadata: MediaMetadata?) {
         val station = activeStation ?: return
+        val mediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
+        if (mediaId != station.id) {
+            updateActiveNowPlayingText(station)
+            return
+        }
         val metadata = mediaMetadata ?: return
         val title = metadata
             .artist
@@ -2264,6 +2270,13 @@ class MainActivity : AppCompatActivity() {
 
         nowPlayingCache[station.id] = info
         updateActiveNowPlayingText(station)
+    }
+
+    private fun clearNowPlayingFor(station: RadioStation) {
+        nowPlayingCache.remove(station.id)
+        if (activeStation?.id == station.id) {
+            updateActiveNowPlayingText(station)
+        }
     }
 
     private fun updateActiveNowPlayingText(station: RadioStation) {
@@ -2286,16 +2299,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mediaItemFor(station: RadioStation): MediaItem {
-        val nowPlaying = nowPlayingCache[station.id]
         val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(station.id)
             .setUri(repository.streamUriFor(station.id))
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(station.name)
-                    .setArtist(nowPlaying?.title ?: "Live radio")
-                    .setSubtitle(nowPlaying?.title)
-                    .setDescription(nowPlayingTextFor(station))
+                    .setArtist("Live radio")
                     .setArtworkUri(station.logo?.takeIf { it.isNotBlank() }?.let(Uri::parse))
                     .setIsBrowsable(false)
                     .setIsPlayable(true)

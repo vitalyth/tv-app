@@ -36,6 +36,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentSkipListSet
 import java.util.concurrent.Executors
 
 class RadioMediaLibraryService : MediaLibraryService() {
@@ -55,6 +56,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private lateinit var nowPlayingRepository: NowPlayingRepository
     private val executor = Executors.newSingleThreadExecutor()
     private val nowPlayingCache = ConcurrentHashMap<String, CachedNowPlaying>()
+    private val connectedCarControllers = ConcurrentSkipListSet<String>()
     private var castContext: CastContext? = null
     private var castSession: CastSession? = null
     private var remoteToLocalStation: RadioStation? = null
@@ -62,6 +64,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private var isRemoteToLocalTransferInProgress = false
     private var isMovingPlaybackToRemote = false
     private var isStoppingPlayback = false
+    private var previousNowPlayingInfo: NowPlayingInfo? = null
+    private var currentMediaItemChangedAtMs: Long = 0L
     private val castSessionListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarting(session: CastSession) {
             Log.d(LOG_TAG, "Cast session starting")
@@ -165,6 +169,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             repeatMode = Player.REPEAT_MODE_OFF
             addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    clearCurrentNowPlaying(mediaItem)
                     moveCurrentStationToCastIfConnected()
                 }
 
@@ -475,6 +480,31 @@ class RadioMediaLibraryService : MediaLibraryService() {
     }
 
     private inner class RadioLibraryCallback : MediaLibrarySession.Callback {
+        override fun onPostConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ) {
+            if (controller.isAutomotiveController()) {
+                connectedCarControllers += controller.controllerKey()
+                Log.d(LOG_TAG, "Android Auto controller connected: ${controller.packageName}")
+            }
+        }
+
+        override fun onDisconnected(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ) {
+            if (!controller.isAutomotiveController()) {
+                return
+            }
+
+            connectedCarControllers -= controller.controllerKey()
+            Log.d(LOG_TAG, "Android Auto controller disconnected: ${controller.packageName}")
+            if (connectedCarControllers.isEmpty()) {
+                stopActivePlayback(stopService = true)
+            }
+        }
+
         override fun onPlayerCommandRequest(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -924,6 +954,13 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 nowPlayingRepository.nowPlayingFromMetadataText(icyInfo.title)
             } ?: return
 
+        val isLikelyPreviousStationMetadata = previousNowPlayingInfo == info &&
+            nowPlayingCache[station.id]?.info == null &&
+            System.currentTimeMillis() - currentMediaItemChangedAtMs < METADATA_TRANSITION_IGNORE_MS
+        if (isLikelyPreviousStationMetadata) {
+            return
+        }
+
         val currentInfo = nowPlayingCache[station.id]?.info
         if (currentInfo == info) {
             return
@@ -931,6 +968,15 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
         nowPlayingCache[station.id] = CachedNowPlaying(info, System.currentTimeMillis())
         updateCurrentMediaItemMetadata(station, info)
+    }
+
+    private fun clearCurrentNowPlaying(mediaItem: MediaItem?) {
+        val mediaId = mediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
+        previousNowPlayingInfo = nowPlayingCache.values
+            .maxByOrNull { it.loadedAtMs }
+            ?.info
+        nowPlayingCache.remove(mediaId)
+        currentMediaItemChangedAtMs = System.currentTimeMillis()
     }
 
     private fun updateCurrentMediaItemMetadata(station: RadioStation, nowPlaying: NowPlayingInfo?) {
@@ -1067,6 +1113,19 @@ class RadioMediaLibraryService : MediaLibraryService() {
         }
     }
 
+    private fun MediaSession.ControllerInfo.controllerKey(): String {
+        return "$packageName:$uid"
+    }
+
+    private fun MediaSession.ControllerInfo.isAutomotiveController(): Boolean {
+        val normalizedPackage = packageName.lowercase(Locale.US)
+        return normalizedPackage == "com.google.android.projection.gearhead" ||
+            normalizedPackage.contains("android.projection") ||
+            normalizedPackage.contains("android.car") ||
+            normalizedPackage.contains("automotive") ||
+            normalizedPackage.contains("gearhead")
+    }
+
     private fun defaultVoiceStation(stations: List<RadioStation>): RadioStation? {
         val stationById = stations.associateBy { it.id }
         return recentStationIds().firstNotNullOfOrNull { stationById[it] }
@@ -1140,6 +1199,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val FAVORITE_STATIONS_PREFS = "favorite_stations"
         const val RECENT_STATIONS_PREFS = "recent_stations"
         const val MAX_RECENT_STATIONS = 20
+        const val METADATA_TRANSITION_IGNORE_MS = 2_000L
         const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
         const val FAVORITES_GROUP_TITLE = "מועדפים"
         const val ALL_STATIONS_GROUP_TITLE = "כל השאר"
