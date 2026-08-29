@@ -1,12 +1,14 @@
 package com.tvapp.autoradio
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.annotation.StringRes
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -149,6 +151,10 @@ class RadioMediaLibraryService : MediaLibraryService() {
         }
     }
 
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(AppLocaleManager.localizedContext(base))
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -203,6 +209,10 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     if (isPlaying) {
                         moveCurrentStationToCastIfConnected()
                     }
+                    notifyPlaybackStateChanged()
+                }
+
+                override fun onAudioSessionIdChanged(audioSessionId: Int) {
                     notifyPlaybackStateChanged()
                 }
 
@@ -314,7 +324,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         val nowPlaying = nowPlayingCache[station.id]?.info
         val metadata = CastMediaMetadata(CastMediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
             putString(CastMediaMetadata.KEY_TITLE, station.name)
-            putString(CastMediaMetadata.KEY_ARTIST, nowPlaying?.title ?: NO_INFO_TEXT)
+            putString(CastMediaMetadata.KEY_ARTIST, nowPlaying?.title ?: localizedString(R.string.no_info))
             station.logo?.takeIf { it.isNotBlank() }?.let { logo ->
                 addImage(WebImage(resolveArtworkUri(logo)))
             }
@@ -485,7 +495,12 @@ class RadioMediaLibraryService : MediaLibraryService() {
     }
 
     private fun notifyPlaybackStopped() {
-        savePlaybackState(stationId = null, isPlaying = false, hasMediaItem = false)
+        savePlaybackState(
+            stationId = null,
+            isPlaying = false,
+            hasMediaItem = false,
+            audioSessionId = INVALID_AUDIO_SESSION_ID,
+        )
         sendBroadcast(
             Intent(ACTION_PLAYBACK_STOPPED).apply {
                 setPackage(packageName)
@@ -496,25 +511,38 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private fun notifyPlaybackStateChanged() {
         val stationId = player.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
         val hasMediaItem = player.currentMediaItem != null
-        savePlaybackState(stationId, player.isPlaying, hasMediaItem)
+        val audioSessionId = if (hasMediaItem) validAudioSessionId(player.audioSessionId) else INVALID_AUDIO_SESSION_ID
+        savePlaybackState(stationId, player.isPlaying, hasMediaItem, audioSessionId)
         sendBroadcast(
             Intent(ACTION_PLAYBACK_STATE_CHANGED).apply {
                 setPackage(packageName)
                 stationId?.let { putExtra(EXTRA_STATION_ID, it) }
                 putExtra(EXTRA_IS_PLAYING, player.isPlaying)
                 putExtra(EXTRA_HAS_MEDIA_ITEM, hasMediaItem)
+                putExtra(EXTRA_AUDIO_SESSION_ID, audioSessionId)
             }
         )
     }
 
-    private fun savePlaybackState(stationId: String?, isPlaying: Boolean, hasMediaItem: Boolean) {
+    private fun savePlaybackState(
+        stationId: String?,
+        isPlaying: Boolean,
+        hasMediaItem: Boolean,
+        audioSessionId: Int,
+    ) {
         getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE)
             .edit()
             .putString(EXTRA_STATION_ID, stationId)
             .putBoolean(EXTRA_IS_PLAYING, isPlaying)
             .putBoolean(EXTRA_HAS_MEDIA_ITEM, hasMediaItem)
+            .putInt(EXTRA_AUDIO_SESSION_ID, audioSessionId)
             .putLong(EXTRA_UPDATED_AT_MS, System.currentTimeMillis())
             .apply()
+    }
+
+    private fun validAudioSessionId(audioSessionId: Int): Int {
+        return audioSessionId.takeIf { it > INVALID_AUDIO_SESSION_ID && it != C.AUDIO_SESSION_ID_UNSET }
+            ?: INVALID_AUDIO_SESSION_ID
     }
 
     private fun pauseActivePlayback() {
@@ -702,10 +730,10 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     val otherStations = stations.filterNot { it.id in favoriteIds }
                     val entries = buildList {
                         addAll(
-                            favoriteStations.map { StationMediaEntry(it, FAVORITES_GROUP_TITLE) }
+                            favoriteStations.map { StationMediaEntry(it, localizedString(R.string.favorites_group)) }
                         )
                         addAll(
-                            otherStations.map { StationMediaEntry(it, ALL_STATIONS_GROUP_TITLE) }
+                            otherStations.map { StationMediaEntry(it, localizedString(R.string.all_stations_group)) }
                         )
                     }
                         .let { applyPaging(it, page, pageSize) }
@@ -851,7 +879,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .setMediaId(ROOT_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle(getString(R.string.radio_root_title))
+                    .setTitle(localizedString(R.string.radio_root_title))
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setExtras(
@@ -876,8 +904,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .setMediaId(RECENTLY_PLAYED_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("לאחרונה")
-                    .setSubtitle("תחנות שנוגנו לאחרונה")
+                    .setTitle(localizedString(R.string.nav_recent))
+                    .setSubtitle(localizedString(R.string.recent_subtitle))
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_history}"))
@@ -899,8 +927,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .setMediaId(STATIONS_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("ראשי")
-                    .setSubtitle("כל תחנות הרדיו")
+                    .setTitle(localizedString(R.string.home_title))
+                    .setSubtitle(localizedString(R.string.home_subtitle))
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_home}"))
@@ -922,8 +950,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .setMediaId(FAVORITES_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("מועדפים")
-                    .setSubtitle("תחנות שסומנו בטלפון")
+                    .setTitle(localizedString(R.string.nav_favorites))
+                    .setSubtitle(localizedString(R.string.favorites_subtitle))
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_star}"))
@@ -945,8 +973,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .setMediaId(SETTINGS_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("הגדרות")
-                    .setSubtitle("ניהול ההגדרות מתבצע בטלפון")
+                    .setTitle(localizedString(R.string.nav_settings))
+                    .setSubtitle(localizedString(R.string.settings_subtitle))
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setArtworkUri(settingsIconUri())
@@ -968,8 +996,8 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .setMediaId(OPEN_SETTINGS_ON_PHONE_ID)
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle("פתח הגדרות בטלפון")
-                    .setSubtitle("ניהול הגדרות האפליקציה מתבצע במכשיר הטלפון שלך")
+                    .setTitle(localizedString(R.string.open_settings_phone))
+                    .setSubtitle(localizedString(R.string.open_settings_phone_subtitle))
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setArtworkUri(settingsIconUri())
@@ -1018,7 +1046,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         } else {
             null
         }
-        val subtitle = nowPlaying?.title ?: if (includeNowPlaying || useNowPlayingOverride) NO_INFO_TEXT else null
+        val subtitle = nowPlaying?.title ?: if (includeNowPlaying || useNowPlayingOverride) localizedString(R.string.no_info) else null
         val description = nowPlayingText(nowPlaying) ?: subtitle
         val metadataBuilder = MediaMetadata.Builder()
             .setTitle(name)
@@ -1121,6 +1149,10 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 append(it)
             }
         }
+    }
+
+    private fun localizedString(@StringRes resId: Int): String {
+        return AppLocaleManager.localizedContext(this).getString(resId)
     }
 
     private fun favoriteStationIds(): Set<String> {
@@ -1300,7 +1332,9 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val EXTRA_STATION_ID = "station_id"
         const val EXTRA_IS_PLAYING = "is_playing"
         const val EXTRA_HAS_MEDIA_ITEM = "has_media_item"
+        const val EXTRA_AUDIO_SESSION_ID = "audio_session_id"
         const val EXTRA_UPDATED_AT_MS = "updated_at_ms"
+        const val INVALID_AUDIO_SESSION_ID = 0
         const val PLAYBACK_STATE_PREFS = "radio_playback_state"
         const val LOG_TAG = "TVAppRadioService"
         const val ROOT_ID = "radio_root"
@@ -1316,10 +1350,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val METADATA_TRANSITION_IGNORE_MS = 2_000L
         const val PLAYBACK_RETRY_DELAY_MS = 1_500L
         const val MAX_PLAYBACK_RETRIES = 3
-        const val NO_INFO_TEXT = "אין מידע"
         const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
-        const val FAVORITES_GROUP_TITLE = "מועדפים"
-        const val ALL_STATIONS_GROUP_TITLE = "כל השאר"
         val STATION_ALIASES = mapOf(
             "rd_glglz" to listOf(
                 "galgalaz",

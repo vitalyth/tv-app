@@ -1314,5 +1314,101 @@
     "linkDetails": {
       "link": "http://live02.rfi.fr/rfimusiquemonde-96k.mp3"
     }
+  },
+  {
+    "id": "rd_glglz_sofshavua",
+    "channelID": "rd_glglz_sofshavua",
+    "index": 166,
+    "name": "גלגל\"צ סופשבוע רגוע",
+    "mode": 0,
+    "image": "https://www.radio-head.co.il/images/stations/glgltz-sofshavua.webp",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "group": "israelis",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_sofshavua_mp3?awCollectionId=misc&awEpisodeId=glglz_sofshavua",
+    "linkDetails": {
+      "link": "https://glzwizzlv.bynetcdn.com/glglz_sofshavua_mp3?awCollectionId=misc&awEpisodeId=glglz_sofshavua"
+    }
+  },
+  {
+    "id": "rd_glglz_hits",
+    "channelID": "rd_glglz_hits",
+    "index": 167,
+    "name": "גלגל\"צ פופ-אפ!",
+    "mode": 0,
+    "image": "https://www.radio-head.co.il/images/stations/glgltz-hits.webp",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "group": "israelis",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_hits_mp3?awCollectionId=misc&awEpisodeId=glglz_hits",
+    "linkDetails": {
+      "link": "https://glzwizzlv.bynetcdn.com/glglz_hits_mp3?awCollectionId=misc&awEpisodeId=glglz_hits"
+    }
+  },
+  {
+    "id": "rd_glglz_classicil",
+    "channelID": "rd_glglz_classicil",
+    "index": 168,
+    "name": "גלגל\"צ ארבע אחרי הצהריים",
+    "mode": 0,
+    "image": "https://www.radio-head.co.il/images/stations/glgltz-classicil.webp",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "group": "israelis",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_classicil_mp3?awCollectionId=misc&awEpisodeId=glglz_classicil",
+    "linkDetails": {
+      "link": "https://glzwizzlv.bynetcdn.com/glglz_classicil_mp3?awCollectionId=misc&awEpisodeId=glglz_classicil"
+    }
+  },
+  {
+    "id": "rd_glglz_med",
+    "channelID": "rd_glglz_med",
+    "index": 169,
+    "name": "גלגל\"צ ים תיכוני",
+    "mode": 0,
+    "image": "https://www.radio-head.co.il/images/stations/glgltz-med.webp",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "group": "israelis",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_med_mp3?awCollectionId=misc&awEpisodeId=glglz_med",
+    "linkDetails": {
+      "link": "https://glzwizzlv.bynetcdn.com/glglz_med_mp3?awCollectionId=misc&awEpisodeId=glglz_med"
+    }
+  },
+  {
+    "id": "rd_glglz_rock",
+    "channelID": "rd_glglz_rock",
+    "index": 170,
+    "name": "גלגל\"צ רוק קלאסי",
+    "mode": 0,
+    "image": "https://www.radio-head.co.il/images/stations/glgltz-rock.webp",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "group": "israelis",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_rock_mp3?awCollectionId=misc&awEpisodeId=glglz_rock",
+    "linkDetails": {
+      "link": "https://glzwizzlv.bynetcdn.com/glglz_rock_mp3?awCollectionId=misc&awEpisodeId=glglz_rock"
+    }
+  },
+  {
+    "id": "rd_glglz_alt",
+    "channelID": "rd_glglz_alt",
+    "index": 171,
+    "name": "גלגל\"צ עשורים",
+    "mode": 0,
+    "image": "https://www.radio-head.co.il/images/stations/glgltz-alt.webp",
+    "module": "custom",
+    "tvgID": "",
+    "type": "radio",
+    "group": "israelis",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_alt_mp3?awCollectionId=misc&awEpisodeId=glglz_alt",
+    "linkDetails": {
+      "link": "https://glzwizzlv.bynetcdn.com/glglz_alt_mp3?awCollectionId=misc&awEpisodeId=glglz_alt"
+    }
   }
 ]

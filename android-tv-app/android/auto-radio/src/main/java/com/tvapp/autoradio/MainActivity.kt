@@ -26,6 +26,7 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.media.audiofx.Visualizer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
@@ -51,11 +52,13 @@ import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -76,7 +79,10 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.math.abs
+import kotlin.math.ln
+import kotlin.math.pow
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
     private companion object {
@@ -93,6 +99,7 @@ class MainActivity : AppCompatActivity() {
         private const val EXTRA_STATION_ID = "station_id"
         private const val EXTRA_IS_PLAYING = "is_playing"
         private const val EXTRA_HAS_MEDIA_ITEM = "has_media_item"
+        private const val EXTRA_AUDIO_SESSION_ID = "audio_session_id"
         private const val EXTRA_UPDATED_AT_MS = "updated_at_ms"
         private const val PLAYBACK_STATE_PREFS = "radio_playback_state"
         private const val SAVED_PLAYBACK_STATE_MAX_AGE_MS = 6 * 60 * 60 * 1_000L
@@ -105,10 +112,12 @@ class MainActivity : AppCompatActivity() {
         private const val STATION_GROUP_LOCAL = "local"
         private const val STATION_GROUP_ISRAELIS = "israelis"
         private const val STATION_GROUP_WORLD = "world"
-        private const val NO_INFO_TEXT = "אין מידע"
         private const val INITIAL_VISIBLE_STATION_LIMIT = 24
         private const val VISIBLE_STATION_BATCH_SIZE = 24
         private const val LOAD_MORE_STATIONS_TAG = "load_more_stations"
+        private const val REQUEST_RECORD_AUDIO_PERMISSION = 1002
+        private const val INVALID_AUDIO_SESSION_ID = 0
+        private const val EQUALIZER_BAR_COUNT = 31
         private val STATION_ALIASES = mapOf(
             "rd_glglz" to listOf(
                 "galgalaz",
@@ -238,12 +247,24 @@ class MainActivity : AppCompatActivity() {
     private var pendingVoicePlaybackQuery: String? = null
     private var pendingControllerStationId: String? = null
     private val nowPlayingCache = ConcurrentHashMap<String, NowPlayingInfo>()
+    private var isReactiveEqualizerEnabled = true
+    private var audioVisualizer: Visualizer? = null
+    private var visualizerAudioSessionId = INVALID_AUDIO_SESSION_ID
+    private var currentAudioSessionId = INVALID_AUDIO_SESSION_ID
+    @Volatile
+    private var reactiveEqualizerLevels: FloatArray? = null
+    private var smoothedEqualizerLevels = FloatArray(EQUALIZER_BAR_COUNT)
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocaleManager.localizedContext(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = RadioCatalogRepository(this, BuildConfig.RADIO_API_BASE_URL)
         recentPrefs = getSharedPreferences("recent_stations", MODE_PRIVATE)
         favoritePrefs = getSharedPreferences("favorite_stations", MODE_PRIVATE)
+        isReactiveEqualizerEnabled = RadioCatalogSettings.isReactiveEqualizerEnabled(this)
         restoredStationId = savedInstanceState?.getString(STATE_ACTIVE_STATION_ID)
         requestedStationId = restoredStationId
         playStartedAtMs = savedInstanceState?.getLong(STATE_PLAY_STARTED_AT_MS, 0L) ?: 0L
@@ -309,6 +330,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        releaseAudioVisualizer()
         if (isFinishing && !isChangingConfigurations && !isUserStoppingPlayback) {
             startService(Intent(this, RadioMediaLibraryService::class.java).setAction(ACTION_DISCONNECT_OUTPUT))
         }
@@ -380,7 +402,10 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
-                            showStatus("שגיאת ניגון: ${error.message ?: error.errorCodeName}", showRetry = false)
+                            showStatus(
+                                localizedString(R.string.playback_error, error.message ?: error.errorCodeName),
+                                showRetry = false,
+                            )
                             stopElapsedTimer(resetText = false)
                         }
                     })
@@ -464,11 +489,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val controllerMediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
-        if (controllerMediaId != null && controllerMediaId != station.id) {
+        val mediaController = controller ?: return
+        val controllerMediaId = mediaController.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
+        if (controllerMediaId != station.id) {
             return
         }
 
+        currentAudioSessionId = validAudioSessionId(
+            prefs.getInt(EXTRA_AUDIO_SESSION_ID, INVALID_AUDIO_SESSION_ID),
+        )
         applyExternalPlaybackState(station, prefs.getBoolean(EXTRA_IS_PLAYING, false))
     }
 
@@ -478,6 +507,166 @@ class MainActivity : AppCompatActivity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
         }
+    }
+
+    private fun requestReactiveEqualizerPermissionIfNeeded() {
+        if (!isReactiveEqualizerEnabled ||
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            hasRecordAudioPermission()
+        ) {
+            return
+        }
+
+        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO_PERMISSION)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_RECORD_AUDIO_PERMISSION) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                updateAudioVisualizer()
+            } else {
+                releaseAudioVisualizer()
+                renderStations(animatePlayerIn = false)
+            }
+        }
+    }
+
+    private fun updateAudioVisualizer() {
+        if (!shouldUseReactiveEqualizer()) {
+            releaseAudioVisualizer()
+            return
+        }
+
+        val audioSessionId = validAudioSessionId(currentAudioSessionId)
+        if (audioSessionId == INVALID_AUDIO_SESSION_ID) {
+            releaseAudioVisualizer()
+            return
+        }
+
+        if (audioVisualizer != null && visualizerAudioSessionId == audioSessionId) {
+            return
+        }
+
+        releaseAudioVisualizer()
+        try {
+            audioVisualizer = Visualizer(audioSessionId).apply {
+                captureSize = Visualizer.getCaptureSizeRange().last()
+                scalingMode = Visualizer.SCALING_MODE_NORMALIZED
+                setDataCaptureListener(
+                    object : Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(
+                            visualizer: Visualizer?,
+                            waveform: ByteArray?,
+                            samplingRate: Int,
+                        ) = Unit
+
+                        override fun onFftDataCapture(
+                            visualizer: Visualizer?,
+                            fft: ByteArray?,
+                            samplingRate: Int,
+                        ) {
+                            reactiveEqualizerLevels = fft?.toEqualizerLevels()
+                        }
+                    },
+                    (Visualizer.getMaxCaptureRate() / 2).coerceAtLeast(1),
+                    false,
+                    true,
+                )
+                enabled = true
+            }
+            visualizerAudioSessionId = audioSessionId
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to start audio visualizer", error)
+            releaseAudioVisualizer()
+        }
+    }
+
+    private fun shouldUseReactiveEqualizer(): Boolean {
+        return isReactiveEqualizerEnabled &&
+            shouldAnimateEqualizer() &&
+            hasRecordAudioPermission()
+    }
+
+    private fun releaseAudioVisualizer() {
+        reactiveEqualizerLevels = null
+        smoothedEqualizerLevels = FloatArray(EQUALIZER_BAR_COUNT)
+        visualizerAudioSessionId = INVALID_AUDIO_SESSION_ID
+        audioVisualizer?.let { visualizer ->
+            runCatching {
+                visualizer.enabled = false
+                visualizer.release()
+            }
+        }
+        audioVisualizer = null
+    }
+
+    private fun hasRecordAudioPermission(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun validAudioSessionId(audioSessionId: Int): Int {
+        return audioSessionId.takeIf { it > INVALID_AUDIO_SESSION_ID } ?: INVALID_AUDIO_SESSION_ID
+    }
+
+    private fun ByteArray.toEqualizerLevels(): FloatArray {
+        val levels = FloatArray(EQUALIZER_BAR_COUNT)
+        if (size < 4) {
+            return levels
+        }
+
+        val rawLevels = FloatArray(EQUALIZER_BAR_COUNT)
+        val usableBins = ((size / 2) - 2).coerceAtLeast(1)
+        val maxLog = ln((usableBins + 1).toFloat())
+        for (barIndex in rawLevels.indices) {
+            val startRatio = barIndex.toFloat() / rawLevels.size
+            val endRatio = (barIndex + 1).toFloat() / rawLevels.size
+            val binStart = (1 + ((kotlin.math.exp(maxLog * startRatio) - 1f) / usableBins * usableBins))
+                .toInt()
+                .coerceIn(1, usableBins)
+            val binEnd = (1 + ((kotlin.math.exp(maxLog * endRatio) - 1f) / usableBins * usableBins))
+                .toInt()
+                .coerceIn(binStart + 1, usableBins + 1)
+            var peak = 0f
+            var total = 0f
+            var count = 0
+            for (bin in binStart until binEnd) {
+                val realIndex = bin * 2
+                val imagIndex = realIndex + 1
+                if (imagIndex >= size) break
+                val real = this[realIndex].toInt()
+                val imag = this[imagIndex].toInt()
+                val magnitude = sqrt((real * real + imag * imag).toFloat()) / 128f
+                if (magnitude > peak) {
+                    peak = magnitude
+                }
+                total += magnitude
+                count += 1
+            }
+            val average = if (count > 0) total / count else 0f
+            val combined = peak * 0.78f + average * 0.22f
+            rawLevels[barIndex] = combined.coerceAtLeast(0f).pow(0.5f)
+        }
+
+        val quietest = rawLevels.minOrNull() ?: 0f
+        val loudest = rawLevels.maxOrNull() ?: 0f
+        val range = (loudest - quietest).coerceAtLeast(0.02f)
+        for (barIndex in rawLevels.indices) {
+            val localContrast = ((rawLevels[barIndex] - quietest) / range).coerceIn(0f, 1f)
+            val globalEnergy = (rawLevels[barIndex] * 1.75f).coerceIn(0f, 1f)
+            val expanded = (localContrast.pow(0.68f) * 0.72f + globalEnergy * 0.28f).coerceIn(0f, 1f)
+            val spread = (0.04f + expanded * 0.96f).coerceIn(0f, 1f)
+            val previous = smoothedEqualizerLevels.getOrElse(barIndex) { 0f }
+            val smoothing = if (spread > previous) 0.28f else 0.7f
+            levels[barIndex] = (previous * smoothing + spread * (1f - smoothing)).coerceIn(0f, 1f)
+        }
+        smoothedEqualizerLevels = levels
+        return levels
     }
 
     private fun buildLayout() {
@@ -532,7 +721,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         filterInput = EditText(this).apply {
-            hint = "סנן תחנות"
+            hint = localizedString(R.string.filter_hint)
             textSize = 16f
             setSingleLine(true)
             setTextColor(inkColor)
@@ -587,7 +776,7 @@ class MainActivity : AppCompatActivity() {
         statusPanel.addView(statusText)
 
         retryButton = Button(this).apply {
-            text = getString(R.string.retry)
+            text = localizedString(R.string.retry)
             isAllCaps = false
             setOnClickListener { loadStations() }
         }
@@ -663,7 +852,7 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
 
                 addView(TextView(this@MainActivity).apply {
-                    text = getString(R.string.app_name)
+                    text = localizedString(R.string.app_name)
                     textSize = 30f
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(inkColor)
@@ -681,7 +870,7 @@ class MainActivity : AppCompatActivity() {
     )
 
     private data class StationGroupFilter(
-        val label: String,
+        @StringRes val labelRes: Int,
         val value: String,
     )
 
@@ -705,10 +894,10 @@ class MainActivity : AppCompatActivity() {
     private fun LinearLayout.populateStationGroupFilter() {
         removeAllViews()
         val items = listOf(
-            StationGroupFilter("All", STATION_GROUP_ALL),
-            StationGroupFilter("Local", STATION_GROUP_LOCAL),
-            StationGroupFilter("Israelis", STATION_GROUP_ISRAELIS),
-            StationGroupFilter("World", STATION_GROUP_WORLD),
+            StationGroupFilter(R.string.filter_all, STATION_GROUP_ALL),
+            StationGroupFilter(R.string.filter_local, STATION_GROUP_LOCAL),
+            StationGroupFilter(R.string.filter_israelis, STATION_GROUP_ISRAELIS),
+            StationGroupFilter(R.string.filter_world, STATION_GROUP_WORLD),
         )
 
         items.forEach { item ->
@@ -722,7 +911,7 @@ class MainActivity : AppCompatActivity() {
     private fun stationGroupChip(item: StationGroupFilter): TextView {
         val isSelected = selectedStationGroup == item.value
         return TextView(this).apply {
-            text = item.label
+            text = localizedString(item.labelRes)
             textSize = 13f
             typeface = if (isSelected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             gravity = Gravity.CENTER
@@ -825,7 +1014,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun miniPlayerShortcutButton(station: RadioStation): FrameLayout {
         return FrameLayout(this).apply {
-            contentDescription = "חזור לנגן"
+            contentDescription = localizedString(R.string.mini_player)
             background = roundedRect(Color.rgb(38, 39, 47), 18f, accentColor, 2)
             elevation = dp(14).toFloat()
             translationZ = dp(5).toFloat()
@@ -875,10 +1064,10 @@ class MainActivity : AppCompatActivity() {
     private fun LinearLayout.populateBottomNavigation() {
         removeAllViews()
         val items = listOf(
-            BottomNavItem(R.drawable.ic_home, "בית", LIBRARY_TAB_HOME),
-            BottomNavItem(R.drawable.ic_star, "מועדפים", LIBRARY_TAB_FAVORITES),
-            BottomNavItem(R.drawable.ic_history, "לאחרונה", LIBRARY_TAB_RECENT),
-            BottomNavItem(R.drawable.ic_settings, "הגדרות", "settings"),
+            BottomNavItem(R.drawable.ic_home, localizedString(R.string.nav_home), LIBRARY_TAB_HOME),
+            BottomNavItem(R.drawable.ic_star, localizedString(R.string.nav_favorites), LIBRARY_TAB_FAVORITES),
+            BottomNavItem(R.drawable.ic_history, localizedString(R.string.nav_recent), LIBRARY_TAB_RECENT),
+            BottomNavItem(R.drawable.ic_settings, localizedString(R.string.nav_settings), "settings"),
         )
 
         items.forEach { item ->
@@ -973,7 +1162,7 @@ class MainActivity : AppCompatActivity() {
             background = null
             elevation = 0f
             translationZ = 0f
-            contentDescription = "בחר מכשיר ניגון"
+            contentDescription = localizedString(R.string.output_switcher)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 tooltipText = contentDescription
             }
@@ -985,37 +1174,141 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun localizedString(@StringRes resId: Int, vararg formatArgs: Any): String {
+        val localizedContext = AppLocaleManager.localizedContext(this)
+        return if (formatArgs.isEmpty()) {
+            localizedContext.getString(resId)
+        } else {
+            localizedContext.getString(resId, *formatArgs)
+        }
+    }
+
     private fun showCatalogSourceSettings() {
         catalogSourceDialog?.takeIf { it.isShowing }?.let {
             return
         }
 
         val currentSource = RadioCatalogSettings.getSource(this)
-        val sources = arrayOf(
-            "Static JSON file",
-            "API proxy",
-        )
-        val selectedIndex = when (currentSource) {
-            RadioCatalogSource.StaticFile -> 0
-            RadioCatalogSource.ApiProxy -> 1
+        val useReactiveEqualizer = RadioCatalogSettings.isReactiveEqualizerEnabled(this)
+        val currentLanguage = AppLocaleManager.selectedLanguageTag(this)
+        val settingsContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(6), dp(20), dp(6))
+
+            addView(TextView(this@MainActivity).apply {
+                text = localizedString(R.string.radio_source)
+                textSize = 13f
+                setTextColor(Color.rgb(93, 104, 120))
+                typeface = Typeface.DEFAULT_BOLD
+            })
+
+            val staticSourceButton = RadioButton(this@MainActivity).apply {
+                text = localizedString(R.string.source_static)
+                isChecked = currentSource == RadioCatalogSource.StaticFile
+                setOnClickListener {
+                    updateCatalogSource(RadioCatalogSource.StaticFile)
+                    catalogSourceDialog?.dismiss()
+                }
+            }
+            addView(staticSourceButton)
+
+            val apiSourceButton = RadioButton(this@MainActivity).apply {
+                text = localizedString(R.string.source_api)
+                isChecked = currentSource == RadioCatalogSource.ApiProxy
+                setOnClickListener {
+                    updateCatalogSource(RadioCatalogSource.ApiProxy)
+                    catalogSourceDialog?.dismiss()
+                }
+            }
+            addView(apiSourceButton)
+
+            addView(TextView(this@MainActivity).apply {
+                text = localizedString(R.string.equalizer)
+                textSize = 13f
+                setTextColor(Color.rgb(93, 104, 120))
+                typeface = Typeface.DEFAULT_BOLD
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(16)
+                }
+            })
+
+            val reactiveButton = RadioButton(this@MainActivity).apply {
+                text = localizedString(R.string.equalizer_reactive)
+                isChecked = useReactiveEqualizer
+            }
+            val classicButton = RadioButton(this@MainActivity).apply {
+                text = localizedString(R.string.equalizer_classic)
+                isChecked = !useReactiveEqualizer
+            }
+            reactiveButton.setOnClickListener {
+                reactiveButton.isChecked = true
+                classicButton.isChecked = false
+                updateReactiveEqualizerSetting(enabled = true)
+            }
+            classicButton.setOnClickListener {
+                reactiveButton.isChecked = false
+                classicButton.isChecked = true
+                updateReactiveEqualizerSetting(enabled = false)
+            }
+            addView(reactiveButton)
+            addView(classicButton)
+
+            addView(TextView(this@MainActivity).apply {
+                text = localizedString(R.string.language)
+                textSize = 13f
+                setTextColor(Color.rgb(93, 104, 120))
+                typeface = Typeface.DEFAULT_BOLD
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(16)
+                }
+            })
+
+            AppLocaleManager.supportedLanguages(this@MainActivity).forEach { language ->
+                addView(RadioButton(this@MainActivity).apply {
+                    text = language.displayName
+                    isChecked = currentLanguage == language.tag
+                    setOnClickListener {
+                        catalogSourceDialog?.dismiss()
+                        if (AppLocaleManager.selectedLanguageTag(this@MainActivity) != language.tag) {
+                            AppLocaleManager.setLanguage(this@MainActivity, language.tag)
+                            mainHandler.post { recreate() }
+                        }
+                    }
+                })
+            }
         }
 
         catalogSourceDialog = AlertDialog.Builder(this)
-            .setTitle("Radio source")
-            .setSingleChoiceItems(sources, selectedIndex) { dialog, which ->
-                val nextSource = when (which) {
-                    1 -> RadioCatalogSource.ApiProxy
-                    else -> RadioCatalogSource.StaticFile
-                }
-                updateCatalogSource(nextSource)
-                dialog.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
+            .setTitle(localizedString(R.string.settings_title))
+            .setView(settingsContent)
+            .setPositiveButton(localizedString(R.string.ok), null)
             .create()
             .apply {
                 setOnDismissListener { catalogSourceDialog = null }
                 show()
             }
+    }
+
+    private fun updateReactiveEqualizerSetting(enabled: Boolean) {
+        if (RadioCatalogSettings.isReactiveEqualizerEnabled(this) == enabled) {
+            return
+        }
+
+        RadioCatalogSettings.setReactiveEqualizerEnabled(this, enabled)
+        isReactiveEqualizerEnabled = enabled
+        if (enabled) {
+            requestReactiveEqualizerPermissionIfNeeded()
+            updateAudioVisualizer()
+        } else {
+            releaseAudioVisualizer()
+        }
+        renderStations(animatePlayerIn = false)
     }
 
     private fun updateCatalogSource(source: RadioCatalogSource) {
@@ -1036,7 +1329,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadStations() {
         isCatalogLoading = true
         stationsContainer.removeAllViews()
-        showStatus("טוען תחנות...", showRetry = false)
+        showStatus(localizedString(R.string.loading_stations), showRetry = false)
 
         executor.execute {
             val stations = repository.getStations(forceRefresh = true)
@@ -1045,7 +1338,7 @@ class MainActivity : AppCompatActivity() {
                 allStations = stations
 
                 if (stations.isEmpty()) {
-                    showStatus("לא נמצאו תחנות. בדוק שהשרת זמין.", showRetry = true)
+                    showStatus(localizedString(R.string.no_stations_retry), showRetry = true)
                     return@post
                 }
 
@@ -1089,7 +1382,7 @@ class MainActivity : AppCompatActivity() {
         val station = resolveVoiceStation(query) ?: defaultVoiceStation()
         if (station == null) {
             Log.d(LOG_TAG, "Voice playback request had no station match and no default station")
-            showStatus("לא נמצאה תחנה מתאימה לפקודה הקולית.", showRetry = false)
+            showStatus(localizedString(R.string.voice_no_match), showRetry = false)
             return
         }
 
@@ -1270,7 +1563,7 @@ class MainActivity : AppCompatActivity() {
 
         stationsContainer.removeAllViews()
         if (filteredStations.isEmpty()) {
-            stationsContainer.addView(emptyState("אין תחנות שמתאימות לסינון"))
+            stationsContainer.addView(emptyState(localizedString(R.string.empty_filter)))
             updateElapsedTime()
             return
         }
@@ -1308,7 +1601,7 @@ class MainActivity : AppCompatActivity() {
 
         stationsContainer.removeAllViews()
         if (filteredStations.isEmpty()) {
-            stationsContainer.addView(emptyState("אין תחנות שמתאימות לסינון"))
+            stationsContainer.addView(emptyState(localizedString(R.string.empty_filter)))
             return
         }
 
@@ -1482,7 +1775,7 @@ class MainActivity : AppCompatActivity() {
         val loadCount = minOf(VISIBLE_STATION_BATCH_SIZE, remainingCount)
         return TextView(this).apply {
             tag = LOAD_MORE_STATIONS_TAG
-            text = "טען עוד $loadCount תחנות"
+            text = localizedString(R.string.load_more_stations, loadCount)
             textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
@@ -1739,7 +2032,7 @@ class MainActivity : AppCompatActivity() {
                     })
 
                     addView(TextView(this@MainActivity).apply {
-                        text = "Radio"
+                        text = localizedString(R.string.radio_label)
                         textSize = 11f
                         setTextColor(Color.argb(185, 255, 255, 255))
                         maxLines = 1
@@ -2105,7 +2398,7 @@ class MainActivity : AppCompatActivity() {
             })
 
             activeNowPlayingText = TextView(this@MainActivity).apply {
-                text = nowPlayingTextFor(station) ?: "בודק מה משודר עכשיו..."
+                text = nowPlayingTextFor(station) ?: localizedString(R.string.now_playing_loading)
                 textSize = 13f
                 setTextColor(mutedColor)
                 gravity = Gravity.CENTER
@@ -2133,7 +2426,7 @@ class MainActivity : AppCompatActivity() {
             })
 
             activeElapsedText = TextView(this@MainActivity).apply {
-                text = if (isActiveStationLoading) "טוען..." else "00:00"
+                text = if (isActiveStationLoading) localizedString(R.string.loading_short) else "00:00"
                 textSize = 13f
                 setTextColor(mutedColor)
                 gravity = Gravity.CENTER
@@ -2190,7 +2483,7 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
 
-                addView(playerNavButton(R.drawable.ic_skip_previous, "Prev Station") {
+                addView(playerNavButton(R.drawable.ic_skip_previous, localizedString(R.string.prev_station)) {
                     playAdjacentStation(-1)
                 }, LinearLayout.LayoutParams(dp(82), dp(82)))
 
@@ -2201,7 +2494,7 @@ class MainActivity : AppCompatActivity() {
                     marginEnd = dp(22)
                 })
 
-                addView(playerNavButton(R.drawable.ic_skip_next, "Next Station") {
+                addView(playerNavButton(R.drawable.ic_skip_next, localizedString(R.string.next_station)) {
                     playAdjacentStation(1)
                 }, LinearLayout.LayoutParams(dp(82), dp(82)))
             }, LinearLayout.LayoutParams(
@@ -2223,6 +2516,9 @@ class MainActivity : AppCompatActivity() {
         mid = Color.rgb(245, 185, 78),
         peak = accentColor,
         isAnimating = isAnimating,
+        levelsProvider = {
+            if (isReactiveEqualizerEnabled) reactiveEqualizerLevels else null
+        },
     )
 
     private fun TextView.applyStationTextDirection(textValue: String, alignHebrewRight: Boolean) {
@@ -2289,7 +2585,7 @@ class MainActivity : AppCompatActivity() {
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
-            contentDescription = "בחר מכשיר ניגון"
+            contentDescription = localizedString(R.string.output_switcher)
             setPadding(dp(5), dp(5), dp(5), dp(5))
 
             addView(ImageView(this@MainActivity).apply {
@@ -2308,7 +2604,7 @@ class MainActivity : AppCompatActivity() {
 
             setOnClickListener {
                 if (!routeButton.performClick()) {
-                    showStatus("פתח את בחירת הפלט מנגן המדיה של Android.", showRetry = false)
+                    showStatus(localizedString(R.string.output_switcher_unavailable), showRetry = false)
                 }
             }
         }
@@ -2408,6 +2704,11 @@ class MainActivity : AppCompatActivity() {
     private fun toggleActivePlayback(station: RadioStation) {
         activeStation = station
         if (isActiveStationPaused) {
+            val controllerMediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
+            if (controllerMediaId != station.id) {
+                playStation(station)
+                return
+            }
             isActiveStationPaused = false
             startService(Intent(this, RadioMediaLibraryService::class.java).setAction(ACTION_PLAY_ACTIVE))
             startElapsedTimer()
@@ -2436,12 +2737,12 @@ class MainActivity : AppCompatActivity() {
         renderStations(animatePlayerIn = shouldAnimatePlayerIn)
 
         if (refreshLive) {
-            showStatus("מרענן תחנה: ${station.name}", showRetry = false)
+            showStatus(localizedString(R.string.refresh_station, station.name), showRetry = false)
         }
 
         val mediaController = controller
         if (mediaController == null) {
-            showStatus("הנגן עדיין נטען. נסה שוב בעוד רגע.", showRetry = false)
+            showStatus(localizedString(R.string.player_not_ready), showRetry = false)
             return
         }
 
@@ -2500,13 +2801,13 @@ class MainActivity : AppCompatActivity() {
     private fun updateActiveNowPlayingText(station: RadioStation) {
         val text = nowPlayingTextFor(station)
         activeNowPlayingText?.run {
-            this.text = text ?: NO_INFO_TEXT
+            this.text = text ?: localizedString(R.string.no_info)
             applyStationTextDirection(this.text.toString(), alignHebrewRight = false)
         }
     }
 
     private fun isRealNowPlayingValue(value: String): Boolean {
-        return value.isNotBlank() && value != "Live radio" && value != NO_INFO_TEXT
+        return value.isNotBlank() && value != "Live radio" && value != localizedString(R.string.no_info)
     }
 
     private fun nowPlayingTextFor(station: RadioStation): String? {
@@ -2527,9 +2828,9 @@ class MainActivity : AppCompatActivity() {
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(station.name)
-                    .setArtist(NO_INFO_TEXT)
-                    .setSubtitle(NO_INFO_TEXT)
-                    .setDescription(NO_INFO_TEXT)
+                    .setArtist(localizedString(R.string.no_info))
+                    .setSubtitle(localizedString(R.string.no_info))
+                    .setDescription(localizedString(R.string.no_info))
                     .setArtworkUri(station.logo?.takeIf { it.isNotBlank() }?.let(Uri::parse))
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
@@ -2590,10 +2891,14 @@ class MainActivity : AppCompatActivity() {
 
         val hasMediaItem = intent.getBooleanExtra(EXTRA_HAS_MEDIA_ITEM, false)
         if (!hasMediaItem) {
+            currentAudioSessionId = INVALID_AUDIO_SESSION_ID
             handleExternalPlaybackStopped()
             return
         }
 
+        currentAudioSessionId = validAudioSessionId(
+            intent.getIntExtra(EXTRA_AUDIO_SESSION_ID, INVALID_AUDIO_SESSION_ID),
+        )
         val stationId = intent.getStringExtra(EXTRA_STATION_ID)?.takeIf { it.isNotBlank() } ?: return
         val station = allStations.firstOrNull { it.id == stationId }
         if (station == null) {
@@ -2620,6 +2925,13 @@ class MainActivity : AppCompatActivity() {
             stopElapsedTimer(resetText = false)
         }
 
+        if (isPlaying) {
+            requestReactiveEqualizerPermissionIfNeeded()
+            updateAudioVisualizer()
+        } else {
+            releaseAudioVisualizer()
+        }
+
         renderStations(animatePlayerIn = false)
     }
 
@@ -2628,6 +2940,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        currentAudioSessionId = INVALID_AUDIO_SESSION_ID
         clearActivePlaybackState()
         if (::playerContainer.isInitialized && ::stationsContainer.isInitialized && !isCatalogLoading) {
             renderStations()
@@ -2641,6 +2954,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncStoppedPlaybackFromController() {
+        releaseAudioVisualizer()
         if (!isPlayerHiding) {
             hideActivePlayerWithAnimation()
         }
@@ -2677,6 +2991,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncPausedButActiveFromController() {
         if (!isActiveStationLoading) {
+            releaseAudioVisualizer()
             syncActiveStationFromController()
             stopElapsedTimer(resetText = false)
         }
@@ -2685,6 +3000,19 @@ class MainActivity : AppCompatActivity() {
     private fun syncPlayingFromController() {
         isActiveStationPaused = false
         syncActiveStationFromController()
+        refreshAudioSessionIdFromSavedState()
+        requestReactiveEqualizerPermissionIfNeeded()
+        updateAudioVisualizer()
+    }
+
+    private fun refreshAudioSessionIdFromSavedState() {
+        val mediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() } ?: return
+        val prefs = getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE)
+        if (prefs.getString(EXTRA_STATION_ID, null) == mediaId) {
+            currentAudioSessionId = validAudioSessionId(
+                prefs.getInt(EXTRA_AUDIO_SESSION_ID, INVALID_AUDIO_SESSION_ID),
+            )
+        }
     }
 
     private fun syncActiveStationFromController() {
@@ -2814,7 +3142,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showActiveStationLoading() {
-        activeElapsedText?.text = "טוען..."
+        activeElapsedText?.text = localizedString(R.string.loading_short)
     }
 
     private fun roundedRect(fill: Int, radiusDp: Float, stroke: Int? = null, strokeWidthDp: Int = 0): GradientDrawable {
@@ -3182,11 +3510,12 @@ class MainActivity : AppCompatActivity() {
         private val mid: Int,
         private val peak: Int,
         private val isAnimating: Boolean,
+        private val levelsProvider: () -> FloatArray?,
     ) : View(context) {
         private val density = resources.displayMetrics.density
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
-        private val barCount = 31
+        private val barCount = EQUALIZER_BAR_COUNT
         private var isAttached = false
 
         override fun onAttachedToWindow() {
@@ -3211,6 +3540,13 @@ class MainActivity : AppCompatActivity() {
             val maxBarHeight = height * 0.9f
             val minBarHeight = height * 0.07f
             val time = SystemClock.uptimeMillis() / 260f
+            val reactiveLevels = levelsProvider()
+                ?.takeIf { isAnimating && it.size >= barCount }
+                ?.takeIf { levels ->
+                    val high = levels.maxOrNull() ?: 0f
+                    val low = levels.minOrNull() ?: 0f
+                    high > 0.18f && high - low > 0.025f
+                }
 
             repeat(barCount) { index ->
                 val basePattern = when {
@@ -3219,7 +3555,9 @@ class MainActivity : AppCompatActivity() {
                     index % 3 == 0 -> 0.64f
                     else -> 0.42f
                 }
-                val wave = if (isAnimating) {
+                val wave = if (reactiveLevels != null) {
+                    reactiveLevels[index]
+                } else if (isAnimating) {
                     (
                         abs(sin(time + index * 0.52f)) * 0.62f +
                             abs(sin(time * 0.63f + index * 0.31f)) * 0.38f
@@ -3229,7 +3567,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 val barHeight = if (isAnimating) {
                     val barCharacter = 0.58f + basePattern * 0.42f
-                    minBarHeight + (maxBarHeight - minBarHeight) * (0.04f + wave * barCharacter * 0.96f)
+                    val lift = if (reactiveLevels != null) {
+                        wave.pow(1.18f)
+                    } else {
+                        0.04f + wave * barCharacter * 0.96f
+                    }
+                    minBarHeight + (maxBarHeight - minBarHeight) * lift.coerceIn(0f, 1f)
                 } else {
                     4f * density
                 }

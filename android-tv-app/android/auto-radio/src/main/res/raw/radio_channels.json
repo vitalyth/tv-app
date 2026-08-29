@@ -8,6 +8,60 @@
     "mimeType": "audio/mpeg"
   },
   {
+    "id": "rd_glglz_sofshavua",
+    "name": "גלגל\"צ סופשבוע רגוע",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.radio-head.co.il/images/stations/glgltz-sofshavua.webp",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_sofshavua_mp3?awCollectionId=misc&awEpisodeId=glglz_sofshavua",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_glglz_hits",
+    "name": "גלגל\"צ פופ-אפ!",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.radio-head.co.il/images/stations/glgltz-hits.webp",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_hits_mp3?awCollectionId=misc&awEpisodeId=glglz_hits",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_glglz_classicil",
+    "name": "גלגל\"צ ארבע אחרי הצהריים",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.radio-head.co.il/images/stations/glgltz-classicil.webp",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_classicil_mp3?awCollectionId=misc&awEpisodeId=glglz_classicil",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_glglz_med",
+    "name": "גלגל\"צ ים תיכוני",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.radio-head.co.il/images/stations/glgltz-med.webp",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_med_mp3?awCollectionId=misc&awEpisodeId=glglz_med",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_glglz_rock",
+    "name": "גלגל\"צ רוק קלאסי",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.radio-head.co.il/images/stations/glgltz-rock.webp",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_rock_mp3?awCollectionId=misc&awEpisodeId=glglz_rock",
+    "mimeType": "audio/mpeg"
+  },
+  {
+    "id": "rd_glglz_alt",
+    "name": "גלגל\"צ עשורים",
+    "type": "radio",
+    "group": "israelis",
+    "logo": "https://www.radio-head.co.il/images/stations/glgltz-alt.webp",
+    "streamUrl": "https://glzwizzlv.bynetcdn.com/glglz_alt_mp3?awCollectionId=misc&awEpisodeId=glglz_alt",
+    "mimeType": "audio/mpeg"
+  },
+  {
     "id": "rd_88",
     "name": "כאן 88",
     "type": "radio",
