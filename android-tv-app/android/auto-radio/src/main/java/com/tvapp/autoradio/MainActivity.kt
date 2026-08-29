@@ -40,6 +40,7 @@ import android.util.Log
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -1345,7 +1346,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun closePlayerPageWithAnimation(horizontalDirection: Float = 0f) {
+    private fun closePlayerPageWithAnimation() {
         if (!isPlayerPageVisible || activeStation == null || !::playerContainer.isInitialized) {
             isPlayerPageVisible = false
             renderStations()
@@ -1360,20 +1361,10 @@ class MainActivity : AppCompatActivity() {
         playerContainer.alpha = 1f
         playerContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         playerContainer.bringToFront()
-        val targetX = when {
-            horizontalDirection > dp(42) -> resources.displayMetrics.widthPixels.toFloat()
-            horizontalDirection < -dp(42) -> -resources.displayMetrics.widthPixels.toFloat()
-            else -> 0f
-        }
-        val targetY = if (targetX == 0f) {
-            resources.displayMetrics.heightPixels.toFloat()
-        } else {
-            playerContainer.translationY
-        }
+        val targetY = resources.displayMetrics.heightPixels.toFloat()
 
         playerContainer.post {
             playerContainer.animate()
-                .translationX(targetX)
                 .translationY(targetY)
                 .alpha(1f)
                 .setDuration(320L)
@@ -1382,7 +1373,6 @@ class MainActivity : AppCompatActivity() {
                     override fun onAnimationEnd(animation: Animator) {
                         playerContainer.animate().setListener(null)
                         playerContainer.setLayerType(View.LAYER_TYPE_NONE, null)
-                        playerContainer.translationX = 0f
                         playerContainer.translationY = 0f
                         playerContainer.alpha = 1f
                         playerContainer.visibility = View.GONE
@@ -1825,7 +1815,9 @@ class MainActivity : AppCompatActivity() {
             isFocusable = true
             setOnClickListener {
                 if (isActive) {
-                    stopPlayback()
+                    isPlayerPageDismissedByUser = false
+                    isPlayerPageVisible = true
+                    renderStations(animatePlayerIn = playerContainer.visibility != View.VISIBLE)
                 } else {
                     playStation(station)
                 }
@@ -1888,30 +1880,81 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun activePlayerCard(station: RadioStation): LinearLayout {
-        var gestureStartX = 0f
         var gestureStartY = 0f
-        val closeSwipeListener = View.OnTouchListener { _, event ->
+        var isDraggingPlayer = false
+        var gestureVelocityTracker: VelocityTracker? = null
+        fun animateDraggedPlayerBack() {
+            playerContainer.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(180L)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+        }
+
+        fun handleVerticalCloseGesture(event: MotionEvent, closeOnTap: Boolean): Boolean {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    gestureStartX = event.rawX
                     gestureStartY = event.rawY
-                    true
+                    isDraggingPlayer = false
+                    gestureVelocityTracker?.recycle()
+                    gestureVelocityTracker = VelocityTracker.obtain().apply {
+                        addMovement(event)
+                    }
+                    playerContainer.animate().cancel()
+                    return true
                 }
-                MotionEvent.ACTION_UP -> {
-                    val deltaX = event.rawX - gestureStartX
+                MotionEvent.ACTION_MOVE -> {
+                    gestureVelocityTracker?.addMovement(event)
                     val deltaY = event.rawY - gestureStartY
-                    val shouldCloseDown = deltaY > dp(76) && abs(deltaY) > abs(deltaX) * 0.72f
-                    val shouldCloseSide = abs(deltaX) > dp(96) && abs(deltaX) > abs(deltaY) * 0.9f
-                    if (shouldCloseDown || shouldCloseSide) {
-                        closePlayerPageWithAnimation(if (shouldCloseSide) deltaX else 0f)
-                        true
+                    if (deltaY > dp(8) || isDraggingPlayer) {
+                        isDraggingPlayer = true
+                        playerContainer.translationY = deltaY.coerceAtLeast(0f)
+                        return true
                     } else {
-                        false
+                        return false
                     }
                 }
-                MotionEvent.ACTION_CANCEL -> false
-                else -> false
+                MotionEvent.ACTION_UP -> {
+                    gestureVelocityTracker?.addMovement(event)
+                    gestureVelocityTracker?.computeCurrentVelocity(1000)
+                    val yVelocity = gestureVelocityTracker?.yVelocity ?: 0f
+                    gestureVelocityTracker?.recycle()
+                    gestureVelocityTracker = null
+                    val deltaY = event.rawY - gestureStartY
+                    val shouldCloseDown = deltaY >= resources.displayMetrics.heightPixels * 0.5f
+                    val shouldFlingDown = yVelocity >= dp(700).toFloat() && deltaY > dp(14)
+                    if (shouldCloseDown || shouldFlingDown) {
+                        closePlayerPageWithAnimation()
+                        return true
+                    } else if (isDraggingPlayer) {
+                        animateDraggedPlayerBack()
+                        return true
+                    } else if (closeOnTap) {
+                        closePlayerPageWithAnimation()
+                        return true
+                    } else {
+                        return false
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    gestureVelocityTracker?.recycle()
+                    gestureVelocityTracker = null
+                    if (isDraggingPlayer) {
+                        animateDraggedPlayerBack()
+                        return true
+                    } else {
+                        return false
+                    }
+                }
+                else -> return false
             }
+        }
+        val closeSwipeListener = View.OnTouchListener { _, event ->
+            handleVerticalCloseGesture(event, closeOnTap = false)
+        }
+        val closeArrowSwipeListener = View.OnTouchListener { _, event ->
+            handleVerticalCloseGesture(event, closeOnTap = true)
         }
 
         return LinearLayout(this).apply {
@@ -1996,7 +2039,7 @@ class MainActivity : AppCompatActivity() {
                     isClickable = true
                     isFocusable = true
                     foreground = selectableItemBackground()
-                    setOnClickListener { closePlayerPageWithAnimation() }
+                    setOnTouchListener(closeArrowSwipeListener)
 
                     addView(ImageView(this@MainActivity).apply {
                         setImageResource(R.drawable.ic_keyboard_arrow_down)
@@ -3165,8 +3208,8 @@ class MainActivity : AppCompatActivity() {
 
             val gap = 4f * density
             val barWidth = ((width - gap * (barCount - 1)) / barCount).coerceAtLeast(2f * density)
-            val maxBarHeight = height * 0.78f
-            val minBarHeight = height * 0.16f
+            val maxBarHeight = height * 0.9f
+            val minBarHeight = height * 0.07f
             val time = SystemClock.uptimeMillis() / 260f
 
             repeat(barCount) { index ->
@@ -3185,7 +3228,8 @@ class MainActivity : AppCompatActivity() {
                     0f
                 }
                 val barHeight = if (isAnimating) {
-                    minBarHeight + (maxBarHeight - minBarHeight) * (0.24f + wave * basePattern * 0.76f)
+                    val barCharacter = 0.58f + basePattern * 0.42f
+                    minBarHeight + (maxBarHeight - minBarHeight) * (0.04f + wave * barCharacter * 0.96f)
                 } else {
                     4f * density
                 }

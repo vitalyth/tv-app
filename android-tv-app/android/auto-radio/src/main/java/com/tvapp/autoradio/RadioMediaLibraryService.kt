@@ -39,7 +39,6 @@ import com.google.common.util.concurrent.ListenableFuture
 import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentSkipListSet
 import java.util.concurrent.Executors
 
 class RadioMediaLibraryService : MediaLibraryService() {
@@ -60,7 +59,6 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private val executor = Executors.newSingleThreadExecutor()
     private val playbackRetryHandler = Handler(Looper.getMainLooper())
     private val nowPlayingCache = ConcurrentHashMap<String, CachedNowPlaying>()
-    private val connectedCarControllers = ConcurrentSkipListSet<String>()
     private var castContext: CastContext? = null
     private var castSession: CastSession? = null
     private var remoteToLocalStation: RadioStation? = null
@@ -533,11 +531,6 @@ class RadioMediaLibraryService : MediaLibraryService() {
         player.playWhenReady = false
     }
 
-    private fun pausePlaybackAfterCarDisconnect() {
-        Log.d(LOG_TAG, "Pausing playback after Android Auto disconnect")
-        pauseActivePlayback()
-    }
-
     private fun playActivePlayback() {
         Log.d(LOG_TAG, "Playing active playback")
         val activeCastSession = castSession?.takeIf { it.isConnected }
@@ -602,7 +595,6 @@ class RadioMediaLibraryService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
         ) {
             if (controller.isAutomotiveController()) {
-                connectedCarControllers += controller.controllerKey()
                 Log.d(LOG_TAG, "Android Auto controller connected: ${controller.packageName}")
             }
         }
@@ -615,11 +607,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 return
             }
 
-            connectedCarControllers -= controller.controllerKey()
             Log.d(LOG_TAG, "Android Auto controller disconnected: ${controller.packageName}")
-            if (connectedCarControllers.isEmpty()) {
-                pausePlaybackAfterCarDisconnect()
-            }
         }
 
         override fun onPlayerCommandRequest(
