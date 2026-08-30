@@ -14,6 +14,7 @@
     <string name="nav_favorites">מועדפים</string>
     <string name="nav_recent">לאחרונה</string>
     <string name="nav_settings">הגדרות</string>
+    <string name="nav_more">עוד</string>
     <string name="radio_label">רדיו</string>
     <string name="settings_title">הגדרות</string>
     <string name="ok">אישור</string>
@@ -43,8 +44,12 @@
     <string name="next_station">הבא</string>
     <string name="recent_subtitle">תחנות שנוגנו לאחרונה</string>
     <string name="home_title">ראשי</string>
-    <string name="home_subtitle">כל תחנות הרדיו</string>
+    <string name="home_subtitle">בחירות מהירות לרכב</string>
     <string name="favorites_subtitle">תחנות שסומנו בטלפון</string>
+    <string name="more_subtitle">עיון לפי קטגוריה</string>
+    <string name="all_stations_title">כל התחנות</string>
+    <string name="all_stations_subtitle">קטלוג הרדיו המלא</string>
+    <string name="station_count">%1$d תחנות</string>
     <string name="settings_subtitle">ניהול ההגדרות מתבצע בטלפון</string>
     <string name="settings_subtitle_car">בחר כיצד Radio Hub טוענת ומציגה תחנות</string>
     <string name="settings_selected">נבחר</string>
@@ -56,6 +61,9 @@
     <string name="open_settings_phone">פתח הגדרות בטלפון</string>
     <string name="open_settings_phone_subtitle">ניהול הגדרות האפליקציה מתבצע במכשיר הטלפון שלך</string>
     <string name="favorites_group">מועדפים</string>
+    <string name="recent_group">נוגנו לאחרונה</string>
+    <string name="local_group">מקומי</string>
+    <string name="recommended_group">מומלץ</string>
     <string name="all_stations_group">כל השאר</string>
     <string name="playback_error">שגיאת ניגון: %1$s</string>
 </resources>

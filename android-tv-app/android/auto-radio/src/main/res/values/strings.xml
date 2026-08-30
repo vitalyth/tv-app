@@ -14,6 +14,7 @@
     <string name="nav_favorites">Favorites</string>
     <string name="nav_recent">Recent</string>
     <string name="nav_settings">Settings</string>
+    <string name="nav_more">More</string>
     <string name="radio_label">Radio</string>
     <string name="settings_title">Settings</string>
     <string name="ok">OK</string>
@@ -43,8 +44,12 @@
     <string name="next_station">Next Station</string>
     <string name="recent_subtitle">Recently played stations</string>
     <string name="home_title">Home</string>
-    <string name="home_subtitle">All radio stations</string>
+    <string name="home_subtitle">Quick picks for the car</string>
     <string name="favorites_subtitle">Stations marked on your phone</string>
+    <string name="more_subtitle">Browse by category</string>
+    <string name="all_stations_title">All stations</string>
+    <string name="all_stations_subtitle">Full radio catalog</string>
+    <string name="station_count">%1$d stations</string>
     <string name="settings_subtitle">Settings are managed on your phone</string>
     <string name="settings_subtitle_car">Choose how Radio Hub loads and displays stations</string>
     <string name="settings_selected">Selected</string>
@@ -56,6 +61,9 @@
     <string name="open_settings_phone">Open settings on phone</string>
     <string name="open_settings_phone_subtitle">App settings are managed on your phone</string>
     <string name="favorites_group">Favorites</string>
+    <string name="recent_group">Recently played</string>
+    <string name="local_group">Local</string>
+    <string name="recommended_group">Recommended</string>
     <string name="all_stations_group">All others</string>
     <string name="playback_error">Playback error: %1$s</string>
 </resources>

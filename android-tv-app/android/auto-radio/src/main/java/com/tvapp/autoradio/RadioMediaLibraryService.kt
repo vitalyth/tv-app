@@ -687,7 +687,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             if (parentId == ROOT_ID) {
                 return Futures.immediateFuture(
                     LibraryResult.ofItemList(
-                        ImmutableList.of(stationsItem(), favoritesItem(), recentlyPlayedItem(), settingsItem()),
+                        ImmutableList.of(homeItem(), favoritesItem(), recentlyPlayedItem(), moreItem()),
                         params,
                     )
                 )
@@ -734,6 +734,54 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 )
             }
 
+            if (parentId == MORE_ID) {
+                return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
+                    {
+                        val stations = repository.getStations()
+                        LibraryResult.ofItemList(
+                            ImmutableList.of(
+                                stationGroupItem(
+                                    LOCAL_STATIONS_ID,
+                                    R.string.filter_local,
+                                    stations.count { it.group == "local" },
+                                ),
+                                stationGroupItem(
+                                    ISRAELI_STATIONS_ID,
+                                    R.string.filter_israelis,
+                                    stations.count { it.group == "israelis" },
+                                ),
+                                stationGroupItem(
+                                    WORLD_STATIONS_ID,
+                                    R.string.filter_world,
+                                    stations.count { it.group == "world" },
+                                ),
+                                allStationsItem(stations.size),
+                                settingsItem(),
+                            ),
+                            params,
+                        )
+                    },
+                    executor,
+                )
+            }
+
+            if (parentId in setOf(ALL_STATIONS_ID, LOCAL_STATIONS_ID, ISRAELI_STATIONS_ID, WORLD_STATIONS_ID)) {
+                return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
+                    {
+                        val filteredStations = stationsForCategory(parentId, repository.getStations())
+                            .let { applyPaging(it, page, pageSize) }
+                            .map {
+                                it.toMediaItem(
+                                    contentStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
+                                )
+                            }
+
+                        LibraryResult.ofItemList(ImmutableList.copyOf(filteredStations), params)
+                    },
+                    executor,
+                )
+            }
+
             if (parentId != STATIONS_ID) {
                 return handleSettingsChildren(parentId, params)
             }
@@ -741,17 +789,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             return Futures.submit<LibraryResult<ImmutableList<MediaItem>>>(
                 {
                     val stations = repository.getStations()
-                    val favoriteIds = favoriteStationIds()
-                    val favoriteStations = stations.filter { it.id in favoriteIds }
-                    val otherStations = stations.filterNot { it.id in favoriteIds }
-                    val entries = buildList {
-                        addAll(
-                            favoriteStations.map { StationMediaEntry(it, localizedString(R.string.favorites_group)) }
-                        )
-                        addAll(
-                            otherStations.map { StationMediaEntry(it, localizedString(R.string.all_stations_group)) }
-                        )
-                    }
+                    val entries = homeEntries(stations)
                         .let { applyPaging(it, page, pageSize) }
                     val items = entries.map { entry ->
                         entry.station.toMediaItem(
@@ -938,7 +976,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .build()
     }
 
-    private fun stationsItem(): MediaItem {
+    private fun homeItem(): MediaItem {
         return MediaItem.Builder()
             .setMediaId(STATIONS_ID)
             .setMediaMetadata(
@@ -948,6 +986,29 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_home}"))
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun moreItem(): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(MORE_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(localizedString(R.string.nav_more))
+                    .setSubtitle(localizedString(R.string.more_subtitle))
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_settings}"))
                     .setExtras(
                         Bundle().apply {
                             putInt(
@@ -994,6 +1055,52 @@ class RadioMediaLibraryService : MediaLibraryService() {
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setArtworkUri(settingsIconUri())
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun allStationsItem(stationsCount: Int): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(ALL_STATIONS_ID)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(localizedString(R.string.all_stations_title))
+                    .setSubtitle(localizedString(R.string.station_count, stationsCount))
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_radio}"))
+                    .setExtras(
+                        Bundle().apply {
+                            putInt(
+                                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_SINGLE_ITEM,
+                                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
+                            )
+                        }
+                    )
+                    .build()
+            )
+            .build()
+    }
+
+    private fun stationGroupItem(mediaId: String, @StringRes titleRes: Int, stationsCount: Int): MediaItem {
+        return MediaItem.Builder()
+            .setMediaId(mediaId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(localizedString(titleRes))
+                    .setSubtitle(localizedString(R.string.station_count, stationsCount))
+                    .setIsBrowsable(true)
+                    .setIsPlayable(false)
+                    .setArtworkUri(Uri.parse("android.resource://$packageName/${R.drawable.ic_radio}"))
                     .setExtras(
                         Bundle().apply {
                             putInt(
@@ -1166,8 +1273,13 @@ class RadioMediaLibraryService : MediaLibraryService() {
         }
     }
 
-    private fun localizedString(@StringRes resId: Int): String {
-        return AppLocaleManager.localizedContext(this).getString(resId)
+    private fun localizedString(@StringRes resId: Int, vararg formatArgs: Any): String {
+        val localizedContext = AppLocaleManager.localizedContext(this)
+        return if (formatArgs.isEmpty()) {
+            localizedContext.getString(resId)
+        } else {
+            localizedContext.getString(resId, *formatArgs)
+        }
     }
 
     private fun favoriteStationIds(): Set<String> {
@@ -1186,6 +1298,53 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .sortedByDescending { it.second }
             .take(MAX_RECENT_STATIONS)
             .map { it.first }
+    }
+
+    private fun homeEntries(stations: List<RadioStation>): List<StationMediaEntry> {
+        val stationById = stations.associateBy { it.id }
+        val favoriteIds = favoriteStationIds()
+        val addedIds = linkedSetOf<String>()
+        val entries = mutableListOf<StationMediaEntry>()
+
+        fun addStations(groupTitle: String, candidates: List<RadioStation>, limit: Int) {
+            candidates
+                .asSequence()
+                .filter { addedIds.add(it.id) }
+                .take(limit)
+                .forEach { entries += StationMediaEntry(it, groupTitle) }
+        }
+
+        addStations(
+            localizedString(R.string.recent_group),
+            recentStationIds().mapNotNull { stationById[it] },
+            HOME_RECENT_STATION_LIMIT,
+        )
+        addStations(
+            localizedString(R.string.favorites_group),
+            stations.filter { it.id in favoriteIds },
+            HOME_FAVORITE_STATION_LIMIT,
+        )
+        addStations(
+            localizedString(R.string.local_group),
+            stations.filter { it.group == "local" },
+            HOME_LOCAL_STATION_LIMIT,
+        )
+        addStations(
+            localizedString(R.string.recommended_group),
+            stations,
+            HOME_RECOMMENDED_STATION_LIMIT,
+        )
+
+        return entries.take(HOME_STATION_LIMIT)
+    }
+
+    private fun stationsForCategory(parentId: String, stations: List<RadioStation>): List<RadioStation> {
+        return when (parentId) {
+            LOCAL_STATIONS_ID -> stations.filter { it.group == "local" }
+            ISRAELI_STATIONS_ID -> stations.filter { it.group == "israelis" }
+            WORLD_STATIONS_ID -> stations.filter { it.group == "world" }
+            else -> stations
+        }
     }
 
     private fun rememberStation(station: RadioStation) {
@@ -1356,12 +1515,22 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val STATIONS_ID = "radio_stations"
         const val FAVORITES_ID = "radio_favorites"
         const val RECENTLY_PLAYED_ID = "radio_recently_played"
+        const val MORE_ID = "radio_more"
+        const val ALL_STATIONS_ID = "radio_all_stations"
+        const val LOCAL_STATIONS_ID = "radio_local_stations"
+        const val ISRAELI_STATIONS_ID = "radio_israeli_stations"
+        const val WORLD_STATIONS_ID = "radio_world_stations"
         const val SETTINGS_ID = "radio_settings"
         const val OPEN_SETTINGS_ON_PHONE_ID = "radio_open_settings_on_phone"
         const val ACTION_SHOW_CATALOG_SETTINGS = "com.tvapp.autoradio.SHOW_CATALOG_SETTINGS"
         const val FAVORITE_STATIONS_PREFS = "favorite_stations"
         const val RECENT_STATIONS_PREFS = "recent_stations"
         const val MAX_RECENT_STATIONS = 20
+        const val HOME_STATION_LIMIT = 24
+        const val HOME_RECENT_STATION_LIMIT = 6
+        const val HOME_FAVORITE_STATION_LIMIT = 8
+        const val HOME_LOCAL_STATION_LIMIT = 6
+        const val HOME_RECOMMENDED_STATION_LIMIT = 12
         const val METADATA_TRANSITION_IGNORE_MS = 2_000L
         const val PLAYBACK_RETRY_DELAY_MS = 1_500L
         const val MAX_PLAYBACK_RETRIES = 3
