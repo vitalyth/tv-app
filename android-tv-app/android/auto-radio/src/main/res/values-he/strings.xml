@@ -34,6 +34,9 @@
     <string name="output_switcher">בחר מכשיר ניגון</string>
     <string name="output_switcher_unavailable">פתח את בחירת הפלט מנגן המדיה של Android.</string>
     <string name="mini_player">חזור לנגן</string>
+    <string name="play_station">נגן תחנה</string>
+    <string name="pause_station">השהה תחנה</string>
+    <string name="close_player">סגור נגן</string>
     <string name="now_playing_loading">בודק מה משודר עכשיו...</string>
     <string name="loading_short">טוען...</string>
     <string name="prev_station">הקודם</string>

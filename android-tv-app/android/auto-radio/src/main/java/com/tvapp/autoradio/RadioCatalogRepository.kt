@@ -2,6 +2,7 @@ package com.tvapp.autoradio
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.media3.common.MimeTypes
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,6 +19,7 @@ class RadioCatalogRepository(
     private val appContext = context.applicationContext
     private val cachedStations = AtomicReference<List<RadioStation>>(emptyList())
     private val cachedSource = AtomicReference<RadioCatalogSource?>(null)
+    private val staticDatabase by lazy { RadioChannelsDatabase.getInstance(appContext) }
 
     fun getStations(forceRefresh: Boolean = false): List<RadioStation> {
         val source = RadioCatalogSettings.getSource(appContext)
@@ -41,6 +43,7 @@ class RadioCatalogRepository(
 
     private fun getApiProxyStations(cached: List<RadioStation>): List<RadioStation> {
         val fallbackStations = fallbackStations()
+        val startedAtMs = System.currentTimeMillis()
         return try {
             val connection = URL("${baseUrl.trimEnd('/')}/radio_channels").openConnection() as HttpURLConnection
             connection.connectTimeout = 8_000
@@ -60,29 +63,50 @@ class RadioCatalogRepository(
                     return cached.ifEmpty { fallbackStations }
                 }
                 cachedStations.set(stations)
+                Log.d(LOG_TAG, "Loaded ${stations.size} stations from API in ${System.currentTimeMillis() - startedAtMs}ms")
                 stations
             } finally {
                 connection.disconnect()
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to load stations from API", error)
             cached.ifEmpty { fallbackStations }
         }
     }
 
     private fun getStaticFileStations(cached: List<RadioStation>): List<RadioStation> {
+        val startedAtMs = System.currentTimeMillis()
         return try {
-            val body = appContext.resources.openRawResource(R.raw.radio_channels)
-                .bufferedReader()
-                .use(BufferedReader::readText)
-            val stations = parseStations(body)
+            val stations = loadStationsFromStaticDatabase()
             if (stations.isEmpty()) {
                 cached.ifEmpty { fallbackStations() }
             } else {
                 cachedStations.set(stations)
+                Log.d(LOG_TAG, "Loaded ${stations.size} stations from Room DB in ${System.currentTimeMillis() - startedAtMs}ms")
                 stations
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.w(LOG_TAG, "Failed to load stations from Room DB", error)
             cached.ifEmpty { fallbackStations() }
+        }
+    }
+
+    private fun loadStationsFromStaticDatabase(): List<RadioStation> {
+        return staticDatabase.radioChannelDao().getRadioChannels().mapNotNull { entity ->
+            if (entity.id.isBlank() || entity.name.isBlank()) {
+                return@mapNotNull null
+            }
+
+            RadioStation(
+                id = entity.id,
+                name = entity.name,
+                logo = entity.logo,
+                streamUrl = entity.streamUrl,
+                mimeType = entity.mimeType,
+                group = normalizeStationGroup(
+                    entity.groupName ?: inferStationGroup(entity.id, entity.name),
+                ),
+            )
         }
     }
 
@@ -362,4 +386,7 @@ class RadioCatalogRepository(
             RadioStation(id = "rd_world_rfi_musique", name = "RFI Musique", logo = "https://musique.rfi.fr//mstile-144x144.png", streamUrl = "http://live02.rfi.fr/rfimusiquemonde-96k.mp3", mimeType = MimeTypes.AUDIO_MPEG, group = "world"),
         ).sortedBy { it.name }
     }
+
 }
+
+private const val LOG_TAG = "RadioCatalogRepository"

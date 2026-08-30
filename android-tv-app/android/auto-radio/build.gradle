@@ -1,6 +1,7 @@
 plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.android"
+    id "com.google.devtools.ksp"
 }
 
 android {
@@ -36,6 +37,8 @@ dependencies {
     implementation "androidx.core:core-ktx:1.17.0"
     implementation "androidx.appcompat:appcompat:1.8.0"
     implementation "androidx.fragment:fragment-ktx:1.8.9"
+    implementation "androidx.room:room-runtime:2.7.1"
+    ksp "androidx.room:room-compiler:2.7.1"
     implementation "androidx.media3:media3-exoplayer:1.8.0"
     implementation "androidx.media3:media3-exoplayer-dash:1.8.0"
     implementation "androidx.media3:media3-exoplayer-hls:1.8.0"

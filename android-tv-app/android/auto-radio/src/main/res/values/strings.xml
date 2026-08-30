@@ -34,6 +34,9 @@
     <string name="output_switcher">Choose playback device</string>
     <string name="output_switcher_unavailable">Open output selection from the Android media player.</string>
     <string name="mini_player">Back to player</string>
+    <string name="play_station">Play station</string>
+    <string name="pause_station">Pause station</string>
+    <string name="close_player">Close player</string>
     <string name="now_playing_loading">Checking what is playing now...</string>
     <string name="loading_short">Loading...</string>
     <string name="prev_station">Prev Station</string>

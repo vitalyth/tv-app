@@ -235,6 +235,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .setSessionActivity(mainActivityPendingIntent())
             .build()
 
+        warmUpCatalog()
         initializeOutputSwitcher()
     }
 
@@ -268,6 +269,21 @@ class RadioMediaLibraryService : MediaLibraryService() {
         player.release()
         executor.shutdown()
         super.onDestroy()
+    }
+
+    private fun warmUpCatalog() {
+        executor.execute {
+            try {
+                val startedAtMs = System.currentTimeMillis()
+                val stations = repository.getStations()
+                Log.d(
+                    LOG_TAG,
+                    "Catalog warmup loaded ${stations.size} stations in ${System.currentTimeMillis() - startedAtMs}ms",
+                )
+            } catch (error: Exception) {
+                Log.w(LOG_TAG, "Catalog warmup failed", error)
+            }
+        }
     }
 
     private fun initializeOutputSwitcher() {
