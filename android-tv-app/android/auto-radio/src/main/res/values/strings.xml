@@ -43,6 +43,13 @@
     <string name="home_subtitle">All radio stations</string>
     <string name="favorites_subtitle">Stations marked on your phone</string>
     <string name="settings_subtitle">Settings are managed on your phone</string>
+    <string name="settings_subtitle_car">Choose how Radio Hub loads and displays stations</string>
+    <string name="settings_selected">Selected</string>
+    <string name="settings_tap_to_select">Tap to select</string>
+    <string name="settings_static_toggle">Use static JSON file</string>
+    <string name="settings_static_toggle_subtitle">Turn off to load stations from the API proxy</string>
+    <string name="settings_equalizer_toggle">Reactive equalizer</string>
+    <string name="settings_equalizer_toggle_subtitle">Animate the equalizer from the current audio</string>
     <string name="open_settings_phone">Open settings on phone</string>
     <string name="open_settings_phone_subtitle">App settings are managed on your phone</string>
     <string name="favorites_group">Favorites</string>

@@ -43,6 +43,13 @@
     <string name="home_subtitle">כל תחנות הרדיו</string>
     <string name="favorites_subtitle">תחנות שסומנו בטלפון</string>
     <string name="settings_subtitle">ניהול ההגדרות מתבצע בטלפון</string>
+    <string name="settings_subtitle_car">בחר כיצד Radio Hub טוענת ומציגה תחנות</string>
+    <string name="settings_selected">נבחר</string>
+    <string name="settings_tap_to_select">לחץ לבחירה</string>
+    <string name="settings_static_toggle">השתמש בקובץ JSON סטטי</string>
+    <string name="settings_static_toggle_subtitle">כבה כדי לטעון תחנות דרך API proxy</string>
+    <string name="settings_equalizer_toggle">אקולייזר מגיב</string>
+    <string name="settings_equalizer_toggle_subtitle">הנעת האקולייזר לפי האודיו המתנגן</string>
     <string name="open_settings_phone">פתח הגדרות בטלפון</string>
     <string name="open_settings_phone_subtitle">ניהול הגדרות האפליקציה מתבצע במכשיר הטלפון שלך</string>
     <string name="favorites_group">מועדפים</string>

@@ -1022,7 +1022,6 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-
         try {
             startActivity(intent)
         } catch (error: Exception) {
