@@ -47,14 +47,14 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -67,6 +67,8 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.mediarouter.app.MediaRouteButton
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
@@ -116,6 +118,9 @@ class MainActivity : AppCompatActivity() {
         private const val STATION_GROUP_WORLD = "world"
         private const val INITIAL_VISIBLE_STATION_LIMIT = 24
         private const val VISIBLE_STATION_BATCH_SIZE = 24
+        private const val STATION_ITEM_VIEW_TYPE = 1
+        private const val LOAD_MORE_ITEM_VIEW_TYPE = 2
+        private const val EMPTY_ITEM_VIEW_TYPE = 3
         private const val LOAD_MORE_STATIONS_TAG = "load_more_stations"
         private const val STATION_VIEW_TAG_PREFIX = "station_view:"
         private const val FAVORITE_BUTTON_TAG_PREFIX = "favorite_button:"
@@ -221,8 +226,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bottomNavContainer: LinearLayout
     private lateinit var miniPlayerShortcut: FrameLayout
     private lateinit var playerContainer: LinearLayout
-    private lateinit var stationsContainer: LinearLayout
-    private lateinit var scrollView: ScrollView
+    private lateinit var stationsRecyclerView: RecyclerView
+    private lateinit var stationListAdapter: StationListAdapter
     private var castContext: CastContext? = null
 
     private var allStations: List<RadioStation> = emptyList()
@@ -736,8 +741,9 @@ class MainActivity : AppCompatActivity() {
             setTextColor(inkColor)
             setHintTextColor(mutedColor)
             setPadding(dp(18), dp(13), dp(18), dp(13))
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
             compoundDrawablePadding = dp(10)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_search, 0, 0, 0)
+            updateSearchClearIcon()
             compoundDrawableTintList = ColorStateList.valueOf(mutedColor)
             background = roundedRect(Color.rgb(22, 22, 29), 18f, borderColor, 1)
             elevation = dp(5).toFloat()
@@ -748,11 +754,29 @@ class MainActivity : AppCompatActivity() {
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    updateSearchClearIcon()
                     resetStationBatch()
                     renderStations()
                 }
                 override fun afterTextChanged(s: Editable?) = Unit
             })
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
+                    hideKeyboardAndClearSearchFocus()
+                    true
+                } else {
+                    false
+                }
+            }
+            setOnTouchListener { _, event ->
+                if (shouldHandleSearchClearTouch(event)) {
+                    text?.clear()
+                    hideKeyboardAndClearSearchFocus()
+                    true
+                } else {
+                    false
+                }
+            }
         }
         stationGroupFilterContainer = stationGroupFilterView()
         filterPanel.addView(stationGroupFilterContainer)
@@ -792,36 +816,49 @@ class MainActivity : AppCompatActivity() {
         statusPanel.addView(retryButton)
         listParent.addView(statusPanel)
 
-        stationsContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(4), 0, dp(18))
-            clipToPadding = false
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        }
-
-        scrollView = ScrollView(this).apply {
-            background = null
-            clipChildren = true
-            clipToPadding = true
-            isFillViewport = false
-            addView(stationsContainer)
-            setOnScrollChangeListener { _, _, scrollY, _, _ ->
-                val content = getChildAt(0) ?: return@setOnScrollChangeListener
-                val distanceToBottom = content.bottom - (scrollY + height)
-                if (distanceToBottom < dp(280)) {
-                    loadNextStationBatch()
+        stationListAdapter = StationListAdapter()
+        val stationGridLayoutManager = GridLayoutManager(this, stationGridColumnCount()).apply {
+            spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+                override fun getSpanSize(position: Int): Int {
+                    return if (stationListAdapter.isFullWidthItem(position)) spanCount else 1
                 }
             }
+        }
+        stationsRecyclerView = RecyclerView(this).apply {
+            background = null
+            clipChildren = true
+            clipToPadding = false
+            setPadding(0, dp(4), 0, dp(18))
+            layoutManager = stationGridLayoutManager
+            adapter = stationListAdapter
+            itemAnimator = null
+            setItemViewCacheSize(12)
+            addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    super.onScrollStateChanged(recyclerView, newState)
+                    if (newState == RecyclerView.SCROLL_STATE_DRAGGING && filterInput.hasFocus()) {
+                        hideKeyboardAndClearSearchFocus()
+                    }
+                }
+
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    super.onScrolled(recyclerView, dx, dy)
+                    if (dy <= 0) {
+                        return
+                    }
+                    val manager = recyclerView.layoutManager as? GridLayoutManager ?: return
+                    if (manager.findLastVisibleItemPosition() >= stationListAdapter.itemCount - 8) {
+                        loadNextStationBatch()
+                    }
+                }
+            })
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f,
             )
         }
-        listParent.addView(scrollView)
+        listParent.addView(stationsRecyclerView)
         root.addView(bottomNavigationView())
         shell.addView(root, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -1025,17 +1062,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateStationListBottomInset(showMiniPlayer: Boolean) {
-        if (!::stationsContainer.isInitialized) {
+        if (!::stationsRecyclerView.isInitialized) {
             return
         }
         val bottomInset = if (showMiniPlayer) dp(104) else dp(18)
-        if (stationsContainer.paddingBottom == bottomInset) {
+        if (stationsRecyclerView.paddingBottom == bottomInset) {
             return
         }
-        stationsContainer.setPadding(
-            stationsContainer.paddingLeft,
-            stationsContainer.paddingTop,
-            stationsContainer.paddingRight,
+        stationsRecyclerView.setPadding(
+            stationsRecyclerView.paddingLeft,
+            stationsRecyclerView.paddingTop,
+            stationsRecyclerView.paddingRight,
             bottomInset,
         )
     }
@@ -1435,7 +1472,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadStations(forceRefresh: Boolean = false) {
         isCatalogLoading = true
-        stationsContainer.removeAllViews()
+        if (::stationListAdapter.isInitialized) {
+            stationListAdapter.clear()
+        }
         showStatus(localizedString(R.string.loading_stations), showRetry = false)
 
         executor.execute {
@@ -1612,7 +1651,6 @@ class MainActivity : AppCompatActivity() {
         activeNowPlayingText = null
         val filteredStations = filteredStationsForCurrentState()
         filteredStationCount = filteredStations.size
-        val visibleStations = filteredStations.take(visibleStationLimit)
 
         if (::bottomNavContainer.isInitialized) {
             bottomNavContainer.populateBottomNavigation()
@@ -1657,7 +1695,7 @@ class MainActivity : AppCompatActivity() {
         isPlayerPageVisible = false
         headerContainer.visibility = View.VISIBLE
         filterPanel.visibility = View.VISIBLE
-        scrollView.visibility = View.VISIBLE
+        stationsRecyclerView.visibility = View.VISIBLE
         bottomNavContainer.visibility = View.VISIBLE
         playerContainer.visibility = View.GONE
         playerContainer.layoutParams = playerContainer.layoutParams.apply {
@@ -1668,18 +1706,7 @@ class MainActivity : AppCompatActivity() {
         playerContainer.translationY = 0f
         updateMiniPlayerShortcut(activeStation)
 
-        stationsContainer.removeAllViews()
-        if (filteredStations.isEmpty()) {
-            stationsContainer.addView(emptyState(localizedString(R.string.empty_filter)))
-            updateElapsedTime()
-            return
-        }
-
-        stationsContainer.addView(stationGrid(visibleStations))
-        if (visibleStations.size < filteredStations.size) {
-            stationsContainer.addView(loadMoreStationsButton(filteredStations.size - visibleStations.size))
-        }
-
+        updateStationList(filteredStations, animateChanges = false)
         updateElapsedTime()
     }
 
@@ -1690,11 +1717,10 @@ class MainActivity : AppCompatActivity() {
 
         val filteredStations = filteredStationsForCurrentState()
         filteredStationCount = filteredStations.size
-        val visibleStations = filteredStations.take(visibleStationLimit)
 
         headerContainer.visibility = View.VISIBLE
         filterPanel.visibility = View.VISIBLE
-        scrollView.visibility = View.VISIBLE
+        stationsRecyclerView.visibility = View.VISIBLE
         bottomNavContainer.visibility = View.VISIBLE
 
         if (::bottomNavContainer.isInitialized) {
@@ -1705,17 +1731,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateMiniPlayerShortcut(activeStation, animateIn = animateMiniPlayer)
-
-        stationsContainer.removeAllViews()
-        if (filteredStations.isEmpty()) {
-            stationsContainer.addView(emptyState(localizedString(R.string.empty_filter)))
-            return
-        }
-
-        stationsContainer.addView(stationGrid(visibleStations))
-        if (visibleStations.size < filteredStations.size) {
-            stationsContainer.addView(loadMoreStationsButton(filteredStations.size - visibleStations.size))
-        }
+        updateStationList(filteredStations, animateChanges = false)
     }
 
     private fun filteredStationsForCurrentState(): List<RadioStation> {
@@ -1794,7 +1810,7 @@ class MainActivity : AppCompatActivity() {
         isPlayerHiding = false
         headerContainer.visibility = View.VISIBLE
         filterPanel.visibility = View.VISIBLE
-        scrollView.visibility = View.VISIBLE
+        stationsRecyclerView.visibility = View.VISIBLE
         bottomNavContainer.visibility = View.VISIBLE
         playerContainer.animate().cancel()
         playerContainer.setLayerType(View.LAYER_TYPE_NONE, null)
@@ -1814,9 +1830,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shouldRenderCatalogAfterPlayerClose(): Boolean {
-        return ::stationsContainer.isInitialized &&
+        return ::stationListAdapter.isInitialized &&
             !isCatalogLoading &&
-            stationsContainer.childCount == 0
+            stationListAdapter.itemCount == 0
     }
 
     private fun applyLibraryTabFilter(stations: List<RadioStation>): List<RadioStation> {
@@ -1853,7 +1869,7 @@ class MainActivity : AppCompatActivity() {
         }
         isLoadingStationBatch = true
 
-        stationsContainer.post {
+        stationsRecyclerView.post {
             val filteredStations = filteredStationsForCurrentState()
             filteredStationCount = filteredStations.size
             if (visibleStationLimit >= filteredStations.size) {
@@ -1863,55 +1879,34 @@ class MainActivity : AppCompatActivity() {
 
             val previousLimit = visibleStationLimit
             visibleStationLimit = minOf(visibleStationLimit + VISIBLE_STATION_BATCH_SIZE, filteredStations.size)
-            appendStationBatch(filteredStations, previousLimit, visibleStationLimit)
+            updateStationList(filteredStations, animateChanges = true, previousVisibleCount = previousLimit)
             isLoadingStationBatch = false
             updateElapsedTime()
         }
     }
 
-    private fun appendStationBatch(filteredStations: List<RadioStation>, fromIndex: Int, toIndex: Int) {
-        val grid = (0 until stationsContainer.childCount)
-            .map { stationsContainer.getChildAt(it) }
-            .filterIsInstance<GridLayout>()
-            .firstOrNull()
-
-        if (grid == null || fromIndex <= 0 || toIndex <= fromIndex) {
-            renderStations()
-            return
-        }
-
-        removeLoadMoreStationsButton()
-        val columns = stationGridColumnCount()
-        filteredStations.subList(fromIndex, toIndex).forEachIndexed { offset, station ->
-            val index = fromIndex + offset
-            grid.addView(stationTile(station), GridLayout.LayoutParams(
-                GridLayout.spec(GridLayout.UNDEFINED, 1f),
-                GridLayout.spec(index % columns, 1f),
-            ).apply {
-                width = 0
-                height = GridLayout.LayoutParams.WRAP_CONTENT
-                setMargins(dp(2), dp(3), dp(2), dp(6))
-            })
-        }
-
-        if (toIndex < filteredStations.size) {
-            stationsContainer.addView(loadMoreStationsButton(filteredStations.size - toIndex))
-        }
-    }
-
-    private fun removeLoadMoreStationsButton() {
-        for (index in stationsContainer.childCount - 1 downTo 0) {
-            if (stationsContainer.getChildAt(index).tag == LOAD_MORE_STATIONS_TAG) {
-                stationsContainer.removeViewAt(index)
-            }
-        }
+    private fun updateStationList(
+        filteredStations: List<RadioStation>,
+        animateChanges: Boolean,
+        previousVisibleCount: Int = 0,
+    ) {
+        val layoutManager = stationsRecyclerView.layoutManager as? GridLayoutManager
+        layoutManager?.spanCount = stationGridColumnCount()
+        val visibleStations = filteredStations.take(visibleStationLimit)
+        stationListAdapter.submit(
+            stations = visibleStations,
+            remainingCount = filteredStations.size - visibleStations.size,
+            showEmpty = filteredStations.isEmpty(),
+            animateChanges = animateChanges,
+            previousStationCount = previousVisibleCount,
+        )
     }
 
     private fun updateVisibleActiveStationHighlights(previousStationId: String?, currentStationId: String) {
         previousStationId?.let { stationId ->
-            findStationView(stationsContainer, stationId)?.applyStationActiveState(false)
+            findStationView(stationsRecyclerView, stationId)?.applyStationActiveState(false)
         }
-        findStationView(stationsContainer, currentStationId)?.applyStationActiveState(true)
+        findStationView(stationsRecyclerView, currentStationId)?.applyStationActiveState(true)
     }
 
     private fun View.applyStationActiveState(isActive: Boolean) {
@@ -1970,42 +1965,112 @@ class MainActivity : AppCompatActivity() {
             foreground = selectableItemBackground()
             setPadding(dp(18), dp(13), dp(18), dp(13))
             setOnClickListener { loadNextStationBatch() }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
+            layoutParams = RecyclerView.LayoutParams(
+                RecyclerView.LayoutParams.MATCH_PARENT,
+                RecyclerView.LayoutParams.WRAP_CONTENT,
             ).apply {
-                topMargin = dp(12)
-                leftMargin = dp(8)
-                rightMargin = dp(8)
-                bottomMargin = dp(18)
+                setMargins(dp(8), dp(12), dp(8), dp(18))
             }
         }
     }
 
-    private fun stationGrid(stations: List<RadioStation>): GridLayout {
-        val columns = stationGridColumnCount()
-        return GridLayout(this).apply {
-            columnCount = columns
-            useDefaultMargins = false
-            alignmentMode = GridLayout.ALIGN_BOUNDS
-            clipChildren = false
-            clipToPadding = false
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
+    private inner class StationListAdapter : RecyclerView.Adapter<StationListAdapter.StationViewHolder>() {
+        private var stations: List<RadioStation> = emptyList()
+        private var remainingCount: Int = 0
+        private var showEmpty: Boolean = false
 
-            stations.forEachIndexed { index, station ->
-                addView(stationTile(station), GridLayout.LayoutParams(
-                    GridLayout.spec(GridLayout.UNDEFINED, 1f),
-                    GridLayout.spec(index % columns, 1f),
-                ).apply {
-                    width = 0
-                    height = GridLayout.LayoutParams.WRAP_CONTENT
-                    setMargins(dp(2), dp(3), dp(2), dp(6))
-                })
+        override fun getItemCount(): Int {
+            return when {
+                showEmpty -> 1
+                remainingCount > 0 -> stations.size + 1
+                else -> stations.size
             }
         }
+
+        override fun getItemViewType(position: Int): Int {
+            return when {
+                showEmpty -> EMPTY_ITEM_VIEW_TYPE
+                position >= stations.size -> LOAD_MORE_ITEM_VIEW_TYPE
+                else -> STATION_ITEM_VIEW_TYPE
+            }
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): StationViewHolder {
+            return StationViewHolder(FrameLayout(parent.context).apply {
+                layoutParams = RecyclerView.LayoutParams(
+                    RecyclerView.LayoutParams.MATCH_PARENT,
+                    RecyclerView.LayoutParams.WRAP_CONTENT,
+                )
+            })
+        }
+
+        override fun onBindViewHolder(holder: StationViewHolder, position: Int) {
+            val container = holder.container
+            container.removeAllViews()
+            container.tag = null
+            val view = when (getItemViewType(position)) {
+                LOAD_MORE_ITEM_VIEW_TYPE -> loadMoreStationsButton(remainingCount)
+                EMPTY_ITEM_VIEW_TYPE -> emptyState(localizedString(R.string.empty_filter)).apply {
+                    minHeight = dp(180)
+                    layoutParams = RecyclerView.LayoutParams(
+                        RecyclerView.LayoutParams.MATCH_PARENT,
+                        RecyclerView.LayoutParams.WRAP_CONTENT,
+                    )
+                }
+                else -> stationTile(stations[position])
+            }
+            container.addView(view, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
+
+        fun isFullWidthItem(position: Int): Boolean {
+            return getItemViewType(position) != STATION_ITEM_VIEW_TYPE
+        }
+
+        fun clear() {
+            stations = emptyList()
+            remainingCount = 0
+            showEmpty = false
+            notifyDataSetChanged()
+        }
+
+        fun submit(
+            stations: List<RadioStation>,
+            remainingCount: Int,
+            showEmpty: Boolean,
+            animateChanges: Boolean,
+            previousStationCount: Int,
+        ) {
+            val oldStationCount = this.stations.size
+            val oldHadLoadMore = this.remainingCount > 0 && !this.showEmpty
+            val oldShowEmpty = this.showEmpty
+            this.stations = stations
+            this.remainingCount = remainingCount.coerceAtLeast(0)
+            this.showEmpty = showEmpty
+
+            if (!animateChanges || oldShowEmpty != showEmpty || stations.size < oldStationCount) {
+                notifyDataSetChanged()
+                return
+            }
+
+            val appendStart = previousStationCount.coerceIn(0, oldStationCount)
+            val insertedCount = stations.size - appendStart
+            if (oldHadLoadMore && insertedCount > 0) {
+                notifyItemChanged(appendStart)
+                if (insertedCount > 1) {
+                    notifyItemRangeInserted(appendStart + 1, insertedCount - 1)
+                }
+            } else if (insertedCount > 0) {
+                notifyItemRangeInserted(appendStart, insertedCount)
+            }
+            if (this.remainingCount > 0) {
+                notifyItemInserted(stations.size)
+            }
+        }
+
+        inner class StationViewHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
     }
 
     private fun stationGridColumnCount(): Int {
@@ -2816,8 +2881,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFavoriteButtonsForStation(station: RadioStation, isFavorite: Boolean) {
-        if (::stationsContainer.isInitialized) {
-            updateFavoriteButtonsForStation(stationsContainer, station.id, isFavorite)
+        if (::stationsRecyclerView.isInitialized) {
+            updateFavoriteButtonsForStation(stationsRecyclerView, station.id, isFavorite)
         }
         if (::playerContainer.isInitialized) {
             updateFavoriteButtonsForStation(playerContainer, station.id, isFavorite)
@@ -3257,7 +3322,7 @@ class MainActivity : AppCompatActivity() {
         currentAudioSessionId = INVALID_AUDIO_SESSION_ID
         activePlaybackErrorMessage = null
         clearActivePlaybackState()
-        if (::playerContainer.isInitialized && ::stationsContainer.isInitialized && !isCatalogLoading) {
+        if (::playerContainer.isInitialized && ::stationsRecyclerView.isInitialized && !isCatalogLoading) {
             renderStations()
         }
     }
@@ -3386,9 +3451,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scrollToTop() {
-        scrollView.post {
-            scrollView.smoothScrollTo(0, 0)
+        stationsRecyclerView.post {
+            stationsRecyclerView.smoothScrollToPosition(0)
         }
+    }
+
+    private fun EditText.updateSearchClearIcon() {
+        val clearIcon = if (text?.isNotEmpty() == true) R.drawable.ic_close else 0
+        setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_search, 0, clearIcon, 0)
+    }
+
+    private fun EditText.shouldHandleSearchClearTouch(event: MotionEvent): Boolean {
+        if (event.actionMasked != MotionEvent.ACTION_UP || text?.isNotEmpty() != true) {
+            return false
+        }
+        val clearDrawable = compoundDrawablesRelative[2] ?: return false
+        val hitSlop = dp(12)
+        return if (layoutDirection == View.LAYOUT_DIRECTION_RTL) {
+            event.x <= paddingStart + clearDrawable.bounds.width() + hitSlop
+        } else {
+            event.x >= width - paddingEnd - clearDrawable.bounds.width() - hitSlop
+        }
+    }
+
+    private fun hideKeyboardAndClearSearchFocus() {
+        if (!::filterInput.isInitialized) {
+            return
+        }
+        val inputManager = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        inputManager?.hideSoftInputFromWindow(filterInput.windowToken, 0)
+        filterInput.clearFocus()
     }
 
     private fun emptyState(message: String): TextView {

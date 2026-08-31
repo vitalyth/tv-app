@@ -20,9 +20,10 @@ import sys
 import time
 import unicodedata
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -53,6 +54,8 @@ RADIO_BROWSER_SERVERS_URL = "https://all.api.radio-browser.info/json/servers"
 DEFAULT_USER_AGENT = "RadioHubScanner/1.0 (+https://tv.bestcams.net)"
 DEFAULT_BATCH_SIZE = 500
 REQUEST_TIMEOUT_SECONDS = 20
+LOGO_REQUEST_TIMEOUT_SECONDS = 4
+MAX_LOGO_CANDIDATES_PER_HOMEPAGE = 8
 
 CURATED_LOGO_OVERRIDES = [
     (
@@ -113,6 +116,25 @@ CURATED_LOGO_OVERRIDES = [
     ),
 ]
 
+STREAM_URL_OVERRIDES_BY_UUID = {
+    "0f902505-76c7-489b-8ddc-03b05b5867ae": "https://radio.gen.dance/radio/8030/hd",
+    "9300b8d7-0953-48d8-82a2-fa69c3b3030b": "https://radio.gen.dance/radio/8030/mobile",
+}
+
+HOMEPAGE_OVERRIDES_BY_UUID = {
+    "1e3038cc-eafc-45d0-a2e5-ef4c5d40494a": "https://www.babaradyo.com/",
+    "39215908-b5f6-40d9-875c-57248dfe314a": "https://amrdiab.net/diab-fm-online-radio-station/",
+    "3c7aba81-3375-41e3-b268-5231fcf576ba": "https://zeno.fm/radio/tes3enat-fm/",
+    "8c01f241-6fe8-42b1-afd3-d6abf90ec78e": "https://radyohome.com/radyolar/ankara-havalari",
+    "8cd4aff2-15af-454f-84b7-a8904548f704": "https://www.beurfm.net/",
+    "902ea231-d537-4dc8-8708-6819418086d0": "https://prasarbharati.gov.in/vividh-bharati/",
+    "97ed8391-6abe-4b91-b59e-fd29c1866d36": "https://www.francemaghreb2.fr/",
+    "b129bdd2-65bc-4363-8f74-14b474bc0500": "https://www.marca.com/radio/",
+    "b7e7bb7b-b41a-11e8-afe1-52543be04c81": "https://www.90s90s.de/radios/danceradio",
+    "c08d86af-30aa-4de7-985d-b4963498da6c": "https://www.kissfm.ua/",
+    "df3734d3-67f7-438b-8203-ad64ae1ca77a": "https://www.caltexmusic.com/",
+}
+
 HEBREW_TRANSLITERATION = {
     "א": "a",
     "ב": "b",
@@ -142,6 +164,38 @@ HEBREW_TRANSLITERATION = {
     "ש": "sh",
     "ת": "t",
 }
+
+
+class LogoLinkParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.candidates: list[tuple[int, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "link" and tag.lower() != "meta":
+            return
+
+        values = {key.lower(): clean_text(value) for key, value in attrs if key and value}
+        if tag.lower() == "meta":
+            property_name = (values.get("property") or values.get("name") or "").lower()
+            content = values.get("content", "")
+            if property_name in {"og:image", "og:image:url", "twitter:image", "twitter:image:src"} and content:
+                self.candidates.append((70, content))
+            return
+
+        rel = values.get("rel", "").lower()
+        href = values.get("href", "")
+        if not href:
+            return
+
+        sizes = values.get("sizes", "")
+        size_score = icon_size_score(sizes)
+        if "apple-touch-icon" in rel:
+            self.candidates.append((100 + size_score, href))
+        elif "mask-icon" in rel:
+            self.candidates.append((55 + size_score, href))
+        elif "icon" in rel:
+            self.candidates.append((60 + size_score, href))
 
 
 @dataclass
@@ -224,6 +278,117 @@ def normalize_url(value: str | None) -> str:
     ]
     query = urlencode(sorted(query_pairs), doseq=True)
     return urlunsplit((scheme, netloc, path, query, ""))
+
+
+def icon_size_score(sizes: str) -> int:
+    numbers = [int(value) for value in re.findall(r"\d+", clean_text(sizes)) if value.isdigit()]
+    if not numbers:
+        return 0
+    largest = max(numbers)
+    if largest >= 512:
+        return 30
+    if largest >= 192:
+        return 24
+    if largest >= 120:
+        return 18
+    if largest >= 64:
+        return 8
+    return 0
+
+
+def is_probably_image_url(url: str) -> bool:
+    parsed = urlsplit(clean_text(url))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    path = parsed.path.lower()
+    return path.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".svg")) or "image" in path
+
+
+def validate_image_url(session: requests.Session, url: str) -> str | None:
+    url = clean_text(url)
+    if not url:
+        return None
+    try:
+        response = session.head(url, allow_redirects=True, timeout=LOGO_REQUEST_TIMEOUT_SECONDS)
+        if response.status_code == 405:
+            response = session.get(url, stream=True, allow_redirects=True, timeout=LOGO_REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    content_type = response.headers.get("content-type", "").lower()
+    final_url = response.url or url
+    if content_type.startswith("image/") or is_probably_image_url(final_url):
+        return final_url
+    return None
+
+
+def homepage_logo_candidates(session: requests.Session, homepage: str) -> list[str]:
+    homepage = clean_text(homepage)
+    if not homepage:
+        return []
+    try:
+        response = session.get(homepage, timeout=LOGO_REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
+
+    parser = LogoLinkParser()
+    try:
+        parser.feed(response.text[:250_000])
+    except Exception:
+        pass
+
+    base_url = response.url or homepage
+    candidates = [
+        urljoin(base_url, candidate)
+        for _, candidate in sorted(parser.candidates, key=lambda item: item[0], reverse=True)
+    ]
+    candidates.extend(
+        urljoin(base_url, path)
+        for path in (
+            "/apple-touch-icon.png",
+            "/apple-touch-icon-precomposed.png",
+            "/favicon-512x512.png",
+            "/favicon-256x256.png",
+            "/favicon-196x196.png",
+            "/favicon-192x192.png",
+            "/favicon.png",
+        )
+    )
+    return unique_urls(candidates)
+
+
+def unique_urls(urls: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for url in urls:
+        cleaned = clean_text(url)
+        key = normalize_url(cleaned)
+        if not cleaned or not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(cleaned)
+    return unique
+
+
+def high_res_favicon_url(homepage: str) -> str | None:
+    homepage = clean_text(homepage)
+    if not homepage:
+        return None
+    parsed = urlsplit(homepage if "://" in homepage else f"https://{homepage}")
+    if not parsed.netloc:
+        return None
+    domain_url = urlunsplit((parsed.scheme or "https", parsed.netloc, "", "", ""))
+    return f"https://www.google.com/s2/favicons?domain_url={domain_url}&sz=256"
+
+
+def resolve_logo_from_homepage(session: requests.Session, homepage: str) -> str | None:
+    for candidate in homepage_logo_candidates(session, homepage)[:MAX_LOGO_CANDIDATES_PER_HOMEPAGE]:
+        valid = validate_image_url(session, candidate)
+        if valid:
+            return valid
+    return None
 
 
 def stable_radio_browser_id(stationuuid: str, name: str, url: str) -> str:
@@ -465,7 +630,9 @@ def radio_browser_row(station: dict[str, Any], app_station: dict[str, Any] | Non
     stream_url = (
         clean_text(app_station.get("streamUrl")) if app_station else ""
     ) or clean_text(station.get("url_resolved")) or clean_text(station.get("url"))
+    stream_url = STREAM_URL_OVERRIDES_BY_UUID.get(stationuuid, stream_url)
     favicon = clean_text(station.get("favicon"))
+    homepage = HOMEPAGE_OVERRIDES_BY_UUID.get(stationuuid) or clean_text(station.get("homepage"))
     app_logo = (
         clean_text(app_station.get("logo")) or clean_text(app_station.get("image"))
         if app_station
@@ -501,7 +668,7 @@ def radio_browser_row(station: dict[str, Any], app_station: dict[str, Any] | Non
         "stream_url": stream_url or None,
         "normalized_stream_url": normalize_url(stream_url) or None,
         "mime_type": clean_text(app_station.get("mimeType")) if app_station else mime_type_from_codec(station.get("codec"), station.get("hls")),
-        "homepage": clean_text(station.get("homepage")) or None,
+        "homepage": homepage or None,
         "favicon": favicon or None,
         "tags": clean_text(station.get("tags")) or None,
         "country": clean_text(station.get("country")) or None,
@@ -1078,6 +1245,8 @@ def scan_app_catalog(args: argparse.Namespace) -> None:
             existing_json=args.existing_json,
             local_state=local_states,
             popular_world_limit=args.popular_world_limit,
+            user_agent=args.user_agent,
+            fetch_homepage_logos=args.fetch_homepage_logos,
         )
     )
 
@@ -1104,7 +1273,7 @@ def scan_app_catalog(args: argparse.Namespace) -> None:
 def init_android_db(con: sqlite3.Connection) -> None:
     con.executescript(
         """
-        PRAGMA user_version=1;
+        PRAGMA user_version=3;
         CREATE TABLE radio_channels (
             id TEXT PRIMARY KEY NOT NULL,
             name TEXT NOT NULL,
@@ -1224,6 +1393,58 @@ def select_android_export_rows(
     return list(selected_by_id.values()), skipped_duplicate_names
 
 
+def enrich_android_export_logos(
+    source: sqlite3.Connection,
+    rows: list[sqlite3.Row],
+    user_agent: str,
+    fetch_homepage_logos: bool,
+) -> int:
+    missing_rows = [
+        row
+        for row in rows
+        if not clean_text(row["logo"]) and clean_text(row["homepage"])
+    ]
+    if not missing_rows:
+        return 0
+
+    session = requests.Session()
+    configure_session(session)
+    session.headers.update(
+        {
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/png,image/*,*/*;q=0.8",
+        }
+    )
+
+    updated = 0
+    homepage_cache: dict[str, str | None] = {}
+    for index, row in enumerate(missing_rows, start=1):
+        if index == 1 or index % 25 == 0:
+            print(f"logos: checking {index}/{len(missing_rows)}", flush=True)
+        homepage = clean_text(row["homepage"])
+        if homepage not in homepage_cache:
+            homepage_cache[homepage] = (
+                resolve_logo_from_homepage(session, homepage)
+                if fetch_homepage_logos
+                else high_res_favicon_url(homepage)
+            )
+            time.sleep(0.05)
+        logo = homepage_cache[homepage]
+        if not logo:
+            continue
+        source.execute(
+            """
+            UPDATE radio_stations
+            SET logo = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (logo, int(time.time()), row["id"]),
+        )
+        updated += 1
+    source.commit()
+    return updated
+
+
 def export_android(args: argparse.Namespace) -> None:
     source_db = Path(args.db)
     output_db = Path(args.output)
@@ -1239,6 +1460,19 @@ def export_android(args: argparse.Namespace) -> None:
             local_state_terms=args.local_state,
             popular_world_limit=args.popular_world_limit,
         )
+        logos_enriched = enrich_android_export_logos(
+            source,
+            rows,
+            args.user_agent,
+            args.fetch_homepage_logos,
+        )
+        if logos_enriched:
+            rows, skipped_duplicate_names = select_android_export_rows(
+                source,
+                existing_ids=existing_ids,
+                local_state_terms=args.local_state,
+                popular_world_limit=args.popular_world_limit,
+            )
 
     output_db.parent.mkdir(parents=True, exist_ok=True)
     temp_db = output_db.with_suffix(output_db.suffix + ".tmp")
@@ -1281,6 +1515,7 @@ def export_android(args: argparse.Namespace) -> None:
                 "stations": len(rows),
                 "existingStationsIncluded": len(existing_ids),
                 "duplicateNamesSkipped": skipped_duplicate_names,
+                "logosEnriched": logos_enriched,
                 "groups": counts,
             },
             ensure_ascii=False,
@@ -1370,10 +1605,21 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Existing app radio JSON to always include. Repeatable.",
     )
+    catalog_parser.add_argument(
+        "--fetch-homepage-logos",
+        action="store_true",
+        help="Fetch station homepages and look for apple-touch-icon/og:image before favicon fallback.",
+    )
 
     export_parser = subparsers.add_parser("export-android", help="Export a small Android Room asset DB.")
     export_parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Source server radio SQLite DB.")
     export_parser.add_argument("--output", default=str(DEFAULT_ANDROID_DB_PATH), help="Android DB asset output path.")
+    export_parser.add_argument("--user-agent", default=DEFAULT_USER_AGENT, help="HTTP User-Agent used for logo enrichment.")
+    export_parser.add_argument(
+        "--fetch-homepage-logos",
+        action="store_true",
+        help="Fetch station homepages and look for apple-touch-icon/og:image before favicon fallback.",
+    )
     export_parser.add_argument(
         "--existing-json",
         action="append",

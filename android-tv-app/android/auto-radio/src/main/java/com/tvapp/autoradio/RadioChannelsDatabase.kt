@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [RadioChannelEntity::class],
-    version = 1,
+    version = 3,
     exportSchema = false,
 )
 abstract class RadioChannelsDatabase : RoomDatabase() {
@@ -28,6 +28,7 @@ abstract class RadioChannelsDatabase : RoomDatabase() {
                     DATABASE_NAME,
                 )
                     .createFromAsset(DATABASE_ASSET_PATH)
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }
             }
