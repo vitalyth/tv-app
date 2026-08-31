@@ -1789,6 +1789,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun finishPlayerPageClose() {
+        val shouldRestoreCatalog = shouldRenderCatalogAfterPlayerClose()
         isPlayerPageVisible = false
         isPlayerHiding = false
         headerContainer.visibility = View.VISIBLE
@@ -1804,8 +1805,18 @@ class MainActivity : AppCompatActivity() {
             width = ViewGroup.LayoutParams.MATCH_PARENT
             height = ViewGroup.LayoutParams.MATCH_PARENT
         }
-        updateMiniPlayerShortcut(activeStation, animateIn = false)
+        if (shouldRestoreCatalog) {
+            renderCatalogBehindPlayer(animateMiniPlayer = false)
+        } else {
+            updateMiniPlayerShortcut(activeStation, animateIn = false)
+        }
         updateElapsedTime()
+    }
+
+    private fun shouldRenderCatalogAfterPlayerClose(): Boolean {
+        return ::stationsContainer.isInitialized &&
+            !isCatalogLoading &&
+            stationsContainer.childCount == 0
     }
 
     private fun applyLibraryTabFilter(stations: List<RadioStation>): List<RadioStation> {
@@ -2754,8 +2765,8 @@ class MainActivity : AppCompatActivity() {
         return FrameLayout(this).apply {
             tag = favoriteButtonTag(station.id)
             applyFavoriteButtonState(isFavorite)
-            elevation = dp(8).toFloat()
-            translationZ = dp(3).toFloat()
+            elevation = 0f
+            translationZ = 0f
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
@@ -2765,7 +2776,7 @@ class MainActivity : AppCompatActivity() {
                 tag = "favorite_icon"
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 applyFavoriteIconState(isFavorite)
-            }, FrameLayout.LayoutParams(dp(27), dp(27), Gravity.CENTER))
+            }, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
         }
     }
 
@@ -2788,17 +2799,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun FrameLayout.applyFavoriteButtonState(isFavorite: Boolean) {
-        background = if (isFavorite) {
-            roundedRect(Color.rgb(255, 159, 28), 999f, Color.argb(210, 255, 228, 174), 2)
-        } else {
-            roundedRect(Color.argb(205, 12, 14, 20), 999f, Color.argb(135, 255, 255, 255), 2)
-        }
-        alpha = if (isFavorite) 1f else 0.96f
+        background = FavoriteStarFadeDrawable(
+            centerColor = Color.argb(if (isFavorite) 96 else 74, 0, 0, 0),
+            edgeColor = Color.TRANSPARENT,
+        )
+        alpha = 1f
     }
 
     private fun ImageView.applyFavoriteIconState(isFavorite: Boolean) {
         setImageResource(if (isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star)
-        setColorFilter(if (isFavorite) Color.rgb(26, 23, 18) else Color.WHITE)
+        setColorFilter(if (isFavorite) accentColor else Color.WHITE)
     }
 
     private fun favoriteButtonTag(stationId: String): String {
@@ -3835,6 +3845,41 @@ class MainActivity : AppCompatActivity() {
                 (Color.blue(color) * (1f - amount)).toInt().coerceIn(0, 255),
             )
         }
+    }
+
+    private class FavoriteStarFadeDrawable(
+        private val centerColor: Int,
+        private val edgeColor: Int,
+    ) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        override fun draw(canvas: Canvas) {
+            val cx = bounds.exactCenterX()
+            val cy = bounds.exactCenterY()
+            val radius = minOf(bounds.width(), bounds.height()) * 0.72f
+            paint.shader = RadialGradient(
+                cx,
+                cy,
+                radius,
+                intArrayOf(centerColor, centerColor, edgeColor),
+                floatArrayOf(0f, 0.28f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawCircle(cx, cy, radius, paint)
+            paint.shader = null
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+            invalidateSelf()
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            paint.colorFilter = colorFilter
+            invalidateSelf()
+        }
+
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
 
     private class AnimatedEqualizerView(
