@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from config import CACHE_DIR
-from epg_parsers.common import dedupe_and_sort_programs
+from epg_parsers.common import dedupe_and_sort_programs, program_names_match, resolve_overlapping_programs
 
 
 DEFAULT_EPG_DB_PATH = CACHE_DIR / "epg.sqlite"
@@ -190,35 +190,45 @@ def _delete_conflicting_programs(
     programs: list[dict[str, Any]],
 ) -> None:
     """
-    Remove stale rows only when the new import gives a better version of the
-    same schedule slot or the same named show moved inside the refreshed window.
+    Remove stale rows when the new import gives a better version of the same
+    schedule slot or a matching named program that moved inside the refreshed
+    window.
 
     This intentionally does not clear the whole channel/table. If a source
     returns partial data, unrelated existing programs remain available.
     """
     for program in programs:
-        con.execute(
+        rows = con.execute(
             """
-            DELETE FROM epg_programs
+            SELECT start, end, name
+            FROM epg_programs
             WHERE channel_id = ?
               AND NOT (start = ? AND end = ? AND name = ?)
-              AND (
-                (start = ? AND end = ?)
-                OR (name = ? AND start < ? AND end > ?)
-              )
+              AND start < ?
+              AND end > ?
             """,
             (
                 channel_id,
                 program["start"],
                 program["end"],
                 program["name"],
-                program["start"],
-                program["end"],
-                program["name"],
                 program["end"],
                 program["start"],
             ),
-        )
+        ).fetchall()
+        for row_start, row_end, row_name in rows:
+            same_slot = int(row_start) == program["start"] and int(row_end) == program["end"]
+            same_program = program_names_match(str(row_name), program["name"])
+            if not same_slot and not same_program:
+                continue
+
+            con.execute(
+                """
+                DELETE FROM epg_programs
+                WHERE channel_id = ? AND start = ? AND end = ? AND name = ?
+                """,
+                (channel_id, row_start, row_end, row_name),
+            )
 
 
 def load_channel_programs(
@@ -253,12 +263,12 @@ def load_channel_programs(
             SELECT start, end, name, description, image, data
             FROM epg_programs
             WHERE {' AND '.join(clauses)}
-            ORDER BY start, end, name
+            ORDER BY updated_at, start, end, name
             """,
             params,
         ).fetchall()
 
-    return [_row_to_program(row) for row in rows]
+    return resolve_overlapping_programs([_row_to_program(row) for row in rows])
 
 
 def load_all_epg(
@@ -294,7 +304,7 @@ def load_all_epg(
             SELECT channel_id, start, end, name, description, image, data
             FROM epg_programs
             {where}
-            ORDER BY channel_id, start, end, name
+            ORDER BY channel_id, updated_at, start, end, name
             """,
             params,
         ).fetchall()
@@ -302,7 +312,10 @@ def load_all_epg(
     epg: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         epg.setdefault(row["channel_id"], []).append(_row_to_program(row))
-    return epg
+    return {
+        channel_id: resolve_overlapping_programs(programs)
+        for channel_id, programs in epg.items()
+    }
 
 
 def _escape_like(value: str) -> str:

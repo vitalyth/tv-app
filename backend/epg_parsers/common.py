@@ -1,8 +1,12 @@
 import json
 import os
+import re
 from datetime import datetime, timedelta, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+
+MIN_PROGRAM_SECONDS = 60
 
 
 def dedupe_and_sort_programs(programs: list[dict]) -> list[dict]:
@@ -10,7 +14,88 @@ def dedupe_and_sort_programs(programs: list[dict]) -> list[dict]:
     for program in programs:
         key = (program["start"], program["end"], program["name"])
         deduped[key] = program
-    return sorted(deduped.values(), key=lambda program: (program["start"], program["end"], program["name"]))
+    return resolve_overlapping_programs(list(deduped.values()))
+
+
+def resolve_overlapping_programs(programs: list[dict]) -> list[dict]:
+    """
+    Keep a channel schedule linear when refreshed EPG data shifts times.
+
+    Callers pass older programs first and newer programs last. If two programs
+    overlap, the later item wins because it came from the newer schedule import.
+    """
+    accepted: list[dict] = []
+
+    for program in programs:
+        start = program["start"]
+        end = program["end"]
+        next_accepted: list[dict] = []
+        for existing in accepted:
+            if existing["end"] <= start or existing["start"] >= end:
+                next_accepted.append(existing)
+                continue
+
+            if program_names_match(existing.get("name", ""), program.get("name", "")):
+                continue
+
+            if existing["start"] < start and end < existing["end"]:
+                before = dict(existing)
+                before["end"] = start
+                if before["end"] - before["start"] >= MIN_PROGRAM_SECONDS:
+                    next_accepted.append(before)
+
+                after = dict(existing)
+                after["start"] = end
+                if after["end"] - after["start"] >= MIN_PROGRAM_SECONDS:
+                    next_accepted.append(after)
+                continue
+
+            if existing["start"] < start < existing["end"]:
+                trimmed = dict(existing)
+                trimmed["end"] = start
+                if trimmed["end"] - trimmed["start"] >= MIN_PROGRAM_SECONDS:
+                    next_accepted.append(trimmed)
+                continue
+
+            if existing["start"] < end < existing["end"]:
+                trimmed = dict(existing)
+                trimmed["start"] = end
+                if trimmed["end"] - trimmed["start"] >= MIN_PROGRAM_SECONDS:
+                    next_accepted.append(trimmed)
+                continue
+
+        accepted = next_accepted
+        accepted.append(program)
+
+    return sorted(accepted, key=lambda program: (program["start"], program["end"], program["name"]))
+
+
+def program_names_match(first: str, second: str) -> bool:
+    first_norm = _normalize_program_name(first)
+    second_norm = _normalize_program_name(second)
+    if not first_norm or not second_norm:
+        return False
+    if first_norm == second_norm:
+        return True
+    if len(first_norm) >= 8 and first_norm in second_norm:
+        return True
+    if len(second_norm) >= 8 and second_norm in first_norm:
+        return True
+
+    first_tokens = set(first_norm.split())
+    second_tokens = set(second_norm.split())
+    if not first_tokens or not second_tokens:
+        return False
+
+    overlap = len(first_tokens & second_tokens)
+    return overlap >= 2 and overlap / min(len(first_tokens), len(second_tokens)) >= 0.6
+
+
+def _normalize_program_name(name: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(name or "")).strip().casefold()
+    normalized = normalized.replace("...", " ")
+    normalized = re.sub(r"[\"'`.,:;!?()\[\]{}|/\\_-]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def fill_short_gaps(programs: list[dict], max_gap_seconds: int = 2 * 60 * 60) -> list[dict]:
