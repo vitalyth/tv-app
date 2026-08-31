@@ -2,6 +2,7 @@ package com.tvapp.autoradio
 
 import android.os.Build
 import android.text.Html
+import java.net.URLDecoder
 import java.nio.charset.Charset
 import java.util.Locale
 
@@ -117,8 +118,9 @@ class NowPlayingRepository {
         val rawFields = STREAM_KEY_VALUE_REGEX.findAll(compact)
             .associate { match ->
                 match.groupValues[1].lowercase(Locale.US) to match.groupValues[3].trim()
-            }
-        val hasAdvertisementMetadata = rawFields.keys.any { it in ADVERTISEMENT_METADATA_FIELDS } ||
+            } + compact.queryMetadataFields()
+        val hasAdvertisementMetadata = rawFields["songtype"]?.equals("A", ignoreCase = true) == true ||
+            rawFields.keys.any { it in ADVERTISEMENT_METADATA_FIELDS } ||
             TECHNICAL_METADATA_PARTS.any { compact.lowercase(Locale.US).contains(it) }
         val fields = rawFields
             .filterKeys { it !in IGNORED_METADATA_FIELDS }
@@ -175,6 +177,45 @@ class NowPlayingRepository {
         return substring(0, firstField)
     }
 
+    private fun String.queryMetadataFields(): Map<String, String> {
+        val query = queryMetadataText() ?: return emptyMap()
+        return query
+            .split('&')
+            .mapNotNull { part ->
+                val separatorIndex = part.indexOf('=')
+                if (separatorIndex <= 0) {
+                    return@mapNotNull null
+                }
+
+                val key = part.substring(0, separatorIndex)
+                    .trim()
+                    .lowercase(Locale.US)
+                    .takeIf { it.isNotBlank() }
+                    ?: return@mapNotNull null
+                val value = part.substring(separatorIndex + 1).decodeQueryField().trim()
+                if (value.isBlank()) null else key to value
+            }
+            .toMap()
+    }
+
+    private fun String.queryMetadataText(): String? {
+        listOf(indexOf('?'), indexOf('&'))
+            .filter { it >= 0 }
+            .minOrNull()
+            ?.let { index ->
+                val candidate = substring(index + 1)
+                if (QUERY_METADATA_REGEX.containsMatchIn(candidate)) {
+                    return candidate
+                }
+            }
+
+        return takeIf { QUERY_METADATA_REGEX.containsMatchIn(it) }
+    }
+
+    private fun String.decodeQueryField(): String {
+        return runCatching { URLDecoder.decode(this, "UTF-8") }.getOrDefault(this)
+    }
+
     private fun String.cleanDisplayMetadata(): String {
         return replace(Regex("\\s+[-–—|:]\\s*$"), "")
             .replace(Regex("\\s+"), " ")
@@ -214,7 +255,12 @@ class NowPlayingRepository {
         private val IGNORED_METADATA_FIELDS = setOf(
             "duration",
             "id",
+            "buycd",
+            "overlay",
+            "picture",
+            "streamurl",
             "url",
+            "website",
         ) + ADVERTISEMENT_METADATA_FIELDS
         private val IGNORED_TITLES = setOf("unknown", "live", "radio")
         private val IGNORED_TITLE_PARTS = listOf(
@@ -227,7 +273,9 @@ class NowPlayingRepository {
             "doubleclick",
             "googlesyndication",
             "pubads",
+            "streamurl",
             "vast",
         )
+        private val QUERY_METADATA_REGEX = Regex("""(?:^|&)[A-Za-z_][A-Za-z0-9_]*=""")
     }
 }

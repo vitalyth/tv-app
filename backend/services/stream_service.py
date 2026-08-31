@@ -41,6 +41,11 @@ def get_stream(channel):
         custom_stream = get_custom_channel_stream(custom_channel)
         if custom_stream:
             return custom_stream
+
+    link_details = getattr(channel, "linkDetails", None) or {}
+    direct_stream = link_details.get("link") or link_details.get("live")
+    if getattr(channel, "type", None) == "radio" and direct_stream:
+        return direct_stream
     
     xbmcplugin.clearStream()
 

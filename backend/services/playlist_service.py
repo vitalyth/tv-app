@@ -15,7 +15,11 @@ def get_channel_number(channel: dict, channel_model: Channel) -> str:
 
 
 def generate_playlist(base_url, use_api_prefix=True, use_vpn_routes=True):
-    channels = merge_custom_channels(idan_main.GetUserChannels(type='tv'))
+    channels = [
+        channel
+        for channel in merge_custom_channels(idan_main.GetUserChannels(type='tv'))
+        if channel.get("type") == "tv"
+    ]
     lines = ["#EXTM3U"]
 
     for channel in channels:

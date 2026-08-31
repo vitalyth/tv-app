@@ -72,6 +72,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private var currentMediaItemChangedAtMs: Long = 0L
     private var playbackRetryCount = 0
     private var pendingPlaybackRetry: Runnable? = null
+    private var playbackErrorMessage: String? = null
     private val castSessionListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarting(session: CastSession) {
             Log.d(LOG_TAG, "Cast session starting")
@@ -187,6 +188,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     when (playbackState) {
                         Player.STATE_READY -> {
+                            playbackErrorMessage = null
                             clearPendingPlaybackRetry(resetCount = true)
                             moveCurrentStationToCastIfConnected()
                             notifyPlaybackStateChanged()
@@ -222,10 +224,9 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
                 override fun onPlayerError(error: PlaybackException) {
                     Log.w(LOG_TAG, "Playback error: ${error.errorCodeName}", error)
+                    playbackErrorMessage = error.message?.takeIf { it.isNotBlank() } ?: error.errorCodeName
                     val willRetry = schedulePlaybackRetry("playback error ${error.errorCodeName}")
-                    if (!willRetry) {
-                        notifyPlaybackStateChanged()
-                    }
+                    notifyPlaybackStateChanged()
                 }
             })
         }
@@ -341,9 +342,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         val metadata = CastMediaMetadata(CastMediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
             putString(CastMediaMetadata.KEY_TITLE, station.name)
             putString(CastMediaMetadata.KEY_ARTIST, nowPlaying?.title ?: localizedString(R.string.no_info))
-            station.logo?.takeIf { it.isNotBlank() }?.let { logo ->
-                addImage(WebImage(resolveArtworkUri(logo)))
-            }
+            addImage(WebImage(stationArtworkUri(station.logo)))
         }
 
         val mediaInfo = MediaInfo.Builder(repository.streamUriFor(station.id).toString())
@@ -403,6 +402,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun resumeLocalPlayback(station: RadioStation) {
         Log.d(LOG_TAG, "Resuming local playback: ${station.id}")
+        playbackErrorMessage = null
         clearPendingPlaybackRetry(resetCount = true)
         player.setMediaItem(station.toMediaItem())
         player.prepare()
@@ -411,6 +411,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun stopLocalPlayback() {
         Log.d(LOG_TAG, "Stopping local playback")
+        playbackErrorMessage = null
         clearPendingPlaybackRetry(resetCount = true)
         player.pause()
         player.stop()
@@ -419,6 +420,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun pauseLocalPlaybackForCast() {
         Log.d(LOG_TAG, "Pausing local playback for Cast")
+        playbackErrorMessage = null
         clearPendingPlaybackRetry(resetCount = true)
         player.pause()
         player.playWhenReady = false
@@ -516,6 +518,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             isPlaying = false,
             hasMediaItem = false,
             audioSessionId = INVALID_AUDIO_SESSION_ID,
+            playbackErrorMessage = null,
         )
         sendBroadcast(
             Intent(ACTION_PLAYBACK_STOPPED).apply {
@@ -528,7 +531,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         val stationId = player.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
         val hasMediaItem = player.currentMediaItem != null
         val audioSessionId = if (hasMediaItem) validAudioSessionId(player.audioSessionId) else INVALID_AUDIO_SESSION_ID
-        savePlaybackState(stationId, player.isPlaying, hasMediaItem, audioSessionId)
+        savePlaybackState(stationId, player.isPlaying, hasMediaItem, audioSessionId, playbackErrorMessage)
         sendBroadcast(
             Intent(ACTION_PLAYBACK_STATE_CHANGED).apply {
                 setPackage(packageName)
@@ -536,6 +539,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 putExtra(EXTRA_IS_PLAYING, player.isPlaying)
                 putExtra(EXTRA_HAS_MEDIA_ITEM, hasMediaItem)
                 putExtra(EXTRA_AUDIO_SESSION_ID, audioSessionId)
+                playbackErrorMessage?.let { putExtra(EXTRA_PLAYBACK_ERROR_MESSAGE, it) }
             }
         )
     }
@@ -545,6 +549,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         isPlaying: Boolean,
         hasMediaItem: Boolean,
         audioSessionId: Int,
+        playbackErrorMessage: String?,
     ) {
         getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE)
             .edit()
@@ -552,6 +557,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
             .putBoolean(EXTRA_IS_PLAYING, isPlaying)
             .putBoolean(EXTRA_HAS_MEDIA_ITEM, hasMediaItem)
             .putInt(EXTRA_AUDIO_SESSION_ID, audioSessionId)
+            .putString(EXTRA_PLAYBACK_ERROR_MESSAGE, playbackErrorMessage)
             .putLong(EXTRA_UPDATED_AT_MS, System.currentTimeMillis())
             .apply()
     }
@@ -563,6 +569,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun pauseActivePlayback() {
         Log.d(LOG_TAG, "Pausing active playback")
+        playbackErrorMessage = null
         clearPendingPlaybackRetry(resetCount = true)
         try {
             val remoteClient = castSession?.remoteMediaClient
@@ -577,6 +584,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
 
     private fun playActivePlayback() {
         Log.d(LOG_TAG, "Playing active playback")
+        playbackErrorMessage = null
         val activeCastSession = castSession?.takeIf { it.isConnected }
             ?: castContext?.sessionManager?.currentCastSession?.takeIf { it.isConnected }
 
@@ -1156,6 +1164,17 @@ class RadioMediaLibraryService : MediaLibraryService() {
         return Uri.parse("android.resource://$packageName/${R.drawable.ic_settings}")
     }
 
+    private fun defaultStationArtworkUri(): Uri {
+        return Uri.parse("android.resource://$packageName/${R.drawable.ic_radio}")
+    }
+
+    private fun stationArtworkUri(logo: String?): Uri {
+        return logo
+            ?.takeIf { it.isNotBlank() }
+            ?.let { resolveArtworkUri(it) }
+            ?: defaultStationArtworkUri()
+    }
+
     private fun RadioStation.toMediaItem(
         contentStyle: Int = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM,
         groupTitle: String? = null,
@@ -1187,7 +1206,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 }
             )
 
-        logo?.let { metadataBuilder.setArtworkUri(resolveArtworkUri(it)) }
+        metadataBuilder.setArtworkUri(stationArtworkUri(logo))
 
         val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(id)
@@ -1507,6 +1526,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         const val EXTRA_IS_PLAYING = "is_playing"
         const val EXTRA_HAS_MEDIA_ITEM = "has_media_item"
         const val EXTRA_AUDIO_SESSION_ID = "audio_session_id"
+        const val EXTRA_PLAYBACK_ERROR_MESSAGE = "playback_error_message"
         const val EXTRA_UPDATED_AT_MS = "updated_at_ms"
         const val INVALID_AUDIO_SESSION_ID = 0
         const val PLAYBACK_STATE_PREFS = "radio_playback_state"

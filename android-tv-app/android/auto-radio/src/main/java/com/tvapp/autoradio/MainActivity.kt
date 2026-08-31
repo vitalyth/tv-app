@@ -101,6 +101,7 @@ class MainActivity : AppCompatActivity() {
         private const val EXTRA_IS_PLAYING = "is_playing"
         private const val EXTRA_HAS_MEDIA_ITEM = "has_media_item"
         private const val EXTRA_AUDIO_SESSION_ID = "audio_session_id"
+        private const val EXTRA_PLAYBACK_ERROR_MESSAGE = "playback_error_message"
         private const val EXTRA_UPDATED_AT_MS = "updated_at_ms"
         private const val PLAYBACK_STATE_PREFS = "radio_playback_state"
         private const val SAVED_PLAYBACK_STATE_MAX_AGE_MS = 6 * 60 * 60 * 1_000L
@@ -232,6 +233,7 @@ class MainActivity : AppCompatActivity() {
     private var isLoadingStationBatch = false
     private var isActiveStationLoading = false
     private var isActiveStationPaused = false
+    private var activePlaybackErrorMessage: String? = null
     private var isSwitchingStation = false
     private var isPlayerHiding = false
     private var isUserStoppingPlayback = false
@@ -371,7 +373,9 @@ class MainActivity : AppCompatActivity() {
                                 }
                                 Player.STATE_ENDED,
                                 Player.STATE_IDLE -> {
-                                    if (!isSwitchingStation) {
+                                    if (activePlaybackErrorMessage != null && currentMediaItem != null) {
+                                        syncPlaybackErrorFromController(activePlaybackErrorMessage)
+                                    } else if (!isSwitchingStation) {
                                         syncStoppedPlaybackFromController()
                                     }
                                 }
@@ -392,6 +396,7 @@ class MainActivity : AppCompatActivity() {
                             } else if (
                                 !isSwitchingStation &&
                                 activeStation != null &&
+                                activePlaybackErrorMessage == null &&
                                 (!mediaController.playWhenReady ||
                                     mediaController.playbackState == Player.STATE_IDLE ||
                                     mediaController.playbackState == Player.STATE_ENDED)
@@ -405,11 +410,7 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
-                            showStatus(
-                                localizedString(R.string.playback_error, error.message ?: error.errorCodeName),
-                                showRetry = false,
-                            )
-                            stopElapsedTimer(resetText = false)
+                            syncPlaybackErrorFromController(error.message ?: error.errorCodeName)
                         }
                     })
                     syncControllerStateIntoUi()
@@ -501,7 +502,11 @@ class MainActivity : AppCompatActivity() {
         currentAudioSessionId = validAudioSessionId(
             prefs.getInt(EXTRA_AUDIO_SESSION_ID, INVALID_AUDIO_SESSION_ID),
         )
-        applyExternalPlaybackState(station, prefs.getBoolean(EXTRA_IS_PLAYING, false))
+        applyExternalPlaybackState(
+            station,
+            prefs.getBoolean(EXTRA_IS_PLAYING, false),
+            prefs.getString(EXTRA_PLAYBACK_ERROR_MESSAGE, null),
+        )
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -1743,7 +1748,7 @@ class MainActivity : AppCompatActivity() {
     private fun closePlayerPageWithAnimation() {
         if (!isPlayerPageVisible || activeStation == null || !::playerContainer.isInitialized) {
             isPlayerPageVisible = false
-            renderStations()
+            finishPlayerPageClose()
             return
         }
 
@@ -1771,9 +1776,7 @@ class MainActivity : AppCompatActivity() {
                         playerContainer.translationY = 0f
                         playerContainer.alpha = 1f
                         playerContainer.visibility = View.GONE
-                        isPlayerPageVisible = false
-                        isPlayerHiding = false
-                        renderStations()
+                        finishPlayerPageClose()
                     }
 
                     override fun onAnimationCancel(animation: Animator) {
@@ -1783,6 +1786,26 @@ class MainActivity : AppCompatActivity() {
                 })
                 .start()
         }
+    }
+
+    private fun finishPlayerPageClose() {
+        isPlayerPageVisible = false
+        isPlayerHiding = false
+        headerContainer.visibility = View.VISIBLE
+        filterPanel.visibility = View.VISIBLE
+        scrollView.visibility = View.VISIBLE
+        bottomNavContainer.visibility = View.VISIBLE
+        playerContainer.animate().cancel()
+        playerContainer.setLayerType(View.LAYER_TYPE_NONE, null)
+        playerContainer.translationY = 0f
+        playerContainer.alpha = 1f
+        playerContainer.visibility = View.GONE
+        playerContainer.layoutParams = playerContainer.layoutParams.apply {
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = ViewGroup.LayoutParams.MATCH_PARENT
+        }
+        updateMiniPlayerShortcut(activeStation, animateIn = false)
+        updateElapsedTime()
     }
 
     private fun applyLibraryTabFilter(stations: List<RadioStation>): List<RadioStation> {
@@ -2884,6 +2907,7 @@ class MainActivity : AppCompatActivity() {
     private fun toggleActivePlayback(station: RadioStation) {
         activeStation = station
         if (isActiveStationPaused) {
+            activePlaybackErrorMessage = null
             val controllerMediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
             if (controllerMediaId != station.id) {
                 playStation(station)
@@ -2901,6 +2925,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playStation(station: RadioStation, refreshLive: Boolean = false) {
+        activePlaybackErrorMessage = null
         hideStatus()
         rememberStation(station)
         val shouldAnimatePlayerIn = activeStation == null || playerContainer.visibility != View.VISIBLE
@@ -3044,6 +3069,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopPlayback() {
         isUserStoppingPlayback = true
+        activePlaybackErrorMessage = null
         isActiveStationPaused = false
         startService(Intent(this, RadioMediaLibraryService::class.java).setAction(ACTION_DISCONNECT_OUTPUT))
         controller?.run {
@@ -3090,10 +3116,18 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        applyExternalPlaybackState(station, intent.getBooleanExtra(EXTRA_IS_PLAYING, false))
+        applyExternalPlaybackState(
+            station,
+            intent.getBooleanExtra(EXTRA_IS_PLAYING, false),
+            intent.getStringExtra(EXTRA_PLAYBACK_ERROR_MESSAGE),
+        )
     }
 
-    private fun applyExternalPlaybackState(station: RadioStation, isPlaying: Boolean) {
+    private fun applyExternalPlaybackState(
+        station: RadioStation,
+        isPlaying: Boolean,
+        playbackErrorMessage: String? = null,
+    ) {
         val wasDifferentStation = activeStation?.id != station.id
         activeStation = station
         requestedStationId = station.id
@@ -3101,8 +3135,10 @@ class MainActivity : AppCompatActivity() {
         rememberStation(station)
         isActiveStationPaused = !isPlaying
         isActiveStationLoading = false
+        activePlaybackErrorMessage = playbackErrorMessage?.takeIf { it.isNotBlank() }
 
         if (isPlaying && (playStartedAtMs <= 0L || wasDifferentStation)) {
+            activePlaybackErrorMessage = null
             playStartedAtMs = System.currentTimeMillis()
             startElapsedTimer()
         } else if (!isPlaying) {
@@ -3116,7 +3152,9 @@ class MainActivity : AppCompatActivity() {
             releaseAudioVisualizer()
         }
 
+        isPlayerPageVisible = !isPlayerPageDismissedByUser || activePlaybackErrorMessage != null
         renderStations(animatePlayerIn = false)
+        activePlaybackErrorMessage?.let { showPlaybackError(it) }
     }
 
     private fun handleExternalPlaybackStopped() {
@@ -3125,6 +3163,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         currentAudioSessionId = INVALID_AUDIO_SESSION_ID
+        activePlaybackErrorMessage = null
         clearActivePlaybackState()
         if (::playerContainer.isInitialized && ::stationsContainer.isInitialized && !isCatalogLoading) {
             renderStations()
@@ -3138,6 +3177,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncStoppedPlaybackFromController() {
+        activePlaybackErrorMessage = null
         releaseAudioVisualizer()
         if (!isPlayerHiding) {
             hideActivePlayerWithAnimation()
@@ -3158,12 +3198,14 @@ class MainActivity : AppCompatActivity() {
         isPlayerPageVisible = !isPlayerPageDismissedByUser
         isActiveStationLoading = true
         isActiveStationPaused = false
+        activePlaybackErrorMessage = null
         hideStatus()
         renderStations(animatePlayerIn = isPlayerPageVisible && playerContainer.visibility != View.VISIBLE)
         showActiveStationLoading()
     }
 
     private fun syncReadyFromController() {
+        activePlaybackErrorMessage = null
         isActiveStationLoading = false
         if (controller?.isPlaying == true || !isActiveStationPaused) {
             syncPlayingFromController()
@@ -3182,6 +3224,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncPlayingFromController() {
+        activePlaybackErrorMessage = null
         isActiveStationPaused = false
         syncActiveStationFromController()
         refreshAudioSessionIdFromSavedState()
@@ -3218,8 +3261,36 @@ class MainActivity : AppCompatActivity() {
             playStartedAtMs = System.currentTimeMillis()
         }
         isActiveStationLoading = false
-        hideStatus()
+        if (activePlaybackErrorMessage == null) {
+            hideStatus()
+        }
         renderStations(animatePlayerIn = isPlayerPageVisible && (previousId == null || playerContainer.visibility != View.VISIBLE))
+    }
+
+    private fun syncPlaybackErrorFromController(message: String?) {
+        val mediaId = controller?.currentMediaItem?.mediaId?.takeIf { it.isNotBlank() }
+            ?: activeStation?.id
+            ?: return
+        val station = allStations.firstOrNull { it.id == mediaId } ?: activeStation ?: return
+        activeStation = station
+        requestedStationId = station.id
+        pendingControllerStationId = null
+        activePlaybackErrorMessage = message?.takeIf { it.isNotBlank() } ?: localizedString(R.string.no_info)
+        isActiveStationLoading = false
+        isActiveStationPaused = true
+        isPlayerPageDismissedByUser = false
+        isPlayerPageVisible = true
+        stopElapsedTimer(resetText = false)
+        releaseAudioVisualizer()
+        renderStations(animatePlayerIn = playerContainer.visibility != View.VISIBLE)
+        showPlaybackError(activePlaybackErrorMessage)
+    }
+
+    private fun showPlaybackError(message: String?) {
+        showStatus(
+            localizedString(R.string.playback_error, message?.takeIf { it.isNotBlank() } ?: localizedString(R.string.no_info)),
+            showRetry = false,
+        )
     }
 
     private fun scrollToTop() {
@@ -3252,7 +3323,7 @@ class MainActivity : AppCompatActivity() {
         val logoUrl = station.logo
         if (logoUrl.isNullOrBlank()) {
             imageView.tag = null
-            imageView.setImageDrawable(logoFallback())
+            imageView.setImageResource(R.drawable.ic_radio)
             return
         }
 
@@ -3262,7 +3333,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        imageView.setImageDrawable(logoFallback())
+        imageView.setImageResource(R.drawable.ic_radio)
         logoExecutor.execute {
             try {
                 val connection = URL(logoUrl).openConnection() as HttpURLConnection
@@ -3283,15 +3354,11 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 mainHandler.post {
                     if (imageView.tag == logoUrl) {
-                        imageView.setImageDrawable(logoFallback())
+                        imageView.setImageResource(R.drawable.ic_radio)
                     }
                 }
             }
         }
-    }
-
-    private fun logoFallback(): Drawable {
-        return roundedRect(elevatedSurfaceColor, 18f, borderColor, 1)
     }
 
     private fun startElapsedTimer() {

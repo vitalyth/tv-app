@@ -20,9 +20,9 @@ export function useRadioNowPlaying(channel?: Channel | null) {
     activeRadioStationId ? ["radio-now-playing", activeRadioStationId] : null,
     ([, channelId]: [string, string]) => channelService.getRadioNowPlaying(channelId),
     {
-      refreshInterval: 20 * 1000,
+      refreshInterval: 10 * 1000,
       revalidateOnFocus: true,
-      dedupingInterval: 5000,
+      dedupingInterval: 1000,
     },
   );
 }

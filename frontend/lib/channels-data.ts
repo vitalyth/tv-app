@@ -39,6 +39,7 @@ export interface Channel {
   mode: number
   linkDetails: LinkDetails
   type: string
+  group?: string
   programs: Program[]
   tvgID?: string
   channelNumber?: string

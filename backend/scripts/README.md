@@ -2,10 +2,75 @@
 
 Tools for preparing local TV series for tv-app streaming.
 
+## Radio Browser DB Scanner
+
+Build a local SQLite station database from Radio Browser and merge the current
+app stations into it:
+
+```bash
+python3 scripts/radio_browser_db_scanner.py scan
+```
+
+Scan the full Radio Browser catalog:
+
+```bash
+python3 scripts/radio_browser_db_scanner.py scan --all-countries
+```
+
+Useful development run:
+
+```bash
+python3 scripts/radio_browser_db_scanner.py scan --limit-per-country 25
+```
+
+Build the app catalog in one command:
+
+```bash
+python3 scripts/radio_browser_db_scanner.py scan-app-catalog
+```
+
+This command scans:
+
+- all Israel stations
+- local stations by the configured country/state or city terms
+- only the most popular world stations
+- every station already used by the app
+
+The default output is:
+
+```text
+db/radio_stations.db
+```
+
+The scanner stores the full Radio Browser station payload in `raw_json`, keeps
+the station's original name, adds an English/search name, and merges matching
+local stations by stream URL or station name to avoid duplicates.
+
+Export the app-ready Android DB subset:
+
+```bash
+python3 scripts/radio_browser_db_scanner.py export-android
+```
+
+The Android export includes:
+
+- all Israel stations
+- local stations for the configured city/state terms
+- popular world stations only
+- every existing app station
+- duplicate stations are collapsed by stream URL and normalized station name
+
+The default Android output is:
+
+```text
+../android-tv-app/android/auto-radio/src/main/assets/databases/radio_channels.db
+```
+
 ## Files
 
 - `rename_tv_episodes.py` — Rename and organize TV episode files
 - `convert_local_series_to_hls.py` — Convert local video files to HLS for streaming
+- `radio_browser_db_scanner.py` — Build the local radio station DB from Radio Browser
 
 ---
 

@@ -3,12 +3,33 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import parse_qsl, unquote
 
 STREAM_TITLE_RE = re.compile(r"StreamTitle='(.*)';", re.IGNORECASE)
 STREAM_KEY_VALUE_RE = re.compile(r"""\b([A-Za-z_][A-Za-z0-9_]*)=(["'])(.*?)\2""")
 STREAM_KEY_VALUE_FIELDS_RE = re.compile(r"""\s+\w+=(["']).*?\1""")
+ADVERTISEMENT_TEXT = "Advertisement"
+ADVERTISEMENT_METADATA_FIELDS = {
+    "ad",
+    "adcontext",
+    "adid",
+    "adtitle",
+    "advertisement",
+    "breakid",
+    "commercial",
+    "spot",
+}
+IGNORED_METADATA_FIELDS = {"duration", "id", "url", "website", "picture", "overlay", "buycd"} | ADVERTISEMENT_METADATA_FIELDS
 IGNORED_TITLES = {"unknown", "live", "radio"}
 IGNORED_TITLE_PARTS = ("powered by", "cdn", "multix")
+TECHNICAL_METADATA_PARTS = (
+    "adcontext",
+    "doubleclick",
+    "googlesyndication",
+    "pubads",
+    "streamurl",
+    "vast",
+)
 METADATA_CACHE_TTL_SECONDS = 20 * 60
 _now_playing_cache: dict[str, tuple[float, "NowPlayingInfo"]] = {}
 
@@ -140,13 +161,40 @@ def _parse_icy_stream_info(value: str) -> Optional[NowPlayingInfo]:
     if not compact:
         return None
 
+    fields = _parse_metadata_fields(compact)
+    is_advertisement = _is_advertisement_metadata(fields)
+    if _is_explicit_advertisement_metadata(fields):
+        return NowPlayingInfo(title=ADVERTISEMENT_TEXT)
+
     fields = {
-        match.group(1).lower(): match.group(3).strip()
-        for match in STREAM_KEY_VALUE_RE.finditer(compact)
+        key: field_value
+        for key, field_value in fields.items()
+        if key not in IGNORED_METADATA_FIELDS and not _is_likely_technical_metadata_value(field_value)
     }
+    if not fields and _is_likely_technical_metadata_value(compact):
+        return None
+
     program = _first_value(fields, "program", "show", "showname", "programname", "program_name")
     song = _first_value(fields, "text", "title", "song", "track", "cue_title")
     artist = _first_value(fields, "artist", "trackartist", "track_artist", "cue_artist")
+
+    if is_advertisement and not song and not artist:
+        return NowPlayingInfo(title=ADVERTISEMENT_TEXT)
+
+    if artist and song:
+        return NowPlayingInfo(
+            title=_clean_display_metadata(f"{artist} - {song}"),
+            detail=_clean_display_metadata(program) if program else None,
+        )
+
+    if song:
+        title = _clean_display_metadata(song)
+        return NowPlayingInfo(title=title, detail=_clean_display_metadata(program) if program else None)
+
+    quoted_fields = {
+        match.group(1).lower(): match.group(3).strip()
+        for match in STREAM_KEY_VALUE_RE.finditer(compact)
+    }
 
     if not artist:
         field_match = STREAM_KEY_VALUE_RE.search(compact)
@@ -155,11 +203,15 @@ def _parse_icy_stream_info(value: str) -> Optional[NowPlayingInfo]:
         if not _is_useful_now_playing_text(artist):
             artist = None
 
-    if song:
-        title = _clean_display_metadata(" - ".join(part for part in (artist, song) if part))
+    quoted_song = _first_value(quoted_fields, "text", "title", "song", "track", "cue_title")
+    quoted_artist = _first_value(quoted_fields, "artist", "trackartist", "track_artist", "cue_artist")
+    if quoted_song:
+        title = _clean_display_metadata(" - ".join(part for part in (quoted_artist, quoted_song) if part))
         return NowPlayingInfo(title=title, detail=_clean_display_metadata(program) if program else None)
 
     cleaned = _clean_display_metadata(STREAM_KEY_VALUE_FIELDS_RE.sub("", compact))
+    if _is_likely_technical_metadata_value(cleaned):
+        cleaned = ""
     if cleaned:
         return NowPlayingInfo(title=cleaned, detail=_clean_display_metadata(program) if program else None)
 
@@ -167,6 +219,67 @@ def _parse_icy_stream_info(value: str) -> Optional[NowPlayingInfo]:
         return NowPlayingInfo(title=_clean_display_metadata(program))
 
     return None
+
+
+def _parse_metadata_fields(value: str) -> dict[str, str]:
+    fields = {
+        match.group(1).lower(): _clean_field_value(match.group(3))
+        for match in STREAM_KEY_VALUE_RE.finditer(value)
+    }
+
+    query_start = _query_start_index(value)
+    if query_start is not None:
+        for key, field_value in parse_qsl(value[query_start:], keep_blank_values=False):
+            normalized_key = key.strip().lower()
+            if normalized_key and normalized_key not in fields:
+                fields[normalized_key] = _clean_field_value(field_value)
+
+    return fields
+
+
+def _query_start_index(value: str) -> int | None:
+    for marker in ("?", "&"):
+        index = value.find(marker)
+        if index >= 0 and re.search(r"[?&][A-Za-z_][A-Za-z0-9_]*=", value[index:]):
+            return index + 1
+
+    if re.search(r"^[A-Za-z_][A-Za-z0-9_]*=", value):
+        return 0
+
+    return None
+
+
+def _clean_field_value(value: str) -> str:
+    return _clean_display_metadata(unquote(value.replace("+", " ")))
+
+
+def _is_advertisement_metadata(fields: dict[str, str]) -> bool:
+    if _is_explicit_advertisement_metadata(fields):
+        return True
+
+    return any(key in fields and fields[key] for key in ADVERTISEMENT_METADATA_FIELDS)
+
+
+def _is_explicit_advertisement_metadata(fields: dict[str, str]) -> bool:
+    return (fields.get("songtype") or "").strip().lower() == "a"
+
+
+def _is_likely_technical_metadata_value(value: Optional[str]) -> bool:
+    normalized = (value or "").strip()
+    lower = normalized.lower()
+    if not normalized:
+        return False
+
+    if any(part in lower for part in TECHNICAL_METADATA_PARTS):
+        return True
+
+    compact = re.sub(r"\s+", "", normalized)
+    base64_like_chars = sum(
+        1
+        for char in compact
+        if char.isalnum() or char in {"+", "/", "=", "-", "_"}
+    )
+    return len(compact) >= 32 and base64_like_chars / len(compact) >= 0.95
 
 
 def _first_value(fields: dict[str, str], *keys: str) -> Optional[str]:

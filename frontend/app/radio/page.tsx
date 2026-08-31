@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Play, Radio, RefreshCw, Search } from "lucide-react";
 import { PageMain } from "@/components/page-main";
@@ -12,6 +12,15 @@ import { resolveImageSrc } from "@/lib/image-urls";
 import { cn } from "@/lib/utils";
 import { channelService } from "@/lib/services/channel-service";
 import { radioNowPlayingText, type RadioNowPlaying, useRadioNowPlaying } from "@/hooks/useRadioNowPlaying";
+
+const PAGE_SIZE = 48;
+
+const RADIO_GROUPS = [
+    { value: "", label: "הכל" },
+    { value: "local", label: "מקומי" },
+    { value: "israelis", label: "ישראלי" },
+    { value: "world", label: "עולמי" },
+] as const;
 
 const fetchRadioChannels = async (): Promise<Channel[]> => {
     return await channelService.getRadioChannels();
@@ -86,6 +95,9 @@ function RadioStationCard({
 
 export default function RadioPage() {
     const [searchQuery, setSearchQuery] = useState("");
+    const [selectedGroup, setSelectedGroup] = useState("");
+    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+    const loadMoreRef = useRef<HTMLDivElement | null>(null);
     const { currentChannel, play } = usePlayer();
     const activeRadioStationId = currentChannel?.type === "radio" && currentChannel.id ? currentChannel.id : null;
     const {
@@ -102,14 +114,50 @@ export default function RadioPage() {
 
     const filteredStations = useMemo(() => {
         const query = searchQuery.trim().toLowerCase();
-        if (!query) return stations;
 
         return stations.filter((station) =>
-            [station.name, station.module, station.category]
-                .filter(Boolean)
-                .some((value) => value.toLowerCase().includes(query))
+            (!selectedGroup || station.group === selectedGroup) &&
+            (!query ||
+                [station.name, station.module, station.category, station.group]
+                    .filter((value): value is string => Boolean(value))
+                    .some((value) => value.toLowerCase().includes(query)))
         );
-    }, [searchQuery, stations]);
+    }, [searchQuery, selectedGroup, stations]);
+
+    const visibleStations = useMemo(
+        () => filteredStations.slice(0, visibleCount),
+        [filteredStations, visibleCount]
+    );
+    const hasMore = visibleStations.length < filteredStations.length;
+
+    const groupCounts = useMemo(() => {
+        return stations.reduce<Record<string, number>>((counts, station) => {
+            const group = station.group || "israelis";
+            counts[group] = (counts[group] || 0) + 1;
+            return counts;
+        }, {});
+    }, [stations]);
+
+    useEffect(() => {
+        setVisibleCount(PAGE_SIZE);
+    }, [searchQuery, selectedGroup]);
+
+    useEffect(() => {
+        const node = loadMoreRef.current;
+        if (!node || !hasMore) return;
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    setVisibleCount((count) => Math.min(count + PAGE_SIZE, filteredStations.length));
+                }
+            },
+            { rootMargin: "320px" }
+        );
+
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [filteredStations.length, hasMore, visibleStations.length]);
 
     const handleRefresh = useCallback(() => {
         return mutate();
@@ -127,8 +175,8 @@ export default function RadioPage() {
 
     return (
         <PageMain className="px-4 py-6">
-            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="relative w-full sm:max-w-md">
+            <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="relative w-full lg:max-w-md">
                     <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                         value={searchQuery}
@@ -138,15 +186,41 @@ export default function RadioPage() {
                     />
                 </div>
 
-                <Button
-                    type="button"
-                    onClick={handleRefresh}
-                    disabled={isValidating}
-                    className="h-10 shrink-0"
-                >
-                    <RefreshCw className={cn("h-4 w-4", isValidating && "animate-spin")} />
-                    רענן
-                </Button>
+                <div className="flex min-w-0 items-center gap-2">
+                    <div className="min-w-0 flex-1 overflow-x-auto scrollbar-hide">
+                        <div className="flex w-max gap-2">
+                            {RADIO_GROUPS.map((group) => {
+                                const count = group.value ? groupCounts[group.value] || 0 : stations.length;
+                                return (
+                                    <Button
+                                        key={group.value || "all"}
+                                        type="button"
+                                        variant={selectedGroup === group.value ? "default" : "outline"}
+                                        size="sm"
+                                        aria-pressed={selectedGroup === group.value}
+                                        onClick={() => setSelectedGroup(group.value)}
+                                        className="h-10 whitespace-nowrap"
+                                    >
+                                        {group.label}
+                                        <span className="rounded-full bg-background/30 px-1.5 text-[11px]">
+                                            {count}
+                                        </span>
+                                    </Button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <Button
+                        type="button"
+                        onClick={handleRefresh}
+                        disabled={isValidating}
+                        className="h-10 shrink-0"
+                    >
+                        <RefreshCw className={cn("h-4 w-4", isValidating && "animate-spin")} />
+                        רענן
+                    </Button>
+                </div>
             </div>
 
             {isLoading ? (
@@ -161,17 +235,29 @@ export default function RadioPage() {
                     </Button>
                 </div>
             ) : filteredStations.length ? (
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                    {filteredStations.map((station) => (
-                        <RadioStationCard
-                            key={station.id}
-                            station={station}
-                            isActive={currentChannel?.id === station.id}
-                            nowPlaying={currentChannel?.id === station.id ? nowPlaying : null}
-                            onPlay={handlePlay}
-                        />
-                    ))}
-                </div>
+                <>
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                        {visibleStations.map((station) => (
+                            <RadioStationCard
+                                key={station.id}
+                                station={station}
+                                isActive={currentChannel?.id === station.id}
+                                nowPlaying={currentChannel?.id === station.id ? nowPlaying : null}
+                                onPlay={handlePlay}
+                            />
+                        ))}
+                    </div>
+
+                    <div ref={loadMoreRef} className="flex h-16 items-center justify-center">
+                        {hasMore ? (
+                            <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
+                        ) : (
+                            <span className="text-xs text-muted-foreground">
+                                {visibleStations.length} מתוך {filteredStations.length}
+                            </span>
+                        )}
+                    </div>
+                </>
             ) : (
                 <div className="flex min-h-72 items-center justify-center text-muted-foreground">
                     לא נמצאו תחנות

@@ -5,6 +5,7 @@ import mimetypes
 import os
 import re
 import requests
+import sqlite3
 import time
 import threading
 from contextlib import contextmanager
@@ -34,6 +35,20 @@ CHANNEL_LOGO_FALLBACKS = {
     "ch_free_food": "freetv-food.webp",
 }
 CHANNEL_LOGO_PUBLIC_DIR = Path(os.getenv("CHANNEL_LOGO_PUBLIC_DIR", BASE_DIR.parent / "frontend" / "public" / "ch"))
+RADIO_CHANNELS_DB_PATH = Path(
+    os.getenv(
+        "RADIO_CHANNELS_DB_PATH",
+        BASE_DIR.parent
+        / "android-tv-app"
+        / "android"
+        / "auto-radio"
+        / "src"
+        / "main"
+        / "assets"
+        / "databases"
+        / "radio_channels.db",
+    )
+)
 IDANPLUS_LOGO_DEFAULT_CACHE_DIR = (
     CHANNEL_LOGO_PUBLIC_DIR
     if CHANNEL_LOGO_PUBLIC_DIR.exists()
@@ -458,6 +473,8 @@ def get_channel_logo(channel: dict) -> str:
     image = str(channel.get("image") or channel.get("logo") or "").strip()
     if image:
         if _is_remote_image(image):
+            if channel.get("type") == "radio":
+                return _existing_local_channel_logo(image) or image
             return cache_remote_channel_logo(channel_id, image)
         return image
     return CHANNEL_LOGO_FALLBACKS.get(channel_id, "live.jpg")
@@ -526,8 +543,75 @@ def get_live_channels():
 
 
 def get_radio_channels():
+    db_channels = _load_radio_channels_from_db()
+    if db_channels:
+        return [_build_channel(channel) for channel in db_channels]
+
     channels = merge_custom_channels(idan_main.GetUserChannels(type='radio'))
     return [_build_channel(channel) for channel in channels if channel.get("type") == "radio"]
+
+
+def _load_radio_channels_from_db() -> list[dict]:
+    if not RADIO_CHANNELS_DB_PATH.exists():
+        return []
+
+    try:
+        with sqlite3.connect(RADIO_CHANNELS_DB_PATH) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """
+                SELECT id, name, type, logo, stream_url, mime_type, group_name
+                FROM radio_channels
+                WHERE COALESCE(stream_url, '') != ''
+                ORDER BY
+                    CASE group_name
+                        WHEN 'local' THEN 0
+                        WHEN 'israelis' THEN 1
+                        WHEN 'world' THEN 2
+                        ELSE 3
+                    END,
+                    name COLLATE NOCASE
+                """
+            ).fetchall()
+    except sqlite3.Error as exc:
+        print(f"Failed to load radio channels DB {RADIO_CHANNELS_DB_PATH}: {exc}")
+        return []
+
+    channels: list[dict] = []
+    for index, row in enumerate(rows, start=1):
+        channel_id = str(row["id"] or "").strip()
+        stream_url = str(row["stream_url"] or "").strip()
+        if not channel_id or not stream_url:
+            continue
+
+        logo = str(row["logo"] or "").strip()
+        if not logo or logo.lower() in {"null", "none"}:
+            logo = "/placeholder-logo.png"
+        group = str(row["group_name"] or "israelis").strip() or "israelis"
+        channels.append(
+            {
+                "id": channel_id,
+                "channelID": channel_id,
+                "index": index,
+                "name": str(row["name"] or channel_id).strip() or channel_id,
+                "mode": 11,
+                "logo": logo,
+                "image": logo,
+                "module": "radio",
+                "type": str(row["type"] or "radio").strip() or "radio",
+                "group": group,
+                "scope": group,
+                "linkDetails": {
+                    "link": stream_url,
+                    "final": True,
+                    "manifest_type": "hls" if ".m3u8" in stream_url.lower() else None,
+                },
+                "tvgID": "",
+                "channelNumber": "",
+            }
+        )
+
+    return channels
 
 def get_vod_channels():
     return IDANPLUS_VOD_CHANNELS
