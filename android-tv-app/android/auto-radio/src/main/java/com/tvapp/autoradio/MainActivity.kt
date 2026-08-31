@@ -118,6 +118,7 @@ class MainActivity : AppCompatActivity() {
         private const val VISIBLE_STATION_BATCH_SIZE = 24
         private const val LOAD_MORE_STATIONS_TAG = "load_more_stations"
         private const val STATION_VIEW_TAG_PREFIX = "station_view:"
+        private const val FAVORITE_BUTTON_TAG_PREFIX = "favorite_button:"
         private const val ACTIVE_STATION_BORDER_TAG = "active_station_border"
         private const val REQUEST_RECORD_AUDIO_PERMISSION = 1002
         private const val INVALID_AUDIO_SESSION_ID = 0
@@ -1728,7 +1729,6 @@ class MainActivity : AppCompatActivity() {
             }
         }).let { applyStationGroupFilter(it) }
             .let { applyLibraryTabFilter(it) }
-            .sortedByDescending { isFavorite(it) }
     }
 
     private fun animatePlayerPageIn() {
@@ -2182,9 +2182,9 @@ class MainActivity : AppCompatActivity() {
                     Gravity.CENTER,
                 ))
 
-                addView(favoriteButton(isFavorite) {
+                addView(favoriteButton(station, isFavorite) {
                     toggleFavorite(station)
-                }, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.TOP or Gravity.END).apply {
+                }, FrameLayout.LayoutParams(dp(42), dp(42), Gravity.TOP or Gravity.END).apply {
                     topMargin = dp(8)
                     rightMargin = dp(8)
                 })
@@ -2335,9 +2335,9 @@ class MainActivity : AppCompatActivity() {
                 })
             })
 
-            addView(favoriteButton(isFavorite) {
+            addView(favoriteButton(station, isFavorite) {
                 toggleFavorite(station)
-            }, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+            }, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
                 marginStart = dp(10)
             })
 
@@ -2547,8 +2547,8 @@ class MainActivity : AppCompatActivity() {
                     rightMargin = dp(18)
                 })
 
-                addView(favoriteButton(isFavorite(station)) {
-                    toggleFavorite(station)
+                addView(iconButton(R.drawable.ic_close, Color.rgb(238, 242, 248)) {
+                    stopPlayback()
                 }, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.LEFT or Gravity.CENTER_VERTICAL).apply {
                     leftMargin = dp(18)
                 })
@@ -2565,17 +2565,33 @@ class MainActivity : AppCompatActivity() {
                     bottomMargin = dp(26)
                 }
 
-                addView(ArtworkShadowLayout(this@MainActivity).apply {
-                    setPadding(dp(24), dp(22), dp(24), dp(30))
-                    addView(RoundedLogoView(this@MainActivity).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        background = roundedRect(elevatedSurfaceColor, 28f)
-                        loadStationLogo(station, this)
+                addView(FrameLayout(this@MainActivity).apply {
+                    clipChildren = false
+                    clipToPadding = false
+
+                    addView(ArtworkShadowLayout(this@MainActivity).apply {
+                        setPadding(dp(24), dp(22), dp(24), dp(30))
+                        addView(RoundedLogoView(this@MainActivity).apply {
+                            scaleType = ImageView.ScaleType.CENTER_CROP
+                            background = roundedRect(elevatedSurfaceColor, 28f)
+                            loadStationLogo(station, this)
+                        }, FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            Gravity.CENTER,
+                        ))
                     }, FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         Gravity.CENTER,
                     ))
+
+                    addView(favoriteButton(station, isFavorite(station)) {
+                        toggleFavorite(station)
+                    }, FrameLayout.LayoutParams(dp(54), dp(54), Gravity.TOP or Gravity.RIGHT).apply {
+                        topMargin = dp(18)
+                        rightMargin = dp(18)
+                    })
                 }, FrameLayout.LayoutParams(
                     dp(286),
                     dp(286),
@@ -2734,21 +2750,82 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun favoriteButton(isFavorite: Boolean, onClick: () -> Unit): FrameLayout {
+    private fun favoriteButton(station: RadioStation, isFavorite: Boolean, onClick: () -> Unit): FrameLayout {
         return FrameLayout(this).apply {
-            background = roundedRect(Color.argb(if (isFavorite) 36 else 20, 18, 19, 25), 999f)
-            elevation = dp(4).toFloat()
-            translationZ = dp(1).toFloat()
+            tag = favoriteButtonTag(station.id)
+            applyFavoriteButtonState(isFavorite)
+            elevation = dp(8).toFloat()
+            translationZ = dp(3).toFloat()
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
             setOnClickListener { onClick() }
 
             addView(ImageView(this@MainActivity).apply {
-                setImageResource(if (isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star)
-                setColorFilter(if (isFavorite) accentColor else Color.rgb(214, 221, 232))
+                tag = "favorite_icon"
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
-            }, FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER))
+                applyFavoriteIconState(isFavorite)
+            }, FrameLayout.LayoutParams(dp(27), dp(27), Gravity.CENTER))
+        }
+    }
+
+    private fun iconButton(@DrawableRes iconRes: Int, iconColor: Int, onClick: () -> Unit): FrameLayout {
+        return FrameLayout(this).apply {
+            background = roundedRect(Color.argb(30, 255, 255, 255), 999f, Color.argb(42, 255, 255, 255), 1)
+            elevation = dp(5).toFloat()
+            translationZ = dp(2).toFloat()
+            isClickable = true
+            isFocusable = true
+            foreground = selectableItemBackground()
+            setOnClickListener { onClick() }
+
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(iconRes)
+                setColorFilter(iconColor)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+            }, FrameLayout.LayoutParams(dp(27), dp(27), Gravity.CENTER))
+        }
+    }
+
+    private fun FrameLayout.applyFavoriteButtonState(isFavorite: Boolean) {
+        background = if (isFavorite) {
+            roundedRect(Color.rgb(255, 159, 28), 999f, Color.argb(210, 255, 228, 174), 2)
+        } else {
+            roundedRect(Color.argb(205, 12, 14, 20), 999f, Color.argb(135, 255, 255, 255), 2)
+        }
+        alpha = if (isFavorite) 1f else 0.96f
+    }
+
+    private fun ImageView.applyFavoriteIconState(isFavorite: Boolean) {
+        setImageResource(if (isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star)
+        setColorFilter(if (isFavorite) Color.rgb(26, 23, 18) else Color.WHITE)
+    }
+
+    private fun favoriteButtonTag(stationId: String): String {
+        return "$FAVORITE_BUTTON_TAG_PREFIX$stationId"
+    }
+
+    private fun updateFavoriteButtonsForStation(station: RadioStation, isFavorite: Boolean) {
+        if (::stationsContainer.isInitialized) {
+            updateFavoriteButtonsForStation(stationsContainer, station.id, isFavorite)
+        }
+        if (::playerContainer.isInitialized) {
+            updateFavoriteButtonsForStation(playerContainer, station.id, isFavorite)
+        }
+    }
+
+    private fun updateFavoriteButtonsForStation(root: View, stationId: String, isFavorite: Boolean) {
+        if (root is FrameLayout && root.tag == favoriteButtonTag(stationId)) {
+            root.applyFavoriteButtonState(isFavorite)
+            for (index in 0 until root.childCount) {
+                (root.getChildAt(index) as? ImageView)?.applyFavoriteIconState(isFavorite)
+            }
+        }
+        if (root !is ViewGroup) {
+            return
+        }
+        for (index in 0 until root.childCount) {
+            updateFavoriteButtonsForStation(root.getChildAt(index), stationId, isFavorite)
         }
     }
 
@@ -3061,10 +3138,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleFavorite(station: RadioStation) {
+        val nextFavorite = !isFavorite(station)
         favoritePrefs.edit()
-            .putBoolean(station.id, !isFavorite(station))
+            .putBoolean(station.id, nextFavorite)
             .apply()
-        renderStations()
+        if (selectedLibraryTab == LIBRARY_TAB_FAVORITES) {
+            renderStations()
+        } else {
+            updateFavoriteButtonsForStation(station, nextFavorite)
+        }
     }
 
     private fun stopPlayback() {
