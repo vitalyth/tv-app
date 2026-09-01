@@ -2134,11 +2134,21 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun updateVisibleActiveStationHighlights(previousStationId: String?, currentStationId: String) {
-        previousStationId?.let { stationId ->
-            findStationView(stationsRecyclerView, stationId)?.applyStationActiveState(false)
+    private fun updateVisibleActiveStationHighlights(currentStationId: String) {
+        syncVisibleStationActiveState(stationsRecyclerView, currentStationId)
+    }
+
+    private fun syncVisibleStationActiveState(root: View, currentStationId: String) {
+        val tag = root.tag as? String
+        if (tag?.startsWith(STATION_VIEW_TAG_PREFIX) == true) {
+            root.applyStationActiveState(tag == stationViewTag(currentStationId))
         }
-        findStationView(stationsRecyclerView, currentStationId)?.applyStationActiveState(true)
+        if (root !is ViewGroup) {
+            return
+        }
+        for (index in 0 until root.childCount) {
+            syncVisibleStationActiveState(root.getChildAt(index), currentStationId)
+        }
     }
 
     private fun View.applyStationActiveState(isActive: Boolean) {
@@ -2147,12 +2157,17 @@ class MainActivity : AppCompatActivity() {
         translationZ = dp(if (isActive) 3 else 1).toFloat()
 
         val artworkFrame = (this as? ViewGroup)?.getChildAt(0) as? FrameLayout ?: return
+        var hasActiveBorder = false
         for (index in artworkFrame.childCount - 1 downTo 0) {
             if (artworkFrame.getChildAt(index).tag == ACTIVE_STATION_BORDER_TAG) {
-                artworkFrame.removeViewAt(index)
+                if (isActive && !hasActiveBorder) {
+                    hasActiveBorder = true
+                } else {
+                    artworkFrame.removeViewAt(index)
+                }
             }
         }
-        if (isActive) {
+        if (isActive && !hasActiveBorder) {
             artworkFrame.addView(View(this@MainActivity).apply {
                 tag = ACTIVE_STATION_BORDER_TAG
                 background = activeStationTileBorder()
@@ -2162,19 +2177,6 @@ class MainActivity : AppCompatActivity() {
                 Gravity.CENTER,
             ))
         }
-    }
-
-    private fun findStationView(root: View, stationId: String): View? {
-        if (root.tag == stationViewTag(stationId)) {
-            return root
-        }
-        if (root !is ViewGroup) {
-            return null
-        }
-        for (index in 0 until root.childCount) {
-            findStationView(root.getChildAt(index), stationId)?.let { return it }
-        }
-        return null
     }
 
     private fun stationViewTag(stationId: String): String {
@@ -3338,14 +3340,11 @@ class MainActivity : AppCompatActivity() {
         hideStatus()
         rememberStation(station)
         val shouldAnimatePlayerIn = activeStation == null || playerContainer.visibility != View.VISIBLE
-        val previousActiveStationId = activeStation?.id
         requestedStationId = station.id
         pendingControllerStationId = station.id
         activeStation = station
         clearNowPlayingFor(station)
-        if (previousActiveStationId != station.id) {
-            updateVisibleActiveStationHighlights(previousActiveStationId, station.id)
-        }
+        updateVisibleActiveStationHighlights(station.id)
         isPlayerPageDismissedByUser = false
         isPlayerPageVisible = true
         playStartedAtMs = 0L
