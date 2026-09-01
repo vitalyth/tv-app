@@ -11,6 +11,8 @@
     <string name="filter_israelis">Israelis</string>
     <string name="filter_world">World</string>
     <string name="nav_home">Home</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_stations">Stations</string>
     <string name="nav_favorites">Favorites</string>
     <string name="nav_recent">Recent</string>
     <string name="nav_settings">Settings</string>
@@ -29,6 +31,7 @@
     <string name="no_stations_retry">No stations found. Check that the server is available.</string>
     <string name="voice_no_match">No station matched the voice command.</string>
     <string name="empty_filter">No stations match this filter</string>
+    <string name="search_start_prompt">Search for a station to see results</string>
     <string name="load_more_stations">Load %1$d more stations</string>
     <string name="refresh_station">Refreshing station: %1$s</string>
     <string name="player_not_ready">The player is still loading. Try again in a moment.</string>
@@ -64,6 +67,11 @@
     <string name="recent_group">Recently played</string>
     <string name="local_group">Local</string>
     <string name="recommended_group">Recommended</string>
+    <string name="music_group">Music</string>
+    <string name="news_group">News &amp; Talk</string>
+    <string name="sport_group">Sport</string>
+    <string name="world_group">World radio</string>
+    <string name="show_all">Show all</string>
     <string name="all_stations_group">All others</string>
     <string name="playback_error">Playback error: %1$s</string>
 </resources>

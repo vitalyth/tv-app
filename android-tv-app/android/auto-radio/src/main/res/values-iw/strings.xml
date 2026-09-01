@@ -11,6 +11,8 @@
     <string name="filter_israelis">ישראלי</string>
     <string name="filter_world">עולמי</string>
     <string name="nav_home">בית</string>
+    <string name="nav_search">חיפוש</string>
+    <string name="nav_stations">תחנות</string>
     <string name="nav_favorites">מועדפים</string>
     <string name="nav_recent">לאחרונה</string>
     <string name="nav_settings">הגדרות</string>
@@ -29,6 +31,7 @@
     <string name="no_stations_retry">לא נמצאו תחנות. בדוק שהשרת זמין.</string>
     <string name="voice_no_match">לא נמצאה תחנה מתאימה לפקודה הקולית.</string>
     <string name="empty_filter">אין תחנות שמתאימות לסינון</string>
+    <string name="search_start_prompt">חפש תחנה כדי לראות תוצאות</string>
     <string name="load_more_stations">טען עוד %1$d תחנות</string>
     <string name="refresh_station">מרענן תחנה: %1$s</string>
     <string name="player_not_ready">הנגן עדיין נטען. נסה שוב בעוד רגע.</string>
@@ -64,6 +67,11 @@
     <string name="recent_group">נוגנו לאחרונה</string>
     <string name="local_group">מקומי</string>
     <string name="recommended_group">מומלץ</string>
+    <string name="music_group">מוזיקה</string>
+    <string name="news_group">חדשות ודיבורים</string>
+    <string name="sport_group">ספורט</string>
+    <string name="world_group">רדיו עולמי</string>
+    <string name="show_all">הצג הכל</string>
     <string name="all_stations_group">כל השאר</string>
     <string name="playback_error">שגיאת ניגון: %1$s</string>
 </resources>

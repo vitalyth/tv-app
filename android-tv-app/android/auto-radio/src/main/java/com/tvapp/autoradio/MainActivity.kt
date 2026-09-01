@@ -21,6 +21,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RadialGradient
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -52,6 +53,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -60,6 +62,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -110,17 +114,25 @@ class MainActivity : AppCompatActivity() {
         private const val LOG_TAG = "TVAppRadio"
         private const val DEFAULT_VOICE_STATION_ID = "rd_glglz"
         private const val LIBRARY_TAB_HOME = "home"
-        private const val LIBRARY_TAB_FAVORITES = "favorites"
-        private const val LIBRARY_TAB_RECENT = "recent"
-        private const val STATION_GROUP_ALL = "all"
+        private const val LIBRARY_TAB_SEARCH = "search"
+        private const val LIBRARY_TAB_STATIONS = "stations"
+        private const val STATION_FILTER_ALL = "all"
         private const val STATION_GROUP_LOCAL = "local"
         private const val STATION_GROUP_ISRAELIS = "israelis"
         private const val STATION_GROUP_WORLD = "world"
+        private const val STATION_CATEGORY_FAVORITES = "favorites"
+        private const val STATION_CATEGORY_RECENT = "recent"
+        private const val STATION_CATEGORY_RECOMMENDED = "recommended"
+        private const val STATION_CATEGORY_MUSIC = "music"
+        private const val STATION_CATEGORY_NEWS = "news"
+        private const val STATION_CATEGORY_SPORT = "sport"
         private const val INITIAL_VISIBLE_STATION_LIMIT = 24
         private const val VISIBLE_STATION_BATCH_SIZE = 24
         private const val STATION_ITEM_VIEW_TYPE = 1
         private const val LOAD_MORE_ITEM_VIEW_TYPE = 2
         private const val EMPTY_ITEM_VIEW_TYPE = 3
+        private const val HOME_SECTION_ITEM_VIEW_TYPE = 4
+        private const val HOME_SECTION_PREVIEW_LIMIT = 8
         private const val LOAD_MORE_STATIONS_TAG = "load_more_stations"
         private const val STATION_VIEW_TAG_PREFIX = "station_view:"
         private const val FAVORITE_BUTTON_TAG_PREFIX = "favorite_button:"
@@ -219,6 +231,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var filterPanel: LinearLayout
     private lateinit var filterInput: EditText
     private lateinit var stationGroupFilterContainer: LinearLayout
+    private lateinit var stationGroupFilterScrollView: HorizontalScrollView
+    private lateinit var stationGroupFilterRow: LinearLayout
     private lateinit var statusPanel: LinearLayout
     private lateinit var statusText: TextView
     private lateinit var retryButton: Button
@@ -251,7 +265,9 @@ class MainActivity : AppCompatActivity() {
     private var isPlayerOpening = false
     private var isPlayerPageDismissedByUser = false
     private var selectedLibraryTab = LIBRARY_TAB_HOME
-    private var selectedStationGroup = STATION_GROUP_ALL
+    private val selectedStationCategories = linkedSetOf<String>()
+    private var stationGroupFilterScrollX = 0
+    private var playerSheetTopInsetPx = 0
     private var visibleStationLimit = INITIAL_VISIBLE_STATION_LIMIT
     private var filteredStationCount = 0
     private var catalogSourceDialog: AlertDialog? = null
@@ -304,6 +320,18 @@ class MainActivity : AppCompatActivity() {
         }
         @Suppress("DEPRECATION")
         super.onBackPressed()
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (
+            event.actionMasked == MotionEvent.ACTION_DOWN &&
+            ::filterInput.isInitialized &&
+            filterInput.hasFocus() &&
+            !filterInput.containsRawPoint(event.rawX.toInt(), event.rawY.toInt())
+        ) {
+            hideKeyboardAndClearSearchFocus()
+        }
+        return super.dispatchTouchEvent(event)
     }
 
     private fun handleIntent(intent: Intent?, allowPlaybackIntent: Boolean) {
@@ -696,13 +724,21 @@ class MainActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_LTR
-            setPadding(dp(18), dp(42), dp(18), dp(24))
+            setPadding(dp(18), dp(44), dp(18), dp(24))
             background = appBackground()
             clipToPadding = false
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
+        }
+        playerSheetTopInsetPx = dp(44)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val contentTopInset = statusBars.top + dp(16)
+            playerSheetTopInsetPx = contentTopInset
+            view.setPadding(dp(18), contentTopInset, dp(18), dp(24))
+            windowInsets
         }
 
         headerContainer = headerView()
@@ -724,7 +760,7 @@ class MainActivity : AppCompatActivity() {
 
         filterPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(4), 0, dp(18))
+            setPadding(0, 0, 0, dp(10))
             background = null
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -828,7 +864,7 @@ class MainActivity : AppCompatActivity() {
             background = null
             clipChildren = true
             clipToPadding = false
-            setPadding(0, dp(4), 0, dp(18))
+            setPadding(0, 0, 0, dp(18))
             layoutManager = stationGridLayoutManager
             adapter = stationListAdapter
             itemAnimator = null
@@ -847,7 +883,10 @@ class MainActivity : AppCompatActivity() {
                         return
                     }
                     val manager = recyclerView.layoutManager as? GridLayoutManager ?: return
-                    if (manager.findLastVisibleItemPosition() >= stationListAdapter.itemCount - 8) {
+                    if (
+                        !shouldShowHomeSections() &&
+                        manager.findLastVisibleItemPosition() >= stationListAdapter.itemCount - 8
+                    ) {
                         loadNextStationBatch()
                     }
                 }
@@ -877,18 +916,23 @@ class MainActivity : AppCompatActivity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(20))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = roundedRect(Color.argb(88, 255, 255, 255), 22f, Color.argb(30, 255, 255, 255), 1)
+            elevation = dp(6).toFloat()
+            translationZ = dp(2).toFloat()
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
+            ).apply {
+                bottomMargin = dp(10)
+            }
 
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_radio)
-                background = roundedRect(elevatedSurfaceColor, 16f, borderColor, 1)
+                background = roundedRect(Color.rgb(31, 32, 40), 15f, Color.argb(32, 255, 255, 255), 1)
                 setPadding(dp(8), dp(8), dp(8), dp(8))
-                layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply {
-                    marginEnd = dp(14)
+                layoutParams = LinearLayout.LayoutParams(dp(46), dp(46)).apply {
+                    marginEnd = dp(12)
                 }
             })
 
@@ -899,7 +943,7 @@ class MainActivity : AppCompatActivity() {
 
                 addView(TextView(this@MainActivity).apply {
                     text = localizedString(R.string.app_name)
-                    textSize = 30f
+                    textSize = 27f
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(inkColor)
                     includeFontPadding = false
@@ -916,69 +960,137 @@ class MainActivity : AppCompatActivity() {
     )
 
     private data class StationGroupFilter(
+        @DrawableRes val iconRes: Int,
         @StringRes val labelRes: Int,
         val value: String,
+    )
+
+    private data class HomeSection(
+        @StringRes val titleRes: Int,
+        val category: String,
+        val stations: List<RadioStation>,
     )
 
     private fun stationGroupFilterView(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, dp(11), 0, 0)
+            setPadding(0, dp(4), 0, 0)
             clipChildren = false
             clipToPadding = false
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply {
-                bottomMargin = dp(12)
+                bottomMargin = dp(8)
             }
+            stationGroupFilterScrollView = HorizontalScrollView(this@MainActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
+                setPadding(dp(2), 0, dp(18), 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    setOnScrollChangeListener { view, scrollX, _, _, _ ->
+                        if (view === this) {
+                            stationGroupFilterScrollX = scrollX
+                        }
+                    }
+                }
+
+                stationGroupFilterRow = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                addView(stationGroupFilterRow, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                ))
+            }
+            addView(stationGroupFilterScrollView, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
             populateStationGroupFilter()
         }
     }
 
     private fun LinearLayout.populateStationGroupFilter() {
-        removeAllViews()
+        if (!::stationGroupFilterRow.isInitialized || !::stationGroupFilterScrollView.isInitialized) {
+            return
+        }
+        stationGroupFilterScrollX = stationGroupFilterScrollView.scrollX.takeIf { it > 0 } ?: stationGroupFilterScrollX
+        stationGroupFilterRow.removeAllViews()
         val items = listOf(
-            StationGroupFilter(R.string.filter_all, STATION_GROUP_ALL),
-            StationGroupFilter(R.string.filter_local, STATION_GROUP_LOCAL),
-            StationGroupFilter(R.string.filter_israelis, STATION_GROUP_ISRAELIS),
-            StationGroupFilter(R.string.filter_world, STATION_GROUP_WORLD),
+            StationGroupFilter(R.drawable.ic_radio_receiver, R.string.filter_all, STATION_FILTER_ALL),
+            StationGroupFilter(R.drawable.ic_star, R.string.favorites_group, STATION_CATEGORY_FAVORITES),
+            StationGroupFilter(R.drawable.ic_location, R.string.local_group, STATION_GROUP_LOCAL),
+            StationGroupFilter(R.drawable.ic_music_note, R.string.music_group, STATION_CATEGORY_MUSIC),
+            StationGroupFilter(R.drawable.ic_news, R.string.news_group, STATION_CATEGORY_NEWS),
+            StationGroupFilter(R.drawable.ic_sports, R.string.sport_group, STATION_CATEGORY_SPORT),
+            StationGroupFilter(R.drawable.ic_public, R.string.filter_world, STATION_GROUP_WORLD),
         )
 
         items.forEach { item ->
-            addView(stationGroupChip(item), LinearLayout.LayoutParams(0, dp(38), 1f).apply {
-                leftMargin = dp(4)
-                rightMargin = dp(4)
+            stationGroupFilterRow.addView(stationGroupChip(item), LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(46),
+            ).apply {
+                rightMargin = dp(10)
             })
         }
+        stationGroupFilterScrollView.post { stationGroupFilterScrollView.scrollTo(stationGroupFilterScrollX, 0) }
     }
 
-    private fun stationGroupChip(item: StationGroupFilter): TextView {
-        val isSelected = selectedStationGroup == item.value
-        return TextView(this).apply {
-            text = localizedString(item.labelRes)
-            textSize = 13f
-            typeface = if (isSelected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+    private fun stationGroupChip(item: StationGroupFilter): LinearLayout {
+        val isAllFilter = item.value == STATION_FILTER_ALL
+        val isSelected = if (isAllFilter) selectedStationCategories.isEmpty() else item.value in selectedStationCategories
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            includeFontPadding = false
-            setTextColor(if (isSelected) Color.rgb(31, 24, 18) else mutedColor)
+            setPadding(dp(14), 0, dp(16), 0)
             background = roundedRect(
-                if (isSelected) accentColor else Color.argb(42, 255, 255, 255),
-                999f,
-                if (isSelected) Color.argb(118, 255, 205, 111) else Color.argb(22, 255, 255, 255),
+                if (isSelected) Color.rgb(255, 170, 48) else Color.argb(42, 255, 255, 255),
+                18f,
+                if (isSelected) Color.argb(155, 255, 219, 132) else Color.argb(28, 255, 255, 255),
                 1,
             )
+            elevation = dp(if (isSelected) 8 else 3).toFloat()
+            translationZ = dp(if (isSelected) 3 else 1).toFloat()
             isClickable = true
             isFocusable = true
             foreground = selectableItemBackground()
+
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(item.iconRes)
+                setColorFilter(if (isSelected) Color.rgb(29, 23, 16) else Color.rgb(205, 207, 216))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+            }, LinearLayout.LayoutParams(dp(19), dp(19)).apply {
+                marginEnd = dp(8)
+            })
+
+            addView(TextView(this@MainActivity).apply {
+                text = localizedString(item.labelRes)
+                textSize = 14f
+                typeface = if (isSelected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                includeFontPadding = false
+                maxLines = 1
+                setTextColor(if (isSelected) Color.rgb(29, 23, 16) else Color.rgb(219, 220, 228))
+            })
+
             setOnClickListener {
-                if (selectedStationGroup == item.value) {
-                    return@setOnClickListener
+                if (isAllFilter) {
+                    selectedStationCategories.clear()
+                } else if (isSelected) {
+                    selectedStationCategories.remove(item.value)
+                } else {
+                    selectedStationCategories.add(item.value)
                 }
-                selectedStationGroup = item.value
+                selectedLibraryTab = LIBRARY_TAB_STATIONS
+                filterInput.text?.clear()
+                hideKeyboardAndClearSearchFocus()
                 resetStationBatch()
                 stationGroupFilterContainer.populateStationGroupFilter()
+                bottomNavContainer.populateBottomNavigation()
                 renderStations()
             }
         }
@@ -1209,8 +1321,8 @@ class MainActivity : AppCompatActivity() {
         removeAllViews()
         val items = listOf(
             BottomNavItem(R.drawable.ic_home, localizedString(R.string.nav_home), LIBRARY_TAB_HOME),
-            BottomNavItem(R.drawable.ic_star, localizedString(R.string.nav_favorites), LIBRARY_TAB_FAVORITES),
-            BottomNavItem(R.drawable.ic_history, localizedString(R.string.nav_recent), LIBRARY_TAB_RECENT),
+            BottomNavItem(R.drawable.ic_radio_receiver, localizedString(R.string.nav_stations), LIBRARY_TAB_STATIONS),
+            BottomNavItem(R.drawable.ic_search, localizedString(R.string.nav_search), LIBRARY_TAB_SEARCH),
             BottomNavItem(R.drawable.ic_settings, localizedString(R.string.nav_settings), "settings"),
         )
 
@@ -1239,10 +1351,15 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 selectedLibraryTab = item.target
+                selectedStationCategories.clear()
                 isPlayerPageVisible = false
                 resetStationBatch()
                 if (::bottomNavContainer.isInitialized) {
                     bottomNavContainer.populateBottomNavigation()
+                }
+                if (item.target != LIBRARY_TAB_SEARCH) {
+                    filterInput.text?.clear()
+                    hideKeyboardAndClearSearchFocus()
                 }
                 renderStations()
             }
@@ -1658,6 +1775,7 @@ class MainActivity : AppCompatActivity() {
         if (::stationGroupFilterContainer.isInitialized) {
             stationGroupFilterContainer.populateStationGroupFilter()
         }
+        updateCatalogControlsVisibility()
 
         if (isPlayerPageVisible && activeStation != null) {
             updateMiniPlayerShortcut(null)
@@ -1669,6 +1787,7 @@ class MainActivity : AppCompatActivity() {
             }
             bottomNavContainer.visibility = View.VISIBLE
             playerContainer.animate().cancel()
+            playerContainer.background = null
             playerContainer.layoutParams = playerContainer.layoutParams.apply {
                 width = ViewGroup.LayoutParams.MATCH_PARENT
                 height = ViewGroup.LayoutParams.MATCH_PARENT
@@ -1694,10 +1813,11 @@ class MainActivity : AppCompatActivity() {
 
         isPlayerPageVisible = false
         headerContainer.visibility = View.VISIBLE
-        filterPanel.visibility = View.VISIBLE
         stationsRecyclerView.visibility = View.VISIBLE
         bottomNavContainer.visibility = View.VISIBLE
+        updateCatalogControlsVisibility()
         playerContainer.visibility = View.GONE
+        playerContainer.background = null
         playerContainer.layoutParams = playerContainer.layoutParams.apply {
             width = ViewGroup.LayoutParams.MATCH_PARENT
             height = ViewGroup.LayoutParams.MATCH_PARENT
@@ -1706,7 +1826,11 @@ class MainActivity : AppCompatActivity() {
         playerContainer.translationY = 0f
         updateMiniPlayerShortcut(activeStation)
 
-        updateStationList(filteredStations, animateChanges = false)
+        if (shouldShowHomeSections()) {
+            stationListAdapter.submitHomeSections(homeSectionsForCurrentState())
+        } else {
+            updateStationList(filteredStations, animateChanges = false)
+        }
         updateElapsedTime()
     }
 
@@ -1729,13 +1853,22 @@ class MainActivity : AppCompatActivity() {
         if (::stationGroupFilterContainer.isInitialized) {
             stationGroupFilterContainer.populateStationGroupFilter()
         }
+        updateCatalogControlsVisibility()
 
         updateMiniPlayerShortcut(activeStation, animateIn = animateMiniPlayer)
-        updateStationList(filteredStations, animateChanges = false)
+        if (shouldShowHomeSections()) {
+            stationListAdapter.submitHomeSections(homeSectionsForCurrentState())
+        } else {
+            updateStationList(filteredStations, animateChanges = false)
+        }
     }
 
     private fun filteredStationsForCurrentState(): List<RadioStation> {
         val query = filterInput.text?.toString()?.trim()?.lowercase(Locale.getDefault()).orEmpty()
+        if (selectedLibraryTab == LIBRARY_TAB_SEARCH && query.isBlank()) {
+            return emptyList()
+        }
+
         return (if (query.isBlank()) {
             allStations
         } else {
@@ -1743,8 +1876,27 @@ class MainActivity : AppCompatActivity() {
                 station.name.lowercase(Locale.getDefault()).contains(query) ||
                     station.id.lowercase(Locale.US).contains(query)
             }
-        }).let { applyStationGroupFilter(it) }
-            .let { applyLibraryTabFilter(it) }
+        }).let { applySelectedCategoryFilter(it) }
+    }
+
+    private fun shouldShowHomeSections(): Boolean {
+        return selectedLibraryTab == LIBRARY_TAB_HOME &&
+            selectedStationCategories.isEmpty() &&
+            filterInput.text?.toString()?.trim().isNullOrBlank()
+    }
+
+    private fun updateCatalogControlsVisibility() {
+        if (!::filterInput.isInitialized) return
+        filterPanel.visibility = if (
+            selectedLibraryTab == LIBRARY_TAB_SEARCH ||
+            selectedLibraryTab == LIBRARY_TAB_STATIONS
+        ) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        filterInput.visibility = if (selectedLibraryTab == LIBRARY_TAB_SEARCH) View.VISIBLE else View.GONE
+        stationGroupFilterContainer.visibility = if (selectedLibraryTab == LIBRARY_TAB_STATIONS) View.VISIBLE else View.GONE
     }
 
     private fun animatePlayerPageIn() {
@@ -1792,6 +1944,7 @@ class MainActivity : AppCompatActivity() {
                         playerContainer.translationY = 0f
                         playerContainer.alpha = 1f
                         playerContainer.visibility = View.GONE
+                        playerContainer.background = null
                         finishPlayerPageClose()
                     }
 
@@ -1809,14 +1962,15 @@ class MainActivity : AppCompatActivity() {
         isPlayerPageVisible = false
         isPlayerHiding = false
         headerContainer.visibility = View.VISIBLE
-        filterPanel.visibility = View.VISIBLE
         stationsRecyclerView.visibility = View.VISIBLE
         bottomNavContainer.visibility = View.VISIBLE
+        updateCatalogControlsVisibility()
         playerContainer.animate().cancel()
         playerContainer.setLayerType(View.LAYER_TYPE_NONE, null)
         playerContainer.translationY = 0f
         playerContainer.alpha = 1f
         playerContainer.visibility = View.GONE
+        playerContainer.background = null
         playerContainer.layoutParams = playerContainer.layoutParams.apply {
             width = ViewGroup.LayoutParams.MATCH_PARENT
             height = ViewGroup.LayoutParams.MATCH_PARENT
@@ -1835,22 +1989,96 @@ class MainActivity : AppCompatActivity() {
             stationListAdapter.itemCount == 0
     }
 
-    private fun applyLibraryTabFilter(stations: List<RadioStation>): List<RadioStation> {
-        return when (selectedLibraryTab) {
-            LIBRARY_TAB_FAVORITES -> stations.filter { isFavorite(it) }
-            LIBRARY_TAB_RECENT -> stations
-                .filter { recentPrefs.contains(it.id) }
-                .sortedByDescending { recentPrefs.getLong(it.id, 0L) }
+    private fun applySelectedCategoryFilter(stations: List<RadioStation>): List<RadioStation> {
+        if (selectedStationCategories.isEmpty()) {
+            return stations
+        }
+
+        val stationById = stations.associateBy { it.id }
+        val matchingIds = selectedStationCategories.flatMap { category ->
+            stationsForCategory(category, stations).map { it.id }
+        }.distinct()
+        return matchingIds.mapNotNull { stationById[it] }
+    }
+
+    private fun stationsForCategory(category: String, stations: List<RadioStation>): List<RadioStation> {
+        return when (category) {
+            STATION_CATEGORY_FAVORITES -> stations.filter { isFavorite(it) }
+            STATION_CATEGORY_RECENT -> recentStations(stations)
+            STATION_CATEGORY_RECOMMENDED -> recommendedStations(stations)
+            STATION_GROUP_LOCAL -> stations.filter { it.group == STATION_GROUP_LOCAL }
+            STATION_GROUP_WORLD -> stations.filter { it.group == STATION_GROUP_WORLD }
+            STATION_CATEGORY_MUSIC -> stations.filter { it.matchesCategory(STATION_CATEGORY_MUSIC) }
+            STATION_CATEGORY_NEWS -> stations.filter { it.matchesCategory(STATION_CATEGORY_NEWS) }
+            STATION_CATEGORY_SPORT -> stations.filter { it.matchesCategory(STATION_CATEGORY_SPORT) }
             else -> stations
         }
     }
 
-    private fun applyStationGroupFilter(stations: List<RadioStation>): List<RadioStation> {
-        return when (selectedStationGroup) {
-            STATION_GROUP_LOCAL -> stations.filter { it.group == STATION_GROUP_LOCAL }
-            STATION_GROUP_ISRAELIS -> stations.filter { it.group == STATION_GROUP_ISRAELIS }
-            STATION_GROUP_WORLD -> stations.filter { it.group == STATION_GROUP_WORLD }
-            else -> stations
+    private fun homeSectionsForCurrentState(): List<HomeSection> {
+        return listOf(
+            HomeSection(R.string.recent_group, STATION_CATEGORY_RECENT, recentStations(allStations)),
+            HomeSection(R.string.favorites_group, STATION_CATEGORY_FAVORITES, allStations.filter { isFavorite(it) }),
+            HomeSection(R.string.recommended_group, STATION_CATEGORY_RECOMMENDED, recommendedStations(allStations)),
+            HomeSection(R.string.local_group, STATION_GROUP_LOCAL, allStations.filter { it.group == STATION_GROUP_LOCAL }),
+            HomeSection(R.string.music_group, STATION_CATEGORY_MUSIC, allStations.filter { it.matchesCategory(STATION_CATEGORY_MUSIC) }),
+            HomeSection(R.string.news_group, STATION_CATEGORY_NEWS, allStations.filter { it.matchesCategory(STATION_CATEGORY_NEWS) }),
+            HomeSection(R.string.sport_group, STATION_CATEGORY_SPORT, allStations.filter { it.matchesCategory(STATION_CATEGORY_SPORT) }),
+            HomeSection(R.string.world_group, STATION_GROUP_WORLD, allStations.filter { it.group == STATION_GROUP_WORLD }),
+        ).filter { it.stations.isNotEmpty() }
+    }
+
+    private fun recentStations(stations: List<RadioStation>): List<RadioStation> {
+        return stations
+            .filter { recentPrefs.contains(it.id) }
+            .sortedByDescending { recentPrefs.getLong(it.id, 0L) }
+    }
+
+    private fun recommendedStations(stations: List<RadioStation>): List<RadioStation> {
+        val preferredIds = listOf(
+            "rd_glglz",
+            "rd_88",
+            "rd_103",
+            "rd_bet",
+            "rd_99",
+            "rd_100",
+            "rd_glz",
+            "rd_gimel",
+            "rd_world_bbc_radio_1",
+            "rd_world_kexp",
+            "rd_world_radio_paradise",
+        )
+        val byId = stations.associateBy { it.id }
+        val preferred = preferredIds.mapNotNull { byId[it] }
+        return (preferred + stations)
+            .distinctBy { it.id }
+            .take(24)
+    }
+
+    private fun RadioStation.matchesCategory(category: String): Boolean {
+        val searchable = "$id $name".lowercase(Locale.getDefault())
+        return when (category) {
+            STATION_CATEGORY_SPORT -> searchable.contains("sport") || searchable.contains("ספורט")
+            STATION_CATEGORY_NEWS -> searchable.contains("news") ||
+                searchable.contains("חדשות") ||
+                searchable.contains("כאן ב") ||
+                searchable.contains("103") ||
+                searchable.contains("גלי צ") ||
+                searchable.contains("glz")
+            STATION_CATEGORY_MUSIC -> !matchesCategory(STATION_CATEGORY_NEWS) &&
+                !matchesCategory(STATION_CATEGORY_SPORT) &&
+                (
+                    searchable.contains("music") ||
+                        searchable.contains("מוזיקה") ||
+                        searchable.contains("מיוזיק") ||
+                        searchable.contains("גלגל") ||
+                        searchable.contains("88") ||
+                        searchable.contains("gimel") ||
+                        searchable.contains("גימל") ||
+                        group == STATION_GROUP_WORLD ||
+                        group == STATION_GROUP_ISRAELIS
+                    )
+            else -> false
         }
     }
 
@@ -1863,6 +2091,7 @@ class MainActivity : AppCompatActivity() {
             isCatalogLoading ||
             isLoadingStationBatch ||
             isPlayerPageVisible ||
+            shouldShowHomeSections() ||
             visibleStationLimit >= filteredStationCount
         ) {
             return
@@ -1976,10 +2205,14 @@ class MainActivity : AppCompatActivity() {
 
     private inner class StationListAdapter : RecyclerView.Adapter<StationListAdapter.StationViewHolder>() {
         private var stations: List<RadioStation> = emptyList()
+        private var homeSections: List<HomeSection> = emptyList()
         private var remainingCount: Int = 0
         private var showEmpty: Boolean = false
 
         override fun getItemCount(): Int {
+            if (homeSections.isNotEmpty()) {
+                return homeSections.size
+            }
             return when {
                 showEmpty -> 1
                 remainingCount > 0 -> stations.size + 1
@@ -1988,6 +2221,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun getItemViewType(position: Int): Int {
+            if (homeSections.isNotEmpty()) {
+                return HOME_SECTION_ITEM_VIEW_TYPE
+            }
             return when {
                 showEmpty -> EMPTY_ITEM_VIEW_TYPE
                 position >= stations.size -> LOAD_MORE_ITEM_VIEW_TYPE
@@ -2009,8 +2245,9 @@ class MainActivity : AppCompatActivity() {
             container.removeAllViews()
             container.tag = null
             val view = when (getItemViewType(position)) {
+                HOME_SECTION_ITEM_VIEW_TYPE -> homeSectionView(homeSections[position])
                 LOAD_MORE_ITEM_VIEW_TYPE -> loadMoreStationsButton(remainingCount)
-                EMPTY_ITEM_VIEW_TYPE -> emptyState(localizedString(R.string.empty_filter)).apply {
+                EMPTY_ITEM_VIEW_TYPE -> emptyState(emptyCatalogMessage()).apply {
                     minHeight = dp(180)
                     layoutParams = RecyclerView.LayoutParams(
                         RecyclerView.LayoutParams.MATCH_PARENT,
@@ -2031,8 +2268,17 @@ class MainActivity : AppCompatActivity() {
 
         fun clear() {
             stations = emptyList()
+            homeSections = emptyList()
             remainingCount = 0
             showEmpty = false
+            notifyDataSetChanged()
+        }
+
+        fun submitHomeSections(sections: List<HomeSection>) {
+            stations = emptyList()
+            remainingCount = 0
+            showEmpty = sections.isEmpty()
+            homeSections = sections
             notifyDataSetChanged()
         }
 
@@ -2043,6 +2289,14 @@ class MainActivity : AppCompatActivity() {
             animateChanges: Boolean,
             previousStationCount: Int,
         ) {
+            if (homeSections.isNotEmpty()) {
+                homeSections = emptyList()
+                this.stations = stations
+                this.remainingCount = remainingCount.coerceAtLeast(0)
+                this.showEmpty = showEmpty
+                notifyDataSetChanged()
+                return
+            }
             val oldStationCount = this.stations.size
             val oldHadLoadMore = this.remainingCount > 0 && !this.showEmpty
             val oldShowEmpty = this.showEmpty
@@ -2087,34 +2341,6 @@ class MainActivity : AppCompatActivity() {
         val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         playerContainer.measure(widthSpec, heightSpec)
         return playerContainer.measuredHeight.coerceAtLeast(dp(220))
-    }
-
-    private fun animatePlayerIn(targetHeight: Int) {
-        playerContainer.animate().cancel()
-        playerContainer.post {
-            val heightAnimator = ValueAnimator.ofInt(0, targetHeight).apply {
-                duration = 280L
-                addUpdateListener { animation ->
-                    playerContainer.layoutParams = playerContainer.layoutParams.apply {
-                        height = animation.animatedValue as Int
-                    }
-                }
-                addListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
-                        playerContainer.layoutParams = playerContainer.layoutParams.apply {
-                            height = LinearLayout.LayoutParams.WRAP_CONTENT
-                        }
-                    }
-                })
-            }
-            heightAnimator.start()
-            animateFilterPanelChrome(0, 255, 280L, clearAtEnd = false)
-            playerContainer.animate()
-                .translationY(0f)
-                .alpha(1f)
-                .setDuration(280L)
-                .start()
-        }
     }
 
     private fun hideActivePlayerWithAnimation() {
@@ -2202,6 +2428,126 @@ class MainActivity : AppCompatActivity() {
             })
             start()
         }
+    }
+
+    private fun homeSectionView(section: HomeSection): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, dp(16))
+            layoutParams = RecyclerView.LayoutParams(
+                RecyclerView.LayoutParams.MATCH_PARENT,
+                RecyclerView.LayoutParams.WRAP_CONTENT,
+            )
+
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isClickable = true
+                isFocusable = true
+                foreground = selectableItemBackground()
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                setOnClickListener { openCategory(section.category) }
+
+                addView(TextView(this@MainActivity).apply {
+                    text = localizedString(section.titleRes)
+                    textSize = 22f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(inkColor)
+                    includeFontPadding = false
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+                addView(TextView(this@MainActivity).apply {
+                    text = localizedString(R.string.show_all)
+                    textSize = 13f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(accentSoftColor)
+                    includeFontPadding = false
+                })
+            })
+
+            addView(HorizontalScrollView(this@MainActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
+                setPadding(0, 0, dp(14), 0)
+
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    section.stations
+                        .take(HOME_SECTION_PREVIEW_LIMIT)
+                        .forEach { station ->
+                            addView(stationTile(station), LinearLayout.LayoutParams(dp(188), LinearLayout.LayoutParams.WRAP_CONTENT))
+                        }
+                    addView(showAllTile(section), LinearLayout.LayoutParams(dp(156), LinearLayout.LayoutParams.WRAP_CONTENT))
+                }, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                ))
+            })
+        }
+    }
+
+    private fun showAllTile(section: HomeSection): LinearLayout {
+        return StationCardShadowLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(22))
+            clipChildren = false
+            clipToPadding = false
+
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(12), dp(16), dp(12), dp(16))
+                background = roundedRect(Color.argb(52, 255, 159, 28), 28f, Color.argb(92, 255, 159, 28), 1)
+                foreground = selectableItemBackground()
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { openCategory(section.category) }
+
+                addView(TextView(this@MainActivity).apply {
+                    text = "..."
+                    textSize = 34f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(accentSoftColor)
+                    gravity = Gravity.CENTER
+                    includeFontPadding = false
+                })
+
+                addView(TextView(this@MainActivity).apply {
+                    text = localizedString(R.string.show_all)
+                    textSize = 14f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(inkColor)
+                    gravity = Gravity.CENTER
+                    includeFontPadding = false
+                }, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(10)
+                })
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(194),
+            ))
+        }
+    }
+
+    private fun openCategory(category: String) {
+        selectedLibraryTab = LIBRARY_TAB_STATIONS
+        selectedStationCategories.clear()
+        selectedStationCategories.add(category)
+        filterInput.text?.clear()
+        hideKeyboardAndClearSearchFocus()
+        resetStationBatch()
+        if (::bottomNavContainer.isInitialized) {
+            bottomNavContainer.populateBottomNavigation()
+        }
+        if (::stationGroupFilterContainer.isInitialized) {
+            stationGroupFilterContainer.populateStationGroupFilter()
+        }
+        renderStations()
+        scrollToTop()
     }
 
     private fun stationTile(station: RadioStation): LinearLayout {
@@ -2328,101 +2674,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun stationRow(station: RadioStation): LinearLayout {
-        val isActive = activeStation?.id == station.id
-        val isFavorite = isFavorite(station)
-        val shadow = StationCardShadowLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(2), dp(12), dp(14))
-            background = null
-            elevation = 0f
-            translationZ = 0f
-            clipChildren = false
-            clipToPadding = false
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                bottomMargin = 0
-            }
-        }
-
-        val row = LinearLayout(this).apply {
-            tag = stationViewTag(station.id)
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            background = stationCardBackground(isActive)
-            elevation = dp(2).toFloat()
-            translationZ = dp(1).toFloat()
-            foreground = selectableItemBackground()
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                if (activeStation?.id == station.id) {
-                    isPlayerPageDismissedByUser = false
-                    isPlayerPageVisible = true
-                    renderStations(animatePlayerIn = playerContainer.visibility != View.VISIBLE)
-                } else {
-                    playStation(station)
-                }
-            }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        }
-
-        row.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-
-            addView(stationLogoView(station), LinearLayout.LayoutParams(dp(54), dp(54)).apply {
-                marginEnd = dp(14)
-            })
-
-            addView(TextView(this@MainActivity).apply {
-                text = if (isActive) "■" else "▶"
-                textSize = if (isActive) 18f else 17f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(if (isActive) liveColor else accentColor)
-                gravity = Gravity.CENTER
-                background = if (isActive) {
-                    null
-                } else {
-                    roundedRect(Color.rgb(43, 37, 20), 13f)
-                }
-                layoutParams = LinearLayout.LayoutParams(dp(30), dp(30)).apply {
-                    marginEnd = dp(10)
-                }
-            })
-
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-
-                addView(TextView(this@MainActivity).apply {
-                    text = station.name
-                    textSize = 18f
-                    typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(inkColor)
-                    applyStationTextDirection(station.name, alignHebrewRight = true)
-                    includeFontPadding = false
-                })
-            })
-
-            addView(favoriteButton(station, isFavorite) {
-                toggleFavorite(station)
-            }, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
-                marginStart = dp(10)
-            })
-
-        })
-
-        shadow.addView(row)
-        return shadow
-    }
-
     private fun activePlayerCard(station: RadioStation): LinearLayout {
         var gestureStartX = 0f
         var gestureStartY = 0f
@@ -2543,7 +2794,7 @@ class MainActivity : AppCompatActivity() {
             setOnTouchListener(closeSwipeListener)
 
             val sheetRadius = dp(34).toFloat()
-            val shadowInsetTop = dp(38)
+            val shadowInsetTop = dp(8)
             val sheetFrame = FrameLayout(this@MainActivity).apply {
                 background = PlayerSheetShadowDrawable(
                     shadow = Color.argb(54, 0, 0, 0),
@@ -2559,7 +2810,7 @@ class MainActivity : AppCompatActivity() {
                     0,
                     1f,
                 ).apply {
-                    topMargin = dp(76)
+                    topMargin = (playerSheetTopInsetPx - shadowInsetTop).coerceAtLeast(0)
                 }
             }
 
@@ -3217,7 +3468,7 @@ class MainActivity : AppCompatActivity() {
         favoritePrefs.edit()
             .putBoolean(station.id, nextFavorite)
             .apply()
-        if (selectedLibraryTab == LIBRARY_TAB_FAVORITES) {
+        if (STATION_CATEGORY_FAVORITES in selectedStationCategories) {
             renderStations()
         } else {
             updateFavoriteButtonsForStation(station, nextFavorite)
@@ -3483,6 +3734,12 @@ class MainActivity : AppCompatActivity() {
         filterInput.clearFocus()
     }
 
+    private fun View.containsRawPoint(rawX: Int, rawY: Int): Boolean {
+        val bounds = Rect()
+        getGlobalVisibleRect(bounds)
+        return bounds.contains(rawX, rawY)
+    }
+
     private fun emptyState(message: String): TextView {
         return TextView(this).apply {
             text = message
@@ -3490,6 +3747,17 @@ class MainActivity : AppCompatActivity() {
             setTextColor(mutedColor)
             gravity = Gravity.CENTER
             setPadding(0, dp(24), 0, dp(24))
+        }
+    }
+
+    private fun emptyCatalogMessage(): String {
+        return if (
+            selectedLibraryTab == LIBRARY_TAB_SEARCH &&
+            filterInput.text?.toString()?.trim().isNullOrBlank()
+        ) {
+            localizedString(R.string.search_start_prompt)
+        } else {
+            localizedString(R.string.empty_filter)
         }
     }
 
@@ -3590,29 +3858,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun roundedCorners(
-        fill: Int,
-        topLeftDp: Float,
-        topRightDp: Float,
-        bottomRightDp: Float,
-        bottomLeftDp: Float,
-        stroke: Int? = null,
-        strokeWidthDp: Int = 0,
-    ): GradientDrawable {
-        return GradientDrawable().apply {
-            setColor(fill)
-            cornerRadii = floatArrayOf(
-                dp(topLeftDp).toFloat(), dp(topLeftDp).toFloat(),
-                dp(topRightDp).toFloat(), dp(topRightDp).toFloat(),
-                dp(bottomRightDp).toFloat(), dp(bottomRightDp).toFloat(),
-                dp(bottomLeftDp).toFloat(), dp(bottomLeftDp).toFloat(),
-            )
-            if (stroke != null && strokeWidthDp > 0) {
-                setStroke(dp(strokeWidthDp), stroke)
-            }
-        }
-    }
-
     private fun appBackground(): GradientDrawable {
         return GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
@@ -3622,78 +3867,6 @@ class MainActivity : AppCompatActivity() {
                 bgColor,
                 Color.rgb(20, 20, 27),
             ),
-        )
-    }
-
-    private fun playerCardBackground(): GradientDrawable {
-        return GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(
-                Color.rgb(38, 38, 48),
-                Color.rgb(30, 30, 39),
-                Color.rgb(24, 24, 32),
-            ),
-        ).apply {
-            cornerRadius = dp(30).toFloat()
-            setStroke(dp(1), borderColor)
-        }
-    }
-
-    private fun playerSheetSurface(): GradientDrawable {
-        return GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(
-                Color.rgb(35, 35, 44),
-                Color.rgb(31, 31, 40),
-            ),
-        ).apply {
-            cornerRadii = floatArrayOf(
-                dp(28).toFloat(), dp(28).toFloat(),
-                dp(28).toFloat(), dp(28).toFloat(),
-                0f, 0f,
-                0f, 0f,
-            )
-        }
-    }
-
-    private fun playerSheetBackground(): GradientDrawable {
-        return GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(
-                Color.rgb(35, 35, 44),
-                Color.rgb(28, 28, 37),
-                Color.rgb(20, 21, 29),
-            ),
-        ).apply {
-            cornerRadii = floatArrayOf(
-                dp(28).toFloat(), dp(28).toFloat(),
-                dp(28).toFloat(), dp(28).toFloat(),
-                0f, 0f,
-                0f, 0f,
-            )
-            setStroke(dp(1), Color.argb(42, 255, 255, 255))
-        }
-    }
-
-    private fun bottomPlayerPanelBackground(compact: Boolean): GradientDrawable {
-        return roundedCorners(
-            fill = Color.rgb(18, 17, 31),
-            topLeftDp = 34f,
-            topRightDp = 34f,
-            bottomRightDp = if (compact) 28f else 0f,
-            bottomLeftDp = if (compact) 28f else 0f,
-        )
-    }
-
-    private fun searchPanelBackground(): GradientDrawable {
-        return roundedCorners(
-            fill = Color.rgb(18, 17, 31),
-            topLeftDp = 30f,
-            topRightDp = 30f,
-            bottomRightDp = 0f,
-            bottomLeftDp = 0f,
-            stroke = Color.rgb(18, 17, 31),
-            strokeWidthDp = 1,
         )
     }
 
