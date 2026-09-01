@@ -2134,14 +2134,14 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun updateVisibleActiveStationHighlights(currentStationId: String) {
+    private fun updateVisibleActiveStationHighlights(currentStationId: String?) {
         syncVisibleStationActiveState(stationsRecyclerView, currentStationId)
     }
 
-    private fun syncVisibleStationActiveState(root: View, currentStationId: String) {
+    private fun syncVisibleStationActiveState(root: View, currentStationId: String?) {
         val tag = root.tag as? String
         if (tag?.startsWith(STATION_VIEW_TAG_PREFIX) == true) {
-            root.applyStationActiveState(tag == stationViewTag(currentStationId))
+            root.applyStationActiveState(currentStationId != null && tag == stationViewTag(currentStationId))
         }
         if (root !is ViewGroup) {
             return
@@ -2213,6 +2213,7 @@ class MainActivity : AppCompatActivity() {
         private var homeSections: List<HomeSection> = emptyList()
         private var remainingCount: Int = 0
         private var showEmpty: Boolean = false
+        private var renderedActiveStationId: String? = null
 
         override fun getItemCount(): Int {
             if (homeSections.isNotEmpty()) {
@@ -2276,17 +2277,26 @@ class MainActivity : AppCompatActivity() {
             homeSections = emptyList()
             remainingCount = 0
             showEmpty = false
+            renderedActiveStationId = null
             notifyDataSetChanged()
         }
 
         fun submitHomeSections(sections: List<HomeSection>) {
-            if (stations.isEmpty() && remainingCount == 0 && showEmpty == sections.isEmpty() && homeSections == sections) {
+            val currentActiveStationId = activeStation?.id
+            if (
+                stations.isEmpty() &&
+                remainingCount == 0 &&
+                showEmpty == sections.isEmpty() &&
+                homeSections == sections &&
+                renderedActiveStationId == currentActiveStationId
+            ) {
                 return
             }
             stations = emptyList()
             remainingCount = 0
             showEmpty = sections.isEmpty()
             homeSections = sections
+            renderedActiveStationId = currentActiveStationId
             notifyDataSetChanged()
         }
 
@@ -2311,6 +2321,7 @@ class MainActivity : AppCompatActivity() {
             this.stations = stations
             this.remainingCount = remainingCount.coerceAtLeast(0)
             this.showEmpty = showEmpty
+            renderedActiveStationId = activeStation?.id
 
             if (!animateChanges || oldShowEmpty != showEmpty || stations.size < oldStationCount) {
                 notifyDataSetChanged()
@@ -2406,6 +2417,9 @@ class MainActivity : AppCompatActivity() {
         isPlayerPageVisible = false
         stopElapsedTimer(resetText = true)
         hideStatus()
+        if (::stationsRecyclerView.isInitialized) {
+            updateVisibleActiveStationHighlights(null)
+        }
     }
 
     private fun updateFilterPanelChrome(alpha: Int = 255) {
@@ -3489,6 +3503,9 @@ class MainActivity : AppCompatActivity() {
             pause()
             stop()
             clearMediaItems()
+        }
+        if (::stationsRecyclerView.isInitialized) {
+            updateVisibleActiveStationHighlights(null)
         }
         hideActivePlayerWithAnimation()
         mainHandler.postDelayed({ isUserStoppingPlayback = false }, 1_000)
