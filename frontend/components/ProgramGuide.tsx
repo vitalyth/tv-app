@@ -72,6 +72,7 @@ const MAX_HOURS_BACK = 24;
 const MAX_HOURS_FORWARD = 48;
 const ROW_OVERSCAN_PX = CELL_H * 4;
 const TIME_OVERSCAN_HOURS = 2;
+const PROGRAM_TOOLTIP_DELAY_MS = 650;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -305,7 +306,7 @@ const ProgramCell = memo(function ProgramCell({
     }
 
     return (
-        <Tooltip>
+        <Tooltip delayDuration={PROGRAM_TOOLTIP_DELAY_MS}>
             <TooltipTrigger asChild>
                 {cell}
             </TooltipTrigger>
