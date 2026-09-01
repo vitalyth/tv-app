@@ -1,0 +1,57 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+    id "org.jetbrains.kotlin.plugin.compose"
+}
+
+android {
+    namespace "com.tvapp.programguide"
+    compileSdk rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        applicationId "com.tvapp.programguide"
+        minSdkVersion 26
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+
+        buildConfigField "String", "PROGRAM_GUIDE_API_BASE_URL", "\"${project.findProperty("PROGRAM_GUIDE_API_BASE_URL") ?: "http://192.168.86.75:8001/api"}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+        compose true
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+dependencies {
+    implementation platform("androidx.compose:compose-bom:2025.12.00")
+    implementation "androidx.activity:activity-compose:1.10.1"
+    implementation "androidx.compose.foundation:foundation"
+    implementation "androidx.compose.material3:material3"
+    implementation "androidx.compose.material:material-icons-core"
+    implementation "androidx.compose.material:material-icons-extended"
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.ui:ui-tooling-preview"
+    implementation "androidx.core:core-ktx:1.17.0"
+    implementation "androidx.lifecycle:lifecycle-runtime-compose:2.9.4"
+    implementation "androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4"
+    implementation "androidx.tv:tv-material:1.1.0"
+    implementation "androidx.media3:media3-exoplayer:1.8.0"
+    implementation "androidx.media3:media3-exoplayer-hls:1.8.0"
+    implementation "androidx.media3:media3-ui:1.8.0"
+    implementation "io.coil-kt:coil-compose:2.7.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
+
+    debugImplementation "androidx.compose.ui:ui-tooling"
+}
