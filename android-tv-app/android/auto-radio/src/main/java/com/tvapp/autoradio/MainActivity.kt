@@ -79,11 +79,13 @@ import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import java.lang.ref.WeakReference
 import java.net.HttpURLConnection
 import java.net.URL
 import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.ln
@@ -187,6 +189,7 @@ class MainActivity : AppCompatActivity() {
     private val logoExecutor = Executors.newFixedThreadPool(4)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val logoCache = ConcurrentHashMap<String, android.graphics.Bitmap>()
+    private val logoWaiters = ConcurrentHashMap<String, CopyOnWriteArrayList<WeakReference<ImageView>>>()
     private val timerRunnable = object : Runnable {
         override fun run() {
             updateElapsedTime()
@@ -2275,6 +2278,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun submitHomeSections(sections: List<HomeSection>) {
+            if (stations.isEmpty() && remainingCount == 0 && showEmpty == sections.isEmpty() && homeSections == sections) {
+                return
+            }
             stations = emptyList()
             remainingCount = 0
             showEmpty = sections.isEmpty()
@@ -3786,6 +3792,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         imageView.setImageResource(R.drawable.ic_radio)
+        val existingWaiters = logoWaiters.putIfAbsent(
+            logoUrl,
+            CopyOnWriteArrayList<WeakReference<ImageView>>().apply {
+                add(WeakReference(imageView))
+            },
+        )
+        if (existingWaiters != null) {
+            existingWaiters.add(WeakReference(imageView))
+            return
+        }
+
         logoExecutor.execute {
             try {
                 val connection = URL(logoUrl).openConnection() as HttpURLConnection
@@ -3793,20 +3810,21 @@ class MainActivity : AppCompatActivity() {
                 connection.readTimeout = 8_000
                 connection.requestMethod = "GET"
                 connection.inputStream.use { stream ->
-                    BitmapFactory.decodeStream(stream)?.let { bitmap ->
-                        logoCache[logoUrl] = bitmap
-                        mainHandler.post {
-                            if (imageView.tag == logoUrl) {
-                                imageView.setImageBitmap(bitmap)
-                            }
+                    val bitmap = BitmapFactory.decodeStream(stream) ?: error("Unable to decode logo")
+                    logoCache[logoUrl] = bitmap
+                    mainHandler.post {
+                        val waiters = logoWaiters.remove(logoUrl).orEmpty()
+                        waiters.forEach { waiter ->
+                            waiter.get()?.takeIf { it.tag == logoUrl }?.setImageBitmap(bitmap)
                         }
                     }
                 }
                 connection.disconnect()
             } catch (_: Exception) {
                 mainHandler.post {
-                    if (imageView.tag == logoUrl) {
-                        imageView.setImageResource(R.drawable.ic_radio)
+                    val waiters = logoWaiters.remove(logoUrl).orEmpty()
+                    waiters.forEach { waiter ->
+                        waiter.get()?.takeIf { it.tag == logoUrl }?.setImageResource(R.drawable.ic_radio)
                     }
                 }
             }
