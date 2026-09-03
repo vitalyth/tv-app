@@ -3,8 +3,6 @@ package com.tvapp.programguide.data
 import com.tvapp.programguide.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -13,19 +11,37 @@ import org.json.JSONObject
 class ProgramGuideRepository(
     private val apiBaseUrl: String = BuildConfig.PROGRAM_GUIDE_API_BASE_URL.trimEnd('/'),
 ) {
-    suspend fun loadGuide(): GuideData = withContext(Dispatchers.IO) {
+    suspend fun loadGuide(): GuideData {
         val now = System.currentTimeMillis() / 1000
-        val start = now - 60 * 60
-        val end = now + 6 * 60 * 60
-        val playlistStreams = parsePlaylistStreams(get("$apiBaseUrl/playlist.m3u"))
-        val channels = parseChannels(getJsonArray("$apiBaseUrl/live_channels"), playlistStreams)
-        val epg = getJsonObject("$apiBaseUrl/epg?start=$start&end=$end")
-        val programs = channels.associate { channel ->
-            val epgKey = channel.tvgId.ifBlank { channel.id }
-            channel.id to parsePrograms(epg.optJSONArray(epgKey), channel.id)
-        }
+        val start = (now - 60 * 60).roundDownToHour()
+        val end = start + INITIAL_EPG_WINDOW_SECONDS
+        val channels = loadChannels()
+        return GuideData(
+            channels = channels,
+            programsByChannel = loadPrograms(channels, start, end),
+            guideStartSeconds = start,
+            guideEndSeconds = end,
+        )
+    }
 
-        GuideData(channels = channels.distinctGuideChannels(), programsByChannel = programs)
+    suspend fun loadChannels(): List<TvChannel> = withContext(Dispatchers.IO) {
+        val playlistStreams = parsePlaylistStreams(get("$apiBaseUrl/playlist.m3u"))
+        parseChannels(getJsonArray("$apiBaseUrl/live_channels"), playlistStreams).distinctGuideChannels()
+    }
+
+    suspend fun loadPrograms(
+        channels: List<TvChannel>,
+        startSeconds: Long,
+        endSeconds: Long,
+    ): Map<String, List<TvProgram>> = withContext(Dispatchers.IO) {
+        val start = startSeconds.roundDownToHour()
+        val end = endSeconds.roundUpToHour()
+        val epg = getJsonObject("$apiBaseUrl/epg?start=$start&end=$end")
+        channels.associate { channel ->
+            val programArray = channel.epgKeys()
+                .firstNotNullOfOrNull { key -> epg.optJSONArray(key) }
+            channel.id to parsePrograms(programArray, channel.id)
+        }
     }
 
     fun streamUrl(channel: TvChannel): String = channel.streamUrl
@@ -39,21 +55,28 @@ class ProgramGuideRepository(
                 val item = array.optJSONObject(index) ?: continue
                 val id = item.optString("channelID", item.optString("id")).trim()
                 if (id.isEmpty()) continue
-                val logo = item.optString("logo").trim()
-                val tvgId = item.optString("tvgID").trim()
-                val name = item.optString("name").ifBlank { id }
-                val number = item.optString("channelNumber", item.optString("index")).trim()
+                if (item.optCleanString("type") == "radio" || item.optCleanString("module") == "radio") {
+                    continue
+                }
+                val logo = item.optCleanString("logo")
+                val tvgId = item.optCleanString("tvgID")
+                val indexNumber = item.optInt("index", 0)
+                val name = item.optCleanString("name").ifBlank { id }
+                val channelNumber = item.optCleanString("channelNumber")
+                val number = channelNumber.ifBlank { indexNumber.takeIf { it > 0 }?.toString().orEmpty() }
                 add(
                     TvChannel(
                         id = id,
+                        index = indexNumber,
                         tvgId = tvgId,
+                        epgNumber = channelNumber,
                         number = number,
                         name = name,
                         logoUrl = resolveLogoUrl(logo),
                         streamUrl = playlistStreams[name]
                             ?: playlistStreams[tvgId]
                             ?: playlistStreams[number]
-                            ?: "$apiBaseUrl/stream?channel_id=${encode(id)}",
+                            ?: "",
                     )
                 )
             }
@@ -63,7 +86,7 @@ class ProgramGuideRepository(
     private fun List<TvChannel>.distinctGuideChannels(): List<TvChannel> {
         val seen = mutableSetOf<String>()
         return filter { channel ->
-            val guideKey = channel.tvgId.ifBlank { channel.number.ifBlank { channel.id } }
+            val guideKey = channel.index.takeIf { it > 0 }?.toString() ?: channel.id
             seen.add(guideKey)
         }
     }
@@ -84,7 +107,7 @@ class ProgramGuideRepository(
             }
 
             if (!line.startsWith("#") && currentKeys.isNotEmpty()) {
-                currentKeys.forEach { streams[it] = line }
+                currentKeys.forEach { streams.putIfAbsent(it, line) }
                 currentKeys = emptyList()
             }
         }
@@ -128,6 +151,18 @@ class ProgramGuideRepository(
         return apiBaseUrl.removeSuffix("/api") + "/ch/" + logo.trimStart('/')
     }
 
+    private fun TvChannel.epgKeys(): List<String> =
+        listOf(
+            tvgId,
+            epgNumber,
+            id,
+        ).filter { it.isNotBlank() }.distinct()
+
+    private fun JSONObject.optCleanString(name: String): String {
+        if (!has(name) || isNull(name)) return ""
+        return optString(name).trim().takeUnless { it.equals("null", ignoreCase = true) }.orEmpty()
+    }
+
     private fun getJsonArray(url: String): JSONArray = JSONArray(get(url))
 
     private fun getJsonObject(url: String): JSONObject = JSONObject(get(url))
@@ -153,6 +188,16 @@ class ProgramGuideRepository(
         }
     }
 
-    private fun encode(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+    private fun Long.roundDownToHour(): Long =
+        this - this.floorMod(3600L)
+
+    private fun Long.roundUpToHour(): Long =
+        if (this.floorMod(3600L) == 0L) this else this.roundDownToHour() + 3600L
+
+    private fun Long.floorMod(divisor: Long): Long =
+        Math.floorMod(this, divisor)
+
+    private companion object {
+        private const val INITIAL_EPG_WINDOW_SECONDS = 6 * 60 * 60L
+    }
 }

@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">Program Guide</string>
-    <string name="loading_guide">Loading program guide...</string>
+    <string name="app_name">TV App</string>
+    <string name="loading_guide">TV App</string>
     <string name="guide_error">Unable to load the guide</string>
     <string name="retry">Retry</string>
 </resources>
