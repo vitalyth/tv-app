@@ -37,6 +37,7 @@ data class GuideDataUiState(
     val error: String? = null,
     val guideData: GuideData? = null,
     val selectedChannel: TvChannel? = null,
+    val selectedProgram: TvProgram? = null,
     val playingChannel: TvChannel? = null,
 )
 
@@ -64,6 +65,7 @@ class GuideViewModel(
                 error = state.error,
                 guideData = state.guideData,
                 selectedChannel = state.selectedChannel,
+                selectedProgram = state.selectedProgram,
                 playingChannel = state.playingChannel,
             )
         }
@@ -167,6 +169,34 @@ class GuideViewModel(
 
     fun playPreviousChannel() {
         playAdjacentChannel(offset = -1)
+    }
+
+    fun playChannelNumberExpanded(number: String): Boolean {
+        val state = _uiState.value
+        val data = state.guideData ?: return false
+        val channel = data.channels.firstOrNull { it.hasStream() && it.normalizedNumber() == normalizedChannelNumber(number) }
+            ?: return false
+        val program = currentProgram(data, channel)
+        saveLastChannel(channel)
+        _uiState.update {
+            it.copy(
+                selectedChannel = channel,
+                selectedProgram = program,
+                playingChannel = channel,
+                playingProgram = program,
+                isMiniPlayerPlaying = true,
+                isPlayerExpanded = true,
+            )
+        }
+        return true
+    }
+
+    fun hasPlayableChannelNumberPrefix(prefix: String): Boolean {
+        val data = _uiState.value.guideData ?: return false
+        val normalizedPrefix = normalizedChannelNumber(prefix)
+        return data.channels.any { channel ->
+            channel.hasStream() && channel.normalizedNumber().startsWith(normalizedPrefix)
+        }
     }
 
     fun expandPlayer() {
@@ -295,6 +325,11 @@ class GuideViewModel(
     }
 
     private fun TvChannel.hasStream(): Boolean = streamUrl.isNotBlank()
+
+    private fun TvChannel.normalizedNumber(): String = normalizedChannelNumber(number)
+
+    private fun normalizedChannelNumber(number: String): String =
+        number.filter { it.isDigit() }.trimStart('0').ifBlank { "0" }
 
     private fun GuideData.lastPlayableChannel(): TvChannel? {
         val lastChannelId = playbackPrefs.getString(KEY_LAST_CHANNEL_ID, null)

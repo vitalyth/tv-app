@@ -3,8 +3,9 @@ package com.tvapp.programguide.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.view.ViewGroup
 import android.view.LayoutInflater
+import android.view.KeyEvent as AndroidKeyEvent
+import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -48,6 +49,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,8 +58,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -68,6 +70,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -117,11 +120,15 @@ private val GlowCyan = Color(0xFF7DF9FF)
 private val PrimaryCyan = Color(0xFF10D5D9)
 private val ActiveGreen = Color(0xFF19D99A)
 private val Gold = Color(0xFFFFC928)
-private val GuideZoneId = ZoneId.of("Asia/Jerusalem")
 private val TimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private const val MINI_PLAYER_MAX_WIDTH = 960
+private const val MINI_PLAYER_MAX_HEIGHT = 540
 
 @Stable
 private class StablePlayer(val value: ExoPlayer)
+
+@Stable
+private class StablePlayerView(val value: PlayerView)
 
 private data class VisibleProgram(
     val program: TvProgram,
@@ -135,6 +142,16 @@ private data class GridFocusTarget(
     val programKey: String? = null,
     val live: Boolean = false,
 )
+
+object TvKeyEventBridge {
+    private var handler: ((AndroidKeyEvent) -> Boolean)? = null
+
+    fun setHandler(nextHandler: ((AndroidKeyEvent) -> Boolean)?) {
+        handler = nextHandler
+    }
+
+    fun dispatch(event: AndroidKeyEvent): Boolean = handler?.invoke(event) == true
+}
 
 @Composable
 private fun KeepScreenOnEffect(enabled: Boolean) {
@@ -181,7 +198,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         DefaultTrackSelector(context).apply {
             setParameters(
                 buildUponParameters()
-                    .setMaxVideoSize(960, 540)
+                    .setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
                     .setForceLowestBitrate(false)
             )
         }
@@ -192,9 +209,34 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         }
     }
     val stablePlayer = remember(player) { StablePlayer(player) }
+    val playerView = remember(player) {
+        (LayoutInflater.from(context).inflate(R.layout.player_view, null) as PlayerView).apply {
+            this.player = player
+            useController = false
+            controllerAutoShow = true
+            controllerShowTimeoutMs = 3_000
+            isFocusable = false
+            isFocusableInTouchMode = false
+            setKeepContentOnPlayerReset(true)
+            setEnableComposeSurfaceSyncWorkaround(true)
+            hideController()
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+    }
+    val stablePlayerView = remember(playerView) { StablePlayerView(playerView) }
     val streamingActive = playbackState.isMiniPlayerPlaying || playbackState.isPlayerExpanded
+    var detailsVisible by remember { mutableStateOf(false) }
+    val nowSeconds by rememberGuideNowSeconds()
     var gridFocusNonce by remember { mutableIntStateOf(0) }
     var gridFocusTarget by remember { mutableStateOf<GridFocusTarget?>(null) }
+    val guideData = guideState.guideData
+    val currentPlayingProgram = playbackState.playingChannel
+        ?.let { channel -> guideData?.programsByChannel?.get(channel.id).orEmpty() }
+        ?.let { programs -> currentProgramForNow(programs, nowSeconds) }
+        ?: playbackState.playingProgram
 
     fun requestGridFocus(channel: TvChannel?, program: TvProgram? = null, live: Boolean = false) {
         val channelId = channel?.id ?: return
@@ -217,25 +259,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     )
 
     DisposableEffect(Unit) {
-        onDispose { player.release() }
-    }
-
-    LaunchedEffect(playbackState.isPlayerExpanded) {
-        val parameters = trackSelector.buildUponParameters()
-            .setForceLowestBitrate(false)
-            .let { builder ->
-                if (playbackState.isPlayerExpanded) {
-                    builder.setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
-                } else {
-                    builder.setMaxVideoSize(960, 540)
-                }
-            }
-        trackSelector.setParameters(parameters)
+        onDispose {
+            playerView.player = null
+            player.release()
+        }
     }
 
     LaunchedEffect(
         playbackState.isMiniPlayerPlaying,
-        playbackState.isPlayerExpanded,
         playbackState.playingChannel?.streamUrl,
     ) {
         val channel = playbackState.playingChannel ?: return@LaunchedEffect
@@ -272,31 +303,76 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                 guideState.guideData != null -> GuideContent(
                     data = guideState.guideData!!,
                     selectedChannel = guideState.selectedChannel,
+                    selectedProgram = guideState.selectedProgram,
                     displayChannel = playbackState.playingChannel ?: playbackState.selectedChannel,
-                    displayProgram = playbackState.playingProgram ?: playbackState.selectedProgram,
+                    displayProgram = currentPlayingProgram ?: playbackState.selectedProgram,
                     playingChannel = playbackState.playingChannel,
-                    playingProgram = playbackState.playingProgram,
-                    player = stablePlayer,
+                    playingProgram = currentPlayingProgram,
                     isMiniPlayerPlaying = playbackState.isMiniPlayerPlaying,
                     isPlayerExpanded = playbackState.isPlayerExpanded,
                     onChannelActivated = viewModel::playChannel,
                     onLiveChannelOpened = viewModel::playChannelExpanded,
+                    onProgramSelected = viewModel::selectChannel,
                     onPlayerClick = viewModel::expandPlayer,
                     onGuideRangeNeeded = viewModel::ensureGuideRange,
                     gridFocusTarget = gridFocusTarget,
+                    onDetailsVisibleChanged = { detailsVisible = it },
                     onGridFocusRequested = { channel, program, live ->
                         requestGridFocus(channel, program, live)
                     },
                 )
             }
 
+            if (streamingActive && playbackState.playingChannel != null && (!detailsVisible || playbackState.isPlayerExpanded)) {
+                PlayerSurface(
+                    player = stablePlayer,
+                    playerView = stablePlayerView,
+                    useController = false,
+                    modifier = if (playbackState.isPlayerExpanded) {
+                        Modifier.fillMaxSize()
+                    } else {
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .width(360.dp)
+                            .height(226.dp)
+                    },
+                )
+                if (!playbackState.isPlayerExpanded) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .width(360.dp)
+                            .height(226.dp)
+                    ) {
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .width(128.dp)
+                                .fillMaxHeight()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colorStops = arrayOf(
+                                            0.00f to Color(0xF0081420),
+                                            0.46f to Color(0x99081420),
+                                            0.78f to Color(0x33081420),
+                                            1.00f to Color.Transparent,
+                                        )
+                                    )
+                                )
+                        )
+                    }
+                }
+            }
+
             if (playbackState.isPlayerExpanded) {
                 ExpandedPlayer(
                     player = stablePlayer,
                     channel = playbackState.playingChannel,
-                    program = playbackState.playingProgram,
+                    program = currentPlayingProgram,
                     onNextChannel = viewModel::playNextChannel,
                     onPreviousChannel = viewModel::playPreviousChannel,
+                    onChannelNumberEntered = viewModel::playChannelNumberExpanded,
+                    hasChannelNumberPrefix = viewModel::hasPlayableChannelNumberPrefix,
                     onClose = {
                         requestGridFocus(playbackState.playingChannel, live = true)
                         viewModel.collapsePlayer()
@@ -311,74 +387,101 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
 private fun GuideContent(
     data: GuideData,
     selectedChannel: TvChannel?,
+    selectedProgram: TvProgram?,
     displayChannel: TvChannel?,
     displayProgram: TvProgram?,
     playingChannel: TvChannel?,
     playingProgram: TvProgram?,
-    player: StablePlayer,
     isMiniPlayerPlaying: Boolean,
     isPlayerExpanded: Boolean,
     onChannelActivated: (TvChannel, TvProgram?) -> Unit,
     onLiveChannelOpened: (TvChannel, TvProgram?) -> Unit,
+    onProgramSelected: (TvChannel, TvProgram?) -> Unit,
     onPlayerClick: () -> Unit,
     onGuideRangeNeeded: (Long, Long) -> Unit,
     gridFocusTarget: GridFocusTarget?,
+    onDetailsVisibleChanged: (Boolean) -> Unit,
     onGridFocusRequested: (TvChannel?, TvProgram?, Boolean) -> Unit,
 ) {
     val topPanelFocusRequester = remember { FocusRequester() }
     val gridFocusRequester = remember { FocusRequester() }
     val nowButtonFocusRequester = remember { FocusRequester() }
+    var showNowRequestNonce by remember { mutableIntStateOf(0) }
+    var blockGridActivationUntilMs by remember { mutableLongStateOf(0L) }
+    var suspendGridAutoPlay by remember { mutableStateOf(false) }
     var detailsChannel by remember { mutableStateOf<TvChannel?>(null) }
     var detailsProgram by remember { mutableStateOf<TvProgram?>(null) }
 
     val programForDetails = detailsProgram
-    if (programForDetails != null) {
-        ProgramDetailsPage(
-            channel = detailsChannel,
-            program = programForDetails,
-            onPlayLive = {
-                detailsChannel?.let { channel ->
-                    onGridFocusRequested(channel, null, true)
-                    detailsChannel = null
-                    detailsProgram = null
-                    onLiveChannelOpened(channel, null)
-                }
-            },
-            onClose = {
-                onGridFocusRequested(detailsChannel, programForDetails, false)
-                detailsChannel = null
-                detailsProgram = null
-            },
-        )
-    } else {
+    LaunchedEffect(programForDetails != null) {
+        onDetailsVisibleChanged(programForDetails != null)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            onDetailsVisibleChanged(false)
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             TopInfoPanel(
                 channel = displayChannel,
                 program = displayProgram,
                 playingChannel = playingChannel,
                 playingProgram = playingProgram,
-                player = player,
                 isMiniPlayerPlaying = isMiniPlayerPlaying,
                 isPlayerExpanded = isPlayerExpanded,
                 onPlayerClick = onPlayerClick,
+                onShowNowClick = { showNowRequestNonce += 1 },
                 topPanelFocusRequester = topPanelFocusRequester,
                 gridFocusRequester = gridFocusRequester,
             )
             ProgramGrid(
                 data = data,
                 selectedChannel = selectedChannel,
+                selectedProgram = selectedProgram,
                 playingChannel = playingChannel,
                 onChannelActivated = onChannelActivated,
                 onLiveChannelOpened = onLiveChannelOpened,
+                onProgramSelected = onProgramSelected,
+                isGridActivationBlocked = {
+                    System.currentTimeMillis() < blockGridActivationUntilMs
+                },
+                isGridAutoPlaySuspended = { suspendGridAutoPlay },
+                onGridNavigationStarted = { suspendGridAutoPlay = false },
                 onProgramDetailsRequested = { channel, program ->
+                    suspendGridAutoPlay = true
                     detailsChannel = channel
                     detailsProgram = program
                 },
                 onGuideRangeNeeded = onGuideRangeNeeded,
                 focusTarget = gridFocusTarget,
+                showNowRequestNonce = showNowRequestNonce,
                 gridFocusRequester = gridFocusRequester,
                 topFocusRequester = topPanelFocusRequester,
                 nowButtonFocusRequester = nowButtonFocusRequester,
+            )
+        }
+
+        if (programForDetails != null) {
+            ProgramDetailsPage(
+                channel = detailsChannel,
+                program = programForDetails,
+                onPlayLive = {
+                    detailsChannel?.let { channel ->
+                        onGridFocusRequested(channel, null, true)
+                        detailsChannel = null
+                        detailsProgram = null
+                        onLiveChannelOpened(channel, null)
+                    }
+                },
+                onClose = {
+                    blockGridActivationUntilMs = System.currentTimeMillis() + 600L
+                    suspendGridAutoPlay = true
+                    onGridFocusRequested(detailsChannel, programForDetails, false)
+                    detailsChannel = null
+                    detailsProgram = null
+                },
             )
         }
     }
@@ -390,15 +493,13 @@ private fun TopInfoPanel(
     program: TvProgram?,
     playingChannel: TvChannel?,
     playingProgram: TvProgram?,
-    player: StablePlayer,
     isMiniPlayerPlaying: Boolean,
     isPlayerExpanded: Boolean,
     onPlayerClick: () -> Unit,
+    onShowNowClick: () -> Unit,
     topPanelFocusRequester: FocusRequester,
     gridFocusRequester: FocusRequester,
 ) {
-    val focused = remember { mutableStateOf(false) }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -407,42 +508,25 @@ private fun TopInfoPanel(
                 Brush.verticalGradient(
                     listOf(Color(0xFF17262A), Color(0xFF090D10))
                 )
-            )
-            .padding(start = 14.dp, top = 12.dp, end = 14.dp, bottom = 12.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .border(1.dp, Color(0xFF3F5961), RoundedCornerShape(9.dp))
-            .onPreviewKeyEvent {
-                when {
-                    it.type == KeyEventType.KeyUp && it.key.isActivationKey() -> {
-                        onPlayerClick()
-                        true
-                    }
-                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown -> {
-                        gridFocusRequester.requestFocus()
-                        true
-                    }
-                    else -> false
-                }
-            }
-            .onFocusChanged { focused.value = it.isFocused }
-            .focusRequester(topPanelFocusRequester)
-            .focusable()
-            .clickable(onClick = onPlayerClick),
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ProgramHeroPanel(
             channel = channel,
             program = program,
+            onPlayerClick = onPlayerClick,
+            onShowNowClick = onShowNowClick,
+            topPanelFocusRequester = topPanelFocusRequester,
+            gridFocusRequester = gridFocusRequester,
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )
         MiniPlayerPreview(
             channel = playingChannel ?: channel,
             program = playingProgram ?: program,
-            player = player,
             isPlaying = isMiniPlayerPlaying,
             isPlayerExpanded = isPlayerExpanded,
             onClick = onPlayerClick,
-            showOpenIcon = focused.value,
+            showOpenIcon = false,
             modifier = Modifier.width(360.dp).fillMaxHeight(),
         )
     }
@@ -452,6 +536,10 @@ private fun TopInfoPanel(
 private fun ProgramHeroPanel(
     channel: TvChannel?,
     program: TvProgram?,
+    onPlayerClick: () -> Unit,
+    onShowNowClick: () -> Unit,
+    topPanelFocusRequester: FocusRequester,
+    gridFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val backgroundUrl = program?.imageUrl ?: channel?.logoUrl
@@ -465,6 +553,8 @@ private fun ProgramHeroPanel(
             .background(Color(0xFF081723))
             .clipToBounds(),
     ) {
+        val heroNowFocusRequester = remember { FocusRequester() }
+
         AsyncImage(
             model = rememberSizedImageRequest(backgroundUrl, width = 900, height = 320),
             contentDescription = null,
@@ -499,6 +589,40 @@ private fun ProgramHeroPanel(
 
         Row(
             modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 18.dp, top = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            HeroIconButton(
+                focusRequester = topPanelFocusRequester,
+                onMoveDown = { gridFocusRequester.requestFocus() },
+                onMoveRight = { heroNowFocusRequester.requestFocus() },
+                onClick = onPlayerClick,
+            ) { tint ->
+                Icon(
+                    painter = painterResource(R.drawable.ic_fullscreen),
+                    contentDescription = "Open fullscreen",
+                    tint = tint,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            HeroIconButton(
+                focusRequester = heroNowFocusRequester,
+                onMoveDown = { gridFocusRequester.requestFocus() },
+                onMoveLeft = { topPanelFocusRequester.requestFocus() },
+                onClick = onShowNowClick,
+            ) { tint ->
+                Icon(
+                    painter = painterResource(R.drawable.ic_clock),
+                    contentDescription = "Show now",
+                    tint = tint,
+                    modifier = Modifier.size(25.dp),
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
                 .align(if (textAlign == TextAlign.Right) Alignment.TopEnd else Alignment.TopStart)
                 .padding(start = 30.dp, top = 26.dp, end = 30.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -508,7 +632,7 @@ private fun ProgramHeroPanel(
             Text(
                 text = program?.timeRange().orEmpty(),
                 color = Color(0xFFD4DEE3),
-                fontSize = 18.sp,
+                fontSize = 16.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -516,7 +640,7 @@ private fun ProgramHeroPanel(
             Text(
                 text = channel?.name.orEmpty(),
                 color = Color.White,
-                fontSize = 20.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -528,28 +652,29 @@ private fun ProgramHeroPanel(
         Column(
             modifier = Modifier
                 .align(if (textAlign == TextAlign.Right) Alignment.BottomEnd else Alignment.BottomStart)
-                .padding(start = 38.dp, end = 38.dp, bottom = 26.dp)
-                .fillMaxWidth(0.9f),
+                .padding(start = 28.dp, end = 28.dp, bottom = 18.dp)
+                .fillMaxWidth(0.94f),
             horizontalAlignment = contentAlignment,
         ) {
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 28.sp,
+                fontSize = 23.sp,
+                lineHeight = 25.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = textAlign,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(7.dp))
             Text(
                 text = description,
                 color = Color(0xFFD1DEE4),
-                fontSize = 16.sp,
-                lineHeight = 21.sp,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
                 textAlign = textAlign,
-                maxLines = 2,
+                maxLines = 6,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -564,6 +689,59 @@ private fun LiveDot() {
             .size(10.dp)
             .background(Color(0xFFFF3648), CircleShape)
     )
+}
+
+@Composable
+private fun HeroIconButton(
+    focusRequester: FocusRequester,
+    onMoveDown: () -> Unit,
+    onClick: () -> Unit,
+    onMoveLeft: (() -> Unit)? = null,
+    onMoveRight: (() -> Unit)? = null,
+    icon: @Composable (Color) -> Unit,
+) {
+    val focused = remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .background(
+                if (focused.value) PrimaryCyan else Color(0xCC06121B),
+                RoundedCornerShape(9.dp),
+            )
+            .border(
+                if (focused.value) 2.dp else 1.dp,
+                if (focused.value) Color.White else Color(0x664C6974),
+                RoundedCornerShape(9.dp),
+            )
+            .onPreviewKeyEvent {
+                when {
+                    it.type == KeyEventType.KeyUp && it.key.isActivationKey() -> {
+                        onClick()
+                        true
+                    }
+                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown -> {
+                        onMoveDown()
+                        true
+                    }
+                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft && onMoveLeft != null -> {
+                        onMoveLeft()
+                        true
+                    }
+                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionRight && onMoveRight != null -> {
+                        onMoveRight()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .onFocusChanged { focused.value = it.isFocused }
+            .focusRequester(focusRequester)
+            .focusable()
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        icon(if (focused.value) Color(0xFF031012) else Color.White)
+    }
 }
 
 @Composable
@@ -588,7 +766,6 @@ private fun ChannelLogoCircle(channel: TvChannel?) {
 private fun MiniPlayerPreview(
     channel: TvChannel?,
     program: TvProgram?,
-    player: StablePlayer,
     isPlaying: Boolean,
     isPlayerExpanded: Boolean,
     onClick: () -> Unit,
@@ -602,9 +779,7 @@ private fun MiniPlayerPreview(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (isPlaying && !isPlayerExpanded) {
-            PlayerSurface(player = player, useController = false)
-        } else {
+        if (!isPlaying || isPlayerExpanded) {
             AsyncImage(
                 model = rememberSizedImageRequest(program?.imageUrl ?: channel?.logoUrl, width = 580, height = 326),
                 contentDescription = null,
@@ -733,12 +908,18 @@ private fun RatingLine() {
 private fun ProgramGrid(
     data: GuideData,
     selectedChannel: TvChannel?,
+    selectedProgram: TvProgram?,
     playingChannel: TvChannel?,
     onChannelActivated: (TvChannel, TvProgram?) -> Unit,
     onLiveChannelOpened: (TvChannel, TvProgram?) -> Unit,
+    onProgramSelected: (TvChannel, TvProgram?) -> Unit,
+    isGridActivationBlocked: () -> Boolean,
+    isGridAutoPlaySuspended: () -> Boolean,
+    onGridNavigationStarted: () -> Unit,
     onProgramDetailsRequested: (TvChannel, TvProgram) -> Unit,
     onGuideRangeNeeded: (Long, Long) -> Unit,
     focusTarget: GridFocusTarget?,
+    showNowRequestNonce: Int,
     gridFocusRequester: FocusRequester,
     topFocusRequester: FocusRequester,
     nowButtonFocusRequester: FocusRequester,
@@ -783,36 +964,50 @@ private fun ProgramGrid(
         )
     }
     val nowSeconds by rememberGuideNowSeconds()
-    var selectedProgramIndex by remember(data.channels, selectedChannelId) {
+    val selectedProgramSeedKey = selectedProgram?.programKey()
+    var selectedProgramIndex by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
         val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
-        mutableIntStateOf(liveProgramIndex(initialPrograms, nowSeconds))
+        val programIndex = selectedProgramSeedKey
+            ?.let { key -> initialPrograms.indexOfFirst { it.programKey() == key } }
+            ?.takeIf { it >= 0 }
+            ?: liveProgramIndex(initialPrograms, nowSeconds)
+        mutableIntStateOf(programIndex)
     }
-    var selectedProgramKey by remember(data.channels, selectedChannelId) {
+    var selectedProgramKey by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
         val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
-        val initialIndex = liveProgramIndex(initialPrograms, nowSeconds)
+        val initialIndex = selectedProgramSeedKey
+            ?.let { key -> initialPrograms.indexOfFirst { it.programKey() == key } }
+            ?.takeIf { it >= 0 }
+            ?: liveProgramIndex(initialPrograms, nowSeconds)
         mutableStateOf(initialPrograms.getOrNull(initialIndex)?.programKey())
     }
-    var selectedTimeAnchorSeconds by remember(data.channels, selectedChannelId) {
+    var selectedTimeAnchorSeconds by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
         val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
-        val initialIndex = liveProgramIndex(initialPrograms, nowSeconds)
+        val initialIndex = selectedProgramSeedKey
+            ?.let { key -> initialPrograms.indexOfFirst { it.programKey() == key } }
+            ?.takeIf { it >= 0 }
+            ?: liveProgramIndex(initialPrograms, nowSeconds)
         mutableStateOf(initialPrograms.getOrNull(initialIndex)?.centerSeconds() ?: nowSeconds)
     }
-    var programFocusMode by remember(data.channels, selectedChannelId) {
+    var programFocusMode by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
         val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
-        mutableStateOf(initialPrograms.isNotEmpty())
-    }
-    val scrollOffsetDp = with(density) { scrollOffsetPx.toDp() }
-    var firstVisibleRowIndex by remember(data.channels, visibleRowCount) {
-        mutableIntStateOf(
-            (selectedRowIndex - visibleRowCount / 2)
-                .coerceIn(0, data.channels.lastIndex.coerceAtLeast(0))
+        mutableStateOf(
+            selectedProgramSeedKey?.let { key -> initialPrograms.any { it.programKey() == key } }
+                ?: initialPrograms.isNotEmpty()
         )
     }
+    val scrollOffsetDp = with(density) { scrollOffsetPx.toDp() }
     val maxFirstVisibleRowIndex = (data.channels.size - visibleRowCount).coerceAtLeast(0)
+    var firstVisibleRowIndex by remember(data.channels, visibleRowCount) {
+        mutableIntStateOf(
+            (selectedRowIndex - 1)
+                .coerceIn(0, maxFirstVisibleRowIndex)
+        )
+    }
     val visibleTimeRange by remember(scrollOffsetPx, slotWidthPx, timelineViewportWidthPx, snappedStart) {
         derivedStateOf {
             val pixelsPerSecond = slotWidthPx / 1800f
@@ -856,21 +1051,26 @@ private fun ProgramGrid(
     }
 
     fun markGridNavigating() {
+        onGridNavigationStarted()
         if (!gridNavigating) {
             gridNavigating = true
         }
         navigationIdleJob?.cancel()
         navigationIdleJob = navigationScope.launch {
-            delay(450)
+            delay(650)
             gridNavigating = false
         }
     }
 
     fun acceptNavigationEvent(): Boolean {
         val nowMs = System.currentTimeMillis()
-        if (nowMs - lastNavigationEventMs[0] < 85L) return false
+        if (nowMs - lastNavigationEventMs[0] < 120L) return false
         lastNavigationEventMs[0] = nowMs
         return true
+    }
+
+    fun preferredFirstVisibleRowIndex(selectedIndex: Int): Int {
+        return (selectedIndex - 1).coerceIn(0, maxFirstVisibleRowIndex)
     }
 
     fun moveSelectedRow(delta: Int) {
@@ -892,12 +1092,7 @@ private fun ProgramGrid(
         }
         selectedProgramKey = nextPrograms.getOrNull(selectedProgramIndex)?.programKey()
         programFocusMode = keepProgramFocus
-        firstVisibleRowIndex = when {
-            nextIndex < firstVisibleRowIndex -> nextIndex
-            nextIndex >= firstVisibleRowIndex + visibleRowCount ->
-                (nextIndex - visibleRowCount + 1).coerceAtMost(maxFirstVisibleRowIndex)
-            else -> firstVisibleRowIndex
-        }
+        firstVisibleRowIndex = preferredFirstVisibleRowIndex(nextIndex)
     }
 
     fun moveTimeline(delta: Int) {
@@ -941,6 +1136,7 @@ private fun ProgramGrid(
                 onChannelActivated(channel, program)
             }
         } else {
+            onProgramSelected(channel, program)
             onProgramDetailsRequested(channel, program)
         }
     }
@@ -958,18 +1154,20 @@ private fun ProgramGrid(
         selectedTimeAnchorSeconds = activeSelectionPrograms.getOrNull(liveIndex)?.centerSeconds() ?: nowSeconds
     }
 
+    LaunchedEffect(showNowRequestNonce) {
+        if (showNowRequestNonce <= 0) return@LaunchedEffect
+        jumpToNow()
+        delay(80)
+        gridFocusRequester.requestFocus()
+    }
+
     LaunchedEffect(focusTarget) {
         val target = focusTarget ?: return@LaunchedEffect
         val nextRowIndex = data.channels.indexOfFirst { it.id == target.channelId }
         if (nextRowIndex < 0) return@LaunchedEffect
 
         selectedRowIndex = nextRowIndex
-        firstVisibleRowIndex = when {
-            nextRowIndex < firstVisibleRowIndex -> nextRowIndex
-            nextRowIndex >= firstVisibleRowIndex + visibleRowCount ->
-                (nextRowIndex - visibleRowCount + 1).coerceAtMost(maxFirstVisibleRowIndex)
-            else -> firstVisibleRowIndex
-        }
+        firstVisibleRowIndex = preferredFirstVisibleRowIndex(nextRowIndex)
 
         val programs = data.programsByChannel[target.channelId].orEmpty()
         val nextProgramIndex = when {
@@ -1010,11 +1208,15 @@ private fun ProgramGrid(
         activeSelectionChannel?.id,
         activeSelectionProgram?.programKey(),
         gridFocused,
+        gridNavigating,
         playingChannelId,
     ) {
         if (!gridFocused) return@LaunchedEffect
+        if (gridNavigating) return@LaunchedEffect
+        if (isGridAutoPlaySuspended()) return@LaunchedEffect
         if (activeSelectionChannel?.id == playingChannelId) return@LaunchedEffect
         delay(3_000)
+        if (gridNavigating) return@LaunchedEffect
         activeSelectionChannel?.let { channel ->
             if (channel.id == playingChannelId) return@let
             onChannelActivated(channel, currentSelectionProgram)
@@ -1060,23 +1262,39 @@ private fun ProgramGrid(
     LaunchedEffect(data, nowSeconds, slotWidthPx, initialNowScrollOffset, maxScrollOffsetPx) {
         if (didInitialScroll) return@LaunchedEffect
         if (maxScrollOffsetPx <= 0) return@LaunchedEffect
+
+        val seededProgramIndex = selectedProgramSeedKey
+            ?.let { key -> activeSelectionPrograms.indexOfFirst { it.programKey() == key } }
+            ?: -1
+        val seededProgram = activeSelectionPrograms.getOrNull(seededProgramIndex)
+        if (seededProgram != null && !isCurrent(seededProgram, nowSeconds)) {
+            selectedProgramIndex = seededProgramIndex
+            selectedProgramKey = seededProgram.programKey()
+            programFocusMode = true
+            selectedTimeAnchorSeconds = seededProgram.centerSeconds()
+            scrollOffsetPx = centeredScrollOffsetPx(
+                program = seededProgram,
+                timelineStartSeconds = snappedStart,
+                slotWidthPx = slotWidthPx,
+                timelineViewportWidthPx = timelineViewportWidthPx,
+                maxScrollOffsetPx = maxScrollOffsetPx,
+            )
+            didInitialScroll = true
+            return@LaunchedEffect
+        }
+
         jumpToNow()
         didInitialScroll = true
     }
 
-    LaunchedEffect(didInitialScroll, selectedRowIndex, selectedProgramIndex) {
+    LaunchedEffect(didInitialScroll) {
         if (!didInitialScroll) return@LaunchedEffect
         delay(100)
         gridFocusRequester.requestFocus()
     }
 
     LaunchedEffect(maxFirstVisibleRowIndex, selectedRowIndex, visibleRowCount) {
-        firstVisibleRowIndex = firstVisibleRowIndex.coerceIn(0, maxFirstVisibleRowIndex)
-        if (selectedRowIndex < firstVisibleRowIndex) {
-            firstVisibleRowIndex = selectedRowIndex.coerceIn(0, maxFirstVisibleRowIndex)
-        } else if (selectedRowIndex >= firstVisibleRowIndex + visibleRowCount) {
-            firstVisibleRowIndex = (selectedRowIndex - visibleRowCount + 1).coerceIn(0, maxFirstVisibleRowIndex)
-        }
+        firstVisibleRowIndex = preferredFirstVisibleRowIndex(selectedRowIndex)
     }
 
     LaunchedEffect(nowSeconds, slotWidthPx, timelineViewportWidthPx, timelineEndSeconds) {
@@ -1115,13 +1333,6 @@ private fun ProgramGrid(
                 nowSeconds = nowSeconds,
                 showLiveLine = showLiveLine,
                 nowOffset = nowOffset,
-                focusRequester = nowButtonFocusRequester,
-                onMoveUp = { topFocusRequester.requestFocus() },
-                onMoveDown = { gridFocusRequester.requestFocus() },
-                onMoveRight = { gridFocusRequester.requestFocus() },
-                onNowClick = {
-                    jumpToNow()
-                },
             )
             Box(
                 Modifier
@@ -1131,7 +1342,9 @@ private fun ProgramGrid(
                     .onPreviewKeyEvent {
                         when {
                             it.key.isActivationKey() && it.type == KeyEventType.KeyUp -> {
-                                activateSelection(expandLive = true)
+                                if (!isGridActivationBlocked()) {
+                                    activateSelection(expandLive = true)
+                                }
                                 true
                             }
                             it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown -> {
@@ -1142,7 +1355,7 @@ private fun ProgramGrid(
                                 if (!acceptNavigationEvent()) {
                                     true
                                 } else if (selectedRowIndex == 0) {
-                                    nowButtonFocusRequester.requestFocus()
+                                    topFocusRequester.requestFocus()
                                 } else {
                                     moveSelectedRow(-1)
                                 }
@@ -1223,20 +1436,14 @@ private fun TimeHeader(
     nowSeconds: Long,
     showLiveLine: Boolean,
     nowOffset: Dp,
-    focusRequester: FocusRequester,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onMoveRight: () -> Unit,
-    onNowClick: () -> Unit,
 ) {
     Row(modifier.background(Color(0xFF131417)), verticalAlignment = Alignment.CenterVertically) {
-        NowJumpButton(
-            width = channelWidth,
-            focusRequester = focusRequester,
-            onMoveUp = onMoveUp,
-            onMoveDown = onMoveDown,
-            onMoveRight = onMoveRight,
-            onClick = onNowClick,
+        Box(
+            Modifier
+                .width(channelWidth)
+                .fillMaxHeight()
+                .background(Color(0xFF131417))
+                .border(0.5.dp, Color(0xFF2A2C31))
         )
         Box(Modifier.fillMaxHeight().fillMaxWidth().clipToBounds()) {
             Box(Modifier.width(timelineWidth).fillMaxHeight()) {
@@ -1255,7 +1462,7 @@ private fun TimeHeader(
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             Text(
-                                text = TimeFormatter.format(Instant.ofEpochSecond(slotStart).atZone(GuideZoneId)),
+                                text = TimeFormatter.format(Instant.ofEpochSecond(slotStart).atZone(ZoneId.systemDefault())),
                                 color = Color(0xFFB8BCC6),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
@@ -1277,7 +1484,7 @@ private fun TimeHeader(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = TimeFormatter.format(Instant.ofEpochSecond(nowSeconds).atZone(GuideZoneId)),
+                        text = TimeFormatter.format(Instant.ofEpochSecond(nowSeconds).atZone(ZoneId.systemDefault())),
                         color = Color(0xFF031012),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -1311,18 +1518,17 @@ private fun NowJumpButton(
     ) {
         Row(
             modifier = Modifier
-                .width(124.dp)
+                .size(42.dp)
                 .height(36.dp)
                 .background(
                     if (focused.value) PrimaryCyan else Color(0xFF0E7C82),
-                    RoundedCornerShape(18.dp),
+                    CircleShape,
                 )
                 .border(
-                    if (focused.value) 3.dp else 1.dp,
+                    if (focused.value) 2.dp else 1.dp,
                     if (focused.value) Color.White else Color(0x9910D5D9),
-                    RoundedCornerShape(18.dp),
+                    CircleShape,
                 )
-                .padding(horizontal = 12.dp)
                 .onPreviewKeyEvent {
                     when {
                         it.type == KeyEventType.KeyUp && it.key.isActivationKey() -> {
@@ -1353,17 +1559,9 @@ private fun NowJumpButton(
         ) {
             Icon(
                 Icons.Default.PlayArrow,
-                contentDescription = null,
+                contentDescription = "Show now",
                 tint = Color(0xFF031012),
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(5.dp))
-            Text(
-                text = "Show Now",
-                color = Color(0xFF031012),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                modifier = Modifier.size(24.dp),
             )
         }
     }
@@ -1755,11 +1953,77 @@ private fun ProgramDetailsPage(
 ) {
     val closeFocusRequester = remember { FocusRequester() }
     val playFocusRequester = remember { FocusRequester() }
-    var closeFocused by remember { mutableStateOf(false) }
-    var playFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val canPlayLive = !channel?.streamUrl.isNullOrBlank()
+    var selectedAction by remember { mutableStateOf(DetailsAction.Close) }
+    val closeFocused = selectedAction == DetailsAction.Close
+    val playFocused = selectedAction == DetailsAction.PlayLive
 
     BackHandler(onBack = onClose)
+    DisposableEffect(canPlayLive, selectedAction) {
+        TvKeyEventBridge.setHandler { event ->
+            if (event.action != AndroidKeyEvent.ACTION_DOWN) {
+                when (event.keyCode) {
+                    AndroidKeyEvent.KEYCODE_BACK -> {
+                        onClose()
+                        true
+                    }
+                    AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                    AndroidKeyEvent.KEYCODE_ENTER,
+                    AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        if (event.action == AndroidKeyEvent.ACTION_UP) {
+                            if (selectedAction == DetailsAction.PlayLive && canPlayLive) {
+                                onPlayLive()
+                            } else {
+                                onClose()
+                            }
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            } else {
+                when (event.keyCode) {
+                    AndroidKeyEvent.KEYCODE_BACK -> {
+                        onClose()
+                        true
+                    }
+                    AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
+                        if (canPlayLive) {
+                            selectedAction = DetailsAction.PlayLive
+                            playFocusRequester.requestFocus()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        selectedAction = DetailsAction.Close
+                        closeFocusRequester.requestFocus()
+                        true
+                    }
+                    AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                    AndroidKeyEvent.KEYCODE_ENTER,
+                    AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        if (selectedAction == DetailsAction.PlayLive && canPlayLive) {
+                            onPlayLive()
+                        } else {
+                            onClose()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
+        onDispose {
+            TvKeyEventBridge.setHandler(null)
+        }
+    }
     LaunchedEffect(Unit) {
+        focusManager.clearFocus(force = true)
+        delay(250)
+        selectedAction = DetailsAction.Close
         closeFocusRequester.requestFocus()
     }
 
@@ -1801,19 +2065,31 @@ private fun ProgramDetailsPage(
                     focused = closeFocused,
                     modifier = Modifier
                         .focusRequester(closeFocusRequester)
-                        .onFocusChanged { closeFocused = it.isFocused },
-                    onMoveRight = { playFocusRequester.requestFocus() },
+                        .onFocusChanged {
+                            if (it.hasFocus || it.isFocused) selectedAction = DetailsAction.Close
+                        },
+                    onMoveLeft = {
+                        if (canPlayLive) {
+                            selectedAction = DetailsAction.PlayLive
+                            playFocusRequester.requestFocus()
+                        }
+                    },
                     onClick = onClose,
                 )
                 Spacer(Modifier.width(12.dp))
-                if (!channel?.streamUrl.isNullOrBlank()) {
+                if (canPlayLive) {
                     DetailActionButton(
                         text = "נגן Live",
                         focused = playFocused,
                         modifier = Modifier
                             .focusRequester(playFocusRequester)
-                            .onFocusChanged { playFocused = it.isFocused },
-                        onMoveLeft = { closeFocusRequester.requestFocus() },
+                            .onFocusChanged {
+                                if (it.hasFocus || it.isFocused) selectedAction = DetailsAction.PlayLive
+                            },
+                        onMoveRight = {
+                            selectedAction = DetailsAction.Close
+                            closeFocusRequester.requestFocus()
+                        },
                         onClick = onPlayLive,
                     )
                 }
@@ -1865,6 +2141,11 @@ private fun ProgramDetailsPage(
     }
 }
 
+private enum class DetailsAction {
+    Close,
+    PlayLive,
+}
+
 @Composable
 private fun DetailActionButton(
     text: String,
@@ -1897,10 +2178,11 @@ private fun DetailActionButton(
                         onMoveRight()
                         true
                     }
-                    it.type == KeyEventType.KeyUp && it.key.isActivationKey() -> {
+                    it.type == KeyEventType.KeyDown && it.key.isActivationKey() -> {
                         onClick()
                         true
                     }
+                    it.key.isActivationKey() -> true
                     else -> false
                 }
             }
@@ -1924,11 +2206,15 @@ private fun ExpandedPlayer(
     program: TvProgram?,
     onNextChannel: () -> Unit,
     onPreviousChannel: () -> Unit,
+    onChannelNumberEntered: (String) -> Boolean,
+    hasChannelNumberPrefix: (String) -> Boolean,
     onClose: () -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInteraction by remember { mutableStateOf(0) }
+    var enteredChannelNumber by remember { mutableStateOf("") }
+    var enteredChannelNumberNonce by remember { mutableIntStateOf(0) }
 
     BackHandler(onBack = onClose)
     LaunchedEffect(Unit) {
@@ -1937,6 +2223,17 @@ private fun ExpandedPlayer(
     LaunchedEffect(channel?.id) {
         controlsVisible = true
         lastInteraction += 1
+        enteredChannelNumber = ""
+        enteredChannelNumberNonce += 1
+    }
+    LaunchedEffect(enteredChannelNumberNonce) {
+        val pendingNumber = enteredChannelNumber
+        if (pendingNumber.isBlank()) return@LaunchedEffect
+        delay(1_100)
+        if (enteredChannelNumber == pendingNumber) {
+            onChannelNumberEntered(pendingNumber)
+            enteredChannelNumber = ""
+        }
     }
     LaunchedEffect(controlsVisible, lastInteraction) {
         if (!controlsVisible) return@LaunchedEffect
@@ -1947,11 +2244,22 @@ private fun ExpandedPlayer(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black)
             .focusRequester(focusRequester)
             .onPreviewKeyEvent {
                 if (it.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
+                val digit = it.key.toRemoteDigitOrNull()
                 when {
+                    digit != null -> {
+                        val nextNumber = (enteredChannelNumber + digit).takeLast(4)
+                        controlsVisible = true
+                        lastInteraction += 1
+                        enteredChannelNumber = nextNumber
+                        enteredChannelNumberNonce += 1
+                        if (!hasChannelNumberPrefix(nextNumber)) {
+                            enteredChannelNumber = ""
+                        }
+                        true
+                    }
                     it.key == Key.DirectionUp -> {
                         controlsVisible = true
                         lastInteraction += 1
@@ -1978,7 +2286,6 @@ private fun ExpandedPlayer(
             }
             .focusable()
     ) {
-        PlayerSurface(player = player, useController = false)
         if (controlsVisible) {
             ExpandedPlayerControls(
                 player = player,
@@ -1989,28 +2296,61 @@ private fun ExpandedPlayer(
                     lastInteraction += 1
                 },
             )
+            if (enteredChannelNumber.isNotBlank()) {
+                ChannelNumberOverlay(
+                    number = enteredChannelNumber,
+                    modifier = Modifier.align(Alignment.TopEnd),
+                )
+            }
         }
     }
 }
 
+private fun Key.toRemoteDigitOrNull(): Char? =
+    when (this) {
+        Key.Zero, Key.NumPad0 -> '0'
+        Key.One, Key.NumPad1 -> '1'
+        Key.Two, Key.NumPad2 -> '2'
+        Key.Three, Key.NumPad3 -> '3'
+        Key.Four, Key.NumPad4 -> '4'
+        Key.Five, Key.NumPad5 -> '5'
+        Key.Six, Key.NumPad6 -> '6'
+        Key.Seven, Key.NumPad7 -> '7'
+        Key.Eight, Key.NumPad8 -> '8'
+        Key.Nine, Key.NumPad9 -> '9'
+        else -> null
+    }
+
 @Composable
-private fun PlayerSurface(player: StablePlayer, useController: Boolean) {
+private fun ChannelNumberOverlay(number: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .padding(top = 44.dp, end = 44.dp)
+            .background(Color(0xDD071018), RoundedCornerShape(12.dp))
+            .border(1.dp, Color(0xAA10D5D9), RoundedCornerShape(12.dp))
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = number,
+            color = Color.White,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun PlayerSurface(
+    player: StablePlayer,
+    playerView: StablePlayerView,
+    useController: Boolean,
+    modifier: Modifier = Modifier,
+) {
     AndroidView(
-        factory = { context ->
-            (LayoutInflater.from(context).inflate(R.layout.player_view, null) as PlayerView).apply {
-                this.player = player.value
-                this.useController = useController
-                controllerAutoShow = true
-                controllerShowTimeoutMs = if (useController) 5_000 else 3_000
-                isFocusable = useController
-                isFocusableInTouchMode = useController
-                if (useController) showController() else hideController()
-                if (useController) requestFocus()
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            }
+        factory = {
+            playerView.value
         },
         update = {
             if (it.player !== player.value) {
@@ -2037,7 +2377,7 @@ private fun PlayerSurface(player: StablePlayer, useController: Boolean) {
                 it.hideController()
             }
         },
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
     )
 }
 
@@ -2100,7 +2440,7 @@ private fun ExpandedPlayerControls(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = listOfNotNull(channel?.name, program?.timeRange()).joinToString("  |  "),
+                text = listOfNotNull(channel?.name, program?.timeRange()?.asLtrText()).joinToString("  |  "),
                 color = Color(0xFFCFCFCF),
                 fontSize = 18.sp,
                 maxLines = 1,
@@ -2299,9 +2639,12 @@ private fun GuideError(message: String, onRetry: () -> Unit) {
 }
 
 private fun TvProgram.timeRange(): String {
-    val zoneId = GuideZoneId
+    val zoneId = ZoneId.systemDefault()
     return "${TimeFormatter.format(Instant.ofEpochSecond(startSeconds).atZone(zoneId))} - ${TimeFormatter.format(Instant.ofEpochSecond(endSeconds).atZone(zoneId))}"
 }
+
+private fun String.asLtrText(): String =
+    "\u200E$this\u200E"
 
 private fun programWidth(program: TvProgram, slotWidth: Dp): Dp {
     val minutes = max(15L, (program.endSeconds - program.startSeconds) / 60L)
@@ -2419,7 +2762,7 @@ private fun playbackTimeLabel(
 
 private fun formatClockTime(timeMs: Long): String =
     DateTimeFormatter.ofPattern("HH:mm:ss")
-        .format(Instant.ofEpochMilli(timeMs).atZone(GuideZoneId))
+        .format(Instant.ofEpochMilli(timeMs).atZone(ZoneId.systemDefault()))
 
 private fun formatPlaybackTime(timeMs: Long): String {
     val totalSeconds = (timeMs.coerceAtLeast(0L) / 1_000L)
