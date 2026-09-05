@@ -12,7 +12,7 @@ android {
         applicationId "com.tvapp.programguide"
         minSdkVersion 26
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode 2
         versionName "1.0"
 
         buildConfigField "String", "PROGRAM_GUIDE_API_BASE_URL", "\"${project.findProperty("PROGRAM_GUIDE_API_BASE_URL") ?: "http://192.168.86.75:8001/api"}\""
