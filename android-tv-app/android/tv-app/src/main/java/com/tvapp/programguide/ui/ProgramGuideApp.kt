@@ -3,11 +3,20 @@ package com.tvapp.programguide.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.view.LayoutInflater
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -38,6 +47,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,9 +62,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,8 +72,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -81,6 +98,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
@@ -94,14 +112,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import coil.imageLoader
 import coil.request.ImageRequest
+import coil.request.SuccessResult
 import com.tvapp.programguide.R
 import com.tvapp.programguide.data.GuideData
 import com.tvapp.programguide.data.TvChannel
@@ -109,12 +132,14 @@ import com.tvapp.programguide.data.TvProgram
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val ScreenBackground = Color(0xFF050607)
 private val CellBackground = Color(0xFF202020)
@@ -125,11 +150,25 @@ private val PrimaryCyan = Color(0xFF10D5D9)
 private val ActiveGreen = Color(0xFF19D99A)
 private val Gold = Color(0xFFFFC928)
 private val TimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-private const val MINI_PLAYER_MAX_WIDTH = 960
-private const val MINI_PLAYER_MAX_HEIGHT = 540
+private val HeaderTimeFormatter = DateTimeFormatter.ofPattern("EEE HH:mm", Locale.getDefault())
 private const val MAX_MULTI_PLAYER_CHANNELS = 4
 private const val MULTI_PLAYER_MAX_WIDTH = 854
 private const val MULTI_PLAYER_MAX_HEIGHT = 480
+private const val PRIMARY_PLAYER_MIN_BUFFER_MS = 4_000
+private const val PRIMARY_PLAYER_MAX_BUFFER_MS = 12_000
+private const val PRIMARY_PLAYER_PLAYBACK_BUFFER_MS = 750
+private const val PRIMARY_PLAYER_REBUFFER_MS = 1_500
+private const val MULTI_PLAYER_MIN_BUFFER_MS = 2_500
+private const val MULTI_PLAYER_MAX_BUFFER_MS = 8_000
+private const val MULTI_PLAYER_PLAYBACK_BUFFER_MS = 750
+private const val MULTI_PLAYER_REBUFFER_MS = 1_500
+private const val NO_PROGRAM_BLOCK_SECONDS = 60 * 60L
+private const val HALF_HOUR_SECONDS = 30 * 60L
+private const val GRID_LOOKBACK_SECONDS = 60 * 60L
+private const val GRID_VISIBLE_WINDOW_SECONDS = 6 * 60 * 60L
+private const val GRID_MOTION_MS = 120
+private const val GRID_NAVIGATION_MIN_INTERVAL_MS = 70L
+private const val MAX_ACTIVE_ROW_IMAGES = 24
 
 @Stable
 private class StablePlayer(val value: ExoPlayer)
@@ -137,8 +176,20 @@ private class StablePlayer(val value: ExoPlayer)
 @Stable
 private class StablePlayerView(val value: PlayerView)
 
+@Stable
+private class StableProgramList(val value: List<TvProgram>)
+
+private enum class PrimaryVideoProfile {
+    Mini,
+    Full,
+    MultiFocused,
+    MultiBackground,
+}
+
 private data class VisibleProgram(
     val program: TvProgram,
+    val key: String,
+    val timeRange: String,
     val visibleStartSeconds: Long,
     val width: Dp,
 )
@@ -201,6 +252,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activeStreamUrl = remember { mutableStateOf<String?>(null) }
+    var primaryVideoProfile by remember { mutableStateOf<PrimaryVideoProfile?>(null) }
     val trackSelector = remember {
         DefaultTrackSelector(context).apply {
             setParameters(
@@ -211,7 +263,11 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         }
     }
     val player = remember {
-        ExoPlayer.Builder(context).setTrackSelector(trackSelector).build().apply {
+        ExoPlayer.Builder(context)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(createPrimaryPlayerLoadControl())
+            .build()
+            .apply {
             playWhenReady = true
         }
     }
@@ -222,6 +278,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             useController = false
             controllerAutoShow = true
             controllerShowTimeoutMs = 3_000
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             isFocusable = false
             isFocusableInTouchMode = false
             setKeepContentOnPlayerReset(true)
@@ -295,21 +352,62 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         }
     }
 
-    LaunchedEffect(multiPlayerActive, multiPlayerFocusIndex, playbackState.playingChannel?.id) {
-        player.volume = if (!multiPlayerActive || multiPlayerFocusIndex == 0) 1f else 0f
+    fun applyPrimaryVideoProfile(profile: PrimaryVideoProfile) {
+        if (primaryVideoProfile == profile) return
+        primaryVideoProfile = profile
+        player.volume = if (profile == PrimaryVideoProfile.MultiBackground) 0f else 1f
         trackSelector.setParameters(
             trackSelector.buildUponParameters().apply {
-                if (multiPlayerActive && multiPlayerFocusIndex != 0) {
-                    clearVideoSizeConstraints()
-                    setMaxVideoBitrate(Int.MAX_VALUE)
-                    setForceLowestBitrate(true)
-                    setExceedVideoConstraintsIfNecessary(true)
-                } else {
-                    setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
-                    setMaxVideoBitrate(Int.MAX_VALUE)
-                    setForceLowestBitrate(false)
-                    setExceedVideoConstraintsIfNecessary(true)
+                when (profile) {
+                    PrimaryVideoProfile.Mini -> {
+                        setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                        setMaxVideoBitrate(Int.MAX_VALUE)
+                        setForceLowestBitrate(false)
+                        setExceedVideoConstraintsIfNecessary(true)
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    }
+                    PrimaryVideoProfile.Full -> {
+                        setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                        setMaxVideoBitrate(Int.MAX_VALUE)
+                        setForceLowestBitrate(false)
+                        setExceedVideoConstraintsIfNecessary(true)
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    }
+                    PrimaryVideoProfile.MultiFocused -> {
+                        setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
+                        setMaxVideoBitrate(Int.MAX_VALUE)
+                        setForceLowestBitrate(false)
+                        setExceedVideoConstraintsIfNecessary(true)
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    }
+                    PrimaryVideoProfile.MultiBackground -> {
+                        setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
+                        setMaxVideoBitrate(Int.MAX_VALUE)
+                        setForceLowestBitrate(true)
+                        setExceedVideoConstraintsIfNecessary(true)
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    }
                 }
+            }
+        )
+    }
+
+    LaunchedEffect(multiPlayerActive, multiPlayerFocusIndex, playbackState.playingChannel?.id) {
+        if (!multiPlayerActive) {
+            if (primaryVideoProfile == PrimaryVideoProfile.MultiBackground ||
+                primaryVideoProfile == PrimaryVideoProfile.MultiFocused
+            ) {
+                applyPrimaryVideoProfile(PrimaryVideoProfile.Full)
+            } else {
+                player.volume = 1f
+            }
+            return@LaunchedEffect
+        }
+        applyPrimaryVideoProfile(
+            if (multiPlayerFocusIndex == 0) {
+                PrimaryVideoProfile.MultiFocused
+            } else {
+                PrimaryVideoProfile.MultiBackground
             }
         )
     }
@@ -351,6 +449,13 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             return@LaunchedEffect
         }
         if (activeStreamUrl.value != streamUrl) {
+            applyPrimaryVideoProfile(
+                if (playbackState.isPlayerExpanded) {
+                    PrimaryVideoProfile.Full
+                } else {
+                    PrimaryVideoProfile.Mini
+                }
+            )
             val mediaItem = MediaItem.Builder()
                 .setUri(streamUrl)
                 .setMimeType(MimeTypes.APPLICATION_M3U8)
@@ -538,7 +643,6 @@ private fun GuideContent(
 ) {
     val topPanelFocusRequester = remember { FocusRequester() }
     val gridFocusRequester = remember { FocusRequester() }
-    val nowButtonFocusRequester = remember { FocusRequester() }
     var showNowRequestNonce by remember { mutableIntStateOf(0) }
     var blockGridActivationUntilMs by remember { mutableLongStateOf(0L) }
     var suspendGridAutoPlay by remember { mutableStateOf(false) }
@@ -592,7 +696,6 @@ private fun GuideContent(
                 showNowRequestNonce = showNowRequestNonce,
                 gridFocusRequester = gridFocusRequester,
                 topFocusRequester = topPanelFocusRequester,
-                nowButtonFocusRequester = nowButtonFocusRequester,
             )
         }
 
@@ -1050,28 +1153,27 @@ private fun ProgramGrid(
     showNowRequestNonce: Int,
     gridFocusRequester: FocusRequester,
     topFocusRequester: FocusRequester,
-    nowButtonFocusRequester: FocusRequester,
 ) {
     val density = LocalDensity.current
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-    val snappedStart = data.guideStartSeconds
-    val timelineEndSeconds = data.guideEndSeconds
+    val nowSeconds by rememberGuideNowSeconds()
+    val desiredWindowStartSeconds = nowSeconds.floorToHalfHour() - GRID_LOOKBACK_SECONDS
+    val desiredWindowEndSeconds = desiredWindowStartSeconds + GRID_VISIBLE_WINDOW_SECONDS
+    val snappedStart = desiredWindowStartSeconds
+    val timelineEndSeconds = desiredWindowEndSeconds
     val slotWidth = 180.dp
     val channelWidth = 150.dp
     val visibleRowCount = visibleGuideRowCount(data.channels.size)
-    val headerHeight = 48.dp
+    val headerHeight = 36.dp
     val gridAvailableHeight = (maxHeight - headerHeight).coerceAtLeast(72.dp)
-    val activeRowHeight = if (visibleRowCount > 1) {
-        gridAvailableHeight * 0.34f
-    } else {
-        gridAvailableHeight
-    }
+    val activeRowHeight = if (visibleRowCount > 1) gridAvailableHeight * 0.34f else gridAvailableHeight
     val inactiveRowHeight = if (visibleRowCount > 1) {
         (gridAvailableHeight - activeRowHeight) / (visibleRowCount - 1)
     } else {
         gridAvailableHeight
     }
+    val baseScrollRowHeight = gridAvailableHeight / visibleRowCount.coerceAtLeast(1)
     val totalSlots = (((timelineEndSeconds - snappedStart) / 1800L).toInt()).coerceAtLeast(10)
     val timelineWidth = slotWidth * totalSlots
     val timelineViewportWidth = (maxWidth - channelWidth).coerceAtLeast(slotWidth)
@@ -1082,8 +1184,24 @@ private fun ProgramGrid(
     val maxScrollOffsetPx = with(density) {
         max(0f, (timelineWidth - timelineViewportWidth).toPx()).roundToInt()
     }
-    val renderPaddingSeconds = 5 * 60L
-    var scrollOffsetPx by remember { mutableIntStateOf(0) }
+    val fullDisplayProgramsCache = remember(data.programsByChannel, snappedStart, timelineEndSeconds) {
+        mutableMapOf<String, StableProgramList>()
+    }
+    fun fullDisplayPrograms(channel: TvChannel): StableProgramList =
+        fullDisplayProgramsCache.getOrPut(channel.id) {
+            StableProgramList(
+                displayProgramsForChannel(
+                    channel = channel,
+                    programs = data.programsByChannel[channel.id].orEmpty(),
+                    timelineStartSeconds = snappedStart,
+                    timelineEndSeconds = timelineEndSeconds,
+                )
+            )
+        }
+
+    var scrollOffsetPx by remember(snappedStart) {
+        mutableIntStateOf(0)
+    }
     var selectedRowIndex by remember(data.channels) {
         mutableIntStateOf(
             data.channels.indexOfFirst { it.id == selectedChannelId }
@@ -1091,11 +1209,10 @@ private fun ProgramGrid(
                 ?: 0
         )
     }
-    val nowSeconds by rememberGuideNowSeconds()
     val selectedProgramSeedKey = selectedProgram?.programKey()
     var selectedProgramIndex by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
-        val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
+        val initialPrograms = initialChannel?.let(::fullDisplayPrograms)?.value.orEmpty()
         val programIndex = selectedProgramSeedKey
             ?.let { key -> initialPrograms.indexOfFirst { it.programKey() == key } }
             ?.takeIf { it >= 0 }
@@ -1104,7 +1221,7 @@ private fun ProgramGrid(
     }
     var selectedProgramKey by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
-        val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
+        val initialPrograms = initialChannel?.let(::fullDisplayPrograms)?.value.orEmpty()
         val initialIndex = selectedProgramSeedKey
             ?.let { key -> initialPrograms.indexOfFirst { it.programKey() == key } }
             ?.takeIf { it >= 0 }
@@ -1113,7 +1230,7 @@ private fun ProgramGrid(
     }
     var selectedTimeAnchorSeconds by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
-        val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
+        val initialPrograms = initialChannel?.let(::fullDisplayPrograms)?.value.orEmpty()
         val initialIndex = selectedProgramSeedKey
             ?.let { key -> initialPrograms.indexOfFirst { it.programKey() == key } }
             ?.takeIf { it >= 0 }
@@ -1122,20 +1239,32 @@ private fun ProgramGrid(
     }
     var programFocusMode by remember(data.channels, selectedChannelId, selectedProgramSeedKey) {
         val initialChannel = data.channels.getOrNull(selectedRowIndex)
-        val initialPrograms = initialChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
+        val initialPrograms = initialChannel?.let(::fullDisplayPrograms)?.value.orEmpty()
         mutableStateOf(
             selectedProgramSeedKey?.let { key -> initialPrograms.any { it.programKey() == key } }
                 ?: initialPrograms.isNotEmpty()
         )
     }
-    val scrollOffsetDp = with(density) { scrollOffsetPx.toDp() }
-    val maxFirstVisibleRowIndex = (data.channels.size - visibleRowCount).coerceAtLeast(0)
-    var firstVisibleRowIndex by remember(data.channels, visibleRowCount) {
+    val animatedScrollOffsetPx = animateFloatAsState(
+        targetValue = scrollOffsetPx.toFloat(),
+        animationSpec = tween(durationMillis = GRID_MOTION_MS, easing = FastOutSlowInEasing),
+        label = "guideTimelineScroll",
+    )
+	    val scrollOffsetProvider = remember(animatedScrollOffsetPx) {
+	        { animatedScrollOffsetPx.value }
+	    }
+	    val maxFirstVisibleRowIndex = (data.channels.size - visibleRowCount).coerceAtLeast(0)
+	    var firstVisibleRowIndex by remember(data.channels, visibleRowCount) {
         mutableIntStateOf(
             (selectedRowIndex - 1)
                 .coerceIn(0, maxFirstVisibleRowIndex)
-        )
-    }
+	            )
+	    }
+	    val animatedFirstVisibleRowIndex = animateFloatAsState(
+	        targetValue = firstVisibleRowIndex.toFloat(),
+	        animationSpec = tween(durationMillis = GRID_MOTION_MS, easing = FastOutSlowInEasing),
+	        label = "guideVerticalScroll",
+	    )
     val visibleTimeRange by remember(scrollOffsetPx, slotWidthPx, timelineViewportWidthPx, snappedStart) {
         derivedStateOf {
             val pixelsPerSecond = slotWidthPx / 1800f
@@ -1144,26 +1273,14 @@ private fun ProgramGrid(
             visibleStart to visibleStart + visibleDuration
         }
     }
-    val renderTimeRange by remember(visibleTimeRange) {
-        derivedStateOf {
-            visibleTimeRange.first - renderPaddingSeconds to visibleTimeRange.second + renderPaddingSeconds
-        }
-    }
     val nowOffset = durationWidth(max(0L, nowSeconds - snappedStart), slotWidth)
-    val initialNowScrollOffset = durationWidth(max(0L, nowSeconds - 3600L - snappedStart), slotWidth)
     val showLiveLine = nowSeconds >= snappedStart && nowSeconds <= timelineEndSeconds
-    var previousNowSeconds by remember { mutableStateOf<Long?>(null) }
-    var didInitialScroll by remember { mutableStateOf(false) }
-    var previousGuideStartSeconds by remember { mutableStateOf(snappedStart) }
     var gridFocused by remember { mutableStateOf(true) }
-    var gridNavigating by remember { mutableStateOf(false) }
-    var navigationIdleJob by remember { mutableStateOf<Job?>(null) }
     val lastNavigationEventMs = remember { LongArray(1) }
-    val navigationScope = rememberCoroutineScope()
-    val scrollOffsetProvider = remember { { scrollOffsetPx } }
     val activeSelectionChannel = data.channels.getOrNull(selectedRowIndex)
     val activeSelectionPrograms = activeSelectionChannel
-        ?.let { data.programsByChannel[it.id].orEmpty() }
+        ?.let(::fullDisplayPrograms)
+        ?.value
         .orEmpty()
     val activeSelectionProgramKeys = remember(activeSelectionPrograms) {
         activeSelectionPrograms.map { it.programKey() }
@@ -1177,22 +1294,13 @@ private fun ProgramGrid(
     } else {
         currentSelectionProgram
     }
-
     fun markGridNavigating() {
         onGridNavigationStarted()
-        if (!gridNavigating) {
-            gridNavigating = true
-        }
-        navigationIdleJob?.cancel()
-        navigationIdleJob = navigationScope.launch {
-            delay(650)
-            gridNavigating = false
-        }
     }
 
     fun acceptNavigationEvent(): Boolean {
         val nowMs = System.currentTimeMillis()
-        if (nowMs - lastNavigationEventMs[0] < 120L) return false
+        if (nowMs - lastNavigationEventMs[0] < GRID_NAVIGATION_MIN_INTERVAL_MS) return false
         lastNavigationEventMs[0] = nowMs
         return true
     }
@@ -1206,13 +1314,11 @@ private fun ProgramGrid(
         if (nextIndex == selectedRowIndex) return
         markGridNavigating()
         val keepProgramFocus = programFocusMode
-        val targetTimeSeconds = activeSelectionProgram
-            ?.visibleCenterSeconds(visibleTimeRange)
-            ?.also { selectedTimeAnchorSeconds = it }
-            ?: selectedTimeAnchorSeconds.coerceIn(visibleTimeRange.first, visibleTimeRange.second)
+        val targetTimeSeconds = selectedTimeAnchorSeconds
+            .coerceIn(visibleTimeRange.first, visibleTimeRange.second)
         selectedRowIndex = nextIndex
         val nextChannel = data.channels.getOrNull(nextIndex)
-        val nextPrograms = nextChannel?.let { data.programsByChannel[it.id].orEmpty() }.orEmpty()
+        val nextPrograms = nextChannel?.let(::fullDisplayPrograms)?.value.orEmpty()
         selectedProgramIndex = if (keepProgramFocus) {
             programIndexAtTime(nextPrograms, targetTimeSeconds)
         } else {
@@ -1221,13 +1327,6 @@ private fun ProgramGrid(
         selectedProgramKey = nextPrograms.getOrNull(selectedProgramIndex)?.programKey()
         programFocusMode = keepProgramFocus
         firstVisibleRowIndex = preferredFirstVisibleRowIndex(nextIndex)
-    }
-
-    fun moveTimeline(delta: Int) {
-        val nextOffset = (scrollOffsetPx + delta * slotWidthPx.roundToInt()).coerceIn(0, maxScrollOffsetPx)
-        if (nextOffset == scrollOffsetPx) return
-        markGridNavigating()
-        scrollOffsetPx = nextOffset
     }
 
     fun moveSelectedProgram(delta: Int) {
@@ -1244,12 +1343,14 @@ private fun ProgramGrid(
         programFocusMode = selectedProgramIndex >= 0
         if (selectedProgramIndex < 0) return
         val program = programs[selectedProgramIndex]
-        selectedTimeAnchorSeconds = program.visibleCenterSeconds(visibleTimeRange)
-        scrollOffsetPx = centeredScrollOffsetPx(
+        selectedTimeAnchorSeconds = program.startSeconds
+            .coerceIn(visibleTimeRange.first, visibleTimeRange.second)
+        scrollOffsetPx = scrollOffsetKeepingProgramVisiblePx(
             program = program,
             timelineStartSeconds = snappedStart,
             slotWidthPx = slotWidthPx,
             timelineViewportWidthPx = timelineViewportWidthPx,
+            currentScrollOffsetPx = scrollOffsetPx,
             maxScrollOffsetPx = maxScrollOffsetPx,
         )
     }
@@ -1270,10 +1371,7 @@ private fun ProgramGrid(
     }
 
     fun jumpToNow() {
-        val target = with(density) { initialNowScrollOffset.toPx() }
-            .roundToInt()
-            .coerceIn(0, maxScrollOffsetPx)
-        scrollOffsetPx = target
+        scrollOffsetPx = 0
 
         val liveIndex = liveProgramIndex(activeSelectionPrograms, nowSeconds)
         selectedProgramIndex = liveIndex
@@ -1297,7 +1395,8 @@ private fun ProgramGrid(
         selectedRowIndex = nextRowIndex
         firstVisibleRowIndex = preferredFirstVisibleRowIndex(nextRowIndex)
 
-        val programs = data.programsByChannel[target.channelId].orEmpty()
+        val targetChannel = data.channels.firstOrNull { it.id == target.channelId }
+        val programs = targetChannel?.let(::fullDisplayPrograms)?.value.orEmpty()
         val nextProgramIndex = when {
             target.live -> liveProgramIndex(programs, nowSeconds)
             target.programKey != null -> programs.indexOfFirst { it.programKey() == target.programKey }
@@ -1314,15 +1413,14 @@ private fun ProgramGrid(
                 program.visibleCenterSeconds(visibleTimeRange)
             }
             scrollOffsetPx = if (target.live) {
-                with(density) { initialNowScrollOffset.toPx() }
-                    .roundToInt()
-                    .coerceIn(0, maxScrollOffsetPx)
+                0
             } else {
-                centeredScrollOffsetPx(
+                scrollOffsetKeepingProgramVisiblePx(
                     program = program,
                     timelineStartSeconds = snappedStart,
                     slotWidthPx = slotWidthPx,
                     timelineViewportWidthPx = timelineViewportWidthPx,
+                    currentScrollOffsetPx = scrollOffsetPx,
                     maxScrollOffsetPx = maxScrollOffsetPx,
                 )
             }
@@ -1336,15 +1434,12 @@ private fun ProgramGrid(
         activeSelectionChannel?.id,
         activeSelectionProgram?.programKey(),
         gridFocused,
-        gridNavigating,
         playingChannelId,
     ) {
         if (!gridFocused) return@LaunchedEffect
-        if (gridNavigating) return@LaunchedEffect
         if (isGridAutoPlaySuspended()) return@LaunchedEffect
         if (activeSelectionChannel?.id == playingChannelId) return@LaunchedEffect
         delay(3_000)
-        if (gridNavigating) return@LaunchedEffect
         activeSelectionChannel?.let { channel ->
             if (channel.id == playingChannelId) return@let
             onChannelActivated(channel, currentSelectionProgram)
@@ -1372,51 +1467,15 @@ private fun ProgramGrid(
         selectedProgramKey = activeSelectionPrograms.getOrNull(liveIndex)?.programKey()
     }
 
-    LaunchedEffect(snappedStart, slotWidthPx) {
-        val previousStart = previousGuideStartSeconds
-        previousGuideStartSeconds = snappedStart
-        if (didInitialScroll && snappedStart < previousStart) {
-            val addedSeconds = previousStart - snappedStart
-            val addedPx = (addedSeconds / 1800f) * slotWidthPx
-            scrollOffsetPx = (scrollOffsetPx + addedPx.roundToInt()).coerceIn(0, maxScrollOffsetPx)
-        }
+    LaunchedEffect(maxScrollOffsetPx) {
+        scrollOffsetPx = scrollOffsetPx.coerceIn(0, maxScrollOffsetPx)
     }
 
-    LaunchedEffect(didInitialScroll, visibleTimeRange.first, visibleTimeRange.second) {
-        if (!didInitialScroll) return@LaunchedEffect
-        onGuideRangeNeeded(visibleTimeRange.first, visibleTimeRange.second)
+    LaunchedEffect(desiredWindowStartSeconds, desiredWindowEndSeconds) {
+        onGuideRangeNeeded(desiredWindowStartSeconds, desiredWindowEndSeconds)
     }
 
-    LaunchedEffect(data, nowSeconds, slotWidthPx, initialNowScrollOffset, maxScrollOffsetPx) {
-        if (didInitialScroll) return@LaunchedEffect
-        if (maxScrollOffsetPx <= 0) return@LaunchedEffect
-
-        val seededProgramIndex = selectedProgramSeedKey
-            ?.let { key -> activeSelectionPrograms.indexOfFirst { it.programKey() == key } }
-            ?: -1
-        val seededProgram = activeSelectionPrograms.getOrNull(seededProgramIndex)
-        if (seededProgram != null && !isCurrent(seededProgram, nowSeconds)) {
-            selectedProgramIndex = seededProgramIndex
-            selectedProgramKey = seededProgram.programKey()
-            programFocusMode = true
-            selectedTimeAnchorSeconds = seededProgram.centerSeconds()
-            scrollOffsetPx = centeredScrollOffsetPx(
-                program = seededProgram,
-                timelineStartSeconds = snappedStart,
-                slotWidthPx = slotWidthPx,
-                timelineViewportWidthPx = timelineViewportWidthPx,
-                maxScrollOffsetPx = maxScrollOffsetPx,
-            )
-            didInitialScroll = true
-            return@LaunchedEffect
-        }
-
-        jumpToNow()
-        didInitialScroll = true
-    }
-
-    LaunchedEffect(didInitialScroll) {
-        if (!didInitialScroll) return@LaunchedEffect
+    LaunchedEffect(data.channels) {
         delay(100)
         gridFocusRequester.requestFocus()
     }
@@ -1425,46 +1484,11 @@ private fun ProgramGrid(
         firstVisibleRowIndex = preferredFirstVisibleRowIndex(selectedRowIndex)
     }
 
-    LaunchedEffect(nowSeconds, slotWidthPx, timelineViewportWidthPx, timelineEndSeconds) {
-        val previousNow = previousNowSeconds
-        previousNowSeconds = nowSeconds
-        if (previousNow == null) return@LaunchedEffect
-
-        val deltaSeconds = nowSeconds - previousNow
-        if (deltaSeconds <= 0 || deltaSeconds > 3600L) return@LaunchedEffect
-
-        val previousNowX = ((previousNow - snappedStart).coerceAtLeast(0L) / 1800f) * slotWidthPx
-        val visibleProgramLeft = scrollOffsetPx.toFloat()
-        val visibleProgramWidth = max(slotWidthPx, timelineViewportWidthPx)
-        val nowWasVisible =
-            previousNowX >= visibleProgramLeft - 2f &&
-                previousNowX <= visibleProgramLeft + visibleProgramWidth + 2f
-
-        if (!nowWasVisible) return@LaunchedEffect
-
-        val deltaPx = deltaSeconds * (slotWidthPx / 1800f)
-        scrollOffsetPx = min(maxScrollOffsetPx.toFloat(), scrollOffsetPx.toFloat() + deltaPx).toInt()
-    }
-
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF080A0C))) {
-            TimeHeader(
-                startSeconds = snappedStart,
-                slotWidth = slotWidth,
-                channelWidth = channelWidth,
-                timelineWidth = timelineWidth,
-                totalSlots = totalSlots,
-                modifier = Modifier.height(48.dp),
-                scrollOffset = scrollOffsetDp,
-                visibleStartSeconds = renderTimeRange.first,
-                visibleEndSeconds = renderTimeRange.second,
-                nowSeconds = nowSeconds,
-                showLiveLine = showLiveLine,
-                nowOffset = nowOffset,
-            )
-            Box(
+        Box(
                 Modifier
                     .fillMaxSize()
+                    .background(Color(0xFF080A0C))
                     .focusRequester(gridFocusRequester)
                     .onFocusChanged { gridFocused = it.hasFocus || it.isFocused }
                     .onPreviewKeyEvent {
@@ -1501,53 +1525,470 @@ private fun ProgramGrid(
                         }
                     }
                     .focusable()
-            ) {
-                Column(Modifier.fillMaxSize()) {
-                    val lastVisibleRowIndex = min(data.channels.lastIndex, firstVisibleRowIndex + visibleRowCount - 1)
-                    if (firstVisibleRowIndex <= lastVisibleRowIndex) {
-                        for (index in firstVisibleRowIndex..lastVisibleRowIndex) {
-                            val channel = data.channels[index]
-                            key(channel.id) {
-                                GuideRow(
-                                    channel = channel,
-                                    programs = data.programsByChannel[channel.id].orEmpty(),
-                                    isSelectedChannel = gridFocused && selectedRowIndex == index,
-                                    isPlayingChannel = playingChannelId == channel.id,
-                                    isChannelFocused = gridFocused && selectedRowIndex == index && selectedProgramIndex < 0,
-                                    selectedProgramKey = activeSelectionProgram?.programKey().takeIf {
-                                        selectedRowIndex == index && selectedProgramIndex >= 0
-                                    },
-                                    slotWidth = slotWidth,
-                                    channelWidth = channelWidth,
-                                    timelineWidth = timelineWidth,
-                                    timelineViewportWidth = timelineViewportWidth,
-                                    timelineStartSeconds = snappedStart,
-                                    timelineEndSeconds = timelineEndSeconds,
-                                    visibleStartSeconds = visibleTimeRange.first,
-                                    visibleEndSeconds = visibleTimeRange.second,
-                                    nowSeconds = nowSeconds,
-                                    rowHeight = if (selectedRowIndex == index) activeRowHeight else inactiveRowHeight,
-                                    showArtwork = selectedRowIndex == index,
-                                    slotWidthPx = slotWidthPx,
-                                    scrollOffsetPx = scrollOffsetProvider,
-                                )
-                            }
-                        }
-                    }
-                }
-                if (showLiveLine) {
-                    LiveNowLine(
-                        channelWidth = channelWidth,
-                        nowOffset = nowOffset,
-                        timelineWidth = timelineWidth,
-                        scrollOffset = scrollOffsetDp,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
+        ) {
+            CanvasGuideGrid(
+                data = data,
+                fullDisplayPrograms = ::fullDisplayPrograms,
+                selectedRowIndex = selectedRowIndex,
+                playingChannelId = playingChannelId,
+                selectedProgramKey = activeSelectionProgram?.programKey().takeIf { selectedProgramIndex >= 0 },
+                gridFocused = gridFocused,
+                startSeconds = snappedStart,
+                endSeconds = timelineEndSeconds,
+                nowSeconds = nowSeconds,
+                channelWidth = channelWidth,
+                slotWidth = slotWidth,
+                headerHeight = headerHeight,
+                activeRowHeight = activeRowHeight,
+                inactiveRowHeight = inactiveRowHeight,
+                baseScrollRowHeight = baseScrollRowHeight,
+                visibleRowCount = visibleRowCount,
+                firstVisibleRowIndex = { animatedFirstVisibleRowIndex.value },
+                scrollOffsetPx = scrollOffsetProvider,
+                modifier = Modifier.fillMaxSize(),
+            )
+            ChannelLogoOverlay(
+                data = data,
+                selectedRowIndex = selectedRowIndex,
+                headerHeight = headerHeight,
+                activeRowHeight = activeRowHeight,
+                inactiveRowHeight = inactiveRowHeight,
+                visibleRowCount = visibleRowCount,
+                firstVisibleRowIndex = animatedFirstVisibleRowIndex.value,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
     }
+}
+
+@Composable
+private fun ChannelLogoOverlay(
+    data: GuideData,
+    selectedRowIndex: Int,
+    headerHeight: Dp,
+    activeRowHeight: Dp,
+    inactiveRowHeight: Dp,
+    visibleRowCount: Int,
+    firstVisibleRowIndex: Float,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier.clipToBounds()) {
+        val headerHeightPx = with(density) { headerHeight.toPx() }
+        val activeRowHeightPx = with(density) { activeRowHeight.toPx() }
+        val inactiveRowHeightPx = with(density) { inactiveRowHeight.toPx() }
+        val viewportHeightPx = with(density) { maxHeight.toPx() }
+        val renderStart = floor(firstVisibleRowIndex).toInt().coerceAtLeast(0)
+        val renderEnd = min(data.channels.lastIndex, renderStart + visibleRowCount)
+        var rowTopPx = headerHeightPx - (firstVisibleRowIndex - renderStart) * inactiveRowHeightPx
+
+        for (index in renderStart..renderEnd) {
+            val rowHeightPx = if (selectedRowIndex == index) activeRowHeightPx else inactiveRowHeightPx
+            val channel = data.channels[index]
+            if (rowTopPx + rowHeightPx > headerHeightPx && rowTopPx < viewportHeightPx && channel.logoUrl.isNotBlank()) {
+                val visibleTopPx = max(rowTopPx, headerHeightPx)
+                val visibleBottomPx = min(rowTopPx + rowHeightPx, viewportHeightPx)
+                if (visibleBottomPx - visibleTopPx < with(density) { 44.dp.toPx() }) {
+                    rowTopPx += rowHeightPx
+                    continue
+                }
+                val x = with(density) { 18.dp }
+                val y = with(density) { (visibleTopPx + (visibleBottomPx - visibleTopPx) / 2f - 20.dp.toPx()).toDp() }
+                AsyncImage(
+                    model = rememberSizedImageRequest(channel.logoUrl, width = 64, height = 64),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .offset(x = x, y = y)
+                        .size(40.dp)
+                        .padding(4.dp),
+                )
+            }
+            rowTopPx += rowHeightPx
+        }
+    }
+}
+
+@Composable
+private fun CanvasGuideGrid(
+    data: GuideData,
+    fullDisplayPrograms: (TvChannel) -> StableProgramList,
+    selectedRowIndex: Int,
+    playingChannelId: String?,
+    selectedProgramKey: String?,
+    gridFocused: Boolean,
+    startSeconds: Long,
+    endSeconds: Long,
+    nowSeconds: Long,
+    channelWidth: Dp,
+    slotWidth: Dp,
+    headerHeight: Dp,
+    activeRowHeight: Dp,
+    inactiveRowHeight: Dp,
+    baseScrollRowHeight: Dp,
+    visibleRowCount: Int,
+    firstVisibleRowIndex: () -> Float,
+    scrollOffsetPx: () -> Float,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val programImageCache = remember { mutableStateMapOf<String, ImageBitmap>() }
+    val activeImageUrls = remember(
+        data.channels,
+        data.programsByChannel,
+        selectedRowIndex,
+        startSeconds,
+        endSeconds,
+    ) {
+        val channel = data.channels.getOrNull(selectedRowIndex)
+        channel
+            ?.let(fullDisplayPrograms)
+            ?.value
+            .orEmpty()
+            .asSequence()
+            .filter { !it.imageUrl.isNullOrBlank() }
+            .filter { it.endSeconds > startSeconds && it.startSeconds < endSeconds }
+            .take(MAX_ACTIVE_ROW_IMAGES)
+            .mapNotNull { it.imageUrl }
+            .toList()
+    }
+    LaunchedEffect(activeImageUrls) {
+        activeImageUrls.forEach { url ->
+            if (programImageCache[url] != null) return@forEach
+            val imageBitmap = withContext(Dispatchers.IO) {
+                val result = context.imageLoader.execute(
+                    ImageRequest.Builder(context)
+                        .data(url)
+                        .size(320, 180)
+                        .crossfade(false)
+                        .build()
+                )
+                ((result as? SuccessResult)?.drawable as? BitmapDrawable)
+                    ?.bitmap
+                    ?.asImageBitmap()
+            }
+            if (imageBitmap != null) {
+                programImageCache[url] = imageBitmap
+            }
+        }
+    }
+    val titlePaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+        }
+    }
+    val metaPaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(170, 174, 184)
+            textAlign = Paint.Align.RIGHT
+        }
+    }
+    val darkTextPaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(7, 17, 20)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+        }
+    }
+
+    Canvas(modifier) {
+        val channelWidthPx = channelWidth.toPx()
+        val slotWidthPx = slotWidth.toPx()
+        val headerHeightPx = headerHeight.toPx()
+        val activeRowHeightPx = activeRowHeight.toPx()
+        val inactiveRowHeightPx = inactiveRowHeight.toPx()
+        val baseScrollRowHeightPx = baseScrollRowHeight.toPx()
+        val rowGapPx = 6.dp.toPx()
+        val cellGapPx = 6.dp.toPx()
+        val cornerPx = 8.dp.toPx()
+        val scrollPx = scrollOffsetPx()
+        val firstRow = firstVisibleRowIndex()
+        val renderStart = floor(firstRow).toInt().coerceAtLeast(0)
+        val renderEnd = min(data.channels.lastIndex, renderStart + visibleRowCount)
+        val visibleStartSeconds = startSeconds + (scrollPx / (slotWidthPx / HALF_HOUR_SECONDS)).toLong()
+        val visibleEndSeconds = visibleStartSeconds + ((size.width - channelWidthPx) / (slotWidthPx / HALF_HOUR_SECONDS)).toLong()
+
+        drawRect(Color(0xFF080A0C))
+        drawRect(
+            brush = Brush.verticalGradient(
+                listOf(Color(0xFF081723), Color(0x66081723), Color.Transparent),
+                startY = 0f,
+                endY = headerHeightPx + 42.dp.toPx(),
+            ),
+            size = Size(size.width, headerHeightPx + 42.dp.toPx()),
+        )
+
+        val nativeCanvas = drawContext.canvas.nativeCanvas
+        fun Paint.withText(sizeSp: Float, color: Int = this.color, bold: Boolean = false): Paint {
+            textSize = with(density) { sizeSp.sp.toPx() }
+            this.color = color
+            typeface = if (bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
+            return this
+        }
+        fun drawAlignedText(
+            text: String,
+            x: Float,
+            centerY: Float,
+            maxWidth: Float,
+            paint: Paint,
+            align: Paint.Align = Paint.Align.RIGHT,
+        ) {
+            paint.textAlign = align
+            val label = paint.ellipsizeToWidth(text, maxWidth)
+            val metrics = paint.fontMetrics
+            val baseline = centerY - (metrics.ascent + metrics.descent) / 2f
+            nativeCanvas.drawText(label, x, baseline, paint)
+        }
+
+        val totalSlots = (((endSeconds - startSeconds) / HALF_HOUR_SECONDS).toInt()).coerceAtLeast(1)
+        val firstSlot = max(0, ((visibleStartSeconds - startSeconds) / HALF_HOUR_SECONDS).toInt() - 1)
+        val lastSlot = min(totalSlots - 1, ((visibleEndSeconds - startSeconds) / HALF_HOUR_SECONDS).toInt() + 1)
+        for (slot in firstSlot..lastSlot) {
+            val slotStart = startSeconds + slot * HALF_HOUR_SECONDS
+            val x = channelWidthPx + slot * slotWidthPx - scrollPx
+            if (x > size.width || x + slotWidthPx < channelWidthPx) continue
+            drawRoundRect(
+                color = Color(0xE817181B),
+                topLeft = Offset(x + 3.dp.toPx(), 3.dp.toPx()),
+                size = Size(slotWidthPx - cellGapPx, headerHeightPx - 6.dp.toPx()),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerPx, cornerPx),
+            )
+            drawAlignedText(
+                text = HeaderTimeFormatter.format(Instant.ofEpochSecond(slotStart).atZone(ZoneId.systemDefault())),
+                x = x + slotWidthPx - 14.dp.toPx(),
+                centerY = headerHeightPx / 2f,
+                maxWidth = slotWidthPx - 26.dp.toPx(),
+                paint = titlePaint.withText(12f, android.graphics.Color.rgb(200, 209, 214), bold = true),
+            )
+        }
+
+        var rowTop = headerHeightPx - (firstRow - renderStart) * baseScrollRowHeightPx
+        clipRect(top = headerHeightPx, bottom = size.height) {
+            for (index in renderStart..renderEnd) {
+                val channel = data.channels[index]
+                val rowHeightPx = if (selectedRowIndex == index) activeRowHeightPx else inactiveRowHeightPx
+                if (rowTop > size.height) break
+                if (rowTop + rowHeightPx < headerHeightPx) {
+                    rowTop += rowHeightPx
+                    continue
+                }
+                val isActiveRow = selectedRowIndex == index
+                val isChannelFocused = gridFocused && isActiveRow && selectedProgramKey == null
+                val isPlaying = playingChannelId == channel.id
+                val channelColor = when {
+                    isChannelFocused -> Color(0xFFE8EAEE)
+                    isActiveRow -> Color(0xFF565B64)
+                    else -> Color(0xFF17181B)
+                }
+                val channelLeft = 6.dp.toPx()
+                val channelTop = rowTop + 3.dp.toPx()
+                val channelHeight = rowHeightPx - rowGapPx
+                drawRoundRect(
+                    color = channelColor,
+                    topLeft = Offset(channelLeft, channelTop),
+                    size = Size(channelWidthPx - 12.dp.toPx(), channelHeight),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerPx, cornerPx),
+                )
+                if (isActiveRow) {
+                    drawRoundRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = if (isChannelFocused) 0.22f else 0.10f),
+                                Color.Transparent,
+                            ),
+                            startX = channelLeft,
+                            endX = channelLeft + channelWidthPx * 0.42f,
+                        ),
+                        topLeft = Offset(channelLeft, channelTop),
+                        size = Size(channelWidthPx - 12.dp.toPx(), channelHeight),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerPx, cornerPx),
+                    )
+                }
+                val channelTextColor = when {
+                    isChannelFocused -> android.graphics.Color.rgb(10, 14, 18)
+                    isActiveRow -> android.graphics.Color.WHITE
+                    else -> android.graphics.Color.rgb(232, 234, 238)
+                }
+                drawAlignedText(
+                    text = channel.name,
+                    x = channelWidthPx - 16.dp.toPx(),
+                    centerY = rowTop + rowHeightPx * 0.38f,
+                    maxWidth = channelWidthPx - 82.dp.toPx(),
+                    paint = titlePaint.withText(14f, channelTextColor, bold = true),
+                )
+                drawAlignedText(
+                    text = if (isPlaying) "מנגן עכשיו" else channel.number,
+                    x = channelWidthPx - 16.dp.toPx(),
+                    centerY = rowTop + rowHeightPx * 0.68f,
+                    maxWidth = channelWidthPx - 82.dp.toPx(),
+                    paint = metaPaint.withText(
+                        11f,
+                        when {
+                            isChannelFocused -> android.graphics.Color.rgb(46, 52, 58)
+                            isPlaying -> android.graphics.Color.rgb(185, 191, 198)
+                            else -> android.graphics.Color.rgb(140, 143, 152)
+                        },
+                    ),
+                )
+                drawRoundRect(
+                    color = when {
+                        isChannelFocused -> Color(0xFFFFFFFF)
+                        isActiveRow -> Color(0xFF707680)
+                        else -> Color(0xFF26272C)
+                    },
+                    topLeft = Offset(18.dp.toPx(), rowTop + rowHeightPx / 2f - 20.dp.toPx()),
+                    size = Size(40.dp.toPx(), 40.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx()),
+                )
+                drawAlignedText(
+                    text = channel.number,
+                    x = 38.dp.toPx(),
+                    centerY = rowTop + rowHeightPx / 2f,
+                    maxWidth = 32.dp.toPx(),
+                    paint = titlePaint.withText(
+                        12f,
+                        if (isChannelFocused) android.graphics.Color.rgb(10, 14, 18) else android.graphics.Color.WHITE,
+                        bold = true,
+                    ),
+                    align = Paint.Align.CENTER,
+                )
+
+                fullDisplayPrograms(channel).value.forEach { program ->
+                val clippedStart = max(program.startSeconds, startSeconds)
+                val clippedEnd = min(program.endSeconds, endSeconds)
+                if (clippedEnd <= clippedStart) return@forEach
+                val x = channelWidthPx + ((clippedStart - startSeconds) / HALF_HOUR_SECONDS.toFloat()) * slotWidthPx - scrollPx
+                val width = ((clippedEnd - clippedStart) / HALF_HOUR_SECONDS.toFloat()) * slotWidthPx
+                if (x > size.width || x + width < channelWidthPx) return@forEach
+                val key = program.programKey()
+                val focused = gridFocused && isActiveRow && selectedProgramKey == key
+                val current = isCurrent(program, nowSeconds)
+                val background = when {
+                    focused -> Color(0xFFF2F4F7)
+                    current -> Color(0xFF33363E)
+                    else -> Color(0xEE24252A)
+                }
+                val cellLeft = max(channelWidthPx + 3.dp.toPx(), x + 3.dp.toPx())
+                val cellRight = min(size.width - 3.dp.toPx(), x + width - 3.dp.toPx())
+                val cellTop = rowTop + 3.dp.toPx()
+                val cellWidth = cellRight - cellLeft
+                val cellHeight = rowHeightPx - rowGapPx
+                if (cellWidth <= 12.dp.toPx()) return@forEach
+                drawRoundRect(
+                    color = background,
+                    topLeft = Offset(cellLeft, cellTop),
+                    size = Size(cellWidth, cellHeight),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerPx, cornerPx),
+                )
+                val programImage = program.imageUrl?.let(programImageCache::get)
+                if (isActiveRow && programImage != null && cellWidth >= 110.dp.toPx()) {
+                    val imageWidthPx = min(132.dp.toPx(), cellWidth * 0.46f)
+                    val clipPath = Path().apply {
+                        addRoundRect(
+                            RectF(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight),
+                            cornerPx,
+                            cornerPx,
+                            Path.Direction.CW,
+                        )
+                    }
+                    nativeCanvas.save()
+                    nativeCanvas.clipPath(clipPath)
+                    drawImage(
+                        image = programImage,
+                        dstOffset = IntOffset(cellLeft.roundToInt(), cellTop.roundToInt()),
+                        dstSize = IntSize(imageWidthPx.roundToInt(), cellHeight.roundToInt()),
+                    )
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Transparent,
+                                0.28f to background.copy(alpha = 0.10f),
+                                0.72f to background.copy(alpha = 0.78f),
+                                1.00f to background.copy(alpha = 0.98f),
+                            ),
+                            startX = cellLeft,
+                            endX = cellLeft + imageWidthPx,
+                        ),
+                        topLeft = Offset(cellLeft, cellTop),
+                        size = Size(imageWidthPx, cellHeight),
+                    )
+                    nativeCanvas.restore()
+                }
+                if (current) {
+                    val dotX = cellLeft + cellWidth - 16.dp.toPx()
+                    if (dotX > cellLeft + 10.dp.toPx()) {
+                        drawCircle(
+                            color = if (focused) ActiveGreen else Color(0xFFFF3648),
+                            radius = 5.dp.toPx(),
+                            center = Offset(dotX, rowTop + rowHeightPx / 2f),
+                        )
+                    }
+                }
+                nativeCanvas.save()
+                nativeCanvas.clipRect(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight)
+                val statusInsetPx = if (current) 26.dp.toPx() else 0f
+                val textRight = min(cellLeft + cellWidth - 12.dp.toPx() - statusInsetPx, x + width - 16.dp.toPx())
+                val maxTextWidth = max(24.dp.toPx(), cellWidth - 26.dp.toPx() - statusInsetPx)
+                val paint = if (focused) darkTextPaint else titlePaint
+                drawAlignedText(
+                    text = program.title,
+                    x = textRight,
+                    centerY = rowTop + rowHeightPx * 0.40f,
+                    maxWidth = maxTextWidth,
+                    paint = paint.withText(14f, if (focused) android.graphics.Color.rgb(7, 17, 20) else android.graphics.Color.WHITE, bold = true),
+                )
+                drawAlignedText(
+                    text = program.timeRange(),
+                    x = textRight,
+                    centerY = rowTop + rowHeightPx * 0.68f,
+                    maxWidth = maxTextWidth,
+                    paint = metaPaint.withText(11f, if (focused) android.graphics.Color.rgb(50, 58, 62) else android.graphics.Color.rgb(170, 174, 184)),
+                )
+                nativeCanvas.restore()
+                }
+                rowTop += rowHeightPx
+            }
+        }
+
+        if (nowSeconds in startSeconds..endSeconds) {
+            val nowX = channelWidthPx + ((nowSeconds - startSeconds) / HALF_HOUR_SECONDS.toFloat()) * slotWidthPx - scrollPx
+            if (nowX in channelWidthPx..size.width) {
+                drawRect(
+                    color = PrimaryCyan,
+                    topLeft = Offset(nowX - 1.dp.toPx(), headerHeightPx),
+                    size = Size(2.dp.toPx(), size.height - headerHeightPx),
+                )
+                drawRoundRect(
+                    color = PrimaryCyan,
+                    topLeft = Offset(nowX - 39.dp.toPx(), headerHeightPx - 24.dp.toPx()),
+                    size = Size(78.dp.toPx(), 22.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()),
+                )
+                drawAlignedText(
+                    text = TimeFormatter.format(Instant.ofEpochSecond(nowSeconds).atZone(ZoneId.systemDefault())),
+                    x = nowX,
+                    centerY = headerHeightPx - 13.dp.toPx(),
+                    maxWidth = 68.dp.toPx(),
+                    paint = darkTextPaint.withText(12f, android.graphics.Color.rgb(3, 16, 18), bold = true),
+                    align = Paint.Align.CENTER,
+                )
+            }
+        }
+    }
+}
+
+private fun Paint.ellipsizeToWidth(text: String, maxWidth: Float): String {
+    if (maxWidth <= 0f || measureText(text) <= maxWidth) return text
+    val ellipsis = "..."
+    var end = text.length
+    while (end > 0 && measureText(text, 0, end) + measureText(ellipsis) > maxWidth) {
+        end--
+    }
+    return if (end <= 0) ellipsis else text.substring(0, end) + ellipsis
 }
 
 @Composable
@@ -1558,43 +1999,63 @@ private fun TimeHeader(
     timelineWidth: Dp,
     totalSlots: Int,
     modifier: Modifier,
-    scrollOffset: Dp,
+    scrollOffsetPx: () -> Float,
     visibleStartSeconds: Long,
     visibleEndSeconds: Long,
     nowSeconds: Long,
     showLiveLine: Boolean,
-    nowOffset: Dp,
+    nowOffsetPx: Float,
 ) {
-    Row(modifier.background(Color(0xFF131417)), verticalAlignment = Alignment.CenterVertically) {
+    val density = LocalDensity.current
+    Row(
+        modifier.background(
+            Brush.verticalGradient(
+                listOf(
+                    Color(0xFF081723),
+                    Color(0xB8081723),
+                    Color(0x22081723),
+                    Color.Transparent,
+                )
+            )
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Box(
             Modifier
                 .width(channelWidth)
                 .fillMaxHeight()
-                .background(Color(0xFF131417))
-                .border(0.5.dp, Color(0xFF2A2C31))
+                .padding(horizontal = 3.dp, vertical = 3.dp)
         )
         Box(Modifier.fillMaxHeight().fillMaxWidth().clipToBounds()) {
-            Box(Modifier.width(timelineWidth).fillMaxHeight()) {
+            Box(
+                Modifier
+                    .width(timelineWidth)
+                    .fillMaxHeight()
+                    .graphicsLayer { translationX = -scrollOffsetPx() }
+            ) {
                 val firstSlotIndex = max(0, ((visibleStartSeconds - startSeconds) / 1800L).toInt() - 1)
                 val lastSlotIndex = min(totalSlots - 1, ((visibleEndSeconds - startSeconds) / 1800L).toInt() + 1)
                 if (firstSlotIndex <= lastSlotIndex) {
                     for (index in firstSlotIndex..lastSlotIndex) {
                         val slotStart = startSeconds + index * 1800L
-                        val xOffset = durationWidth(slotStart - startSeconds, slotWidth) - scrollOffset
+                        val xOffset = durationWidth(slotStart - startSeconds, slotWidth)
                         Box(
                             Modifier
                                 .offset(x = xOffset)
                                 .width(slotWidth)
                                 .fillMaxHeight()
-                                .border(0.5.dp, Color(0xFF26282D)),
+                                .padding(horizontal = 3.dp, vertical = 3.dp)
+                                .background(Color(0xE817181B), RoundedCornerShape(7.dp)),
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             Text(
-                                text = TimeFormatter.format(Instant.ofEpochSecond(slotStart).atZone(ZoneId.systemDefault())),
-                                color = Color(0xFFB8BCC6),
-                                fontSize = 14.sp,
+                                text = HeaderTimeFormatter.format(Instant.ofEpochSecond(slotStart).atZone(ZoneId.systemDefault())),
+                                color = Color(0xFFC8D1D6),
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier.padding(start = 12.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -1603,7 +2064,12 @@ private fun TimeHeader(
             if (showLiveLine) {
                 Box(
                     Modifier
-                        .offset(x = nowOffset - scrollOffset - 39.dp)
+                        .offset {
+                            IntOffset(
+                                x = (nowOffsetPx - scrollOffsetPx() - with(density) { 39.dp.toPx() }).roundToInt(),
+                                y = 0,
+                            )
+                        }
                         .width(78.dp)
                         .height(22.dp)
                         .align(Alignment.BottomStart)
@@ -1626,81 +2092,11 @@ private fun TimeHeader(
 }
 
 @Composable
-private fun NowJumpButton(
-    width: Dp,
-    focusRequester: FocusRequester,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onMoveRight: () -> Unit,
-    onClick: () -> Unit,
-) {
-    val focused = remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .width(width)
-            .fillMaxHeight()
-            .background(Color(0xFF131417))
-            .border(0.5.dp, Color(0xFF2A2C31))
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            modifier = Modifier
-                .size(42.dp)
-                .height(36.dp)
-                .background(
-                    if (focused.value) PrimaryCyan else Color(0xFF0E7C82),
-                    CircleShape,
-                )
-                .border(
-                    if (focused.value) 2.dp else 1.dp,
-                    if (focused.value) Color.White else Color(0x9910D5D9),
-                    CircleShape,
-                )
-                .onPreviewKeyEvent {
-                    when {
-                        it.type == KeyEventType.KeyUp && it.key.isActivationKey() -> {
-                            onClick()
-                            true
-                        }
-                        it.type == KeyEventType.KeyDown && it.key == Key.DirectionUp -> {
-                            onMoveUp()
-                            true
-                        }
-                        it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown -> {
-                            onMoveDown()
-                            true
-                        }
-                        it.type == KeyEventType.KeyDown && it.key == Key.DirectionRight -> {
-                            onMoveRight()
-                            true
-                        }
-                        else -> false
-                    }
-                }
-                .onFocusChanged { focused.value = it.isFocused }
-                .focusRequester(focusRequester)
-                .focusable()
-                .clickable(onClick = onClick),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                Icons.Default.PlayArrow,
-                contentDescription = "Show now",
-                tint = Color(0xFF031012),
-                modifier = Modifier.size(24.dp),
-            )
-        }
-    }
-}
-
-@Composable
 private fun LiveNowLine(
     channelWidth: Dp,
-    nowOffset: Dp,
+    nowOffsetPx: Float,
     timelineWidth: Dp,
-    scrollOffset: Dp,
+    scrollOffsetPx: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier) {
@@ -1715,10 +2111,11 @@ private fun LiveNowLine(
                 Modifier
                     .width(timelineWidth)
                     .fillMaxHeight()
+                    .graphicsLayer { translationX = -scrollOffsetPx() }
             ) {
                 Box(
                     Modifier
-                        .offset(x = nowOffset - scrollOffset)
+                        .offset { IntOffset(nowOffsetPx.roundToInt(), 0) }
                         .width(2.dp)
                         .fillMaxHeight()
                         .background(PrimaryCyan)
@@ -1731,7 +2128,7 @@ private fun LiveNowLine(
 @Composable
 private fun GuideRow(
     channel: TvChannel,
-    programs: List<TvProgram>,
+    programs: StableProgramList,
     isSelectedChannel: Boolean,
     isPlayingChannel: Boolean,
     isChannelFocused: Boolean,
@@ -1742,36 +2139,26 @@ private fun GuideRow(
     timelineViewportWidth: Dp,
     timelineStartSeconds: Long,
     timelineEndSeconds: Long,
-    visibleStartSeconds: Long,
-    visibleEndSeconds: Long,
     nowSeconds: Long,
     rowHeight: Dp,
     showArtwork: Boolean,
     slotWidthPx: Float,
-    scrollOffsetPx: () -> Int,
+    scrollOffsetPx: () -> Float,
 ) {
-    val visiblePrograms = remember(programs, visibleStartSeconds, visibleEndSeconds, slotWidth) {
-        val sortedPrograms = programs.sortedBy { it.startSeconds }
-        sortedPrograms
-            .mapIndexedNotNull { index, program ->
-                if (program.endSeconds <= visibleStartSeconds || program.startSeconds >= visibleEndSeconds) {
-                    return@mapIndexedNotNull null
-                }
-                val nextStartSeconds = sortedPrograms.getOrNull(index + 1)?.startSeconds
-                val displayEndSeconds = min(program.endSeconds, nextStartSeconds ?: program.endSeconds)
-                val clippedStartSeconds = max(program.startSeconds, visibleStartSeconds)
-                val clippedEndSeconds = min(displayEndSeconds, visibleEndSeconds)
-                val displayDurationSeconds = clippedEndSeconds - clippedStartSeconds
-                if (displayDurationSeconds <= 0L) {
-                    null
-                } else {
-                    VisibleProgram(
-                        program = program,
-                        visibleStartSeconds = clippedStartSeconds,
-                        width = durationWidth(displayDurationSeconds, slotWidth),
-                    )
-                }
-            }
+    val visiblePrograms = remember(programs, timelineStartSeconds, timelineEndSeconds, slotWidth) {
+        programs.value.mapNotNull { program ->
+            val clippedStartSeconds = max(program.startSeconds, timelineStartSeconds)
+            val clippedEndSeconds = min(program.endSeconds, timelineEndSeconds)
+            val displayDurationSeconds = clippedEndSeconds - clippedStartSeconds
+            if (displayDurationSeconds <= 0L) return@mapNotNull null
+            VisibleProgram(
+                program = program,
+                key = program.programKey(),
+                timeRange = program.timeRange(),
+                visibleStartSeconds = clippedStartSeconds,
+                width = durationWidth(displayDurationSeconds, slotWidth),
+            )
+        }
     }
 
     val rowSelected = isSelectedChannel
@@ -1781,7 +2168,6 @@ private fun GuideRow(
             .fillMaxWidth()
             .height(rowHeight)
             .background(Color(0xFF101114))
-            .border(0.5.dp, Color(0xFF101114))
     ) {
         ChannelCell(
             channel = channel,
@@ -1800,28 +2186,29 @@ private fun GuideRow(
                 Modifier
                     .width(timelineWidth)
                     .fillMaxHeight()
-                    .offset { IntOffset(-scrollOffsetPx(), 0) }
+                    .graphicsLayer { translationX = -scrollOffsetPx() }
             ) {
                 visiblePrograms.forEach { visibleProgram ->
                     val program = visibleProgram.program
-                    key(program.programKey()) {
+                    key(visibleProgram.key) {
                         val width = visibleProgram.width
                         val programOffsetPx =
                             (((visibleProgram.visibleStartSeconds - timelineStartSeconds) / 1800f) * slotWidthPx)
                                 .roundToInt()
                         ProgramCell(
                             program = program,
+                            timeRange = visibleProgram.timeRange,
                             width = width,
                             isCurrent = isCurrent(program, nowSeconds),
                             isSelectedChannel = rowSelected,
-                            isFocusedProgram = selectedProgramKey == program.programKey(),
+                            isFocusedProgram = selectedProgramKey == visibleProgram.key,
                             isPlayingChannel = isPlayingChannel,
                             showImage = showArtwork && width >= 110.dp && !program.imageUrl.isNullOrBlank(),
                             offsetXPx = programOffsetPx,
                         )
                     }
                 }
-                if (programs.isEmpty()) {
+                if (programs.value.isEmpty()) {
                     Box(
                         Modifier
                             .width(if (timelineWidth < timelineViewportWidth) timelineWidth else timelineViewportWidth)
@@ -1852,79 +2239,88 @@ private fun ChannelCell(
     focused: Boolean,
     active: Boolean,
 ) {
-    Row(
+    val cellShape = RoundedCornerShape(7.dp)
+    Box(
         modifier = Modifier
             .width(width)
             .fillMaxHeight()
-            .background(
-                when {
-                    focused -> Color(0xFF0FCBD0)
-                    active -> Color(0xFF043626)
-                    selected -> Color(0xFF102B30)
-                    else -> Color(0xFF17181B)
-                }
-            )
-            .border(0.5.dp, Color(0xFF17181B))
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(Color(0xFF101114))
+            .padding(horizontal = 3.dp, vertical = 3.dp),
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(36.dp)
-                .background(Color(0xFF26272C), RoundedCornerShape(6.dp))
-                .padding(5.dp),
-            contentAlignment = Alignment.Center,
+                .fillMaxSize()
+                .background(
+                    when {
+                        focused -> Color(0xFF0FCBD0)
+                        active -> Color(0xFF043626)
+                        selected -> Color(0xFF102B30)
+                        else -> Color(0xFF17181B)
+                    },
+                    cellShape,
+                )
+                .clip(cellShape)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (channel.logoUrl.isNotBlank()) {
-                AsyncImage(
-                    model = rememberSizedImageRequest(channel.logoUrl, width = 72, height = 72),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Text(
-                    text = channel.number,
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Spacer(Modifier.width(7.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (active) {
-                    Icon(
-                        Icons.Default.PlayArrow,
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(Color(0xFF26272C), RoundedCornerShape(6.dp))
+                    .padding(5.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (channel.logoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = rememberSizedImageRequest(channel.logoUrl, width = 72, height = 72),
                         contentDescription = null,
-                        tint = if (focused) Color(0xFF031012) else ActiveGreen,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.fillMaxSize(),
                     )
-                    Spacer(Modifier.width(4.dp))
+                } else {
+                    Text(
+                        text = channel.number,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
+            }
+            Spacer(Modifier.width(7.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (active) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = if (focused) Color(0xFF031012) else ActiveGreen,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = channel.name,
+                        color = if (focused) Color(0xFF031012) else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = channel.name,
-                    color = if (focused) Color(0xFF031012) else Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = if (active) "מנגן עכשיו" else channel.number,
+                    color = when {
+                        focused -> Color(0xFF073235)
+                        active -> ActiveGreen
+                        else -> Color(0xFF8C8F98)
+                    },
+                    fontSize = 10.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = if (active) "מנגן עכשיו" else channel.number,
-                color = when {
-                    focused -> Color(0xFF073235)
-                    active -> ActiveGreen
-                    else -> Color(0xFF8C8F98)
-                },
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -1944,6 +2340,7 @@ private fun rememberSizedImageRequest(url: String?, width: Int, height: Int): Im
 @Composable
 private fun ProgramCell(
     program: TvProgram,
+    timeRange: String,
     width: Dp,
     isCurrent: Boolean,
     isSelectedChannel: Boolean,
@@ -1963,7 +2360,6 @@ private fun ProgramCell(
     }
     val borderWidth = when {
         isFocusedProgram -> 0.dp
-        isCurrent -> 0.5.dp
         else -> 0.dp
     }
     val cellShape = RoundedCornerShape(7.dp)
@@ -2058,7 +2454,7 @@ private fun ProgramCell(
                     )
                 }
                 Text(
-                    text = program.timeRange(),
+                    text = timeRange,
                     color = if (isFocusedProgram) Color(0xFF263238) else Color(0xFFB1B4BC),
                     fontSize = 10.sp,
                     lineHeight = 10.sp,
@@ -3145,10 +3541,11 @@ private fun ExtraChannelPlayerSurface(
         DefaultTrackSelector(context).apply {
             setParameters(
                 buildUponParameters()
-                    .clearVideoSizeConstraints()
+                    .setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
                     .setMaxVideoBitrate(Int.MAX_VALUE)
                     .setForceLowestBitrate(true)
                     .setExceedVideoConstraintsIfNecessary(true)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
             )
         }
     }
@@ -3163,6 +3560,7 @@ private fun ExtraChannelPlayerSurface(
         ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
             .setTrackSelector(trackSelector)
+            .setLoadControl(createMultiPlayerLoadControl())
             .build()
             .apply {
                 playWhenReady = true
@@ -3173,6 +3571,7 @@ private fun ExtraChannelPlayerSurface(
         PlayerView(context).apply {
             this.player = player
             useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             isFocusable = false
             isFocusableInTouchMode = false
             setKeepContentOnPlayerReset(true)
@@ -3204,11 +3603,13 @@ private fun ExtraChannelPlayerSurface(
                     setMaxVideoBitrate(Int.MAX_VALUE)
                     setForceLowestBitrate(false)
                     setExceedVideoConstraintsIfNecessary(true)
+                    setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                 } else {
-                    clearVideoSizeConstraints()
+                    setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
                     setMaxVideoBitrate(Int.MAX_VALUE)
                     setForceLowestBitrate(true)
                     setExceedVideoConstraintsIfNecessary(true)
+                    setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
                 }
             }
         )
@@ -3223,15 +3624,44 @@ private fun ExtraChannelPlayerSurface(
         }
     }
 
-    AndroidView(
-        factory = { playerView },
-        update = {
-            if (it.player !== player) it.player = player
-            it.useController = false
-        },
-        modifier = modifier,
-    )
+    val loading = rememberPlayerLoadingState(player)
+    Box(modifier) {
+        AndroidView(
+            factory = { playerView },
+            update = {
+                if (it.player !== player) it.player = player
+                it.useController = false
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        PlayerLoadingOverlay(
+            visible = loading,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
 }
+
+private fun createMultiPlayerLoadControl(): DefaultLoadControl =
+    DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            MULTI_PLAYER_MIN_BUFFER_MS,
+            MULTI_PLAYER_MAX_BUFFER_MS,
+            MULTI_PLAYER_PLAYBACK_BUFFER_MS,
+            MULTI_PLAYER_REBUFFER_MS,
+        )
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+
+private fun createPrimaryPlayerLoadControl(): DefaultLoadControl =
+    DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            PRIMARY_PLAYER_MIN_BUFFER_MS,
+            PRIMARY_PLAYER_MAX_BUFFER_MS,
+            PRIMARY_PLAYER_PLAYBACK_BUFFER_MS,
+            PRIMARY_PLAYER_REBUFFER_MS,
+        )
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
 
 @Composable
 private fun AddChannelMenu(
@@ -3374,38 +3804,117 @@ private fun PlayerSurface(
     useController: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    AndroidView(
-        factory = {
-            (playerView.value.parent as? ViewGroup)?.removeView(playerView.value)
-            playerView.value
-        },
-        update = {
-            if (it.player !== player.value) {
-                it.player = player.value
-            }
-            if (it.useController != useController) {
-                it.useController = useController
-            }
-            it.controllerAutoShow = true
-            val timeoutMs = if (useController) 5_000 else 3_000
-            if (it.controllerShowTimeoutMs != timeoutMs) {
-                it.controllerShowTimeoutMs = timeoutMs
-            }
-            if (it.isFocusable != useController) {
-                it.isFocusable = useController
-            }
-            if (it.isFocusableInTouchMode != useController) {
-                it.isFocusableInTouchMode = useController
-            }
-            if (useController) {
-                if (!it.isControllerFullyVisible) it.showController()
-                if (!it.hasFocus()) it.requestFocus()
-            } else if (it.isControllerFullyVisible) {
-                it.hideController()
-            }
-        },
-        modifier = modifier,
-    )
+    val loading = rememberPlayerLoadingState(player.value)
+    Box(modifier) {
+        AndroidView(
+            factory = {
+                (playerView.value.parent as? ViewGroup)?.removeView(playerView.value)
+                playerView.value.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                playerView.value.layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                playerView.value
+            },
+            update = {
+                if (it.player !== player.value) {
+                    it.player = player.value
+                }
+                if (it.resizeMode != AspectRatioFrameLayout.RESIZE_MODE_FIT) {
+                    it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }
+                if (it.useController != useController) {
+                    it.useController = useController
+                }
+                if (
+                    it.layoutParams?.width != ViewGroup.LayoutParams.MATCH_PARENT ||
+                    it.layoutParams?.height != ViewGroup.LayoutParams.MATCH_PARENT
+                ) {
+                    it.layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    it.requestLayout()
+                }
+                it.controllerAutoShow = true
+                val timeoutMs = if (useController) 5_000 else 3_000
+                if (it.controllerShowTimeoutMs != timeoutMs) {
+                    it.controllerShowTimeoutMs = timeoutMs
+                }
+                if (it.isFocusable != useController) {
+                    it.isFocusable = useController
+                }
+                if (it.isFocusableInTouchMode != useController) {
+                    it.isFocusableInTouchMode = useController
+                }
+                if (useController) {
+                    if (!it.isControllerFullyVisible) it.showController()
+                    if (!it.hasFocus()) it.requestFocus()
+                } else if (it.isControllerFullyVisible) {
+                    it.hideController()
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        PlayerLoadingOverlay(
+            visible = loading,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun rememberPlayerLoadingState(player: Player): Boolean {
+    var loading by remember(player) { mutableStateOf(player.isVideoLoading()) }
+
+    DisposableEffect(player) {
+        fun updateLoading() {
+            loading = player.isVideoLoading()
+        }
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) = updateLoading()
+            override fun onIsLoadingChanged(isLoading: Boolean) = updateLoading()
+            override fun onRenderedFirstFrame() = updateLoading()
+        }
+        player.addListener(listener)
+        updateLoading()
+        onDispose {
+            player.removeListener(listener)
+        }
+    }
+
+    return loading
+}
+
+private fun Player.isVideoLoading(): Boolean =
+    mediaItemCount > 0 &&
+        (playbackState == Player.STATE_BUFFERING ||
+            (isLoading && playbackState != Player.STATE_READY))
+
+@Composable
+private fun PlayerLoadingOverlay(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (!visible) return
+    Box(
+        modifier = modifier
+            .background(Color(0x66000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .background(Color(0xCC06121B), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(
+                color = PrimaryCyan,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(30.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -3735,17 +4244,26 @@ private fun liveProgramIndex(programs: List<TvProgram>, nowSeconds: Long): Int =
         ?.index
         ?: closestProgramIndex(programs, nowSeconds)
 
-private fun centeredScrollOffsetPx(
+private fun scrollOffsetKeepingProgramVisiblePx(
     program: TvProgram,
     timelineStartSeconds: Long,
     slotWidthPx: Float,
     timelineViewportWidthPx: Float,
+    currentScrollOffsetPx: Int,
     maxScrollOffsetPx: Int,
 ): Int {
-    val programCenterPx = ((program.centerSeconds() - timelineStartSeconds) / 1800f) * slotWidthPx
-    return (programCenterPx - timelineViewportWidthPx / 2f)
-        .roundToInt()
-        .coerceIn(0, maxScrollOffsetPx)
+    val programStartPx = ((program.startSeconds - timelineStartSeconds) / 1800f) * slotWidthPx
+    val programEndPx = ((program.endSeconds - timelineStartSeconds) / 1800f) * slotWidthPx
+    val visibleStartPx = currentScrollOffsetPx.toFloat()
+    val visibleEndPx = visibleStartPx + timelineViewportWidthPx
+    val edgePaddingPx = slotWidthPx * 0.08f
+
+    return when {
+        programStartPx >= visibleStartPx + edgePaddingPx &&
+            programEndPx <= visibleEndPx - edgePaddingPx -> currentScrollOffsetPx
+        programStartPx < visibleStartPx + edgePaddingPx -> programStartPx.roundToInt()
+        else -> programStartPx.roundToInt()
+    }.coerceIn(0, maxScrollOffsetPx)
 }
 
 private tailrec fun Context.findActivity(): Activity? =
@@ -3827,3 +4345,91 @@ private fun TvChannel.hasPlayableStream(): Boolean = streamUrl.isNotBlank()
 
 private fun TvProgram.programKey(): String =
     "$channelId:$startSeconds:$endSeconds:$title"
+
+private fun displayProgramsForChannel(
+    channel: TvChannel,
+    programs: List<TvProgram>,
+    timelineStartSeconds: Long,
+    timelineEndSeconds: Long,
+): List<TvProgram> {
+    if (timelineEndSeconds <= timelineStartSeconds) return emptyList()
+    if (programs.isEmpty()) {
+        return noProgramBlocks(
+            channelId = channel.id,
+            startSeconds = timelineStartSeconds,
+            endSeconds = timelineEndSeconds,
+        )
+    }
+
+    val filledPrograms = mutableListOf<TvProgram>()
+    var cursorSeconds = timelineStartSeconds
+
+    programs
+        .sortedBy { it.startSeconds }
+        .forEach { program ->
+            when {
+                program.endSeconds <= timelineStartSeconds -> return@forEach
+                program.startSeconds >= timelineEndSeconds -> return@forEach
+            }
+
+            val coveredStartSeconds = max(program.startSeconds, timelineStartSeconds)
+            val coveredEndSeconds = min(program.endSeconds, timelineEndSeconds)
+            if (coveredEndSeconds <= coveredStartSeconds) return@forEach
+
+            if (coveredStartSeconds > cursorSeconds) {
+                filledPrograms += noProgramBlocks(
+                    channelId = channel.id,
+                    startSeconds = cursorSeconds,
+                    endSeconds = coveredStartSeconds,
+                )
+            }
+            filledPrograms += program
+            cursorSeconds = max(cursorSeconds, coveredEndSeconds)
+        }
+
+    if (cursorSeconds < timelineEndSeconds) {
+        filledPrograms += noProgramBlocks(
+            channelId = channel.id,
+            startSeconds = cursorSeconds,
+            endSeconds = timelineEndSeconds,
+        )
+    }
+
+    return filledPrograms.sortedBy { it.startSeconds }
+}
+
+private fun noProgramBlocks(
+    channelId: String,
+    startSeconds: Long,
+    endSeconds: Long,
+): List<TvProgram> {
+    if (endSeconds <= startSeconds) return emptyList()
+    return generateSequence(startSeconds) { currentStartSeconds ->
+        val nextHourSeconds = currentStartSeconds.roundUpToHour()
+        if (nextHourSeconds <= currentStartSeconds) {
+            currentStartSeconds + NO_PROGRAM_BLOCK_SECONDS
+        } else {
+            nextHourSeconds
+        }
+    }
+        .takeWhile { it < endSeconds }
+        .map { blockStartSeconds ->
+            TvProgram(
+                channelId = channelId,
+                startSeconds = blockStartSeconds,
+                endSeconds = min(blockStartSeconds.roundUpToHour(), endSeconds),
+                title = "אין מידע",
+                description = "No program info",
+                imageUrl = null,
+            )
+        }
+        .toList()
+}
+
+private fun Long.roundUpToHour(): Long {
+    val remainder = ((this % NO_PROGRAM_BLOCK_SECONDS) + NO_PROGRAM_BLOCK_SECONDS) % NO_PROGRAM_BLOCK_SECONDS
+    return if (remainder == 0L) this + NO_PROGRAM_BLOCK_SECONDS else this + (NO_PROGRAM_BLOCK_SECONDS - remainder)
+}
+
+private fun Long.floorToHalfHour(): Long =
+    this - ((this % HALF_HOUR_SECONDS) + HALF_HOUR_SECONDS) % HALF_HOUR_SECONDS

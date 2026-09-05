@@ -34,7 +34,7 @@ class ProgramGuideRepository(
         startSeconds: Long,
         endSeconds: Long,
     ): Map<String, List<TvProgram>> = withContext(Dispatchers.IO) {
-        val start = startSeconds.roundDownToHour()
+        val start = (startSeconds - EPG_BOUNDARY_LOOKBEHIND_SECONDS).roundDownToHour()
         val end = endSeconds.roundUpToHour()
         val epg = getJsonObject("$apiBaseUrl/epg?start=$start&end=$end")
         channels.associate { channel ->
@@ -199,5 +199,6 @@ class ProgramGuideRepository(
 
     private companion object {
         private const val INITIAL_EPG_WINDOW_SECONDS = 6 * 60 * 60L
+        private const val EPG_BOUNDARY_LOOKBEHIND_SECONDS = 6 * 60 * 60L
     }
 }

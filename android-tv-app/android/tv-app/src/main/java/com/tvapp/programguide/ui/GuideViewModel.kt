@@ -233,36 +233,28 @@ class GuideViewModel(
         val state = _uiState.value
         val data = state.guideData ?: return
 
-        val edgeBufferSeconds = 15 * 60L
-        val expandSeconds = 4 * 60 * 60L
-        val loadStart = when {
-            visibleStartSeconds < data.guideStartSeconds + edgeBufferSeconds ->
-                data.guideStartSeconds - expandSeconds
-            visibleEndSeconds > data.guideEndSeconds - edgeBufferSeconds ->
-                data.guideEndSeconds
+        val missingStart = visibleStartSeconds < data.guideStartSeconds
+        val missingEnd = visibleEndSeconds > data.guideEndSeconds
+        val range = when {
+            missingStart && missingEnd -> GuideRange(visibleStartSeconds, visibleEndSeconds)
+            missingStart -> GuideRange(visibleStartSeconds, data.guideStartSeconds)
+            missingEnd -> GuideRange(data.guideEndSeconds, visibleEndSeconds)
             else -> return
         }
-        val loadEnd = when {
-            visibleStartSeconds < data.guideStartSeconds + edgeBufferSeconds ->
-                data.guideStartSeconds
-            else ->
-                data.guideEndSeconds + expandSeconds
-        }
-
-        val range = GuideRange(loadStart, loadEnd)
+        if (range.endSeconds <= range.startSeconds) return
         if (!loadingGuideRanges.add(range)) return
 
-        viewModelScope.launch {
-            runCatching { repository.loadPrograms(data.channels, range.startSeconds, range.endSeconds) }
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    repository.loadPrograms(data.channels, range.startSeconds, range.endSeconds)
+                }
+            }
                 .onSuccess { newPrograms ->
-                    val currentData = _uiState.value.guideData ?: return@onSuccess
-                    val mergeResult = withContext(Dispatchers.Default) {
-                        currentData.mergePrograms(newPrograms, range)
-                    }
-                    if (!mergeResult.changed) return@onSuccess
-
                     _uiState.update { current ->
                         val latestData = current.guideData ?: return@update current
+                        val mergeResult = latestData.mergePrograms(newPrograms, range)
+                        if (!mergeResult.changed) return@update current
                         current.copy(
                             guideData = latestData.copy(
                                 programsByChannel = mergeResult.programsByChannel,
