@@ -151,6 +151,8 @@ private val ActiveGreen = Color(0xFF19D99A)
 private val Gold = Color(0xFFFFC928)
 private val TimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 private val HeaderTimeFormatter = DateTimeFormatter.ofPattern("EEE HH:mm", Locale.getDefault())
+private val TopPanelHeight = 190.dp
+private val MiniPlayerWidth = 320.dp
 private const val MAX_MULTI_PLAYER_CHANNELS = 4
 private const val MULTI_PLAYER_MAX_WIDTH = 854
 private const val MULTI_PLAYER_MAX_HEIGHT = 480
@@ -165,7 +167,7 @@ private const val MULTI_PLAYER_REBUFFER_MS = 1_500
 private const val NO_PROGRAM_BLOCK_SECONDS = 60 * 60L
 private const val HALF_HOUR_SECONDS = 30 * 60L
 private const val GRID_LOOKBACK_SECONDS = 60 * 60L
-private const val GRID_VISIBLE_WINDOW_SECONDS = 6 * 60 * 60L
+private const val GRID_VISIBLE_WINDOW_SECONDS = 12 * 60 * 60L
 private const val GRID_MOTION_MS = 120
 private const val GRID_NAVIGATION_MIN_INTERVAL_MS = 70L
 private const val MAX_ACTIVE_ROW_IMAGES = 24
@@ -500,40 +502,21 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                     player = stablePlayer,
                     playerView = stablePlayerView,
                     useController = false,
+                    resizeMode = if (playbackState.isPlayerExpanded) {
+                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    } else {
+                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    },
                     modifier = if (playbackState.isPlayerExpanded) {
                         Modifier.fillMaxSize()
                     } else {
                         Modifier
                             .align(Alignment.TopEnd)
-                            .width(360.dp)
-                            .height(226.dp)
+                            .width(MiniPlayerWidth)
+                            .height(TopPanelHeight)
                     },
+                    showLeadingFade = !playbackState.isPlayerExpanded,
                 )
-                if (!playbackState.isPlayerExpanded) {
-                    Box(
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .width(360.dp)
-                            .height(226.dp)
-                    ) {
-                        Box(
-                            Modifier
-                                .align(Alignment.CenterStart)
-                                .width(128.dp)
-                                .fillMaxHeight()
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colorStops = arrayOf(
-                                            0.00f to Color(0xF0081420),
-                                            0.46f to Color(0x99081420),
-                                            0.78f to Color(0x33081420),
-                                            1.00f to Color.Transparent,
-                                        )
-                                    )
-                                )
-                        )
-                    }
-                }
             }
 
             if (playbackState.isPlayerExpanded) {
@@ -736,16 +719,16 @@ private fun TopInfoPanel(
     topPanelFocusRequester: FocusRequester,
     gridFocusRequester: FocusRequester,
 ) {
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(226.dp)
+            .height(TopPanelHeight)
             .background(
                 Brush.verticalGradient(
                     listOf(Color(0xFF17262A), Color(0xFF090D10))
                 )
-            ),
-        verticalAlignment = Alignment.CenterVertically,
+            )
+            .clipToBounds(),
     ) {
         ProgramHeroPanel(
             channel = channel,
@@ -754,7 +737,7 @@ private fun TopInfoPanel(
             onShowNowClick = onShowNowClick,
             topPanelFocusRequester = topPanelFocusRequester,
             gridFocusRequester = gridFocusRequester,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
+            modifier = Modifier.fillMaxSize(),
         )
         MiniPlayerPreview(
             channel = playingChannel ?: channel,
@@ -763,7 +746,10 @@ private fun TopInfoPanel(
             isPlayerExpanded = isPlayerExpanded,
             onClick = onPlayerClick,
             showOpenIcon = false,
-            modifier = Modifier.width(360.dp).fillMaxHeight(),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .width(MiniPlayerWidth)
+                .fillMaxHeight(),
         )
     }
 }
@@ -778,17 +764,14 @@ private fun ProgramHeroPanel(
     gridFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
+    val contentEndPadding = MiniPlayerWidth + 32.dp
     val backgroundUrl = program?.imageUrl ?: channel?.logoUrl
     val title = program?.title ?: channel?.name ?: ""
     val description = program?.description?.ifBlank { null } ?: channel?.name.orEmpty()
     val textAlign = if (title.isMostlyRtlText() || description.isMostlyRtlText()) TextAlign.Right else TextAlign.Left
     val contentAlignment = if (textAlign == TextAlign.Right) Alignment.End else Alignment.Start
 
-    Box(
-        modifier = modifier
-            .background(Color(0xFF081723))
-            .clipToBounds(),
-    ) {
+    Box(modifier = modifier.background(Color(0xFF081723)).clipToBounds()) {
         val heroNowFocusRequester = remember { FocusRequester() }
 
         AsyncImage(
@@ -806,8 +789,13 @@ private fun ProgramHeroPanel(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.horizontalGradient(
-                        listOf(Color(0xF1081420), Color(0xDD081420), Color(0x88081420))
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to Color(0x14000000),
+                            0.34f to Color(0x33000000),
+                            0.68f to Color(0x94000000),
+                            1.00f to Color(0xE6000000),
+                        )
                     )
                 )
         )
@@ -860,7 +848,7 @@ private fun ProgramHeroPanel(
         Row(
             modifier = Modifier
                 .align(if (textAlign == TextAlign.Right) Alignment.TopEnd else Alignment.TopStart)
-                .padding(start = 30.dp, top = 26.dp, end = 30.dp),
+                .padding(start = 28.dp, top = 18.dp, end = contentEndPadding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             LiveDot()
@@ -868,7 +856,7 @@ private fun ProgramHeroPanel(
             Text(
                 text = program?.timeRange().orEmpty(),
                 color = Color(0xFFD4DEE3),
-                fontSize = 16.sp,
+                fontSize = 14.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -876,27 +864,27 @@ private fun ProgramHeroPanel(
             Text(
                 text = channel?.name.orEmpty(),
                 color = Color.White,
-                fontSize = 18.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(12.dp))
             ChannelLogoCircle(channel)
         }
 
         Column(
             modifier = Modifier
                 .align(if (textAlign == TextAlign.Right) Alignment.BottomEnd else Alignment.BottomStart)
-                .padding(start = 28.dp, end = 28.dp, bottom = 18.dp)
-                .fillMaxWidth(0.94f),
+                .padding(start = 28.dp, end = contentEndPadding, bottom = 14.dp)
+                .fillMaxWidth(),
             horizontalAlignment = contentAlignment,
         ) {
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 23.sp,
-                lineHeight = 25.sp,
+                fontSize = 20.sp,
+                lineHeight = 22.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = textAlign,
                 maxLines = 2,
@@ -907,10 +895,10 @@ private fun ProgramHeroPanel(
             Text(
                 text = description,
                 color = Color(0xFFD1DEE4),
-                fontSize = 13.sp,
-                lineHeight = 16.sp,
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
                 textAlign = textAlign,
-                maxLines = 6,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -979,7 +967,7 @@ private fun HeroIconButton(
 private fun ChannelLogoCircle(channel: TvChannel?) {
     Box(
         modifier = Modifier
-            .size(58.dp)
+            .size(50.dp)
             .background(Color.White, CircleShape)
             .border(1.dp, Color(0x55FFFFFF), CircleShape)
             .padding(8.dp),
@@ -1005,7 +993,6 @@ private fun MiniPlayerPreview(
 ) {
     Box(
         modifier = modifier
-            .aspectRatio(16f / 9f)
             .background(Color.Black)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -1015,25 +1002,17 @@ private fun MiniPlayerPreview(
                 model = rememberSizedImageRequest(program?.imageUrl ?: channel?.logoUrl, width = 580, height = 326),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().padding(14.dp),
+                modifier = Modifier.fillMaxSize(),
             )
-        }
-        Box(
-            Modifier
-                .align(Alignment.CenterStart)
-                .fillMaxHeight()
-                .width(118.dp)
-                .background(
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0.00f to Color(0xF0081420),
-                            0.42f to Color(0xA0081420),
-                            0.76f to Color(0x22081420),
-                            1.00f to Color.Transparent,
-                        )
-                    )
+            if (!isPlayerExpanded) {
+                MiniPlayerFadeOverlay(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .width(190.dp),
                 )
-        )
+            }
+        }
         if (showOpenIcon) {
             Box(
                 modifier = Modifier
@@ -1747,23 +1726,31 @@ private fun CanvasGuideGrid(
         val totalSlots = (((endSeconds - startSeconds) / HALF_HOUR_SECONDS).toInt()).coerceAtLeast(1)
         val firstSlot = max(0, ((visibleStartSeconds - startSeconds) / HALF_HOUR_SECONDS).toInt() - 1)
         val lastSlot = min(totalSlots - 1, ((visibleEndSeconds - startSeconds) / HALF_HOUR_SECONDS).toInt() + 1)
-        for (slot in firstSlot..lastSlot) {
-            val slotStart = startSeconds + slot * HALF_HOUR_SECONDS
-            val x = channelWidthPx + slot * slotWidthPx - scrollPx
-            if (x > size.width || x + slotWidthPx < channelWidthPx) continue
-            drawRoundRect(
-                color = Color(0xE817181B),
-                topLeft = Offset(x + 3.dp.toPx(), 3.dp.toPx()),
-                size = Size(slotWidthPx - cellGapPx, headerHeightPx - 6.dp.toPx()),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerPx, cornerPx),
-            )
-            drawAlignedText(
-                text = HeaderTimeFormatter.format(Instant.ofEpochSecond(slotStart).atZone(ZoneId.systemDefault())),
-                x = x + slotWidthPx - 14.dp.toPx(),
-                centerY = headerHeightPx / 2f,
-                maxWidth = slotWidthPx - 26.dp.toPx(),
-                paint = titlePaint.withText(12f, android.graphics.Color.rgb(200, 209, 214), bold = true),
-            )
+        clipRect(left = channelWidthPx, top = 0f, right = size.width, bottom = headerHeightPx) {
+            for (slot in firstSlot..lastSlot) {
+                val slotStart = startSeconds + slot * HALF_HOUR_SECONDS
+                val x = channelWidthPx + slot * slotWidthPx - scrollPx
+                if (x > size.width || x + slotWidthPx < channelWidthPx) continue
+                val slotLeft = max(channelWidthPx + 3.dp.toPx(), x + 3.dp.toPx())
+                val slotRight = min(size.width - 3.dp.toPx(), x + slotWidthPx - 3.dp.toPx())
+                val slotCellWidth = slotRight - slotLeft
+                if (slotCellWidth <= 18.dp.toPx()) continue
+                drawRoundRect(
+                    color = Color(0xE817181B),
+                    topLeft = Offset(slotLeft, 3.dp.toPx()),
+                    size = Size(slotCellWidth, headerHeightPx - 6.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerPx, cornerPx),
+                )
+                val labelX = max(x + 14.dp.toPx(), channelWidthPx + 14.dp.toPx())
+                drawAlignedText(
+                    text = HeaderTimeFormatter.format(Instant.ofEpochSecond(slotStart).atZone(ZoneId.systemDefault())),
+                    x = labelX,
+                    centerY = headerHeightPx / 2f,
+                    maxWidth = max(24.dp.toPx(), slotRight - labelX - 10.dp.toPx()),
+                    paint = titlePaint.withText(12f, android.graphics.Color.rgb(200, 209, 214), bold = true),
+                    align = Paint.Align.LEFT,
+                )
+            }
         }
 
         var rowTop = headerHeightPx - (firstRow - renderStart) * baseScrollRowHeightPx
@@ -1918,33 +1905,74 @@ private fun CanvasGuideGrid(
                     )
                     nativeCanvas.restore()
                 }
-                if (current) {
-                    val dotX = cellLeft + cellWidth - 16.dp.toPx()
-                    if (dotX > cellLeft + 10.dp.toPx()) {
-                        drawCircle(
-                            color = if (focused) ActiveGreen else Color(0xFFFF3648),
-                            radius = 5.dp.toPx(),
-                            center = Offset(dotX, rowTop + rowHeightPx / 2f),
+                val liveBadgeWidth = if (isPlaying) 46.dp.toPx() else 36.dp.toPx()
+                val liveBadgeHeight = 16.dp.toPx()
+                val liveBadgeLeft = cellLeft + 8.dp.toPx()
+                val liveBadgeTop = cellTop + 7.dp.toPx()
+                val showLiveBadge = current &&
+                    cellWidth >= liveBadgeWidth + 16.dp.toPx() &&
+                    cellHeight >= liveBadgeHeight + 14.dp.toPx()
+                if (showLiveBadge) {
+                        drawRoundRect(
+                            color = if (isPlaying) ActiveGreen else Color(0xFFE82034),
+                            topLeft = Offset(liveBadgeLeft, liveBadgeTop),
+                            size = Size(liveBadgeWidth, liveBadgeHeight),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()),
                         )
-                    }
+                        if (isPlaying) {
+                            val iconLeft = liveBadgeLeft + 7.dp.toPx()
+                            val iconCenterY = liveBadgeTop + liveBadgeHeight / 2f
+                            val playPath = Path().apply {
+                                moveTo(iconLeft, iconCenterY - 4.dp.toPx())
+                                lineTo(iconLeft, iconCenterY + 4.dp.toPx())
+                                lineTo(iconLeft + 7.dp.toPx(), iconCenterY)
+                                close()
+                            }
+                            drawContext.canvas.nativeCanvas.drawPath(
+                                playPath,
+                                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                    color = android.graphics.Color.rgb(3, 24, 18)
+                                    style = Paint.Style.FILL
+                                },
+                            )
+                        }
+                        drawAlignedText(
+                            text = "LIVE",
+                            x = if (isPlaying) liveBadgeLeft + 29.dp.toPx() else liveBadgeLeft + liveBadgeWidth / 2f,
+                            centerY = liveBadgeTop + liveBadgeHeight / 2f,
+                            maxWidth = if (isPlaying) liveBadgeWidth - 20.dp.toPx() else liveBadgeWidth - 6.dp.toPx(),
+                            paint = titlePaint.withText(
+                                8f,
+                                if (isPlaying) android.graphics.Color.rgb(3, 24, 18) else android.graphics.Color.WHITE,
+                                bold = true,
+                            ),
+                            align = Paint.Align.CENTER,
+                        )
                 }
                 nativeCanvas.save()
                 nativeCanvas.clipRect(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight)
-                val statusInsetPx = if (current) 26.dp.toPx() else 0f
-                val textRight = min(cellLeft + cellWidth - 12.dp.toPx() - statusInsetPx, x + width - 16.dp.toPx())
-                val maxTextWidth = max(24.dp.toPx(), cellWidth - 26.dp.toPx() - statusInsetPx)
+                val textRight = min(cellLeft + cellWidth - 12.dp.toPx(), x + width - 16.dp.toPx())
+                val textLeftLimit = if (showLiveBadge) {
+                    liveBadgeLeft + liveBadgeWidth + 10.dp.toPx()
+                } else {
+                    cellLeft + 12.dp.toPx()
+                }
+                val maxTextWidth = max(24.dp.toPx(), textRight - textLeftLimit)
                 val paint = if (focused) darkTextPaint else titlePaint
+                val textClusterCenterY = cellTop + cellHeight / 2f
+                val titleCenterY = textClusterCenterY - 11.dp.toPx()
+                val timeCenterY = textClusterCenterY + 13.dp.toPx()
                 drawAlignedText(
                     text = program.title,
                     x = textRight,
-                    centerY = rowTop + rowHeightPx * 0.40f,
+                    centerY = titleCenterY,
                     maxWidth = maxTextWidth,
                     paint = paint.withText(14f, if (focused) android.graphics.Color.rgb(7, 17, 20) else android.graphics.Color.WHITE, bold = true),
                 )
                 drawAlignedText(
                     text = program.timeRange(),
                     x = textRight,
-                    centerY = rowTop + rowHeightPx * 0.68f,
+                    centerY = timeCenterY,
                     maxWidth = maxTextWidth,
                     paint = metaPaint.withText(11f, if (focused) android.graphics.Color.rgb(50, 58, 62) else android.graphics.Color.rgb(170, 174, 184)),
                 )
@@ -3802,14 +3830,16 @@ private fun PlayerSurface(
     player: StablePlayer,
     playerView: StablePlayerView,
     useController: Boolean,
+    resizeMode: Int = AspectRatioFrameLayout.RESIZE_MODE_FIT,
     modifier: Modifier = Modifier,
+    showLeadingFade: Boolean = false,
 ) {
     val loading = rememberPlayerLoadingState(player.value)
-    Box(modifier) {
+    Box(modifier.clipToBounds()) {
         AndroidView(
             factory = {
                 (playerView.value.parent as? ViewGroup)?.removeView(playerView.value)
-                playerView.value.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                playerView.value.resizeMode = resizeMode
                 playerView.value.layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -3820,8 +3850,8 @@ private fun PlayerSurface(
                 if (it.player !== player.value) {
                     it.player = player.value
                 }
-                if (it.resizeMode != AspectRatioFrameLayout.RESIZE_MODE_FIT) {
-                    it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                if (it.resizeMode != resizeMode) {
+                    it.resizeMode = resizeMode
                 }
                 if (it.useController != useController) {
                     it.useController = useController
@@ -3860,7 +3890,32 @@ private fun PlayerSurface(
             visible = loading,
             modifier = Modifier.fillMaxSize(),
         )
+        if (showLeadingFade) {
+            MiniPlayerFadeOverlay(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(190.dp),
+            )
+        }
     }
+}
+
+@Composable
+private fun MiniPlayerFadeOverlay(modifier: Modifier = Modifier) {
+    Box(
+        modifier.background(
+            Brush.horizontalGradient(
+                colorStops = arrayOf(
+                    0.00f to Color(0xF8081420),
+                    0.16f to Color(0xE6081420),
+                    0.38f to Color(0xA8081420),
+                    0.66f to Color(0x50081420),
+                    1.00f to Color.Transparent,
+                )
+            )
+        )
+    )
 }
 
 @Composable
@@ -4191,7 +4246,7 @@ private fun durationWidth(durationSeconds: Long, slotWidth: Dp): Dp =
     slotWidth * (durationSeconds / 1800f)
 
 private fun visibleGuideRowCount(channelCount: Int): Int =
-    min(4, channelCount).coerceAtLeast(1)
+    min(5, channelCount).coerceAtLeast(1)
 
 private fun isCurrent(program: TvProgram, nowSeconds: Long): Boolean =
     nowSeconds in program.startSeconds until program.endSeconds
