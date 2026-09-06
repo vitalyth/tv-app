@@ -65,6 +65,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,6 +111,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
@@ -2781,15 +2783,39 @@ private fun ExpandedPlayer(
     var enteredChannelNumber by remember { mutableStateOf("") }
     var enteredChannelNumberNonce by remember { mutableIntStateOf(0) }
     var addMenuVisible by remember { mutableStateOf(false) }
+    var addMenuMounted by remember { mutableStateOf(false) }
     var multiControlFocus by remember { mutableStateOf(MultiControlFocus.None) }
+    val addableChannels = remember(guideChannels, multiChannels, maxMultiPlayerChannels) {
+        if (multiChannels.size >= maxMultiPlayerChannels) {
+            emptyList()
+        } else {
+            guideChannels.filter { channel ->
+                channel.hasPlayableStream() &&
+                    multiChannels.none { it.id == channel.id }
+            }
+        }
+    }
+
+    fun openAddMenu() {
+        if (multiChannels.size >= maxMultiPlayerChannels) return
+        controlsVisible = false
+        multiControlFocus = MultiControlFocus.None
+        addMenuMounted = true
+        addMenuVisible = true
+    }
+
+    fun closeAddMenu(showControls: Boolean = false) {
+        addMenuVisible = false
+        controlsVisible = showControls
+        multiControlFocus = MultiControlFocus.None
+        lastInteraction += 1
+        focusRequester.requestFocus()
+    }
 
     BackHandler {
         when {
             addMenuVisible -> {
-                addMenuVisible = false
-                controlsVisible = true
-                lastInteraction += 1
-                focusRequester.requestFocus()
+                closeAddMenu()
             }
             controlsVisible -> {
                 controlsVisible = false
@@ -2833,11 +2859,7 @@ private fun ExpandedPlayer(
     fun handleBack() {
         when {
             addMenuVisible -> {
-                addMenuVisible = false
-                controlsVisible = true
-                multiControlFocus = MultiControlFocus.None
-                lastInteraction += 1
-                focusRequester.requestFocus()
+                closeAddMenu()
             }
             controlsVisible -> {
                 controlsVisible = false
@@ -2862,7 +2884,8 @@ private fun ExpandedPlayer(
         when {
             digit != null -> {
                 val nextNumber = (enteredChannelNumber + digit).takeLast(4)
-                controlsVisible = true
+                controlsVisible = false
+                multiControlFocus = MultiControlFocus.None
                 lastInteraction += 1
                 enteredChannelNumber = nextNumber
                 enteredChannelNumberNonce += 1
@@ -2880,9 +2903,8 @@ private fun ExpandedPlayer(
                 lastInteraction += 1
                 if (multiPlayerActive) {
                     multiControlFocus = MultiControlFocus.None
-                    onMultiFocusChanged(multiFocusedIndex - 2)
+                    onMultiFocusChanged(multiFocusedIndex - multiPlayerColumnCount(multiChannels.size))
                 } else {
-                    addMenuVisible = false
                     multiControlFocus = MultiControlFocus.None
                     onPreviousChannel()
                 }
@@ -2906,13 +2928,12 @@ private fun ExpandedPlayer(
                 controlsVisible = true
                 lastInteraction += 1
                 if (multiPlayerActive) {
-                    val nextTileIndex = multiFocusedIndex + 2
+                    val nextTileIndex = multiFocusedIndex + multiPlayerColumnCount(multiChannels.size)
                     multiControlFocus = MultiControlFocus.None
                     if (nextTileIndex <= multiChannels.lastIndex) {
                         onMultiFocusChanged(nextTileIndex)
                     }
                 } else {
-                    addMenuVisible = false
                     multiControlFocus = MultiControlFocus.None
                     onNextChannel()
                 }
@@ -2947,16 +2968,25 @@ private fun ExpandedPlayer(
                         multiControlFocus = MultiControlFocus.None
                         onMultiFocusChanged(multiFocusedIndex + 1)
                     } else if (multiChannels.size < maxMultiPlayerChannels) {
-                        addMenuVisible = true
+                        openAddMenu()
                     }
                 } else {
-                    addMenuVisible = true
+                    openAddMenu()
                 }
                 return true
             }
             keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
                 keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
                 keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (enteredChannelNumber.isNotBlank()) {
+                    val number = enteredChannelNumber
+                    controlsVisible = false
+                    multiControlFocus = MultiControlFocus.None
+                    enteredChannelNumber = ""
+                    enteredChannelNumberNonce += 1
+                    onChannelNumberEntered(number)
+                    return true
+                }
                 if (multiPlayerActive) {
                     if (!controlsVisible || multiControlFocus == MultiControlFocus.None) {
                         controlsVisible = true
@@ -2967,7 +2997,7 @@ private fun ExpandedPlayer(
                         lastInteraction += 1
                     } else {
                         when (multiControlFocus) {
-                            MultiControlFocus.Add -> addMenuVisible = true
+                            MultiControlFocus.Add -> openAddMenu()
                             MultiControlFocus.OpenSingle -> multiChannels
                                 .getOrNull(multiFocusedIndex)
                                 ?.let(onOpenFocusedSingle)
@@ -2988,17 +3018,13 @@ private fun ExpandedPlayer(
         return false
     }
 
-    DisposableEffect(
-        addMenuVisible,
-        controlsVisible,
-        enteredChannelNumber,
-        multiPlayerActive,
-        multiFocusedIndex,
-        multiChannels,
-        multiControlFocus,
-    ) {
+    val currentExpandedKeyHandler by rememberUpdatedState<(AndroidKeyEvent) -> Boolean> { event ->
+        event.action == AndroidKeyEvent.ACTION_DOWN && handleExpandedKey(event.keyCode)
+    }
+
+    DisposableEffect(Unit) {
         TvKeyEventBridge.setHandler { event ->
-            event.action == AndroidKeyEvent.ACTION_DOWN && handleExpandedKey(event.keyCode)
+            currentExpandedKeyHandler(event)
         }
         onDispose {
             TvKeyEventBridge.setHandler(null)
@@ -3025,9 +3051,7 @@ private fun ExpandedPlayer(
                 canRemoveChannel = multiChannels.size > 1,
                 focusedAction = multiControlFocus,
                 onAddChannelClick = {
-                    controlsVisible = true
-                    lastInteraction += 1
-                    addMenuVisible = true
+                    openAddMenu()
                 },
                 onOpenSingleClick = {
                     controlsVisible = true
@@ -3055,35 +3079,33 @@ private fun ExpandedPlayer(
                         lastInteraction += 1
                     },
                 )
-            }
-            if (enteredChannelNumber.isNotBlank()) {
-                ChannelNumberOverlay(
-                    number = enteredChannelNumber,
-                    modifier = Modifier.align(Alignment.TopEnd),
-                )
+                if (!addMenuMounted && multiChannels.size < maxMultiPlayerChannels) {
+                    AddChannelMenuPeek(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    )
+                }
             }
         }
-        if (addMenuVisible) {
+        if (enteredChannelNumber.isNotBlank()) {
+            ChannelNumberOverlay(
+                number = enteredChannelNumber,
+                modifier = Modifier.align(Alignment.TopEnd),
+            )
+        }
+        if (addMenuMounted) {
             AddChannelMenu(
-                channels = guideChannels.filter { channel ->
-                    multiChannels.size < maxMultiPlayerChannels &&
-                        channel.hasPlayableStream() &&
-                        multiChannels.none { it.id == channel.id }
-                },
+                channels = addableChannels,
                 onAddChannel = { selectedChannel ->
                     onAddMultiChannel(selectedChannel)
-                    addMenuVisible = false
-                    controlsVisible = true
-                    multiControlFocus = MultiControlFocus.None
-                    lastInteraction += 1
-                    focusRequester.requestFocus()
+                    closeAddMenu()
                 },
                 onClose = {
-                    addMenuVisible = false
-                    controlsVisible = true
-                    multiControlFocus = MultiControlFocus.None
-                    focusRequester.requestFocus()
+                    closeAddMenu()
                 },
+                onClosed = {
+                    addMenuMounted = false
+                },
+                visible = addMenuVisible,
                 modifier = Modifier.align(Alignment.CenterEnd),
             )
         }
@@ -3172,18 +3194,51 @@ private fun ChannelNumberOverlay(number: String, modifier: Modifier = Modifier) 
     Box(
         modifier = modifier
             .padding(top = 44.dp, end = 44.dp)
-            .background(Color(0xDD071018), RoundedCornerShape(12.dp))
-            .border(1.dp, Color(0xAA10D5D9), RoundedCornerShape(12.dp))
-            .padding(horizontal = 24.dp, vertical = 14.dp),
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0xEE08141A),
+                        0.76f to Color(0xDC08141A),
+                        1.00f to Color(0xB808141A),
+                    )
+                ),
+                RoundedCornerShape(18.dp),
+            )
+            .padding(horizontal = 22.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = number,
-            color = Color.White,
-            fontSize = 34.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .background(PrimaryCyan, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = Color(0xFF031012),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "Channel",
+                    color = Color(0xFF9FB1B8),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = number,
+                    color = Color.White,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
@@ -3207,134 +3262,50 @@ private fun MultiPlayerGrid(
 ) {
     Box(
         modifier
-            .background(Color.Black)
-            .padding(10.dp)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF08141A),
+                        Color(0xFF040A0E),
+                    )
+                )
+            )
+            .padding(12.dp)
     ) {
-        when (channels.size) {
-            2 -> Row(Modifier.fillMaxSize()) {
-                MultiPlayerTile(
-                    channel = channels[0],
-                    program = currentProgramForNow(programsByChannel[channels[0].id].orEmpty(), nowSeconds),
-                    focused = focusedIndex == 0,
-                    controlsVisible = controlsVisible && focusedIndex == 0,
-                    canAddChannel = canAddChannel,
-                    canRemoveChannel = canRemoveChannel,
-                    focusedAction = focusedAction,
-                    onAddChannelClick = onAddChannelClick,
-                    onOpenSingleClick = onOpenSingleClick,
-                    onRemoveChannelClick = onRemoveChannelClick,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                ) {
-                    PlayerSurface(
-                        player = primaryPlayer,
-                        playerView = primaryPlayerView,
-                        useController = false,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                MultiPlayerTile(
-                    channel = channels[1],
-                    program = currentProgramForNow(programsByChannel[channels[1].id].orEmpty(), nowSeconds),
-                    focused = focusedIndex == 1,
-                    controlsVisible = controlsVisible && focusedIndex == 1,
-                    canAddChannel = canAddChannel,
-                    canRemoveChannel = canRemoveChannel,
-                    focusedAction = focusedAction,
-                    onAddChannelClick = onAddChannelClick,
-                    onOpenSingleClick = onOpenSingleClick,
-                    onRemoveChannelClick = onRemoveChannelClick,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                ) {
-                    ExtraChannelPlayerSurface(
-                        channel = channels[1],
-                        streamUrl = streamUrl,
-                        hasAudioFocus = focusedIndex == 1,
-                        preferSoftwareDecode = false,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
-            else -> Column(Modifier.fillMaxSize()) {
+        val columnCount = multiPlayerColumnCount(channels.size)
+        val rowCount = ((channels.size + columnCount - 1) / columnCount).coerceAtLeast(1)
+        Column(Modifier.fillMaxSize()) {
+            repeat(rowCount) { row ->
                 Row(Modifier.weight(1f).fillMaxWidth()) {
-                    MultiPlayerCell(
-                        index = 0,
-                        channels = channels,
-                        primaryPlayer = primaryPlayer,
-                        primaryPlayerView = primaryPlayerView,
-                        focusedIndex = focusedIndex,
-                        programsByChannel = programsByChannel,
-                        nowSeconds = nowSeconds,
-                        streamUrl = streamUrl,
-                        controlsVisible = controlsVisible,
-                        canAddChannel = canAddChannel,
-                        canRemoveChannel = canRemoveChannel,
-                        focusedAction = focusedAction,
-                        onAddChannelClick = onAddChannelClick,
-                        onOpenSingleClick = onOpenSingleClick,
-                        onRemoveChannelClick = onRemoveChannelClick,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                    MultiPlayerCell(
-                        index = 1,
-                        channels = channels,
-                        primaryPlayer = primaryPlayer,
-                        primaryPlayerView = primaryPlayerView,
-                        focusedIndex = focusedIndex,
-                        programsByChannel = programsByChannel,
-                        nowSeconds = nowSeconds,
-                        streamUrl = streamUrl,
-                        controlsVisible = controlsVisible,
-                        canAddChannel = canAddChannel,
-                        canRemoveChannel = canRemoveChannel,
-                        focusedAction = focusedAction,
-                        onAddChannelClick = onAddChannelClick,
-                        onOpenSingleClick = onOpenSingleClick,
-                        onRemoveChannelClick = onRemoveChannelClick,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                }
-                Row(Modifier.weight(1f).fillMaxWidth()) {
-                    MultiPlayerCell(
-                        index = 2,
-                        channels = channels,
-                        primaryPlayer = primaryPlayer,
-                        primaryPlayerView = primaryPlayerView,
-                        focusedIndex = focusedIndex,
-                        programsByChannel = programsByChannel,
-                        nowSeconds = nowSeconds,
-                        streamUrl = streamUrl,
-                        controlsVisible = controlsVisible,
-                        canAddChannel = canAddChannel,
-                        canRemoveChannel = canRemoveChannel,
-                        focusedAction = focusedAction,
-                        onAddChannelClick = onAddChannelClick,
-                        onOpenSingleClick = onOpenSingleClick,
-                        onRemoveChannelClick = onRemoveChannelClick,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                    MultiPlayerCell(
-                        index = 3,
-                        channels = channels,
-                        primaryPlayer = primaryPlayer,
-                        primaryPlayerView = primaryPlayerView,
-                        focusedIndex = focusedIndex,
-                        programsByChannel = programsByChannel,
-                        nowSeconds = nowSeconds,
-                        streamUrl = streamUrl,
-                        controlsVisible = controlsVisible,
-                        canAddChannel = canAddChannel,
-                        canRemoveChannel = canRemoveChannel,
-                        focusedAction = focusedAction,
-                        onAddChannelClick = onAddChannelClick,
-                        onOpenSingleClick = onOpenSingleClick,
-                        onRemoveChannelClick = onRemoveChannelClick,
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
+                    repeat(columnCount) { column ->
+                        val index = row * columnCount + column
+                        MultiPlayerCell(
+                            index = index,
+                            channels = channels,
+                            primaryPlayer = primaryPlayer,
+                            primaryPlayerView = primaryPlayerView,
+                            focusedIndex = focusedIndex,
+                            programsByChannel = programsByChannel,
+                            nowSeconds = nowSeconds,
+                            streamUrl = streamUrl,
+                            controlsVisible = controlsVisible,
+                            canAddChannel = canAddChannel,
+                            canRemoveChannel = canRemoveChannel,
+                            focusedAction = focusedAction,
+                            onAddChannelClick = onAddChannelClick,
+                            onOpenSingleClick = onOpenSingleClick,
+                            onRemoveChannelClick = onRemoveChannelClick,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                    }
                 }
             }
         }
     }
 }
+
+private fun multiPlayerColumnCount(channelCount: Int): Int =
+    if (channelCount > 4) 3 else 2
 
 @Composable
 private fun MultiPlayerCell(
@@ -3360,7 +3331,8 @@ private fun MultiPlayerCell(
         Box(
             modifier
                 .padding(6.dp)
-                .background(Color(0xFF050607), RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0x8A20242A), RoundedCornerShape(12.dp))
         )
         return
     }
@@ -3411,15 +3383,16 @@ private fun MultiPlayerTile(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    val tileShape = RoundedCornerShape(12.dp)
     Box(
         modifier
             .padding(6.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.Black)
+            .clip(tileShape)
+            .background(Color.Black, tileShape)
             .border(
-                if (focused) 3.dp else 1.dp,
-                if (focused) PrimaryCyan else Color(0xFF2B3035),
-                RoundedCornerShape(8.dp),
+                if (focused) 2.dp else 1.dp,
+                if (focused) Color(0xCC16D7D7) else Color(0x3334454D),
+                tileShape,
             )
     ) {
         content()
@@ -3427,10 +3400,14 @@ private fun MultiPlayerTile(
             Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .height(88.dp)
+                .height(92.dp)
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, Color(0xB8000000))
+                        listOf(
+                            Color.Transparent,
+                            Color(0x9908141A),
+                            Color(0xE608141A),
+                        )
                     )
                 )
                 .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -3491,7 +3468,16 @@ private fun FocusedMultiPlayerControls(
 ) {
     Row(
         modifier = modifier
-            .background(Color(0x66040A0E), RoundedCornerShape(12.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0xEE08141A),
+                        0.76f to Color(0xDC08141A),
+                        1.00f to Color(0xB808141A),
+                    )
+                ),
+                RoundedCornerShape(16.dp),
+            )
             .padding(horizontal = 5.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -3548,7 +3534,7 @@ private fun MultiControlIconButton(
         modifier = Modifier
             .size(44.dp)
             .background(
-                if (focused) PrimaryCyan else Color(0xCC06121B),
+                if (focused) PrimaryCyan else Color(0x6620242A),
                 shape,
             ),
     ) {
@@ -3573,7 +3559,7 @@ private fun ExtraChannelPlayerSurface(
                     .setMaxVideoBitrate(Int.MAX_VALUE)
                     .setForceLowestBitrate(true)
                     .setExceedVideoConstraintsIfNecessary(true)
-                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
             )
         }
     }
@@ -3622,25 +3608,6 @@ private fun ExtraChannelPlayerSurface(
         )
         player.prepare()
         player.play()
-    }
-    LaunchedEffect(hasAudioFocus) {
-        trackSelector.setParameters(
-            trackSelector.buildUponParameters().apply {
-                if (hasAudioFocus) {
-                    setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
-                    setMaxVideoBitrate(Int.MAX_VALUE)
-                    setForceLowestBitrate(false)
-                    setExceedVideoConstraintsIfNecessary(true)
-                    setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                } else {
-                    setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
-                    setMaxVideoBitrate(Int.MAX_VALUE)
-                    setForceLowestBitrate(true)
-                    setExceedVideoConstraintsIfNecessary(true)
-                    setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                }
-            }
-        )
     }
     LaunchedEffect(hasAudioFocus) {
         player.volume = if (hasAudioFocus) 1f else 0f
@@ -3696,32 +3663,69 @@ private fun AddChannelMenu(
     channels: List<TvChannel>,
     onAddChannel: (TvChannel) -> Unit,
     onClose: () -> Unit,
+    onClosed: () -> Unit,
+    visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val focusRequester = remember { FocusRequester() }
     var selectedIndex by remember(channels) { mutableIntStateOf(0) }
+    var panelReady by remember { mutableStateOf(false) }
+    var menuInteractionNonce by remember(channels) { mutableIntStateOf(0) }
+    val panelProgress by animateFloatAsState(
+        targetValue = if (visible && panelReady) 1f else 0f,
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+        label = "addChannelMenuSlide",
+        finishedListener = { if (!visible) onClosed() },
+    )
+    val density = LocalDensity.current
+    val panelShape = RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp)
 
     BackHandler(onBack = onClose)
-    LaunchedEffect(Unit) {
+    LaunchedEffect(visible) {
+        if (!visible) {
+            panelReady = false
+            return@LaunchedEffect
+        }
+        panelReady = true
         delay(80)
         focusRequester.requestFocus()
     }
-
+    LaunchedEffect(menuInteractionNonce, visible) {
+        if (!visible) return@LaunchedEffect
+        delay(7_000)
+        onClose()
+    }
     Box(
         modifier
-            .width(360.dp)
-            .fillMaxHeight()
-            .background(Color(0xF2071015))
-            .border(1.dp, Color(0xFF34454D))
+            .graphicsLayer {
+                translationX = with(density) { (64.dp).toPx() } * (1f - panelProgress)
+                alpha = 0.74f + 0.26f * panelProgress
+            }
+            .width(282.dp)
+            .fillMaxHeight(0.76f)
+            .clip(panelShape)
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0xEE08141A),
+                        0.76f to Color(0xDC08141A),
+                        1.00f to Color(0xB808141A),
+                    )
+                ),
+                panelShape,
+            )
             .focusRequester(focusRequester)
             .onPreviewKeyEvent {
                 when {
+                    !visible -> true
                     it.type == KeyEventType.KeyDown && it.key == Key.DirectionUp -> {
                         selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
+                        menuInteractionNonce += 1
                         true
                     }
                     it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown -> {
                         selectedIndex = (selectedIndex + 1).coerceAtMost(channels.lastIndex.coerceAtLeast(0))
+                        menuInteractionNonce += 1
                         true
                     }
                     it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft -> {
@@ -3729,6 +3733,7 @@ private fun AddChannelMenu(
                         true
                     }
                     it.type == KeyEventType.KeyDown && it.key.isActivationKey() -> {
+                        menuInteractionNonce += 1
                         channels.getOrNull(selectedIndex)?.let(onAddChannel)
                         true
                     }
@@ -3737,18 +3742,46 @@ private fun AddChannelMenu(
                 }
             }
             .focusable()
-            .padding(18.dp),
+            .padding(start = 12.dp, top = 14.dp, end = 12.dp, bottom = 12.dp),
     ) {
         Column(Modifier.fillMaxSize()) {
-            Text(
-                text = "הוסף ערוץ",
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Right,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(16.dp))
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(PrimaryCyan, RoundedCornerShape(9.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Color(0xFF031012),
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Multi view",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Right,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "בחר ערוץ להוספה",
+                        color = Color(0xFF9FB1B8),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Right,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             if (channels.isEmpty()) {
                 Text(
                     text = "אין ערוצים נוספים",
@@ -3758,15 +3791,41 @@ private fun AddChannelMenu(
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
-                val visibleChannels = channels.drop(selectedIndex.coerceAtLeast(0)).take(8)
-                visibleChannels.forEachIndexed { offset, channel ->
-                    val index = selectedIndex + offset
-                    AddChannelRow(
-                        channel = channel,
-                        focused = index == selectedIndex,
-                        onClick = { onAddChannel(channel) },
-                    )
-                    Spacer(Modifier.height(8.dp))
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .clipToBounds(),
+                ) {
+                    val rowHeight = 54.dp
+                    val rowGap = 6.dp
+                    val visibleCount = (((maxHeight.value + rowGap.value) / (rowHeight.value + rowGap.value)).toInt())
+                        .coerceIn(1, channels.size)
+                    val firstVisibleIndex = when {
+                        channels.size <= visibleCount -> 0
+                        selectedIndex <= visibleCount / 2 -> 0
+                        selectedIndex >= channels.lastIndex - visibleCount / 2 ->
+                            channels.size - visibleCount
+                        else -> selectedIndex - visibleCount / 2
+                    }.coerceAtLeast(0)
+                    val visibleChannels = channels
+                        .drop(firstVisibleIndex)
+                        .take(visibleCount)
+
+                    Column(Modifier.fillMaxSize()) {
+                        visibleChannels.forEachIndexed { offset, channel ->
+                            val index = firstVisibleIndex + offset
+                            AddChannelRow(
+                                channel = channel,
+                                focused = index == selectedIndex,
+                                rowHeight = rowHeight,
+                                onClick = { onAddChannel(channel) },
+                            )
+                            if (offset != visibleChannels.lastIndex) {
+                                Spacer(Modifier.height(rowGap))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3777,36 +3836,32 @@ private fun AddChannelMenu(
 private fun AddChannelRow(
     channel: TvChannel,
     focused: Boolean,
+    rowHeight: Dp,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
+            .height(rowHeight)
             .background(
-                if (focused) Color(0xFFEAFBFC) else Color(0xFF172126),
-                RoundedCornerShape(8.dp),
-            )
-            .border(
-                1.dp,
-                if (focused) PrimaryCyan else Color(0xFF28363D),
-                RoundedCornerShape(8.dp),
+                if (focused) Color(0xFFEAFBFC) else Color(0x8A20242A),
+                RoundedCornerShape(10.dp),
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = rememberSizedImageRequest(channel.logoUrl, width = 80, height = 80),
             contentDescription = null,
-            modifier = Modifier.size(42.dp),
+            modifier = Modifier.size(32.dp),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
             Text(
                 text = channel.name,
                 color = if (focused) Color(0xFF061013) else Color.White,
-                fontSize = 16.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -3816,10 +3871,66 @@ private fun AddChannelRow(
             Text(
                 text = channel.number,
                 color = if (focused) Color(0xFF314348) else Color(0xFFB7C2C6),
-                fontSize = 13.sp,
+                fontSize = 10.sp,
                 maxLines = 1,
                 textAlign = TextAlign.Right,
                 modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddChannelMenuPeek(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .width(76.dp)
+            .height(188.dp)
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0x0008141A),
+                        0.38f to Color(0x9908141A),
+                        1.00f to Color(0xE808141A),
+                    )
+                ),
+                RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp),
+            )
+            .padding(start = 10.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                tint = PrimaryCyan,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Multi\nview",
+                color = Color(0xFFD9F8FA),
+                fontSize = 8.sp,
+                lineHeight = 9.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier
+                    .width(32.dp)
+                    .height(6.dp)
+                    .background(Color(0x5520242A), RoundedCornerShape(4.dp)),
+            )
+            Spacer(Modifier.height(5.dp))
+            Box(
+                Modifier
+                    .width(32.dp)
+                    .height(6.dp)
+                    .background(Color(0x4420242A), RoundedCornerShape(4.dp)),
             )
         }
     }
@@ -3943,8 +4054,7 @@ private fun rememberPlayerLoadingState(player: Player): Boolean {
 
 private fun Player.isVideoLoading(): Boolean =
     mediaItemCount > 0 &&
-        (playbackState == Player.STATE_BUFFERING ||
-            (isLoading && playbackState != Player.STATE_READY))
+        playbackState == Player.STATE_BUFFERING
 
 @Composable
 private fun PlayerLoadingOverlay(
@@ -3984,6 +4094,7 @@ private fun ExpandedPlayerControls(
     var isPlaying by remember { mutableStateOf(player.value.isPlaying) }
     var isLive by remember { mutableStateOf(player.value.isCurrentMediaItemLive) }
     var liveWindowStartTimeMs by remember { mutableStateOf(C.TIME_UNSET) }
+    var videoQuality by remember { mutableStateOf(videoQualityLabel(player.value.videoFormat)) }
 
     LaunchedEffect(player) {
         val window = Timeline.Window()
@@ -3997,6 +4108,7 @@ private fun ExpandedPlayerControls(
             } else {
                 C.TIME_UNSET
             }
+            videoQuality = videoQualityLabel(player.value.videoFormat)
             delay(500)
         }
     }
@@ -4071,6 +4183,8 @@ private fun ExpandedPlayerControls(
                 )
                 Spacer(Modifier.width(18.dp))
                 LiveBadge(isLive = isLive)
+                Spacer(Modifier.width(12.dp))
+                VideoQualityBadge(videoQuality)
             }
         }
     }
@@ -4088,7 +4202,7 @@ private fun ChannelLogoBadge(channel: TvChannel?) {
         contentAlignment = Alignment.Center,
     ) {
         AsyncImage(
-            model = channel?.logoUrl,
+            model = rememberSizedImageRequest(channel?.logoUrl, width = 236, height = 108),
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
         )
@@ -4101,25 +4215,34 @@ private fun ChannelOverlayPanel(
     program: TvProgram?,
     modifier: Modifier = Modifier,
 ) {
+    val imageUrl = program?.imageUrl ?: channel?.logoUrl
     Row(
         modifier = modifier
             .padding(start = 44.dp, top = 36.dp)
-            .background(Color(0xAA050607), RoundedCornerShape(6.dp))
-            .border(1.dp, Color(0xFF4E5F68), RoundedCornerShape(6.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0xEE08141A),
+                        0.72f to Color(0xDC08141A),
+                        1.00f to Color(0xB008141A),
+                    )
+                ),
+                RoundedCornerShape(18.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .width(178.dp)
-                .height(100.dp)
-                .background(Color.Black, RoundedCornerShape(4.dp))
-                .border(1.dp, Color(0xFF333333), RoundedCornerShape(4.dp))
-                .padding(6.dp),
+                .width(164.dp)
+                .height(92.dp)
+                .background(Color(0xCC020609), RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+                .padding(5.dp),
             contentAlignment = Alignment.Center,
         ) {
             AsyncImage(
-                model = program?.imageUrl ?: channel?.logoUrl,
+                model = rememberSizedImageRequest(imageUrl, width = 328, height = 184),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -4129,16 +4252,16 @@ private fun ChannelOverlayPanel(
             Text(
                 text = listOfNotNull(channel?.number, channel?.name).joinToString("  "),
                 color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 text = program?.title.orEmpty(),
-                color = Color(0xFFCFCFCF),
-                fontSize = 16.sp,
+                color = Color(0xFFB7C2C6),
+                fontSize = 15.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -4181,6 +4304,35 @@ private fun LiveBadge(isLive: Boolean) {
             .background(if (isLive) Color(0xFFE21D2F) else FocusBlue, RoundedCornerShape(4.dp))
             .padding(horizontal = 9.dp, vertical = 4.dp),
     )
+}
+
+@Composable
+private fun VideoQualityBadge(label: String) {
+    Text(
+        text = "Quality $label",
+        color = Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        modifier = Modifier
+            .background(Color(0xAA111820), RoundedCornerShape(4.dp))
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+    )
+}
+
+private fun videoQualityLabel(format: Format?): String {
+    if (format == null) return "Auto"
+    val resolution = if (format.width > 0 && format.height > 0) {
+        "${format.width}x${format.height}"
+    } else {
+        null
+    }
+    val bitrate = if (format.bitrate > 0) {
+        String.format(Locale.US, "%.1f Mbps", format.bitrate / 1_000_000f)
+    } else {
+        null
+    }
+    return listOfNotNull(resolution, bitrate).takeIf { it.isNotEmpty() }?.joinToString("  ") ?: "Auto"
 }
 
 @Composable
