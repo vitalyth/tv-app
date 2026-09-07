@@ -10,6 +10,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.view.LayoutInflater
 import android.view.KeyEvent as AndroidKeyEvent
+import android.view.TextureView
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -68,6 +70,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -117,9 +120,11 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -141,6 +146,8 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 
 private val ScreenBackground = Color(0xFF050607)
@@ -156,8 +163,9 @@ private val HeaderTimeFormatter = DateTimeFormatter.ofPattern("EEE HH:mm", Local
 private val TopPanelHeight = 190.dp
 private val MiniPlayerWidth = 320.dp
 private const val MAX_MULTI_PLAYER_CHANNELS = 4
-private const val MULTI_PLAYER_MAX_WIDTH = 854
-private const val MULTI_PLAYER_MAX_HEIGHT = 480
+private const val MULTI_PLAYER_MAX_WIDTH = 320
+private const val MULTI_PLAYER_MAX_HEIGHT = 180
+private const val MULTI_PLAYER_MAX_VIDEO_BITRATE = 260_000
 private const val PRIMARY_PLAYER_MIN_BUFFER_MS = 4_000
 private const val PRIMARY_PLAYER_MAX_BUFFER_MS = 12_000
 private const val PRIMARY_PLAYER_PLAYBACK_BUFFER_MS = 750
@@ -268,6 +276,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     }
     val player = remember {
         ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(SharedHttpDataSourceFactory))
             .setTrackSelector(trackSelector)
             .setLoadControl(createPrimaryPlayerLoadControl())
             .build()
@@ -286,7 +295,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             isFocusable = false
             isFocusableInTouchMode = false
             setKeepContentOnPlayerReset(true)
-            setEnableComposeSurfaceSyncWorkaround(true)
+            setEnableComposeSurfaceSyncWorkaround(false)
             hideController()
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -295,6 +304,23 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         }
     }
     val stablePlayerView = remember(playerView) { StablePlayerView(playerView) }
+    val multiPlayerView = remember(player) {
+        (LayoutInflater.from(context).inflate(R.layout.player_view_texture, null) as PlayerView).apply {
+            (videoSurfaceView as? TextureView)?.isOpaque = true
+            useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            isFocusable = false
+            isFocusableInTouchMode = false
+            setKeepContentOnPlayerReset(true)
+            setEnableComposeSurfaceSyncWorkaround(false)
+            hideController()
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+    }
+    val stableMultiPlayerView = remember(multiPlayerView) { StablePlayerView(multiPlayerView) }
     val streamingActive = playbackState.isMiniPlayerPlaying || playbackState.isPlayerExpanded
     var detailsVisible by remember { mutableStateOf(false) }
     var multiPlayerChannels by remember { mutableStateOf<List<TvChannel>>(emptyList()) }
@@ -352,6 +378,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     DisposableEffect(Unit) {
         onDispose {
             playerView.player = null
+            multiPlayerView.player = null
             player.release()
         }
     }
@@ -379,14 +406,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                     }
                     PrimaryVideoProfile.MultiFocused -> {
                         setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
-                        setMaxVideoBitrate(Int.MAX_VALUE)
-                        setForceLowestBitrate(false)
+                        setMaxVideoBitrate(MULTI_PLAYER_MAX_VIDEO_BITRATE)
+                        setForceLowestBitrate(true)
                         setExceedVideoConstraintsIfNecessary(true)
                         setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                     }
                     PrimaryVideoProfile.MultiBackground -> {
                         setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
-                        setMaxVideoBitrate(Int.MAX_VALUE)
+                        setMaxVideoBitrate(MULTI_PLAYER_MAX_VIDEO_BITRATE)
                         setForceLowestBitrate(true)
                         setExceedVideoConstraintsIfNecessary(true)
                         setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
@@ -410,8 +437,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         applyPrimaryVideoProfile(PrimaryVideoProfile.MultiFocused)
     }
 
-    LaunchedEffect(multiPlayerActive, multiPlayerFocusIndex) {
-        player.volume = if (!multiPlayerActive || multiPlayerFocusIndex == 0) 1f else 0f
+    LaunchedEffect(multiPlayerActive) {
+        if (multiPlayerActive) {
+            playerView.player = null
+            multiPlayerView.player = player
+        } else {
+            multiPlayerView.player = null
+            playerView.player = player
+        }
     }
 
     LaunchedEffect(playbackState.isPlayerExpanded, playbackState.playingChannel?.id) {
@@ -523,8 +556,9 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                 ExpandedPlayer(
                     player = stablePlayer,
                     primaryPlayerView = stablePlayerView,
-                    channel = multiFocusedChannel ?: playbackState.playingChannel,
-                    program = multiFocusedProgram ?: currentPlayingProgram,
+                    primaryMultiPlayerView = stableMultiPlayerView,
+                    channel = if (multiPlayerActive) playbackState.playingChannel else multiFocusedChannel ?: playbackState.playingChannel,
+                    program = if (multiPlayerActive) currentPlayingProgram else multiFocusedProgram ?: currentPlayingProgram,
                     guideChannels = guideData?.channels.orEmpty(),
                     programsByChannel = guideData?.programsByChannel.orEmpty(),
                     nowSeconds = nowSeconds,
@@ -543,8 +577,10 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                     },
                     onChannelNumberEntered = viewModel::playChannelNumberExpanded,
                     hasChannelNumberPrefix = viewModel::hasPlayableChannelNumberPrefix,
-                    onMultiFocusChanged = { nextIndex ->
-                        multiPlayerFocusIndex = nextIndex.coerceIn(0, expandedMultiChannels.lastIndex)
+                    onPrimaryMultiAudioFocusChanged = { focused ->
+                        applyPrimaryVideoProfile(
+                            if (focused) PrimaryVideoProfile.MultiFocused else PrimaryVideoProfile.MultiBackground
+                        )
                     },
                     onAddMultiChannel = { channel ->
                         if (channel.hasPlayableStream()) {
@@ -573,13 +609,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 .let { programs -> currentProgramForNow(programs, nowSeconds) },
                         )
                     },
-                    onRemoveFocusedMultiChannel = {
+                    onRemoveFocusedMultiChannel = { focusedIndex ->
                         if (expandedMultiChannels.size > 1) {
-                            val removedChannel = expandedMultiChannels.getOrNull(multiPlayerFocusIndex)
-                            val nextChannels = expandedMultiChannels.filterIndexed { index, _ -> index != multiPlayerFocusIndex }
+                            val safeFocusedIndex = focusedIndex.coerceIn(0, expandedMultiChannels.lastIndex)
+                            val removedChannel = expandedMultiChannels.getOrNull(safeFocusedIndex)
+                            val nextChannels = expandedMultiChannels.filterIndexed { index, _ -> index != safeFocusedIndex }
                             multiPlayerChannels = nextChannels
                             multiModeEnabled = nextChannels.size > 1
-                            multiPlayerFocusIndex = multiPlayerFocusIndex.coerceAtMost(nextChannels.lastIndex).coerceAtLeast(0)
+                            multiPlayerFocusIndex = safeFocusedIndex.coerceAtMost(nextChannels.lastIndex).coerceAtLeast(0)
                             if (removedChannel?.id == playbackState.playingChannel?.id) {
                                 nextChannels.firstOrNull()?.let { nextChannel ->
                                     viewModel.playChannelExpanded(
@@ -2755,6 +2792,7 @@ private fun DetailActionButton(
 private fun ExpandedPlayer(
     player: StablePlayer,
     primaryPlayerView: StablePlayerView,
+    primaryMultiPlayerView: StablePlayerView,
     channel: TvChannel?,
     program: TvProgram?,
     guideChannels: List<TvChannel>,
@@ -2769,21 +2807,27 @@ private fun ExpandedPlayer(
     onPreviousChannel: () -> Unit,
     onChannelNumberEntered: (String) -> Boolean,
     hasChannelNumberPrefix: (String) -> Boolean,
-    onMultiFocusChanged: (Int) -> Unit,
+    onPrimaryMultiAudioFocusChanged: (Boolean) -> Unit,
     onAddMultiChannel: (TvChannel) -> Unit,
     onOpenFocusedSingle: (TvChannel) -> Unit,
-    onRemoveFocusedMultiChannel: () -> Unit,
+    onRemoveFocusedMultiChannel: (Int) -> Unit,
     onClose: () -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
-    var controlsVisible by remember { mutableStateOf(true) }
-    var lastInteraction by remember { mutableStateOf(0) }
+    val controlsVisibleState = remember { mutableStateOf(true) }
+    var controlsVisible by controlsVisibleState
+    val lastInteractionState = remember { mutableIntStateOf(0) }
+    var lastInteraction by lastInteractionState
     var enteredChannelNumber by remember { mutableStateOf("") }
     var enteredChannelNumberNonce by remember { mutableIntStateOf(0) }
     var addMenuVisible by remember { mutableStateOf(false) }
     var addMenuMounted by remember { mutableStateOf(false) }
-    var multiControlFocus by remember { mutableStateOf(MultiControlFocus.None) }
+    val multiControlFocusState = remember { mutableStateOf(MultiControlFocus.None) }
+    var multiControlFocus by multiControlFocusState
     var controlsMetadataVisible by remember { mutableStateOf(false) }
+    val multiFocusedIndexState = remember { mutableIntStateOf(multiFocusedIndex) }
+    val multiAudioIndexState = remember { mutableIntStateOf(multiFocusedIndex) }
+    var pendingMultiFocusChannelId by remember { mutableStateOf<String?>(null) }
     val addableChannels = remember(guideChannels, multiChannels, maxMultiPlayerChannels) {
         if (multiChannels.size >= maxMultiPlayerChannels) {
             emptyList()
@@ -2825,11 +2869,35 @@ private fun ExpandedPlayer(
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
-    LaunchedEffect(multiPlayerActive, multiFocusedIndex, addMenuVisible) {
+    LaunchedEffect(multiPlayerActive, multiChannels.size) {
+        multiFocusedIndexState.intValue = multiFocusedIndexState.intValue
+            .coerceIn(0, multiChannels.lastIndex.coerceAtLeast(0))
+        multiAudioIndexState.intValue = multiAudioIndexState.intValue
+            .coerceIn(0, multiChannels.lastIndex.coerceAtLeast(0))
+    }
+    LaunchedEffect(multiChannels, pendingMultiFocusChannelId) {
+        val pendingChannelId = pendingMultiFocusChannelId ?: return@LaunchedEffect
+        val pendingIndex = multiChannels.indexOfFirst { it.id == pendingChannelId }
+        if (pendingIndex >= 0) {
+            multiFocusedIndexState.intValue = pendingIndex
+            pendingMultiFocusChannelId = null
+        }
+    }
+    LaunchedEffect(multiPlayerActive, addMenuVisible) {
         if (multiPlayerActive && !addMenuVisible) {
             delay(40)
             focusRequester.requestFocus()
         }
+    }
+    LaunchedEffect(multiPlayerActive) {
+        if (!multiPlayerActive) return@LaunchedEffect
+        snapshotFlow { multiFocusedIndexState.intValue }
+            .distinctUntilChanged()
+            .collectLatest { focusedIndex ->
+                delay(1_000)
+                multiAudioIndexState.intValue = focusedIndex
+                onPrimaryMultiAudioFocusChanged(focusedIndex == 0)
+            }
     }
     LaunchedEffect(channel?.id) {
         controlsVisible = true
@@ -2847,16 +2915,26 @@ private fun ExpandedPlayer(
             enteredChannelNumber = ""
         }
     }
-    LaunchedEffect(controlsVisible, lastInteraction) {
-        if (!controlsVisible) return@LaunchedEffect
-        delay(5_000)
-        controlsVisible = false
+    LaunchedEffect(Unit) {
+        snapshotFlow { controlsVisibleState.value to lastInteractionState.intValue }
+            .distinctUntilChanged()
+            .collectLatest { (visible, _) ->
+                if (!visible) return@collectLatest
+                delay(5_000)
+                controlsVisibleState.value = false
+            }
     }
-    LaunchedEffect(controlsVisible, multiPlayerActive, channel?.id, program?.channelId, program?.startSeconds) {
+    LaunchedEffect(multiPlayerActive, channel?.id, program?.channelId, program?.startSeconds) {
         controlsMetadataVisible = false
-        if (!controlsVisible || multiPlayerActive) return@LaunchedEffect
-        delay(260)
-        controlsMetadataVisible = controlsVisible && !multiPlayerActive
+        if (multiPlayerActive) return@LaunchedEffect
+        snapshotFlow { controlsVisibleState.value }
+            .distinctUntilChanged()
+            .collectLatest { visible ->
+                controlsMetadataVisible = false
+                if (!visible) return@collectLatest
+                delay(260)
+                controlsMetadataVisible = controlsVisibleState.value && !multiPlayerActive
+            }
     }
 
     fun handleBack() {
@@ -2871,6 +2949,9 @@ private fun ExpandedPlayer(
             else -> onClose()
         }
     }
+
+    fun currentMultiFocusedIndex(): Int =
+        multiFocusedIndexState.intValue.coerceIn(0, multiChannels.lastIndex.coerceAtLeast(0))
 
     fun handleExpandedKey(keyCode: Int): Boolean {
         if (addMenuVisible) {
@@ -2901,12 +2982,15 @@ private fun ExpandedPlayer(
                 return true
             }
             keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP -> {
-                controlsVisible = true
                 lastInteraction += 1
                 if (multiPlayerActive) {
+                    val focusedIndex = currentMultiFocusedIndex()
+                    controlsVisible = false
                     multiControlFocus = MultiControlFocus.None
-                    onMultiFocusChanged(multiFocusedIndex - multiPlayerColumnCount(multiChannels.size))
+                    multiFocusedIndexState.intValue = (focusedIndex - multiPlayerColumnCount(multiChannels.size))
+                        .coerceIn(0, multiChannels.lastIndex)
                 } else {
+                    controlsVisible = true
                     multiControlFocus = MultiControlFocus.None
                     onPreviousChannel()
                 }
@@ -2927,52 +3011,58 @@ private fun ExpandedPlayer(
                 return true
             }
             keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN -> {
-                controlsVisible = true
                 lastInteraction += 1
                 if (multiPlayerActive) {
-                    val nextTileIndex = multiFocusedIndex + multiPlayerColumnCount(multiChannels.size)
+                    val focusedIndex = currentMultiFocusedIndex()
+                    controlsVisible = false
+                    val nextTileIndex = focusedIndex + multiPlayerColumnCount(multiChannels.size)
                     multiControlFocus = MultiControlFocus.None
                     if (nextTileIndex <= multiChannels.lastIndex) {
-                        onMultiFocusChanged(nextTileIndex)
+                        multiFocusedIndexState.intValue = nextTileIndex
                     }
                 } else {
+                    controlsVisible = true
                     multiControlFocus = MultiControlFocus.None
                     onNextChannel()
                 }
                 return true
             }
             keyCode == AndroidKeyEvent.KEYCODE_DPAD_LEFT && multiPlayerActive -> {
-                controlsVisible = true
                 lastInteraction += 1
-                if (multiControlFocus != MultiControlFocus.None) {
+                if (controlsVisible && multiControlFocus != MultiControlFocus.None) {
+                    controlsVisible = true
                     multiControlFocus = previousMultiControlFocus(
                         current = multiControlFocus,
                         canAdd = multiChannels.size < maxMultiPlayerChannels,
                         canRemove = multiChannels.size > 1,
                     )
                 } else {
+                    controlsVisible = false
                     multiControlFocus = MultiControlFocus.None
-                    onMultiFocusChanged(multiFocusedIndex - 1)
+                    multiFocusedIndexState.intValue = (currentMultiFocusedIndex() - 1).coerceAtLeast(0)
                 }
                 return true
             }
             keyCode == AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                controlsVisible = true
                 lastInteraction += 1
                 if (multiPlayerActive) {
-                    if (multiControlFocus != MultiControlFocus.None) {
+                    val focusedIndex = currentMultiFocusedIndex()
+                    if (controlsVisible && multiControlFocus != MultiControlFocus.None) {
+                        controlsVisible = true
                         multiControlFocus = nextMultiControlFocus(
                             current = multiControlFocus,
                             canAdd = multiChannels.size < maxMultiPlayerChannels,
                             canRemove = multiChannels.size > 1,
                         )
-                    } else if (multiFocusedIndex < multiChannels.lastIndex) {
+                    } else if (focusedIndex < multiChannels.lastIndex) {
+                        controlsVisible = false
                         multiControlFocus = MultiControlFocus.None
-                        onMultiFocusChanged(multiFocusedIndex + 1)
+                        multiFocusedIndexState.intValue = focusedIndex + 1
                     } else if (multiChannels.size < maxMultiPlayerChannels) {
                         openAddMenu()
                     }
                 } else {
+                    controlsVisible = true
                     openAddMenu()
                 }
                 return true
@@ -3001,10 +3091,10 @@ private fun ExpandedPlayer(
                         when (multiControlFocus) {
                             MultiControlFocus.Add -> openAddMenu()
                             MultiControlFocus.OpenSingle -> multiChannels
-                                .getOrNull(multiFocusedIndex)
+                                .getOrNull(currentMultiFocusedIndex())
                                 ?.let(onOpenFocusedSingle)
                             MultiControlFocus.Remove -> {
-                                onRemoveFocusedMultiChannel()
+                                onRemoveFocusedMultiChannel(currentMultiFocusedIndex())
                                 multiControlFocus = MultiControlFocus.None
                             }
                             MultiControlFocus.None -> Unit
@@ -3042,63 +3132,46 @@ private fun ExpandedPlayer(
         if (multiPlayerActive) {
             MultiPlayerGrid(
                 primaryPlayer = player,
-                primaryPlayerView = primaryPlayerView,
+                primaryPlayerView = primaryMultiPlayerView,
                 channels = multiChannels,
-                focusedIndex = multiFocusedIndex,
+                focusedIndexState = multiFocusedIndexState,
+                audioIndexState = multiAudioIndexState,
                 programsByChannel = programsByChannel,
                 nowSeconds = nowSeconds,
                 streamUrl = streamUrl,
                 modifier = Modifier.fillMaxSize(),
             )
-            if (controlsVisible) {
-                val columnCount = multiPlayerColumnCount(multiChannels.size)
-                val rowCount = ((multiChannels.size + columnCount - 1) / columnCount).coerceAtLeast(1)
-                MultiPlayerControlsLayer(
-                    channels = multiChannels,
-                    focusedIndex = multiFocusedIndex,
-                    columnCount = columnCount,
-                    rowCount = rowCount,
-                    canAddChannel = multiChannels.size < maxMultiPlayerChannels,
-                    canRemoveChannel = multiChannels.size > 1,
-                    focusedAction = multiControlFocus,
-                    onAddChannelClick = {
-                        openAddMenu()
-                    },
-                    onOpenSingleClick = {
-                        controlsVisible = true
-                        lastInteraction += 1
-                        multiChannels.getOrNull(multiFocusedIndex)?.let(onOpenFocusedSingle)
-                        multiControlFocus = MultiControlFocus.None
-                    },
-                    onRemoveChannelClick = {
-                        controlsVisible = true
-                        lastInteraction += 1
-                        onRemoveFocusedMultiChannel()
-                        multiControlFocus = MultiControlFocus.None
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                )
-            }
+            val columnCount = multiPlayerColumnCount(multiChannels.size)
+            val rowCount = ((multiChannels.size + columnCount - 1) / columnCount).coerceAtLeast(1)
+            MultiPlayerNativeOverlayLayer(
+                visibleState = controlsVisibleState,
+                channels = multiChannels,
+                focusedIndexState = multiFocusedIndexState,
+                columnCount = columnCount,
+                rowCount = rowCount,
+                canAddChannel = multiChannels.size < maxMultiPlayerChannels,
+                canRemoveChannel = multiChannels.size > 1,
+                focusedActionState = multiControlFocusState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+            )
         }
-        if (controlsVisible) {
-            if (!multiPlayerActive) {
-                ExpandedPlayerControls(
-                    player = player,
-                    channel = channel,
-                    program = program,
-                    showMetadataPanel = controlsMetadataVisible,
-                    onInteraction = {
-                        controlsVisible = true
-                        lastInteraction += 1
-                    },
+        if (!multiPlayerActive && controlsVisible) {
+            ExpandedPlayerControls(
+                player = player,
+                channel = channel,
+                program = program,
+                showMetadataPanel = controlsMetadataVisible,
+                onInteraction = {
+                    controlsVisible = true
+                    lastInteraction += 1
+                },
+            )
+            if (!addMenuMounted && multiChannels.size < maxMultiPlayerChannels) {
+                AddChannelMenuPeek(
+                    modifier = Modifier.align(Alignment.CenterEnd),
                 )
-                if (!addMenuMounted && multiChannels.size < maxMultiPlayerChannels) {
-                    AddChannelMenuPeek(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                    )
-                }
             }
         }
         if (enteredChannelNumber.isNotBlank()) {
@@ -3111,6 +3184,7 @@ private fun ExpandedPlayer(
             AddChannelMenu(
                 channels = addableChannels,
                 onAddChannel = { selectedChannel ->
+                    pendingMultiFocusChannelId = selectedChannel.id
                     onAddMultiChannel(selectedChannel)
                     closeAddMenu()
                 },
@@ -3173,6 +3247,213 @@ private fun previousMultiControlFocus(
 }
 
 private fun Int.floorMod(divisor: Int): Int = ((this % divisor) + divisor) % divisor
+
+@Composable
+private fun MultiPlayerNativeOverlayLayer(
+    visibleState: State<Boolean>,
+    channels: List<TvChannel>,
+    focusedIndexState: State<Int>,
+    columnCount: Int,
+    rowCount: Int,
+    canAddChannel: Boolean,
+    canRemoveChannel: Boolean,
+    focusedActionState: State<MultiControlFocus>,
+    modifier: Modifier = Modifier,
+) {
+    val overlayViewState = remember { mutableStateOf<MultiPlayerOverlayView?>(null) }
+    val actions = remember(canAddChannel, canRemoveChannel) {
+        availableMultiControlActions(canAddChannel, canRemoveChannel)
+    }
+    AndroidView(
+        factory = { context ->
+            MultiPlayerOverlayView(context).also { overlayViewState.value = it }
+        },
+        update = { view ->
+            view.updateConfig(
+                channelCount = channels.size,
+                columnCount = columnCount,
+                rowCount = rowCount,
+                actions = actions,
+            )
+        },
+        modifier = modifier,
+    )
+    LaunchedEffect(focusedIndexState) {
+        snapshotFlow { focusedIndexState.value }
+            .distinctUntilChanged()
+            .collect { focusedIndex ->
+                overlayViewState.value?.updateFocusedIndex(focusedIndex)
+            }
+    }
+    LaunchedEffect(visibleState, focusedActionState) {
+        snapshotFlow { visibleState.value to focusedActionState.value }
+            .distinctUntilChanged()
+            .collect { (visible, focusedAction) ->
+                overlayViewState.value?.updateControls(
+                    controlsVisible = visible,
+                    focusedAction = focusedAction,
+                )
+            }
+    }
+}
+
+private class MultiPlayerOverlayView(context: Context) : View(context) {
+    private val density = resources.displayMetrics.density
+    private val focusRect = RectF()
+    private val buttonRect = RectF()
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2.dpPx()
+        color = 0xCC16D7D7.toInt()
+    }
+    private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = 0xDD08141A.toInt()
+    }
+    private val buttonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = 2.4f.dpPx()
+    }
+
+    private var channelCount = 0
+    private var focusedIndex = 0
+    private var columnCount = 1
+    private var rowCount = 1
+    private var controlsVisible = false
+    private var actions: List<MultiControlFocus> = emptyList()
+    private var focusedAction = MultiControlFocus.None
+
+    init {
+        setWillNotDraw(false)
+        isFocusable = false
+        isFocusableInTouchMode = false
+    }
+
+    fun updateConfig(
+        channelCount: Int,
+        columnCount: Int,
+        rowCount: Int,
+        actions: List<MultiControlFocus>,
+    ) {
+        val changed = this.channelCount != channelCount ||
+            this.columnCount != columnCount ||
+            this.rowCount != rowCount ||
+            this.actions != actions
+        if (!changed) return
+        this.channelCount = channelCount
+        this.columnCount = columnCount.coerceAtLeast(1)
+        this.rowCount = rowCount.coerceAtLeast(1)
+        this.actions = actions
+        invalidate()
+    }
+
+    fun updateFocusedIndex(focusedIndex: Int) {
+        if (this.focusedIndex == focusedIndex) return
+        this.focusedIndex = focusedIndex
+        invalidate()
+    }
+
+    fun updateControls(
+        controlsVisible: Boolean,
+        focusedAction: MultiControlFocus,
+    ) {
+        if (this.controlsVisible == controlsVisible && this.focusedAction == focusedAction) return
+        this.controlsVisible = controlsVisible
+        this.focusedAction = focusedAction
+        invalidate()
+    }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        super.onDraw(canvas)
+        if (channelCount <= 0 || focusedIndex !in 0 until channelCount) return
+
+        val cellWidth = width.toFloat() / columnCount
+        val cellHeight = height.toFloat() / rowCount
+        val column = focusedIndex % columnCount
+        val row = focusedIndex / columnCount
+        val inset = 6.dpPx()
+        focusRect.set(
+            column * cellWidth + inset,
+            row * cellHeight + inset,
+            (column + 1) * cellWidth - inset,
+            (row + 1) * cellHeight - inset,
+        )
+        canvas.drawRoundRect(focusRect, 12.dpPx(), 12.dpPx(), strokePaint)
+        if (controlsVisible && actions.isNotEmpty()) {
+            drawControls(canvas)
+        }
+    }
+
+    private fun drawControls(canvas: android.graphics.Canvas) {
+        val buttonSize = 44.dpPx()
+        val gap = 4.dpPx()
+        val padding = 5.dpPx()
+        val panelWidth = actions.size * buttonSize + (actions.size - 1).coerceAtLeast(0) * gap + padding * 2
+        val panelHeight = buttonSize + padding * 2
+        val panelRight = focusRect.right - 20.dpPx()
+        val panelTop = focusRect.top + 20.dpPx()
+        val panelLeft = panelRight - panelWidth
+        buttonRect.set(panelLeft, panelTop, panelRight, panelTop + panelHeight)
+        canvas.drawRoundRect(buttonRect, 16.dpPx(), 16.dpPx(), panelPaint)
+
+        var x = panelLeft + padding
+        val y = panelTop + padding
+        actions.forEach { action ->
+            val focused = focusedAction == action
+            buttonPaint.color = if (focused) 0xFF17D7D7.toInt() else 0x6620242A
+            buttonRect.set(x, y, x + buttonSize, y + buttonSize)
+            canvas.drawRoundRect(buttonRect, 9.dpPx(), 9.dpPx(), buttonPaint)
+            iconPaint.color = if (focused) 0xFF031012.toInt() else android.graphics.Color.WHITE
+            drawActionIcon(canvas, action, buttonRect)
+            x += buttonSize + gap
+        }
+    }
+
+    private fun drawActionIcon(
+        canvas: android.graphics.Canvas,
+        action: MultiControlFocus,
+        rect: RectF,
+    ) {
+        val cx = rect.centerX()
+        val cy = rect.centerY()
+        when (action) {
+            MultiControlFocus.Add -> {
+                val r = 10.dpPx()
+                canvas.drawLine(cx - r, cy, cx + r, cy, iconPaint)
+                canvas.drawLine(cx, cy - r, cx, cy + r, iconPaint)
+            }
+            MultiControlFocus.OpenSingle -> {
+                val left = rect.left + 13.dpPx()
+                val top = rect.top + 13.dpPx()
+                val right = rect.right - 13.dpPx()
+                val bottom = rect.bottom - 13.dpPx()
+                val len = 7.dpPx()
+                canvas.drawLine(left, top + len, left, top, iconPaint)
+                canvas.drawLine(left, top, left + len, top, iconPaint)
+                canvas.drawLine(right - len, top, right, top, iconPaint)
+                canvas.drawLine(right, top, right, top + len, iconPaint)
+                canvas.drawLine(left, bottom - len, left, bottom, iconPaint)
+                canvas.drawLine(left, bottom, left + len, bottom, iconPaint)
+                canvas.drawLine(right - len, bottom, right, bottom, iconPaint)
+                canvas.drawLine(right, bottom - len, right, bottom, iconPaint)
+            }
+            MultiControlFocus.Remove -> {
+                val r = 9.dpPx()
+                canvas.drawLine(cx - r, cy - r, cx + r, cy + r, iconPaint)
+                canvas.drawLine(cx + r, cy - r, cx - r, cy + r, iconPaint)
+            }
+            MultiControlFocus.None -> Unit
+        }
+    }
+
+    private fun Int.dpPx(): Float = this * density
+    private fun Float.dpPx(): Float = this * density
+}
 
 private fun Int.toRemoteDigitOrNull(): Char? =
     when (this) {
@@ -3262,7 +3543,8 @@ private fun MultiPlayerGrid(
     primaryPlayer: StablePlayer,
     primaryPlayerView: StablePlayerView,
     channels: List<TvChannel>,
-    focusedIndex: Int,
+    focusedIndexState: State<Int>,
+    audioIndexState: State<Int>,
     programsByChannel: Map<String, List<TvProgram>>,
     nowSeconds: Long,
     streamUrl: (TvChannel) -> String,
@@ -3286,17 +3568,11 @@ private fun MultiPlayerGrid(
             primaryPlayer = primaryPlayer,
             primaryPlayerView = primaryPlayerView,
             channels = channels,
-            focusedIndex = focusedIndex,
+            focusedIndexState = focusedIndexState,
+            audioIndexState = audioIndexState,
             programsByChannel = programsByChannel,
             nowSeconds = nowSeconds,
             streamUrl = streamUrl,
-            columnCount = columnCount,
-            rowCount = rowCount,
-            modifier = Modifier.fillMaxSize(),
-        )
-        MultiPlayerFocusLayer(
-            channels = channels,
-            focusedIndex = focusedIndex,
             columnCount = columnCount,
             rowCount = rowCount,
             modifier = Modifier.fillMaxSize(),
@@ -3312,7 +3588,8 @@ private fun MultiPlayerVideoGrid(
     primaryPlayer: StablePlayer,
     primaryPlayerView: StablePlayerView,
     channels: List<TvChannel>,
-    focusedIndex: Int,
+    focusedIndexState: State<Int>,
+    audioIndexState: State<Int>,
     programsByChannel: Map<String, List<TvProgram>>,
     nowSeconds: Long,
     streamUrl: (TvChannel) -> String,
@@ -3329,9 +3606,10 @@ private fun MultiPlayerVideoGrid(
                         MultiPlayerVideoCell(
                             index = index,
                             channels = channels,
+                            focusedIndexState = focusedIndexState,
+                            audioIndexState = audioIndexState,
                             primaryPlayer = primaryPlayer,
                             primaryPlayerView = primaryPlayerView,
-                            focusedIndex = focusedIndex,
                             programsByChannel = programsByChannel,
                             nowSeconds = nowSeconds,
                             streamUrl = streamUrl,
@@ -3348,9 +3626,10 @@ private fun MultiPlayerVideoGrid(
 private fun MultiPlayerVideoCell(
     index: Int,
     channels: List<TvChannel>,
+    focusedIndexState: State<Int>,
+    audioIndexState: State<Int>,
     primaryPlayer: StablePlayer,
     primaryPlayerView: StablePlayerView,
-    focusedIndex: Int,
     programsByChannel: Map<String, List<TvProgram>>,
     nowSeconds: Long,
     streamUrl: (TvChannel) -> String,
@@ -3381,8 +3660,10 @@ private fun MultiPlayerVideoCell(
         } else {
             ExtraChannelPlayerSurface(
                 channel = channel,
+                index = index,
+                focusedIndexState = focusedIndexState,
+                audioIndexState = audioIndexState,
                 streamUrl = streamUrl,
-                hasAudioFocus = focusedIndex == index,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -3452,168 +3733,12 @@ private fun MultiPlayerTile(
 }
 
 @Composable
-private fun MultiPlayerFocusLayer(
-    channels: List<TvChannel>,
-    focusedIndex: Int,
-    columnCount: Int,
-    rowCount: Int,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier) {
-        repeat(rowCount) { row ->
-            Row(Modifier.weight(1f).fillMaxWidth()) {
-                repeat(columnCount) { column ->
-                    val index = row * columnCount + column
-                    val focused = channels.getOrNull(index) != null && focusedIndex == index
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .padding(6.dp)
-                            .border(
-                                if (focused) 2.dp else 0.dp,
-                                if (focused) Color(0xCC16D7D7) else Color.Transparent,
-                                RoundedCornerShape(12.dp),
-                            )
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MultiPlayerControlsLayer(
-    channels: List<TvChannel>,
-    focusedIndex: Int,
-    columnCount: Int,
-    rowCount: Int,
-    canAddChannel: Boolean,
-    canRemoveChannel: Boolean,
-    focusedAction: MultiControlFocus,
-    onAddChannelClick: () -> Unit,
-    onOpenSingleClick: () -> Unit,
-    onRemoveChannelClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier) {
-        repeat(rowCount) { row ->
-            Row(Modifier.weight(1f).fillMaxWidth()) {
-                repeat(columnCount) { column ->
-                    val index = row * columnCount + column
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        if (channels.getOrNull(index) != null && focusedIndex == index) {
-                            FocusedMultiPlayerControls(
-                                canAddChannel = canAddChannel,
-                                canRemoveChannel = canRemoveChannel,
-                                focusedAction = focusedAction,
-                                onAddChannelClick = onAddChannelClick,
-                                onOpenSingleClick = onOpenSingleClick,
-                                onRemoveChannelClick = onRemoveChannelClick,
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(20.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FocusedMultiPlayerControls(
-    canAddChannel: Boolean,
-    canRemoveChannel: Boolean,
-    focusedAction: MultiControlFocus,
-    onAddChannelClick: () -> Unit,
-    onOpenSingleClick: () -> Unit,
-    onRemoveChannelClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .background(
-                Brush.horizontalGradient(
-                    colorStops = arrayOf(
-                        0.00f to Color(0xEE08141A),
-                        0.76f to Color(0xDC08141A),
-                        1.00f to Color(0xB808141A),
-                    )
-                ),
-                RoundedCornerShape(16.dp),
-            )
-            .padding(horizontal = 5.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        if (canAddChannel) {
-            MultiControlIconButton(
-                focused = focusedAction == MultiControlFocus.Add,
-                onClick = onAddChannelClick,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add channel",
-                    tint = it,
-                    modifier = Modifier.size(25.dp),
-                )
-            }
-        }
-        MultiControlIconButton(
-            focused = focusedAction == MultiControlFocus.OpenSingle,
-            onClick = onOpenSingleClick,
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_fullscreen),
-                contentDescription = "Open single player",
-                tint = it,
-                modifier = Modifier.size(24.dp),
-            )
-        }
-        if (canRemoveChannel) {
-            MultiControlIconButton(
-                focused = focusedAction == MultiControlFocus.Remove,
-                onClick = onRemoveChannelClick,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Remove channel",
-                    tint = it,
-                    modifier = Modifier.size(25.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MultiControlIconButton(
-    focused: Boolean,
-    onClick: () -> Unit,
-    icon: @Composable (Color) -> Unit,
-) {
-    val shape = RoundedCornerShape(9.dp)
-    Box(
-        modifier = Modifier
-            .size(44.dp)
-            .background(
-                if (focused) PrimaryCyan else Color(0x6620242A),
-                shape,
-            )
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        icon(if (focused) Color(0xFF031012) else Color.White)
-    }
-}
-
-@Composable
 private fun ExtraChannelPlayerSurface(
     channel: TvChannel,
+    index: Int,
+    focusedIndexState: State<Int>,
+    audioIndexState: State<Int>,
     streamUrl: (TvChannel) -> String,
-    hasAudioFocus: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -3622,10 +3747,10 @@ private fun ExtraChannelPlayerSurface(
             setParameters(
                 buildUponParameters()
                     .setMaxVideoSize(MULTI_PLAYER_MAX_WIDTH, MULTI_PLAYER_MAX_HEIGHT)
-                    .setMaxVideoBitrate(Int.MAX_VALUE)
+                    .setMaxVideoBitrate(MULTI_PLAYER_MAX_VIDEO_BITRATE)
                     .setForceLowestBitrate(true)
                     .setExceedVideoConstraintsIfNecessary(true)
-                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
             )
         }
     }
@@ -3634,6 +3759,7 @@ private fun ExtraChannelPlayerSurface(
             .setEnableDecoderFallback(true)
         ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(SharedHttpDataSourceFactory))
             .setTrackSelector(trackSelector)
             .setLoadControl(createMultiPlayerLoadControl())
             .build()
@@ -3643,14 +3769,15 @@ private fun ExtraChannelPlayerSurface(
             }
     }
     val playerView = remember(player) {
-        PlayerView(context).apply {
+        (LayoutInflater.from(context).inflate(R.layout.player_view_texture, null) as PlayerView).apply {
+            (videoSurfaceView as? TextureView)?.isOpaque = true
             this.player = player
             useController = false
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             isFocusable = false
             isFocusableInTouchMode = false
             setKeepContentOnPlayerReset(true)
-            setEnableComposeSurfaceSyncWorkaround(true)
+            setEnableComposeSurfaceSyncWorkaround(false)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -3670,8 +3797,23 @@ private fun ExtraChannelPlayerSurface(
         player.prepare()
         player.play()
     }
-    LaunchedEffect(hasAudioFocus) {
-        player.volume = if (hasAudioFocus) 1f else 0f
+    LaunchedEffect(index, focusedIndexState) {
+        snapshotFlow { focusedIndexState.value == index }
+            .distinctUntilChanged()
+            .collect { focused ->
+                if (!focused) player.volume = 0f
+            }
+    }
+    LaunchedEffect(index, audioIndexState) {
+        snapshotFlow { audioIndexState.value == index }
+            .distinctUntilChanged()
+            .collect { hasAudio ->
+                player.volume = if (hasAudio) 1f else 0f
+                trackSelector.setParameters(
+                    trackSelector.buildUponParameters()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, !hasAudio)
+                )
+            }
     }
     DisposableEffect(player) {
         onDispose {
@@ -3695,6 +3837,14 @@ private fun ExtraChannelPlayerSurface(
             modifier = Modifier.fillMaxSize(),
         )
     }
+}
+
+private val SharedHttpDataSourceFactory by lazy {
+    DefaultHttpDataSource.Factory()
+        .setConnectTimeoutMs(8_000)
+        .setReadTimeoutMs(15_000)
+        .setKeepPostFor302Redirects(true)
+        .setAllowCrossProtocolRedirects(true)
 }
 
 private fun createMultiPlayerLoadControl(): DefaultLoadControl =

@@ -1,5 +1,43 @@
 {
     "java.compile.nullAnalysis.mode": "automatic",
     "python.terminal.activateEnvironment": false,
-    "python-envs.alwaysUseUv": true
+    "python-envs.alwaysUseUv": true,
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "files.exclude": {
+        "**/.git": true,
+        "**/.gradle": true,
+        "**/build": true,
+        "**/node_modules": true,
+        "**/.next": true,
+        "**/Pods": true,
+        "**/vendor/bundle": true,
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/cache": true,
+        "**/db": true
+    },
+    "search.exclude": {
+        "**/build": true,
+        "**/node_modules": true,
+        "**/.next": true,
+        "**/Pods": true,
+        "**/vendor/bundle": true,
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/cache": true,
+        "**/db": true,
+        "**/*.sqlite-shm": true,
+        "**/*.sqlite-wal": true
+    },
+    "files.watcherExclude": {
+        "**/build/**": true,
+        "**/node_modules/**": true,
+        "**/.next/**": true,
+        "**/Pods/**": true,
+        "**/vendor/bundle/**": true,
+        "**/__pycache__/**": true,
+        "**/.pytest_cache/**": true,
+        "**/cache/**": true,
+        "**/db/**": true
+    }
 }
