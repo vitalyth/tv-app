@@ -154,12 +154,15 @@ fun VodSeriesDetailsView(
             return
         } catch (_: Exception) {}
         coroutineScope.launch {
-            if (targetIndex > 0) {
-                try {
-                    episodesListState.scrollToItem((targetIndex - 1).coerceAtLeast(0))
-                } catch (_: Exception) {}
-            }
-            delay(60)
+            try {
+                episodesListState.scrollToItem(targetIndex.coerceAtLeast(0))
+            } catch (_: Exception) {}
+            delay(90)
+            safeRequestFocus(
+                primary = primaryReq,
+                fallback = fallbackReq,
+            )
+            delay(120)
             safeRequestFocus(
                 primary = primaryReq,
                 fallback = fallbackReq,
@@ -222,7 +225,7 @@ fun VodSeriesDetailsView(
             ?: episodes.firstOrNull()?.id
         focusedEpisodeId = targetId
         if (!isPlayerActive && targetId != null) {
-            delay(60)
+            delay(120)
             requestEpisodeFocus(targetId)
         }
     }
