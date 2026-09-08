@@ -29,6 +29,7 @@ backend/profile/
 backend/build/
 backend/cache/
 backend/db/
+backend/data/*.db
 db/
 backend/tv_channels.egg-info/
 backend/tv-channels/
@@ -39,6 +40,7 @@ backend/tv-channels/
 temp/
 backend/temp/
 backend/old/
+scratch_test*.png
 *.zip
 
 # =========================

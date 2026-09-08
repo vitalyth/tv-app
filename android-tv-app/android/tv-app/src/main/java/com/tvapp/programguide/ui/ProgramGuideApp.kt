@@ -68,6 +68,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -133,6 +134,9 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.tvapp.programguide.R
+import com.tvapp.programguide.data.AppDestination
+import com.tvapp.programguide.ui.components.AppSideNavRail
+import com.tvapp.programguide.ui.vod.VodScreen
 import com.tvapp.programguide.data.GuideData
 import com.tvapp.programguide.data.TvChannel
 import com.tvapp.programguide.data.TvProgram
@@ -146,6 +150,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
@@ -183,10 +188,10 @@ private const val GRID_NAVIGATION_MIN_INTERVAL_MS = 70L
 private const val MAX_ACTIVE_ROW_IMAGES = 24
 
 @Stable
-private class StablePlayer(val value: ExoPlayer)
+class StablePlayer(val value: ExoPlayer)
 
 @Stable
-private class StablePlayerView(val value: PlayerView)
+class StablePlayerView(val value: PlayerView)
 
 @Stable
 private class StableProgramList(val value: List<TvProgram>)
@@ -326,6 +331,51 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     var multiPlayerChannels by remember { mutableStateOf<List<TvChannel>>(emptyList()) }
     var multiPlayerFocusIndex by remember { mutableIntStateOf(0) }
     var multiModeEnabled by remember { mutableStateOf(false) }
+    var currentDestination by remember { mutableStateOf(AppDestination.LIVE_TV) }
+    val vodViewModel: VodViewModel = viewModel()
+    val vodUiState by vodViewModel.uiState.collectAsStateWithLifecycle()
+    val isVodPlaying = currentDestination == AppDestination.VOD && vodUiState.playingEpisode != null
+    val isInitialLoading = currentDestination == AppDestination.LIVE_TV && (guideState.loading || guideState.guideData == null) && guideState.error == null
+    val sideRailLiveTvFocusRequester = remember { FocusRequester() }
+    val sideRailVodFocusRequester = remember { FocusRequester() }
+    val mainGridFocusRequester = remember { FocusRequester() }
+    val vodContentFocusRequester = remember { FocusRequester() }
+    val coroutineScope = rememberCoroutineScope()
+    var vodContentFocusNonce by remember { mutableIntStateOf(0) }
+    var sideRailExpansionAllowed by remember { mutableStateOf(false) }
+
+    fun requestVodContentFocus() {
+        vodContentFocusNonce += 1
+        try {
+            vodContentFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
+    BackHandler(
+        enabled = currentDestination == AppDestination.LIVE_TV && !playbackState.isPlayerExpanded && !detailsVisible && !isInitialLoading
+    ) {
+        sideRailExpansionAllowed = true
+        sideRailLiveTvFocusRequester.requestFocus()
+    }
+
+    LaunchedEffect(currentDestination) {
+        if (currentDestination == AppDestination.VOD) {
+            player.pause()
+            delay(120)
+            requestVodContentFocus()
+        } else if (currentDestination == AppDestination.LIVE_TV) {
+            if (streamingActive && !player.isPlaying) {
+                player.play()
+            }
+            if (!isInitialLoading) {
+                delay(120)
+                try {
+                    mainGridFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     val maxMultiPlayerChannels = MAX_MULTI_PLAYER_CHANNELS
     val nowSeconds by rememberGuideNowSeconds()
     var gridFocusNonce by remember { mutableIntStateOf(0) }
@@ -466,9 +516,60 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     }
 
     LaunchedEffect(
+        currentDestination,
         playbackState.isMiniPlayerPlaying,
         playbackState.playingChannel?.streamUrl,
+        isVodPlaying,
+        vodUiState.playingStreamUrl,
     ) {
+        if (isVodPlaying) {
+            val vodStream = vodUiState.playingStreamUrl
+            if (!vodStream.isNullOrBlank()) {
+                if (activeStreamUrl.value != vodStream) {
+                    applyPrimaryVideoProfile(PrimaryVideoProfile.Full)
+                    val mediaItem = when {
+                        vodStream.contains(".mpd", ignoreCase = true) || vodStream.contains(".livx", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(vodStream)
+                                .setMimeType(MimeTypes.APPLICATION_MPD)
+                                .build()
+                        }
+                        // Mako/Keshet HLS URLs can include ".mp4.csmil/index.m3u8"; prefer HLS when present.
+                        vodStream.contains(".m3u8", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(vodStream)
+                                .setMimeType(MimeTypes.APPLICATION_M3U8)
+                                .build()
+                        }
+                        vodStream.contains(".mp4", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(vodStream)
+                                .setMimeType(MimeTypes.APPLICATION_MP4)
+                                .build()
+                        }
+                        else -> {
+                            // VOD usually arrives through /api/proxy?url=..., so URL sniffing is unreliable.
+                            MediaItem.Builder()
+                                .setUri(vodStream)
+                                .setMimeType(MimeTypes.APPLICATION_M3U8)
+                                .build()
+                        }
+                    }
+                    player.setMediaItem(mediaItem)
+                    player.prepare()
+                    activeStreamUrl.value = vodStream
+                }
+                player.play()
+            }
+            return@LaunchedEffect
+        }
+
+        if (currentDestination == AppDestination.VOD) {
+            player.stop()
+            activeStreamUrl.value = null
+            return@LaunchedEffect
+        }
+
         val channel = playbackState.playingChannel ?: return@LaunchedEffect
         val shouldPlay = playbackState.isMiniPlayerPlaying || playbackState.isPlayerExpanded
         if (!shouldPlay) {
@@ -503,53 +604,115 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     }
 
     MaterialTheme {
-        Box(Modifier.fillMaxSize().background(ScreenBackground)) {
-            when {
-                guideState.loading -> GuideMessage(stringResource(R.string.loading_guide))
-                guideState.error != null -> GuideError(guideState.error ?: "Error", viewModel::refresh)
-                guideState.guideData != null -> GuideContent(
-                    data = guideState.guideData!!,
-                    selectedChannel = guideState.selectedChannel,
-                    selectedProgram = guideState.selectedProgram,
-                    displayChannel = playbackState.playingChannel ?: playbackState.selectedChannel,
-                    displayProgram = currentPlayingProgram ?: playbackState.selectedProgram,
-                    playingChannel = playbackState.playingChannel,
-                    playingProgram = currentPlayingProgram,
-                    isMiniPlayerPlaying = playbackState.isMiniPlayerPlaying,
-                    isPlayerExpanded = playbackState.isPlayerExpanded,
-                    onChannelActivated = viewModel::playChannel,
-                    onLiveChannelOpened = viewModel::playChannelExpanded,
-                    onProgramSelected = viewModel::selectChannel,
-                    onPlayerClick = viewModel::expandPlayer,
-                    onGuideRangeNeeded = viewModel::ensureGuideRange,
-                    gridFocusTarget = gridFocusTarget,
-                    onDetailsVisibleChanged = { detailsVisible = it },
-                    onGridFocusRequested = { channel, program, live ->
-                        requestGridFocus(channel, program, live)
-                    },
-                )
-            }
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Box(Modifier.fillMaxSize().background(ScreenBackground)) {
+                Row(Modifier.fillMaxSize()) {
+                    if (!playbackState.isPlayerExpanded && !isVodPlaying && !isInitialLoading) {
+                        AppSideNavRail(
+                        currentDestination = currentDestination,
+                        onDestinationSelected = { destination ->
+                            sideRailExpansionAllowed = false
+                            currentDestination = destination
+                            coroutineScope.launch {
+                                delay(120)
+                                if (destination == AppDestination.VOD) {
+                                    requestVodContentFocus()
+                                } else {
+                                    try {
+                                        mainGridFocusRequester.requestFocus()
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        },
+                        liveTvFocusRequester = sideRailLiveTvFocusRequester,
+                        vodFocusRequester = sideRailVodFocusRequester,
+                        allowExpansion = sideRailExpansionAllowed,
+                        onNavigateToContent = {
+                            sideRailExpansionAllowed = false
+                            coroutineScope.launch {
+                                if (currentDestination == AppDestination.VOD) {
+                                    requestVodContentFocus()
+                                } else {
+                                    try {
+                                        mainGridFocusRequester.requestFocus()
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        },
+                    )
+                }
 
-            if (streamingActive && playbackState.playingChannel != null && (!detailsVisible || playbackState.isPlayerExpanded) && !multiPlayerActive) {
-                PlayerSurface(
-                    player = stablePlayer,
-                    playerView = stablePlayerView,
-                    useController = false,
-                    resizeMode = if (playbackState.isPlayerExpanded) {
-                        AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    } else {
-                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    },
-                    modifier = if (playbackState.isPlayerExpanded) {
-                        Modifier.fillMaxSize()
-                    } else {
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .width(MiniPlayerWidth)
-                            .height(TopPanelHeight)
-                    },
-                    showLeadingFade = !playbackState.isPlayerExpanded,
-                )
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    when (currentDestination) {
+                        AppDestination.LIVE_TV -> {
+                            when {
+                                guideState.error != null -> GuideError(guideState.error ?: "Error", viewModel::refresh)
+                                guideState.loading || guideState.guideData == null -> GuideMessage(stringResource(R.string.loading_guide))
+                                else -> GuideContent(
+                                    data = guideState.guideData!!,
+                                    selectedChannel = guideState.selectedChannel,
+                                    selectedProgram = guideState.selectedProgram,
+                                    displayChannel = playbackState.playingChannel ?: playbackState.selectedChannel,
+                                    displayProgram = currentPlayingProgram ?: playbackState.selectedProgram,
+                                    playingChannel = playbackState.playingChannel,
+                                    playingProgram = currentPlayingProgram,
+                                    isMiniPlayerPlaying = playbackState.isMiniPlayerPlaying,
+                                    isPlayerExpanded = playbackState.isPlayerExpanded,
+                                    onChannelActivated = viewModel::playChannel,
+                                    onLiveChannelOpened = viewModel::playChannelExpanded,
+                                    onProgramSelected = viewModel::selectChannel,
+                                    onPlayerClick = viewModel::expandPlayer,
+                                    onGuideRangeNeeded = viewModel::ensureGuideRange,
+                                    gridFocusTarget = gridFocusTarget,
+                                    onDetailsVisibleChanged = { detailsVisible = it },
+                                    onGridFocusRequested = { channel, program, live ->
+                                        requestGridFocus(channel, program, live)
+                                    },
+                                    onNavigateSideRail = {
+                                        sideRailExpansionAllowed = true
+                                        sideRailLiveTvFocusRequester.requestFocus()
+                                    },
+                                    externalGridFocusRequester = mainGridFocusRequester,
+                                )
+                            }
+
+                            if (streamingActive && playbackState.playingChannel != null && (!detailsVisible || playbackState.isPlayerExpanded) && !multiPlayerActive) {
+                                PlayerSurface(
+                                    player = stablePlayer,
+                                    playerView = stablePlayerView,
+                                    useController = false,
+                                    resizeMode = if (playbackState.isPlayerExpanded) {
+                                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    } else {
+                                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                    },
+                                    modifier = if (playbackState.isPlayerExpanded) {
+                                        Modifier.fillMaxSize()
+                                    } else {
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .width(MiniPlayerWidth)
+                                            .height(TopPanelHeight)
+                                    },
+                                    showLeadingFade = !playbackState.isPlayerExpanded,
+                                )
+                            }
+                        }
+                        AppDestination.VOD -> {
+                            VodScreen(
+                                viewModel = vodViewModel,
+                                onNavigateSideRail = {
+                                    sideRailExpansionAllowed = true
+                                    sideRailVodFocusRequester.requestFocus()
+                                },
+                                initialFocusRequester = vodContentFocusRequester,
+                                contentFocusNonce = vodContentFocusNonce,
+                                player = stablePlayer,
+                                playerView = stablePlayerView,
+                            )
+                        }
+                    }
+                }
             }
 
             if (playbackState.isPlayerExpanded) {
@@ -640,6 +803,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         }
     }
 }
+}
 
 @Composable
 private fun GuideContent(
@@ -660,9 +824,11 @@ private fun GuideContent(
     gridFocusTarget: GridFocusTarget?,
     onDetailsVisibleChanged: (Boolean) -> Unit,
     onGridFocusRequested: (TvChannel?, TvProgram?, Boolean) -> Unit,
+    onNavigateSideRail: () -> Unit = {},
+    externalGridFocusRequester: FocusRequester? = null,
 ) {
     val topPanelFocusRequester = remember { FocusRequester() }
-    val gridFocusRequester = remember { FocusRequester() }
+    val gridFocusRequester = externalGridFocusRequester ?: remember { FocusRequester() }
     var showNowRequestNonce by remember { mutableIntStateOf(0) }
     var blockGridActivationUntilMs by remember { mutableLongStateOf(0L) }
     var suspendGridAutoPlay by remember { mutableStateOf(false) }
@@ -716,6 +882,7 @@ private fun GuideContent(
                 showNowRequestNonce = showNowRequestNonce,
                 gridFocusRequester = gridFocusRequester,
                 topFocusRequester = topPanelFocusRequester,
+                onNavigateSideRail = onNavigateSideRail,
             )
         }
 
@@ -1169,6 +1336,7 @@ private fun ProgramGrid(
     showNowRequestNonce: Int,
     gridFocusRequester: FocusRequester,
     topFocusRequester: FocusRequester,
+    onNavigateSideRail: () -> Unit = {},
 ) {
     val density = LocalDensity.current
 
@@ -1534,7 +1702,16 @@ private fun ProgramGrid(
                                 true
                             }
                             it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft -> {
-                                if (acceptNavigationEvent()) moveSelectedProgram(-1)
+                                if (selectedProgramIndex <= 0) {
+                                    onNavigateSideRail()
+                                    true
+                                } else {
+                                    if (acceptNavigationEvent()) moveSelectedProgram(-1)
+                                    true
+                                }
+                            }
+                            it.type == KeyEventType.KeyDown && it.key == Key.Back -> {
+                                onNavigateSideRail()
                                 true
                             }
                             else -> false
@@ -1570,7 +1747,7 @@ private fun ProgramGrid(
                 activeRowHeight = activeRowHeight,
                 inactiveRowHeight = inactiveRowHeight,
                 visibleRowCount = visibleRowCount,
-                firstVisibleRowIndex = animatedFirstVisibleRowIndex.value,
+                firstVisibleRowIndex = { animatedFirstVisibleRowIndex.value },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -1586,18 +1763,19 @@ private fun ChannelLogoOverlay(
     activeRowHeight: Dp,
     inactiveRowHeight: Dp,
     visibleRowCount: Int,
-    firstVisibleRowIndex: Float,
+    firstVisibleRowIndex: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
     BoxWithConstraints(modifier.clipToBounds()) {
+        val firstRowIndex = firstVisibleRowIndex()
         val headerHeightPx = with(density) { headerHeight.toPx() }
         val activeRowHeightPx = with(density) { activeRowHeight.toPx() }
         val inactiveRowHeightPx = with(density) { inactiveRowHeight.toPx() }
         val viewportHeightPx = with(density) { maxHeight.toPx() }
-        val renderStart = floor(firstVisibleRowIndex).toInt().coerceAtLeast(0)
+        val renderStart = floor(firstRowIndex).toInt().coerceAtLeast(0)
         val renderEnd = min(data.channels.lastIndex, renderStart + visibleRowCount)
-        var rowTopPx = headerHeightPx - (firstVisibleRowIndex - renderStart) * inactiveRowHeightPx
+        var rowTopPx = headerHeightPx - (firstRowIndex - renderStart) * inactiveRowHeightPx
 
         for (index in renderStart..renderEnd) {
             val rowHeightPx = if (selectedRowIndex == index) activeRowHeightPx else inactiveRowHeightPx
@@ -1611,15 +1789,17 @@ private fun ChannelLogoOverlay(
                 }
                 val x = with(density) { 18.dp }
                 val y = with(density) { (visibleTopPx + (visibleBottomPx - visibleTopPx) / 2f - 20.dp.toPx()).toDp() }
-                AsyncImage(
-                    model = rememberSizedImageRequest(channel.logoUrl, width = 64, height = 64),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .offset(x = x, y = y)
-                        .size(40.dp)
-                        .padding(4.dp),
-                )
+                key(channel.id) {
+                    AsyncImage(
+                        model = rememberSizedImageRequest(channel.logoUrl, width = 64, height = 64),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .offset(x = x, y = y)
+                            .size(40.dp)
+                            .padding(4.dp),
+                    )
+                }
             }
             rowTopPx += rowHeightPx
         }
@@ -1671,6 +1851,13 @@ private fun CanvasGuideGrid(
             .toList()
     }
     LaunchedEffect(activeImageUrls) {
+        if (programImageCache.size > 24) {
+            val activeSet = activeImageUrls.toSet()
+            val keysToRemove = programImageCache.keys.filter { it !in activeSet }
+            keysToRemove.take(programImageCache.size - 24).forEach { key ->
+                programImageCache.remove(key)
+            }
+        }
         activeImageUrls.forEach { url ->
             if (programImageCache[url] != null) return@forEach
             val imageBitmap = withContext(Dispatchers.IO) {
@@ -1710,6 +1897,21 @@ private fun CanvasGuideGrid(
             textAlign = Paint.Align.RIGHT
         }
     }
+    val playPaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(3, 24, 18)
+            style = Paint.Style.FILL
+        }
+    }
+    val reusablePath = remember { Path() }
+    val reusablePlayPath = remember { Path() }
+    val reusableRectF = remember { RectF() }
+    val boldTypeface = remember { Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+    val normalTypeface = remember { Typeface.DEFAULT }
+    val size8Px = remember(density) { with(density) { 8.sp.toPx() } }
+    val size11Px = remember(density) { with(density) { 11.sp.toPx() } }
+    val size12Px = remember(density) { with(density) { 12.sp.toPx() } }
+    val size14Px = remember(density) { with(density) { 14.sp.toPx() } }
 
     Canvas(modifier) {
         val channelWidthPx = channelWidth.toPx()
@@ -1739,10 +1941,10 @@ private fun CanvasGuideGrid(
         )
 
         val nativeCanvas = drawContext.canvas.nativeCanvas
-        fun Paint.withText(sizeSp: Float, color: Int = this.color, bold: Boolean = false): Paint {
-            textSize = with(density) { sizeSp.sp.toPx() }
+        fun Paint.withText(sizePx: Float, color: Int = this.color, bold: Boolean = false): Paint {
+            textSize = sizePx
             this.color = color
-            typeface = if (bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
+            typeface = if (bold) boldTypeface else normalTypeface
             return this
         }
         fun drawAlignedText(
@@ -1784,7 +1986,7 @@ private fun CanvasGuideGrid(
                     x = labelX,
                     centerY = headerHeightPx / 2f,
                     maxWidth = max(24.dp.toPx(), slotRight - labelX - 10.dp.toPx()),
-                    paint = titlePaint.withText(12f, android.graphics.Color.rgb(200, 209, 214), bold = true),
+                    paint = titlePaint.withText(size12Px, android.graphics.Color.rgb(200, 209, 214), bold = true),
                     align = Paint.Align.LEFT,
                 )
             }
@@ -1842,7 +2044,7 @@ private fun CanvasGuideGrid(
                     x = channelWidthPx - 16.dp.toPx(),
                     centerY = rowTop + rowHeightPx * 0.38f,
                     maxWidth = channelWidthPx - 82.dp.toPx(),
-                    paint = titlePaint.withText(14f, channelTextColor, bold = true),
+                    paint = titlePaint.withText(size14Px, channelTextColor, bold = true),
                 )
                 drawAlignedText(
                     text = if (isPlaying) "מנגן עכשיו" else channel.number,
@@ -1850,7 +2052,7 @@ private fun CanvasGuideGrid(
                     centerY = rowTop + rowHeightPx * 0.68f,
                     maxWidth = channelWidthPx - 82.dp.toPx(),
                     paint = metaPaint.withText(
-                        11f,
+                        size11Px,
                         when {
                             isChannelFocused -> android.graphics.Color.rgb(46, 52, 58)
                             isPlaying -> android.graphics.Color.rgb(185, 191, 198)
@@ -1874,7 +2076,7 @@ private fun CanvasGuideGrid(
                     centerY = rowTop + rowHeightPx / 2f,
                     maxWidth = 32.dp.toPx(),
                     paint = titlePaint.withText(
-                        12f,
+                        size12Px,
                         if (isChannelFocused) android.graphics.Color.rgb(10, 14, 18) else android.graphics.Color.WHITE,
                         bold = true,
                     ),
@@ -1911,16 +2113,16 @@ private fun CanvasGuideGrid(
                 val programImage = program.imageUrl?.let(programImageCache::get)
                 if (isActiveRow && programImage != null && cellWidth >= 110.dp.toPx()) {
                     val imageWidthPx = min(132.dp.toPx(), cellWidth * 0.46f)
-                    val clipPath = Path().apply {
-                        addRoundRect(
-                            RectF(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight),
-                            cornerPx,
-                            cornerPx,
-                            Path.Direction.CW,
-                        )
-                    }
+                    reusablePath.rewind()
+                    reusableRectF.set(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight)
+                    reusablePath.addRoundRect(
+                        reusableRectF,
+                        cornerPx,
+                        cornerPx,
+                        Path.Direction.CW,
+                    )
                     nativeCanvas.save()
-                    nativeCanvas.clipPath(clipPath)
+                    nativeCanvas.clipPath(reusablePath)
                     drawImage(
                         image = programImage,
                         dstOffset = IntOffset(cellLeft.roundToInt(), cellTop.roundToInt()),
@@ -1959,19 +2161,12 @@ private fun CanvasGuideGrid(
                         if (isPlaying) {
                             val iconLeft = liveBadgeLeft + 7.dp.toPx()
                             val iconCenterY = liveBadgeTop + liveBadgeHeight / 2f
-                            val playPath = Path().apply {
-                                moveTo(iconLeft, iconCenterY - 4.dp.toPx())
-                                lineTo(iconLeft, iconCenterY + 4.dp.toPx())
-                                lineTo(iconLeft + 7.dp.toPx(), iconCenterY)
-                                close()
-                            }
-                            drawContext.canvas.nativeCanvas.drawPath(
-                                playPath,
-                                Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                                    color = android.graphics.Color.rgb(3, 24, 18)
-                                    style = Paint.Style.FILL
-                                },
-                            )
+                            reusablePlayPath.rewind()
+                            reusablePlayPath.moveTo(iconLeft, iconCenterY - 4.dp.toPx())
+                            reusablePlayPath.lineTo(iconLeft, iconCenterY + 4.dp.toPx())
+                            reusablePlayPath.lineTo(iconLeft + 7.dp.toPx(), iconCenterY)
+                            reusablePlayPath.close()
+                            nativeCanvas.drawPath(reusablePlayPath, playPaint)
                         }
                         drawAlignedText(
                             text = "LIVE",
@@ -1979,7 +2174,7 @@ private fun CanvasGuideGrid(
                             centerY = liveBadgeTop + liveBadgeHeight / 2f,
                             maxWidth = if (isPlaying) liveBadgeWidth - 20.dp.toPx() else liveBadgeWidth - 6.dp.toPx(),
                             paint = titlePaint.withText(
-                                8f,
+                                size8Px,
                                 if (isPlaying) android.graphics.Color.rgb(3, 24, 18) else android.graphics.Color.WHITE,
                                 bold = true,
                             ),
@@ -2004,14 +2199,14 @@ private fun CanvasGuideGrid(
                     x = textRight,
                     centerY = titleCenterY,
                     maxWidth = maxTextWidth,
-                    paint = paint.withText(14f, if (focused) android.graphics.Color.rgb(7, 17, 20) else android.graphics.Color.WHITE, bold = true),
+                    paint = paint.withText(size14Px, if (focused) android.graphics.Color.rgb(7, 17, 20) else android.graphics.Color.WHITE, bold = true),
                 )
                 drawAlignedText(
                     text = program.timeRange(),
                     x = textRight,
                     centerY = timeCenterY,
                     maxWidth = maxTextWidth,
-                    paint = metaPaint.withText(11f, if (focused) android.graphics.Color.rgb(50, 58, 62) else android.graphics.Color.rgb(170, 174, 184)),
+                    paint = metaPaint.withText(size11Px, if (focused) android.graphics.Color.rgb(50, 58, 62) else android.graphics.Color.rgb(170, 174, 184)),
                 )
                 nativeCanvas.restore()
                 }
@@ -2038,7 +2233,7 @@ private fun CanvasGuideGrid(
                     x = nowX,
                     centerY = headerHeightPx - 13.dp.toPx(),
                     maxWidth = 68.dp.toPx(),
-                    paint = darkTextPaint.withText(12f, android.graphics.Color.rgb(3, 16, 18), bold = true),
+                    paint = darkTextPaint.withText(size12Px, android.graphics.Color.rgb(3, 16, 18), bold = true),
                     align = Paint.Align.CENTER,
                 )
             }
@@ -2049,11 +2244,11 @@ private fun CanvasGuideGrid(
 private fun Paint.ellipsizeToWidth(text: String, maxWidth: Float): String {
     if (maxWidth <= 0f || measureText(text) <= maxWidth) return text
     val ellipsis = "..."
-    var end = text.length
-    while (end > 0 && measureText(text, 0, end) + measureText(ellipsis) > maxWidth) {
-        end--
-    }
-    return if (end <= 0) ellipsis else text.substring(0, end) + ellipsis
+    val ellipsisWidth = measureText(ellipsis)
+    val targetWidth = maxWidth - ellipsisWidth
+    if (targetWidth <= 0f) return ellipsis
+    val count = breakText(text, true, targetWidth, null)
+    return if (count <= 0) ellipsis else text.substring(0, count) + ellipsis
 }
 
 @Composable
@@ -3841,8 +4036,9 @@ private fun ExtraChannelPlayerSurface(
 
 private val SharedHttpDataSourceFactory by lazy {
     DefaultHttpDataSource.Factory()
-        .setConnectTimeoutMs(8_000)
-        .setReadTimeoutMs(15_000)
+        .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(20_000)
         .setKeepPostFor302Redirects(true)
         .setAllowCrossProtocolRedirects(true)
 }
@@ -4167,54 +4363,40 @@ private fun AddChannelMenuRows(
 private fun AddChannelMenuPeek(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .width(76.dp)
-            .height(188.dp)
+            .size(48.dp)
             .background(
                 Brush.horizontalGradient(
                     colorStops = arrayOf(
-                        0.00f to Color(0x0008141A),
-                        0.38f to Color(0x9908141A),
-                        1.00f to Color(0xE808141A),
+                        0.00f to Color(0xD005090D),
+                        1.00f to Color(0xF208141A),
                     )
                 ),
-                RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp),
+                RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp),
             )
-            .padding(start = 10.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
-        contentAlignment = Alignment.CenterEnd,
+            .border(
+                width = 1.dp,
+                color = Color(0x663B3B3B),
+                shape = RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp),
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = null,
-                tint = PrimaryCyan,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Multi\nview",
-                color = Color(0xFFD9F8FA),
-                fontSize = 8.sp,
-                lineHeight = 9.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(10.dp))
-            Box(
-                Modifier
-                    .width(32.dp)
-                    .height(6.dp)
-                    .background(Color(0x5520242A), RoundedCornerShape(4.dp)),
-            )
-            Spacer(Modifier.height(5.dp))
-            Box(
-                Modifier
-                    .width(32.dp)
-                    .height(6.dp)
-                    .background(Color(0x4420242A), RoundedCornerShape(4.dp)),
-            )
+        Canvas(Modifier.size(22.dp)) {
+            val gap = 3.dp.toPx()
+            val tile = (size.minDimension - gap) / 2f
+            val radius = 3.dp.toPx()
+            listOf(
+                Offset(0f, 0f),
+                Offset(tile + gap, 0f),
+                Offset(0f, tile + gap),
+                Offset(tile + gap, tile + gap),
+            ).forEach { topLeft ->
+                drawRoundRect(
+                    color = PrimaryCyan,
+                    topLeft = topLeft,
+                    size = Size(tile, tile),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+                )
+            }
         }
     }
 }
@@ -4373,270 +4555,20 @@ private fun ExpandedPlayerControls(
     showMetadataPanel: Boolean,
     onInteraction: () -> Unit,
 ) {
-    var positionMs by remember { mutableStateOf(0L) }
-    var durationMs by remember { mutableStateOf(C.TIME_UNSET) }
-    var isPlaying by remember { mutableStateOf(player.value.isPlaying) }
-    var isLive by remember { mutableStateOf(player.value.isCurrentMediaItemLive) }
-    var liveWindowStartTimeMs by remember { mutableStateOf(C.TIME_UNSET) }
-    var videoQuality by remember { mutableStateOf(videoQualityLabel(player.value.videoFormat)) }
-
-    fun updatePlayerSnapshot(window: Timeline.Window) {
-        positionMs = player.value.currentPosition.coerceAtLeast(0L)
-        durationMs = player.value.duration
-        isPlaying = player.value.isPlaying
-        isLive = player.value.isCurrentMediaItemLive
-        liveWindowStartTimeMs = if (!player.value.currentTimeline.isEmpty) {
-            player.value.currentTimeline.getWindow(player.value.currentMediaItemIndex, window).windowStartTimeMs
-        } else {
-            C.TIME_UNSET
-        }
-        videoQuality = videoQualityLabel(player.value.videoFormat)
-    }
-
-    DisposableEffect(player) {
-        val window = Timeline.Window()
-        val listener = object : Player.Listener {
-            override fun onEvents(player: Player, events: Player.Events) {
-                updatePlayerSnapshot(window)
-            }
-        }
-        player.value.addListener(listener)
-        updatePlayerSnapshot(window)
-        onDispose {
-            player.value.removeListener(listener)
-        }
-    }
-
-    LaunchedEffect(player) {
-        val window = Timeline.Window()
-        while (true) {
-            updatePlayerSnapshot(window)
-            delay(if (isLive) 1_500 else 700)
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize(),
-        contentAlignment = Alignment.BottomCenter,
-    ) {
-        if (showMetadataPanel) {
-            ChannelOverlayPanel(
-                channel = channel,
-                program = program,
-                modifier = Modifier.align(Alignment.TopStart),
-            )
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color(0x66000000), Color(0xBF000000))
-                    )
-                )
-                .padding(start = 44.dp, end = 44.dp, top = 42.dp, bottom = 24.dp),
-        ) {
-            Text(
-                text = program?.title ?: channel?.name ?: "",
-                color = Color.White,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = listOfNotNull(channel?.name, program?.timeRange()?.asLtrText()).joinToString("  |  "),
-                color = Color(0xFFCFCFCF),
-                fontSize = 18.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(18.dp))
-            PlayerProgressBar(
-                positionMs = positionMs,
-                durationMs = durationMs,
-                isLive = isLive,
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ChannelLogoBadge(channel = channel)
-                Spacer(Modifier.width(18.dp))
-                IconButton(
-                    onClick = {
-                        onInteraction()
-                        if (player.value.isPlaying) player.value.pause() else player.value.play()
-                        isPlaying = player.value.isPlaying
-                    },
-                    modifier = Modifier.size(56.dp),
-                ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(42.dp),
-                    )
-                }
-                Spacer(Modifier.width(18.dp))
-                Text(
-                    text = playbackTimeLabel(positionMs, durationMs, isLive, liveWindowStartTimeMs),
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                Spacer(Modifier.width(18.dp))
-                LiveBadge(isLive = isLive)
-                Spacer(Modifier.width(12.dp))
-                VideoQualityBadge(videoQuality)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChannelLogoBadge(channel: TvChannel?) {
-    Box(
-        modifier = Modifier
-            .width(118.dp)
-            .height(54.dp)
-            .background(Color(0xFF050607), RoundedCornerShape(5.dp))
-            .border(1.dp, Color(0xFF3B3B3B), RoundedCornerShape(5.dp))
-            .padding(8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        AsyncImage(
-            model = rememberSizedImageRequest(channel?.logoUrl, width = 236, height = 108),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-        )
-    }
-}
-
-@Composable
-private fun ChannelOverlayPanel(
-    channel: TvChannel?,
-    program: TvProgram?,
-    modifier: Modifier = Modifier,
-) {
-    val imageUrl = program?.imageUrl ?: channel?.logoUrl
-    Row(
-        modifier = modifier
-            .padding(start = 44.dp, top = 36.dp)
-            .background(
-                Brush.horizontalGradient(
-                    colorStops = arrayOf(
-                        0.00f to Color(0xEE08141A),
-                        0.72f to Color(0xDC08141A),
-                        1.00f to Color(0xB008141A),
-                    )
-                ),
-                RoundedCornerShape(18.dp),
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .width(164.dp)
-                .height(92.dp)
-                .background(Color(0xCC020609), RoundedCornerShape(10.dp))
-                .clip(RoundedCornerShape(10.dp))
-                .padding(5.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            AsyncImage(
-                model = rememberSizedImageRequest(imageUrl, width = 328, height = 184),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.width(14.dp))
-        Column {
-            Text(
-                text = listOfNotNull(channel?.number, channel?.name).joinToString("  "),
-                color = Color.White,
-                fontSize = 21.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = program?.title.orEmpty(),
-                color = Color(0xFFB7C2C6),
-                fontSize = 15.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PlayerProgressBar(positionMs: Long, durationMs: Long, isLive: Boolean) {
-    val hasSeekableDuration = durationMs != C.TIME_UNSET && durationMs > 0
-    val progress = if (hasSeekableDuration) {
-        (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-    } else {
-        1f
-    }
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(7.dp)
-            .background(Color(0xFF4D4D4D), RoundedCornerShape(4.dp))
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(progress)
-                .fillMaxHeight()
-                .background(if (isLive) Color(0xFFE21D2F) else GlowCyan, RoundedCornerShape(4.dp))
-        )
-    }
-}
-
-@Composable
-private fun LiveBadge(isLive: Boolean) {
-    Text(
-        text = if (isLive) "LIVE" else "DVR",
-        color = Color.White,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier
-            .background(if (isLive) Color(0xFFE21D2F) else FocusBlue, RoundedCornerShape(4.dp))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
+    val isLive = player.value.isCurrentMediaItemLive
+    com.tvapp.programguide.ui.components.UnifiedPlayerControlsOverlay(
+        player = player,
+        title = program?.title ?: channel?.name ?: "",
+        subtitle = listOfNotNull(channel?.name, program?.timeRange()?.asLtrText()).joinToString("  |  "),
+        badgeText = if (isLive) "LIVE" else "DVR",
+        isLive = isLive,
+        logoUrl = channel?.logoUrl,
+        providerDisplayName = channel?.name,
+        previewImageUrl = program?.imageUrl ?: channel?.logoUrl,
+        headerChannelText = listOfNotNull(channel?.number, channel?.name).joinToString("  "),
+        showMetadataPanel = showMetadataPanel,
+        onInteraction = onInteraction,
     )
-}
-
-@Composable
-private fun VideoQualityBadge(label: String) {
-    Text(
-        text = "Quality $label",
-        color = Color.White,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Bold,
-        maxLines = 1,
-        modifier = Modifier
-            .background(Color(0xAA111820), RoundedCornerShape(4.dp))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-    )
-}
-
-private fun videoQualityLabel(format: Format?): String {
-    if (format == null) return "Auto"
-    val resolution = if (format.width > 0 && format.height > 0) {
-        "${format.width}x${format.height}"
-    } else {
-        null
-    }
-    val bitrate = if (format.bitrate > 0) {
-        String.format(Locale.US, "%.1f Mbps", format.bitrate / 1_000_000f)
-    } else {
-        null
-    }
-    return listOfNotNull(resolution, bitrate).takeIf { it.isNotEmpty() }?.joinToString("  ") ?: "Auto"
 }
 
 @Composable

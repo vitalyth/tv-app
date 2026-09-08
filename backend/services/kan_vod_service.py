@@ -538,9 +538,6 @@ def get_kan_vod_stream(episode_id: str) -> str | None:
         if not row:
             return None
 
-        if row["stream_url"]:
-            return row["stream_url"]
-
         try:
             stream_url, entry_id = _with_retries(
                 lambda: kan_db_scanner.resolve_episode_stream(
@@ -549,7 +546,7 @@ def get_kan_vod_stream(episode_id: str) -> str | None:
                 )
             )
         except Exception:
-            return None
+            return row["stream_url"]
 
         if stream_url:
             episode = kan_db_scanner.Episode(
@@ -570,6 +567,6 @@ def get_kan_vod_stream(episode_id: str) -> str | None:
             kan_db_scanner.upsert_episode(con, episode)
             con.commit()
 
-        return stream_url
+        return stream_url or row["stream_url"]
     finally:
         con.close()

@@ -37,6 +37,8 @@ RESHET_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "he-IL,he;q=0.9,en;q=0.8",
     "Referer": f"{RESHET_BASE_URL}/",
+    "Origin": RESHET_BASE_URL,
+    "X-Forwarded-For": "212.179.1.1",
 }
 CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[,;|/•·،]+)\s*")
 RESHET_IGNORED_CATEGORY_VALUES = {"1259", "series"}
@@ -1268,8 +1270,6 @@ def get_reshet_vod_stream(episode_id: str) -> str | None:
         row = con.execute("SELECT * FROM reshet_episodes WHERE id = ?", (episode_id,)).fetchone()
         if not row:
             return None
-        if row["stream_url"]:
-            return row["stream_url"]
 
         stream_url = _with_retries(lambda: resolve_reshet_vod_stream(row["play_url"] or row["kaltura_entry_id"] or ""))
         if stream_url:
@@ -1282,6 +1282,8 @@ def get_reshet_vod_stream(episode_id: str) -> str | None:
                 (stream_url, episode_id),
             )
             con.commit()
-        return stream_url
+            return stream_url
+
+        return row["stream_url"]
     finally:
         con.close()

@@ -1420,20 +1420,10 @@ def get_keshet_vod_stream(episode_id: str) -> str | None:
         row = con.execute("SELECT * FROM keshet_episodes WHERE id = ?", (episode_id,)).fetchone()
         if not row:
             return None
-        if row["stream_url"]:
-            return row["stream_url"]
 
-        stream_url = _with_retries(lambda: resolve_keshet_vod_stream(row["play_url"] or row["url"]))
-        if stream_url:
-            con.execute(
-                """
-                UPDATE keshet_episodes
-                SET stream_url = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (stream_url, episode_id),
-            )
-            con.commit()
-        return stream_url
+        # Mako CloudFront tickets contain short-lived JWT signatures that expire.
+        # Always resolve a fresh ticket so playback never fails with 403 Forbidden.
+        target_url = row["play_url"] or row["url"]
+        return _with_retries(lambda: resolve_keshet_vod_stream(target_url))
     finally:
         con.close()
