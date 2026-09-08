@@ -33,7 +33,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -279,6 +278,7 @@ fun VodSeriesDetailsView(
                         .graphicsLayer {
                             scaleX = 1.05f
                             scaleY = 1.05f
+                            alpha = 0.34f
                         },
                 )
                 Box(

@@ -46,7 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
@@ -71,8 +70,6 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.tvapp.programguide.data.VodProvider
 import com.tvapp.programguide.data.VodSeries
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import com.tvapp.programguide.ui.StablePlayer
 import com.tvapp.programguide.ui.StablePlayerView
 import com.tvapp.programguide.ui.VodViewModel
@@ -402,10 +399,10 @@ private fun UnifiedVodCatalogView(
             .padding(top = 18.dp, start = 24.dp, end = 24.dp),
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 2.dp, vertical = 6.dp),
+                .padding(horizontal = 2.dp, vertical = 4.dp),
         ) {
             providers.forEachIndexed { index, provider ->
                 ProviderTab(
@@ -438,13 +435,22 @@ private fun UnifiedVodCatalogView(
             }
         }
 
+        ChannelDetailsBand(
+            provider = uiState.selectedProvider,
+            logoUrl = viewModel.getProviderLogoUrl(uiState.selectedProvider),
+            totalSeries = uiState.totalSeries,
+            categoriesCount = uiState.categories.size,
+            isLoading = uiState.isLoadingSeries,
+            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
+        )
+
         if (uiState.categories.isNotEmpty()) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(horizontal = 2.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 12.dp),
+                    .padding(bottom = 12.dp),
             ) {
                 item {
                     CategoryFilterChip(
@@ -586,22 +592,27 @@ private fun ProviderTab(
     val active = isFocused || isSelected
 
     val tabBg = when {
-        isFocused -> FocusedCardBg
-        isSelected -> Color(0x1410D5D9)
+        isSelected -> FocusedCardBg
+        isFocused -> Color(0x22FFFFFF)
         else -> Color.Transparent
     }
     val labelColor = when {
-        isFocused -> FocusedCardContent
-        isSelected -> Color.White
+        isSelected -> FocusedCardContent
+        isFocused -> Color.White
         else -> MutedText
     }
-    val underlineColor = if (isSelected) SelectedProviderAccent else Color.Transparent
-    val logoBg = if (active) Color(0xFF20232A) else Color(0xFF121419)
+    val focusLineColor = when {
+        isFocused -> SelectedProviderAccent
+        isSelected -> Color.White
+        else -> Color.Transparent
+    }
+    val logoBg = if (active) Color(0x3320232A) else Color.Transparent
 
-    Column(
+    Box(
         modifier = Modifier
-            .width(128.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .width(154.dp)
+            .height(54.dp)
+            .clip(RoundedCornerShape(999.dp))
             .background(tabBg)
             .onFocusChanged {
                 if (it.isFocused) onFocused()
@@ -612,12 +623,23 @@ private fun ProviderTab(
                 focusRequester = focusRequester,
                 onNavigateLeft = onNavigateLeft,
                 onNavigateDown = onNavigateDown,
-            )
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            ),
+        contentAlignment = Alignment.CenterStart,
     ) {
+        AsyncImage(
+            model = logoUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(76.dp)
+                .graphicsLayer { alpha = if (active) 0.2f else 0.1f },
+            contentScale = ContentScale.Fit,
+        )
+
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -652,12 +674,112 @@ private fun ProviderTab(
 
         Box(
             modifier = Modifier
-                .padding(top = 8.dp)
+                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(if (isSelected) 4.dp else 2.dp)
+                .height(if (isFocused) 3.dp else 2.dp)
                 .clip(RoundedCornerShape(999.dp))
-                .background(underlineColor),
+                .background(focusLineColor),
         )
+    }
+}
+
+@Composable
+private fun ChannelDetailsBand(
+    provider: VodProvider,
+    logoUrl: String,
+    totalSeries: Int,
+    categoriesCount: Int,
+    isLoading: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(92.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        Color(0xFF12151C),
+                        Color(0xFF101219),
+                        Color(0xFF080A0C),
+                    )
+                )
+            ),
+    ) {
+        AsyncImage(
+            model = logoUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(168.dp)
+                .graphicsLayer { alpha = 0.09f },
+            contentScale = ContentScale.Fit,
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0x1AFFFFFF)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = logoUrl,
+                        contentDescription = provider.displayName,
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = provider.displayName,
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = RtlTextStyle,
+                    )
+                    Text(
+                        text = "ערוץ ${provider.channelNumber}",
+                        color = MutedText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        style = RtlTextStyle,
+                    )
+                }
+            }
+
+            val summary = when {
+                isLoading -> "טוען תוכניות"
+                totalSeries > 0 && categoriesCount > 0 -> "$totalSeries תוכניות · $categoriesCount פילטרים"
+                totalSeries > 0 -> "$totalSeries תוכניות"
+                else -> ""
+            }
+
+            if (summary.isNotBlank()) {
+                Text(
+                    text = summary,
+                    color = Color(0xFFD0D5DD),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    style = RtlTextStyle,
+                )
+            }
+        }
     }
 }
 
