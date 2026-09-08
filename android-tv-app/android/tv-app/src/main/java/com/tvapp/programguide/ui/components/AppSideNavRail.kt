@@ -3,6 +3,7 @@ package com.tvapp.programguide.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -20,6 +21,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -43,6 +49,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,15 +62,12 @@ import com.tvapp.programguide.ui.vod.tvFocusableClickable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
-import kotlinx.coroutines.delay
-
-// Delicate, modern Google TV rail styling without harsh borders
-private val RailBackground = Color(0xFF080A0D)
+import kotlin.math.roundToInt
 
 // Item colors matching CanvasGuideGrid & Android TV Leanback
 private val ItemFocusedBg = Color(0xFFF2F4F7)
 private val ItemFocusedContent = Color(0xFF0A0E14)
-private val ItemSelectedBg = Color(0x1FFFFFFF)
+private val ItemSelectedBg = Color(0x25FFFFFF)
 private val ItemSelectedContent = Color(0xFFF2F4F7)
 private val ItemIdleContent = Color(0xFF8E95A2)
 
@@ -75,26 +79,22 @@ fun AppSideNavRail(
     liveTvFocusRequester: FocusRequester = remember { FocusRequester() },
     vodFocusRequester: FocusRequester = remember { FocusRequester() },
     onNavigateToContent: () -> Unit = {},
-    allowExpansion: Boolean = true,
 ) {
     var liveTvFocused by remember { mutableStateOf(false) }
     var vodFocused by remember { mutableStateOf(false) }
     val hasRailFocus = liveTvFocused || vodFocused
-    var isRailExpanded by remember { mutableStateOf(false) }
+    val isRailExpanded = hasRailFocus
 
-    LaunchedEffect(hasRailFocus, allowExpansion) {
-        val shouldExpand = hasRailFocus && allowExpansion
-        if (shouldExpand) {
-            delay(140)
-        }
-        isRailExpanded = shouldExpand
-    }
-
-    val width by animateDpAsState(
-        targetValue = if (isRailExpanded) 176.dp else 56.dp,
-        animationSpec = tween(180),
-        label = "rail_width",
+    val width = if (isRailExpanded) 176.dp else 56.dp
+    val railCornerRadius = if (isRailExpanded) 16.dp else 0.dp
+    val railShape = RoundedCornerShape(
+        topStart = 0.dp,
+        bottomStart = 0.dp,
+        topEnd = railCornerRadius,
+        bottomEnd = railCornerRadius,
     )
+
+    val railBgColor = if (isRailExpanded) Color(0xF80A0E17) else Color(0xFA080A0D)
 
     // Ensure strictly LTR geometry so expanding from 56dp to 176dp anchors to physical screen left (x=0)
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -102,28 +102,33 @@ fun AppSideNavRail(
             modifier = modifier
                 .fillMaxHeight()
                 .width(width)
-                .zIndex(50f),
+                .zIndex(50f)
+                .then(
+                    if (isRailExpanded) {
+                        Modifier.drawBehind {
+                            val sw = 20.dp.toPx()
+                            drawRect(
+                                brush = Brush.horizontalGradient(
+                                    0.0f to Color.Black.copy(alpha = 0.6f),
+                                    0.4f to Color.Black.copy(alpha = 0.25f),
+                                    1.0f to Color.Transparent,
+                                    startX = size.width,
+                                    endX = size.width + sw,
+                                ),
+                                topLeft = Offset(size.width, 0f),
+                                size = Size(sw, size.height),
+                            )
+                        }
+                    } else Modifier
+                ),
             contentAlignment = Alignment.TopStart,
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth()
-                    .shadow(elevation = 12.dp)
-                    .background(RailBackground)
-                    .drawBehind {
-                        // Delicate soft drop shadow on trailing edge
-                        val shadowWidth = 14.dp.toPx()
-                        drawRect(
-                            brush = Brush.horizontalGradient(
-                                colors = listOf(Color(0x38000000), Color.Transparent),
-                                startX = size.width,
-                                endX = size.width + shadowWidth,
-                            ),
-                            topLeft = Offset(size.width, 0f),
-                            size = Size(shadowWidth, size.height),
-                        )
-                    }
+                    .clip(railShape)
+                    .background(color = railBgColor, shape = railShape)
                     .padding(top = 28.dp, bottom = 20.dp, start = 6.dp, end = 6.dp)
             ) {
                 Column(
@@ -186,6 +191,10 @@ private fun NavRailItem(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
+    LaunchedEffect(isFocused) {
+        onFocusChanged(isFocused)
+    }
+
     val targetBgColor = when {
         isFocused -> ItemFocusedBg
         isSelected -> ItemSelectedBg
@@ -197,8 +206,8 @@ private fun NavRailItem(
         else -> ItemIdleContent
     }
 
-    val bgColor by animateColorAsState(targetBgColor, animationSpec = tween(150), label = "rail_bg")
-    val contentColor by animateColorAsState(targetContentColor, animationSpec = tween(150), label = "rail_fg")
+    val bgColor = targetBgColor
+    val contentColor = targetContentColor
 
     val shape = RoundedCornerShape(8.dp)
 
@@ -207,9 +216,18 @@ private fun NavRailItem(
         modifier = Modifier
             .fillMaxWidth()
             .height(40.dp)
-            .scale(if (isFocused) 1.04f else 1f)
             .clip(shape)
             .background(bgColor)
+            .onPreviewKeyEvent { event ->
+                if (event.key == Key.Back) {
+                    if (event.type == KeyEventType.KeyUp) {
+                        onNavigateRight?.invoke()
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
             .onFocusChanged { onFocusChanged(it.isFocused) }
             .tvFocusableClickable(
                 onClick = onSelect,
@@ -228,11 +246,7 @@ private fun NavRailItem(
             modifier = Modifier.size(19.dp),
         )
 
-        AnimatedVisibility(
-            visible = isRailExpanded,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(100)),
-        ) {
+        if (isRailExpanded) {
             Text(
                 text = label,
                 color = contentColor,

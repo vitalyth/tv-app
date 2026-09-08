@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -36,11 +37,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +53,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -94,6 +98,7 @@ fun VodSeriesDetailsView(
     onClose: () -> Unit,
     onNavigateSideRail: () -> Unit,
     contentFocusNonce: Int = 0,
+    onRegisterFocusRestorer: (((() -> Unit) -> Unit))? = null,
     modifier: Modifier = Modifier,
 ) {
     val episodesListState = rememberLazyListState()
@@ -101,21 +106,22 @@ fun VodSeriesDetailsView(
     val series = details?.series
     val seasons = details?.seasons.orEmpty()
     val episodes = if (details != null && selectedSeason != null && seasons.size > 1) {
-        details.episodes.filter { it.seasonId == selectedSeason.seasonId }
+        val filtered = details.episodes.filter { it.seasonId == selectedSeason.seasonId }
+        if (filtered.isNotEmpty()) filtered else details.episodes
     } else {
         details?.episodes.orEmpty()
     }
 
-    // Pre-associate focus requesters to guarantee they are never null during key navigation
     val seasonFocusRequesters = remember(seasons) {
         seasons.associate { it.seasonId to FocusRequester() }
     }
     val episodeFocusRequesters = remember(episodes) {
         episodes.associate { it.id to FocusRequester() }
     }
-    var focusedEpisodeId by remember { mutableStateOf<String?>(null) }
-    var prevPlayerActive by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+    var selectedSeasonId by remember(series?.id) { mutableStateOf(selectedSeason?.seasonId) }
+    var focusedEpisodeId by remember(series?.id) { mutableStateOf<String?>(null) }
+    var prevPlayerActive by remember { mutableStateOf(false) }
 
     fun safeRequestFocus(primary: FocusRequester?, fallback: FocusRequester? = null) {
         var succeeded = false
@@ -133,36 +139,58 @@ fun VodSeriesDetailsView(
     }
 
     fun rememberedEpisodeId(): String? {
-        val focusedId = focusedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
         val lastPlayedId = lastPlayedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
-        return focusedId ?: lastPlayedId ?: episodes.firstOrNull()?.id
+        val focusedId = focusedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
+        return lastPlayedId ?: focusedId ?: episodes.firstOrNull()?.id
     }
 
     fun requestEpisodeFocus(episodeId: String? = rememberedEpisodeId()) {
         if (episodeId == null || episodes.isEmpty()) return
         val targetIndex = episodes.indexOfFirst { it.id == episodeId }
         if (targetIndex < 0) return
+        val primaryReq = episodeFocusRequesters[episodeId]
+        val fallbackReq = episodes.firstOrNull()?.id?.let { episodeFocusRequesters[it] }
+        try {
+            primaryReq?.requestFocus()
+            return
+        } catch (_: Exception) {}
         coroutineScope.launch {
-            try {
-                episodesListState.animateScrollToItem((targetIndex - 1).coerceAtLeast(0))
-            } catch (_: Exception) {}
-            delay(90)
+            if (targetIndex > 0) {
+                try {
+                    episodesListState.scrollToItem((targetIndex - 1).coerceAtLeast(0))
+                } catch (_: Exception) {}
+            }
+            delay(60)
             safeRequestFocus(
-                primary = episodeFocusRequesters[episodeId],
-                fallback = episodes.firstOrNull()?.id?.let { episodeFocusRequesters[it] } ?: backFocusRequester,
+                primary = primaryReq,
+                fallback = fallbackReq,
             )
         }
+    }
+
+    val latestFocusRestorer by rememberUpdatedState<() -> Unit>({ requestEpisodeFocus() })
+
+    DisposableEffect(Unit) {
+        onRegisterFocusRestorer?.invoke {
+            latestFocusRestorer()
+        }
+        onDispose {}
     }
 
     // When returning from player, restore focus to the episode that was played
     LaunchedEffect(isPlayerActive) {
         if (prevPlayerActive && !isPlayerActive) {
-            val targetId = rememberedEpisodeId()
-            if (targetId != null && episodes.isNotEmpty()) {
-                val targetIndex = episodes.indexOfFirst { it.id == targetId }
-                if (targetIndex >= 0) {
-                    requestEpisodeFocus(targetId)
+            val targetId = lastPlayedEpisodeId ?: rememberedEpisodeId()
+            if (targetId != null) {
+                val targetEpisode = details?.episodes?.firstOrNull { it.id == targetId }
+                if (targetEpisode?.seasonId != null && seasons.size > 1 && selectedSeason?.seasonId != targetEpisode.seasonId) {
+                    seasons.firstOrNull { it.seasonId == targetEpisode.seasonId }?.let { matchingSeason ->
+                        onSeasonSelected(matchingSeason)
+                    }
                 }
+                focusedEpisodeId = targetId
+                delay(80)
+                requestEpisodeFocus(targetId)
             }
         }
         prevPlayerActive = isPlayerActive
@@ -176,8 +204,15 @@ fun VodSeriesDetailsView(
         }
     }
 
+    // Focus update when selected season changes
     LaunchedEffect(selectedSeason?.seasonId) {
-        focusedEpisodeId = episodes.firstOrNull()?.id
+        val targetId = lastPlayedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
+            ?: episodes.firstOrNull()?.id
+        focusedEpisodeId = targetId
+        if (!isPlayerActive && targetId != null) {
+            delay(60)
+            requestEpisodeFocus(targetId)
+        }
     }
 
     LaunchedEffect(contentFocusNonce) {
@@ -191,14 +226,6 @@ fun VodSeriesDetailsView(
             modifier = modifier
                 .fillMaxSize()
                 .background(DetailsBg)
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
-                        onClose()
-                        true
-                    } else {
-                        false
-                    }
-                }
         ) {
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -222,13 +249,24 @@ fun VodSeriesDetailsView(
 
             // Background Backdrop with Gradient Overlay
             if (!series.imageUrl.isNullOrBlank()) {
+                val context = LocalContext.current
+                val backdropRequest = remember(series.imageUrl) {
+                    ImageRequest.Builder(context)
+                        .data(series.imageUrl)
+                        .size(1280, 720)
+                        .crossfade(false)
+                        .build()
+                }
                 AsyncImage(
-                    model = series.imageUrl,
+                    model = backdropRequest,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .scale(1.1f),
+                        .graphicsLayer {
+                            scaleX = 1.05f
+                            scaleY = 1.05f
+                        },
                 )
                 Box(
                     modifier = Modifier
@@ -239,19 +277,6 @@ fun VodSeriesDetailsView(
                                     Color(0xE6080A0C),
                                     Color(0xF5080A0C),
                                     Color(0xFF080A0C),
-                                )
-                            )
-                        )
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(
-                                    Color(0xDD080A0C),
-                                    Color(0xBB080A0C),
-                                    Color(0x66080A0C),
                                 )
                             )
                         )
@@ -274,18 +299,11 @@ fun VodSeriesDetailsView(
                     ) {
                         val backInteractionSource = remember { MutableInteractionSource() }
                         val isBackFocused by backInteractionSource.collectIsFocusedAsState()
-                        val backBg by animateColorAsState(
-                            targetValue = if (isBackFocused) FocusedCardBg else Color(0x26FFFFFF),
-                            label = "back_bg",
-                        )
-                        val backFg by animateColorAsState(
-                            targetValue = if (isBackFocused) FocusedCardContent else Color(0xFFF2F4F7),
-                            label = "back_fg",
-                        )
+                        val backBg = if (isBackFocused) FocusedCardBg else Color(0x26FFFFFF)
+                        val backFg = if (isBackFocused) FocusedCardContent else Color(0xFFF2F4F7)
 
                         Box(
                             modifier = Modifier
-                                .scale(if (isBackFocused) 1.08f else 1.0f)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(backBg)
                                 .tvFocusableClickable(
@@ -434,6 +452,7 @@ fun VodSeriesDetailsView(
                                 EpisodeCard(
                                     episode = episode,
                                     focusRequester = fr,
+                                    isLastPlayed = (episode.id == lastPlayedEpisodeId),
                                     onPlay = { onPlayEpisode(episode, series) },
                                     onFocused = { focusedEpisodeId = episode.id },
                                     onNavigateLeft = if (index == 0) onNavigateSideRail else null,
@@ -471,28 +490,21 @@ private fun SeasonChip(
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
-    val targetBg by animateColorAsState(
-        targetValue = when {
-            isFocused -> FocusedCardBg
-            isSelected -> SelectedFilterBg
-            else -> Color(0x14FFFFFF)
-        },
-        label = "season_bg",
-    )
-    val targetFg by animateColorAsState(
-        targetValue = when {
-            isFocused -> FocusedCardContent
-            isSelected -> Color.White
-            else -> MutedText
-        },
-        label = "season_fg",
-    )
+    val targetBg = when {
+        isFocused -> FocusedCardBg
+        isSelected -> SelectedFilterBg
+        else -> Color(0x14FFFFFF)
+    }
+    val targetFg = when {
+        isFocused -> FocusedCardContent
+        isSelected -> Color.White
+        else -> MutedText
+    }
 
     val shape = RoundedCornerShape(8.dp)
 
     Box(
         modifier = Modifier
-            .scale(if (isFocused) 1.05f else 1f)
             .clip(shape)
             .background(targetBg)
             .tvFocusableClickable(
@@ -518,6 +530,7 @@ private fun EpisodeCard(
     episode: VodEpisode,
     focusRequester: FocusRequester,
     onPlay: () -> Unit,
+    isLastPlayed: Boolean = false,
     onFocused: () -> Unit = {},
     onNavigateLeft: (() -> Unit)? = null,
     onNavigateUp: () -> Unit = {},
@@ -533,9 +546,15 @@ private fun EpisodeCard(
 
     val shape = RoundedCornerShape(8.dp)
 
-    val bg by animateColorAsState(if (isFocused) FocusedCardBg else CardBg, label = "ep_bg")
-    val titleColor by animateColorAsState(if (isFocused) FocusedCardContent else Color.White, label = "ep_title")
-    val descColor by animateColorAsState(if (isFocused) Color(0xFF344054) else MutedText, label = "ep_desc")
+    val bg = if (isFocused) FocusedCardBg else CardBg
+    val titleColor = if (isFocused) FocusedCardContent else Color.White
+    val descColor = if (isFocused) Color(0xFF344054) else MutedText
+
+    val borderModifier = when {
+        isFocused -> Modifier.border(2.5.dp, FocusedCardBg, shape)
+        isLastPlayed -> Modifier.border(2.dp, Color(0xFF10D5D9), shape)
+        else -> Modifier
+    }
 
     val context = LocalContext.current
     val imageRequest = remember(episode.imageUrl) {
@@ -552,7 +571,7 @@ private fun EpisodeCard(
     Column(
         modifier = Modifier
             .width(230.dp)
-            .scale(if (isFocused) 1.04f else 1.0f)
+            .then(borderModifier)
             .clip(shape)
             .background(bg)
             .tvFocusableClickable(

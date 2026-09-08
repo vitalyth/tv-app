@@ -12,6 +12,8 @@ import org.json.JSONObject
 class VodRepository(
     private val apiBaseUrl: String = BuildConfig.PROGRAM_GUIDE_API_BASE_URL.trimEnd('/'),
 ) {
+    private val seriesDetailsCache = LinkedHashMap<String, VodSeriesDetails>(32, 0.75f, true)
+
     fun getProviderLogoUrl(provider: VodProvider): String {
         return apiBaseUrl.removeSuffix("/api") + "/ch/" + provider.logoPath.trimStart('/')
     }
@@ -24,9 +26,9 @@ class VodRepository(
             apiBaseUrl.removeSuffix("/api") + "/" + image.trimStart('/')
         }
 
-        val targetWidth = if (isBackdrop) 1280 else 800
-        val targetHeight = if (isBackdrop) 720 else 450
-        val targetQuality = 85
+        val targetWidth = if (isBackdrop) 1280 else 480
+        val targetHeight = if (isBackdrop) 720 else 270
+        val targetQuality = if (isBackdrop) 85 else 78
 
         try {
             if (fullUrl.contains("images.frp1.ott.kaltura.com")) {
@@ -131,6 +133,11 @@ class VodRepository(
         provider: VodProvider,
         programId: String,
     ): VodSeriesDetails = withContext(Dispatchers.IO) {
+        val cacheKey = "${provider.id}:$programId"
+        synchronized(seriesDetailsCache) {
+            seriesDetailsCache[cacheKey]?.let { return@withContext it }
+        }
+
         val encodedId = URLEncoder.encode(programId, "UTF-8")
         val url = "$apiBaseUrl/${provider.endpoint}/$encodedId"
         val response = getJsonObject(url)
@@ -207,11 +214,21 @@ class VodRepository(
             }
         }
 
-        VodSeriesDetails(
+        val details = VodSeriesDetails(
             series = series,
             seasons = seasonsList,
             episodes = episodesList,
         )
+
+        synchronized(seriesDetailsCache) {
+            seriesDetailsCache[cacheKey] = details
+            if (seriesDetailsCache.size > 32) {
+                val oldest = seriesDetailsCache.keys.firstOrNull()
+                if (oldest != null) seriesDetailsCache.remove(oldest)
+            }
+        }
+
+        details
     }
 
     fun buildPlaybackStreamUrl(rawStreamUrl: String, provider: VodProvider): String {
@@ -222,11 +239,19 @@ class VodRepository(
             return cleanUrl
         }
 
-        val requiresVpn = provider == VodProvider.KAN11 ||
-                provider == VodProvider.RESHET13 ||
-                cleanUrl.contains("cdn-redge") ||
-                cleanUrl.contains("redge.media") ||
-                cleanUrl.contains("kancdn")
+        val kanVpnMode = BuildConfig.KAN_VOD_VPN_MODE.trim().lowercase()
+        val kanVodRequiresVpn = when (kanVpnMode) {
+            "direct", "off", "false", "0", "no" -> false
+            else -> provider == VodProvider.KAN11
+        }
+        val forceKanDirect = provider == VodProvider.KAN11 && kanVpnMode in setOf("direct", "off", "false", "0", "no")
+        val requiresVpn = !forceKanDirect && (
+                kanVodRequiresVpn ||
+                        provider == VodProvider.RESHET13 ||
+                        cleanUrl.contains("cdn-redge") ||
+                        cleanUrl.contains("redge.media") ||
+                        cleanUrl.contains("kancdn")
+                )
 
         val referer = when (provider) {
             VodProvider.KAN11 -> "https://www.kan.org.il/"
@@ -237,7 +262,11 @@ class VodRepository(
         }
 
         val proxyEndpoint = if (requiresVpn) "/v/proxy" else "/proxy"
-        val vpnParam = if (requiresVpn) "&vpn=true" else ""
+        val vpnParam = when {
+            requiresVpn -> "&vpn=true"
+            forceKanDirect -> "&vpn=false"
+            else -> ""
+        }
         val encodedUrl = URLEncoder.encode(cleanUrl, "UTF-8")
         val encodedReferer = URLEncoder.encode(referer, "UTF-8")
 
@@ -352,4 +381,3 @@ class VodRepository(
         }
     }
 }
-

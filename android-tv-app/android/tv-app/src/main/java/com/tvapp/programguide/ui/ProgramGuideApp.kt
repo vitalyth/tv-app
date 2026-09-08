@@ -335,40 +335,44 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val vodViewModel: VodViewModel = viewModel()
     val vodUiState by vodViewModel.uiState.collectAsStateWithLifecycle()
     val isVodPlaying = currentDestination == AppDestination.VOD && vodUiState.playingEpisode != null
-    val isInitialLoading = currentDestination == AppDestination.LIVE_TV && (guideState.loading || guideState.guideData == null) && guideState.error == null
+    val isInitialLoading = currentDestination == AppDestination.LIVE_TV && guideState.guideData == null && guideState.error == null
     val sideRailLiveTvFocusRequester = remember { FocusRequester() }
     val sideRailVodFocusRequester = remember { FocusRequester() }
     val mainGridFocusRequester = remember { FocusRequester() }
     val vodContentFocusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     var vodContentFocusNonce by remember { mutableIntStateOf(0) }
-    var sideRailExpansionAllowed by remember { mutableStateOf(false) }
+    var vodFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     fun requestVodContentFocus() {
-        vodContentFocusNonce += 1
-        try {
-            vodContentFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+        val restorer = vodFocusRestorer
+        if (restorer != null) {
+            restorer()
+        } else {
+            vodContentFocusNonce += 1
+            try {
+                vodContentFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
     }
 
     BackHandler(
         enabled = currentDestination == AppDestination.LIVE_TV && !playbackState.isPlayerExpanded && !detailsVisible && !isInitialLoading
     ) {
-        sideRailExpansionAllowed = true
         sideRailLiveTvFocusRequester.requestFocus()
     }
 
     LaunchedEffect(currentDestination) {
         if (currentDestination == AppDestination.VOD) {
             player.pause()
-            delay(120)
+            delay(40)
             requestVodContentFocus()
         } else if (currentDestination == AppDestination.LIVE_TV) {
             if (streamingActive && !player.isPlaying) {
                 player.play()
             }
             if (!isInitialLoading) {
-                delay(120)
+                delay(40)
                 try {
                     mainGridFocusRequester.requestFocus()
                 } catch (_: Exception) {}
@@ -606,43 +610,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     MaterialTheme {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Box(Modifier.fillMaxSize().background(ScreenBackground)) {
-                Row(Modifier.fillMaxSize()) {
-                    if (!playbackState.isPlayerExpanded && !isVodPlaying && !isInitialLoading) {
-                        AppSideNavRail(
-                        currentDestination = currentDestination,
-                        onDestinationSelected = { destination ->
-                            sideRailExpansionAllowed = false
-                            currentDestination = destination
-                            coroutineScope.launch {
-                                delay(120)
-                                if (destination == AppDestination.VOD) {
-                                    requestVodContentFocus()
-                                } else {
-                                    try {
-                                        mainGridFocusRequester.requestFocus()
-                                    } catch (_: Exception) {}
-                                }
-                            }
-                        },
-                        liveTvFocusRequester = sideRailLiveTvFocusRequester,
-                        vodFocusRequester = sideRailVodFocusRequester,
-                        allowExpansion = sideRailExpansionAllowed,
-                        onNavigateToContent = {
-                            sideRailExpansionAllowed = false
-                            coroutineScope.launch {
-                                if (currentDestination == AppDestination.VOD) {
-                                    requestVodContentFocus()
-                                } else {
-                                    try {
-                                        mainGridFocusRequester.requestFocus()
-                                    } catch (_: Exception) {}
-                                }
-                            }
-                        },
-                    )
-                }
+                val showNavRail = !playbackState.isPlayerExpanded && !isVodPlaying && !isInitialLoading
+                val contentStartPadding = if (showNavRail) 56.dp else 0.dp
 
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = contentStartPadding),
+                ) {
                     when (currentDestination) {
                         AppDestination.LIVE_TV -> {
                             when {
@@ -669,7 +644,6 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                         requestGridFocus(channel, program, live)
                                     },
                                     onNavigateSideRail = {
-                                        sideRailExpansionAllowed = true
                                         sideRailLiveTvFocusRequester.requestFocus()
                                     },
                                     externalGridFocusRequester = mainGridFocusRequester,
@@ -702,18 +676,50 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                             VodScreen(
                                 viewModel = vodViewModel,
                                 onNavigateSideRail = {
-                                    sideRailExpansionAllowed = true
                                     sideRailVodFocusRequester.requestFocus()
                                 },
                                 initialFocusRequester = vodContentFocusRequester,
                                 contentFocusNonce = vodContentFocusNonce,
                                 player = stablePlayer,
                                 playerView = stablePlayerView,
+                                onRegisterFocusRestorer = { restorer ->
+                                    vodFocusRestorer = restorer
+                                },
                             )
                         }
                     }
                 }
-            }
+
+                if (showNavRail) {
+                    AppSideNavRail(
+                        currentDestination = currentDestination,
+                        onDestinationSelected = { destination ->
+                            currentDestination = destination
+                            coroutineScope.launch {
+                                delay(40)
+                                if (destination == AppDestination.VOD) {
+                                    requestVodContentFocus()
+                                } else {
+                                    try {
+                                        mainGridFocusRequester.requestFocus()
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        },
+                        liveTvFocusRequester = sideRailLiveTvFocusRequester,
+                        vodFocusRequester = sideRailVodFocusRequester,
+                        onNavigateToContent = {
+                            if (currentDestination == AppDestination.VOD) {
+                                requestVodContentFocus()
+                            } else {
+                                try {
+                                    mainGridFocusRequester.requestFocus()
+                                } catch (_: Exception) {}
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.TopStart),
+                    )
+                }
 
             if (playbackState.isPlayerExpanded) {
                 ExpandedPlayer(

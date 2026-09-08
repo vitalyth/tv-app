@@ -182,6 +182,8 @@ fun VodPlayerOverlay(
         TvKeyEventBridge.setHandler { event ->
             if (event.action == AndroidKeyEvent.ACTION_DOWN) {
                 handleKey(event.keyCode)
+            } else if (event.action == AndroidKeyEvent.ACTION_UP && event.keyCode == AndroidKeyEvent.KEYCODE_BACK) {
+                true
             } else {
                 false
             }

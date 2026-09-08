@@ -11,6 +11,7 @@ import com.tvapp.programguide.data.VodSeries
 import com.tvapp.programguide.data.VodSeriesDetails
 import java.net.URLEncoder
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +20,7 @@ import kotlinx.coroutines.launch
 
 import com.tvapp.programguide.data.VodNavLevel
 import com.tvapp.programguide.data.VodRecentItem
+import com.tvapp.programguide.data.VodSeriesPage
 
 data class VodUiState(
     val navLevel: VodNavLevel = VodNavLevel.CHANNELS_HUB,
@@ -60,6 +62,7 @@ class VodViewModel(
     private var loadSeriesJob: Job? = null
     private var loadDetailsJob: Job? = null
     private var loadRecentJob: Job? = null
+    private val seriesPageCache = LinkedHashMap<String, VodSeriesPage>(16, 0.75f, true)
 
     init {
         loadRecent()
@@ -110,6 +113,29 @@ class VodViewModel(
 
     fun selectProvider(provider: VodProvider) {
         if (_uiState.value.selectedProvider == provider && _uiState.value.seriesList.isNotEmpty()) return
+
+        val cachedPage = getCachedSeriesPage(provider = provider, category = null, query = "")
+        if (cachedPage != null) {
+            loadSeriesJob?.cancel()
+            _uiState.update {
+                it.copy(
+                    selectedProvider = provider,
+                    selectedCategory = null,
+                    searchQuery = "",
+                    selectedSeriesDetails = null,
+                    selectedSeason = null,
+                    seriesList = cachedPage.series,
+                    categories = cachedPage.categories,
+                    hasMoreSeries = cachedPage.hasMore,
+                    isLoadingSeries = false,
+                    isLoadingMoreSeries = false,
+                    totalSeries = cachedPage.total,
+                    seriesError = null,
+                )
+            }
+            return
+        }
+
         _uiState.update {
             it.copy(
                 selectedProvider = provider,
@@ -118,23 +144,30 @@ class VodViewModel(
                 selectedSeriesDetails = null,
                 selectedSeason = null,
                 seriesList = emptyList(),
+                categories = emptyList(),
                 hasMoreSeries = true,
+                isLoadingSeries = true,
                 isLoadingMoreSeries = false,
                 totalSeries = 0,
+                seriesError = null,
             )
         }
-        loadInitialSeries(provider = provider)
+        loadInitialSeries(provider = provider, category = null, query = "")
     }
 
     fun selectCategory(category: String?) {
         val next = if (category == "הכל" || category == _uiState.value.selectedCategory) null else category
+        if (next == _uiState.value.selectedCategory && _uiState.value.seriesList.isNotEmpty()) return
+
         _uiState.update {
             it.copy(
                 selectedCategory = next,
                 seriesList = emptyList(),
                 hasMoreSeries = true,
+                isLoadingSeries = true,
                 isLoadingMoreSeries = false,
                 totalSeries = 0,
+                seriesError = null,
             )
         }
         loadInitialSeries(
@@ -168,6 +201,24 @@ class VodViewModel(
     ) {
         loadSeriesJob?.cancel()
         loadSeriesJob = viewModelScope.launch {
+            getCachedSeriesPage(provider, category, query)?.let { cachedPage ->
+                _uiState.update {
+                    it.copy(
+                        selectedProvider = provider,
+                        selectedCategory = category,
+                        searchQuery = query,
+                        seriesList = cachedPage.series,
+                        categories = if (cachedPage.categories.isNotEmpty()) cachedPage.categories else it.categories,
+                        hasMoreSeries = cachedPage.hasMore,
+                        totalSeries = cachedPage.total,
+                        isLoadingSeries = false,
+                        isLoadingMoreSeries = false,
+                        seriesError = null,
+                    )
+                }
+                return@launch
+            }
+
             _uiState.update { it.copy(isLoadingSeries = true, seriesError = null) }
             runCatching {
                 repository.loadSeries(
@@ -178,6 +229,7 @@ class VodViewModel(
                     offset = 0,
                 )
             }.onSuccess { page ->
+                putCachedSeriesPage(provider, category, query, page)
                 _uiState.update {
                     it.copy(
                         seriesList = page.series,
@@ -189,6 +241,7 @@ class VodViewModel(
                     )
                 }
             }.onFailure { error ->
+                if (error is CancellationException) return@launch
                 _uiState.update {
                     it.copy(
                         isLoadingSeries = false,
@@ -218,8 +271,11 @@ class VodViewModel(
                 _uiState.update { current ->
                     val existingIds = current.seriesList.map { it.id }.toSet()
                     val newSeries = page.series.filter { it.id !in existingIds }
+                    val nextSeries = current.seriesList + newSeries
+                    val nextPage = page.copy(series = nextSeries)
+                    putCachedSeriesPage(state.selectedProvider, state.selectedCategory, state.searchQuery, nextPage)
                     current.copy(
-                        seriesList = current.seriesList + newSeries,
+                        seriesList = nextSeries,
                         hasMoreSeries = page.hasMore && page.series.isNotEmpty(),
                         totalSeries = page.total,
                         isLoadingMoreSeries = false,
@@ -232,7 +288,22 @@ class VodViewModel(
     }
 
     companion object {
-        private const val PAGE_SIZE = 40
+        private const val PAGE_SIZE = 30
+        private const val SERIES_CACHE_MAX_ENTRIES = 16
+    }
+
+    private fun seriesCacheKey(provider: VodProvider, category: String?, query: String): String =
+        "${provider.id}|${category.orEmpty()}|${query.trim()}"
+
+    private fun getCachedSeriesPage(provider: VodProvider, category: String?, query: String): VodSeriesPage? =
+        seriesPageCache[seriesCacheKey(provider, category, query)]
+
+    private fun putCachedSeriesPage(provider: VodProvider, category: String?, query: String, page: VodSeriesPage) {
+        seriesPageCache[seriesCacheKey(provider, category, query)] = page
+        if (seriesPageCache.size > SERIES_CACHE_MAX_ENTRIES) {
+            val oldest = seriesPageCache.keys.firstOrNull()
+            if (oldest != null) seriesPageCache.remove(oldest)
+        }
     }
 
     fun openSeriesDetails(series: VodSeries) {
