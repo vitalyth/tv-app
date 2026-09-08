@@ -168,6 +168,19 @@ fun VodSeriesDetailsView(
         }
     }
 
+    fun requestDetailsBodyFocus() {
+        if (seasons.size > 1) {
+            val targetSeason = selectedSeason ?: seasons.firstOrNull()
+            val targetFr = targetSeason?.let { seasonFocusRequesters[it.seasonId] }
+            safeRequestFocus(
+                primary = targetFr,
+                fallback = rememberedEpisodeId()?.let { episodeFocusRequesters[it] },
+            )
+        } else {
+            requestEpisodeFocus()
+        }
+    }
+
     val latestFocusRestorer by rememberUpdatedState<() -> Unit>({ requestEpisodeFocus() })
 
     DisposableEffect(Unit) {
@@ -306,29 +319,17 @@ fun VodSeriesDetailsView(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(backBg)
-                                .tvFocusableClickable(
-                                    onClick = onClose,
-                                    interactionSource = backInteractionSource,
-                                    focusRequester = backFocusRequester,
-                                    onNavigateDown = {
-                                        if (seasons.size > 1) {
-                                            val targetSeason = selectedSeason ?: seasons.firstOrNull()
-                                            val targetFr = targetSeason?.let { seasonFocusRequesters[it.seasonId] }
-                                            safeRequestFocus(
-                                                primary = targetFr,
-                                                fallback = rememberedEpisodeId()?.let { episodeFocusRequesters[it] },
-                                            )
-                                        } else {
-                                            requestEpisodeFocus()
-                                        }
-                                    },
-                                    onNavigateUp = {
-                                        // Keep focus on Back button, trap focus inside modal
-                                    },
-                                    onNavigateLeft = {
-                                        // Trap focus, prevent accidentally jumping to side nav rail
-                                    },
-                                )
+	                                .tvFocusableClickable(
+	                                    onClick = onClose,
+	                                    interactionSource = backInteractionSource,
+	                                    focusRequester = backFocusRequester,
+	                                    onNavigateDown = { requestDetailsBodyFocus() },
+	                                    onNavigateUp = {
+	                                        safeRequestFocus(backFocusRequester)
+	                                    },
+	                                    onNavigateLeft = onNavigateSideRail,
+	                                    onNavigateRight = { requestDetailsBodyFocus() },
+	                                )
                                 .padding(horizontal = 18.dp, vertical = 9.dp),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -411,16 +412,17 @@ fun VodSeriesDetailsView(
                             items(seasons, key = { it.seasonId }) { season ->
                                 val isSelected = season.seasonId == selectedSeason?.seasonId
                                 val fr = seasonFocusRequesters[season.seasonId] ?: remember { FocusRequester() }
-                                SeasonChip(
-                                    season = season,
-                                    isSelected = isSelected,
-                                    focusRequester = fr,
-                                    onClick = { onSeasonSelected(season) },
-                                    onNavigateUp = { safeRequestFocus(backFocusRequester) },
-                                    onNavigateDown = {
-                                        requestEpisodeFocus()
-                                    },
-                                )
+	                                SeasonChip(
+	                                    season = season,
+	                                    isSelected = isSelected,
+	                                    focusRequester = fr,
+	                                    onClick = { onSeasonSelected(season) },
+	                                    onNavigateUp = { safeRequestFocus(backFocusRequester) },
+	                                    onNavigateDown = {
+	                                        requestEpisodeFocus()
+	                                    },
+	                                    onNavigateLeft = if (season == seasons.firstOrNull()) onNavigateSideRail else null,
+	                                )
                             }
                         }
                     }
@@ -486,6 +488,7 @@ private fun SeasonChip(
     onClick: () -> Unit,
     onNavigateUp: () -> Unit,
     onNavigateDown: () -> Unit,
+    onNavigateLeft: (() -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -513,6 +516,7 @@ private fun SeasonChip(
                 focusRequester = focusRequester,
                 onNavigateUp = onNavigateUp,
                 onNavigateDown = onNavigateDown,
+                onNavigateLeft = onNavigateLeft,
             )
             .padding(horizontal = 14.dp, vertical = 7.dp),
     ) {

@@ -95,6 +95,7 @@ enum class VodFocusZone {
 }
 
 private class FocusKeyRef(var key: String? = null)
+private class ProviderFocusRef(var provider: VodProvider)
 
 private val SeriesCardShape = RoundedCornerShape(8.dp)
 private val FocusedSeriesBorderModifier = Modifier.border(3.dp, FocusedCardBg, SeriesCardShape)
@@ -120,7 +121,7 @@ fun VodScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isCatalogActive = uiState.selectedSeriesDetails == null && !uiState.isLoadingDetails && uiState.playingEpisode == null
-    var lastFocusedProvider by remember { mutableStateOf(uiState.selectedProvider) }
+    val lastFocusedProviderRef = remember { ProviderFocusRef(uiState.selectedProvider) }
     val lastFocusedSeriesRef = remember { FocusKeyRef() }
     var suppressDetailsBackCloseUntil by remember { mutableLongStateOf(0L) }
     var catalogFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -146,7 +147,7 @@ fun VodScreen(
     }
 
     LaunchedEffect(Unit) {
-        lastFocusedProvider = uiState.selectedProvider
+        lastFocusedProviderRef.provider = uiState.selectedProvider
         lastFocusedSeriesRef.key = null
         if (uiState.seriesList.isEmpty() && !uiState.isLoadingSeries) {
             viewModel.loadInitialSeries(uiState.selectedProvider)
@@ -178,12 +179,12 @@ fun VodScreen(
                 onNavigateSideRail = onNavigateSideRail,
                 initialFocusRequester = initialFocusRequester,
                 contentFocusNonce = contentFocusNonce,
-                focusedProvider = lastFocusedProvider,
+                lastFocusedProviderRef = lastFocusedProviderRef,
                 lastFocusedSeriesRef = lastFocusedSeriesRef,
                 modifier = Modifier.focusProperties { canFocus = isCatalogActive },
                 onProviderFocused = { provider ->
-                    if (isCatalogActive && lastFocusedProvider != provider) {
-                        lastFocusedProvider = provider
+                    if (isCatalogActive && lastFocusedProviderRef.provider != provider) {
+                        lastFocusedProviderRef.provider = provider
                         lastFocusedSeriesRef.key = null
                     }
                 },
@@ -244,7 +245,7 @@ private fun UnifiedVodCatalogView(
     onNavigateSideRail: () -> Unit,
     initialFocusRequester: FocusRequester,
     contentFocusNonce: Int,
-    focusedProvider: VodProvider,
+    lastFocusedProviderRef: ProviderFocusRef,
     lastFocusedSeriesRef: FocusKeyRef,
     modifier: Modifier = Modifier,
     onProviderFocused: (VodProvider) -> Unit,
@@ -281,7 +282,8 @@ private fun UnifiedVodCatalogView(
                     seriesFirstItemFocusRequester.requestFocus()
                     return
                 } catch (_: Exception) {}
-                val fallbackReq = if (focusedProvider == providers.first()) initialFocusRequester else providerFocusRequesters[focusedProvider]
+                val provider = lastFocusedProviderRef.provider
+                val fallbackReq = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
                 try { fallbackReq?.requestFocus() } catch (_: Exception) {}
             }
             VodFocusZone.CATEGORY -> {
@@ -289,11 +291,13 @@ private fun UnifiedVodCatalogView(
                     allCategoryFocusRequester.requestFocus()
                     return
                 } catch (_: Exception) {}
-                val fallbackReq = if (focusedProvider == providers.first()) initialFocusRequester else providerFocusRequesters[focusedProvider]
+                val provider = lastFocusedProviderRef.provider
+                val fallbackReq = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
                 try { fallbackReq?.requestFocus() } catch (_: Exception) {}
             }
             VodFocusZone.PROVIDER -> {
-                val req = if (focusedProvider == providers.first()) initialFocusRequester else providerFocusRequesters[focusedProvider]
+                val provider = lastFocusedProviderRef.provider
+                val req = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
                 try { req?.requestFocus() } catch (_: Exception) {}
             }
         }
@@ -347,7 +351,7 @@ private fun UnifiedVodCatalogView(
         }
     }
 
-    fun requestProviderFocus(provider: VodProvider = focusedProvider) {
+    fun requestProviderFocus(provider: VodProvider = lastFocusedProviderRef.provider) {
         val requester = if (provider == providers.first()) {
             initialFocusRequester
         } else {
