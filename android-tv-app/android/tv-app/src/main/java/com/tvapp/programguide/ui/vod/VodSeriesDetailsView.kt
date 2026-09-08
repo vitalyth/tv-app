@@ -278,7 +278,7 @@ fun VodSeriesDetailsView(
                         .graphicsLayer {
                             scaleX = 1.05f
                             scaleY = 1.05f
-                            alpha = 0.34f
+                            alpha = 0.72f
                         },
                 )
                 Box(
@@ -287,8 +287,8 @@ fun VodSeriesDetailsView(
                         .background(
                             Brush.verticalGradient(
                                 listOf(
-                                    Color(0xE6080A0C),
-                                    Color(0xF5080A0C),
+                                    Color(0xB3080A0C),
+                                    Color(0xD9080A0C),
                                     Color(0xFF080A0C),
                                 )
                             )
