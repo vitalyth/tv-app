@@ -71,12 +71,13 @@ fun AppSideNavRail(
     localSeriesFocusRequester: FocusRequester = remember { FocusRequester() },
     onNavigateToContent: () -> Unit = {},
     onExpandedChanged: (Boolean) -> Unit = {},
+    forceCollapsed: Boolean = false,
 ) {
     var liveTvFocused by remember { mutableStateOf(false) }
     var vodFocused by remember { mutableStateOf(false) }
     var localSeriesFocused by remember { mutableStateOf(false) }
     val hasRailFocus = liveTvFocused || vodFocused || localSeriesFocused
-    val isRailExpanded = hasRailFocus
+    val isRailExpanded = hasRailFocus && !forceCollapsed
 
     LaunchedEffect(isRailExpanded) {
         onExpandedChanged(isRailExpanded)

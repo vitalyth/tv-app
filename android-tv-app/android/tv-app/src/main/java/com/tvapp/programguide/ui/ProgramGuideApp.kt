@@ -361,6 +361,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     var localSeriesContentFocusNonce by remember { mutableIntStateOf(0) }
     var vodFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var localSeriesFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var sideNavForceCollapsed by remember { mutableStateOf(false) }
 
     fun requestVodContentFocus() {
         val restorer = vodFocusRestorer
@@ -389,6 +390,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     BackHandler(
         enabled = currentDestination == AppDestination.LIVE_TV && !playbackState.isPlayerExpanded && !detailsVisible && !isInitialLoading
     ) {
+        sideNavForceCollapsed = false
         sideRailLiveTvFocusRequester.requestFocus()
     }
 
@@ -724,6 +726,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                         requestGridFocus(channel, program, live)
                                     },
                                     onNavigateSideRail = {
+                                        sideNavForceCollapsed = false
                                         sideRailLiveTvFocusRequester.requestFocus()
                                     },
                                     externalGridFocusRequester = mainGridFocusRequester,
@@ -756,6 +759,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                             VodScreen(
                                 viewModel = vodViewModel,
                                 onNavigateSideRail = {
+                                    sideNavForceCollapsed = false
                                     sideRailVodFocusRequester.requestFocus()
                                 },
                                 initialFocusRequester = vodContentFocusRequester,
@@ -771,6 +775,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                             LocalSeriesScreen(
                                 viewModel = localSeriesViewModel,
                                 onNavigateSideRail = {
+                                    sideNavForceCollapsed = false
                                     sideRailLocalSeriesFocusRequester.requestFocus()
                                 },
                                 initialFocusRequester = localSeriesContentFocusRequester,
@@ -829,6 +834,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                     AppSideNavRail(
                         currentDestination = currentDestination,
                         onDestinationSelected = { destination ->
+                            sideNavForceCollapsed = true
                             navRailExpanded = false
                             focusManager.clearFocus(force = true)
                             currentDestination = destination
@@ -848,10 +854,13 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         liveTvFocusRequester = sideRailLiveTvFocusRequester,
                         vodFocusRequester = sideRailVodFocusRequester,
                         localSeriesFocusRequester = sideRailLocalSeriesFocusRequester,
+                        forceCollapsed = sideNavForceCollapsed,
                         onExpandedChanged = { expanded ->
                             navRailExpanded = expanded
                         },
                         onNavigateToContent = {
+                            sideNavForceCollapsed = true
+                            navRailExpanded = false
                             if (currentDestination == AppDestination.VOD) {
                                 requestVodContentFocus()
                             } else if (currentDestination == AppDestination.LOCAL_SERIES) {
