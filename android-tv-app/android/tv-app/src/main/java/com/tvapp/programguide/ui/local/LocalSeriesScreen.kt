@@ -388,6 +388,7 @@ private fun LocalSeriesDetails(
     val seasonNumbers = remember(series.id, episodes) {
         episodes.map { it.season ?: 1 }.distinct().sorted()
     }
+    val showSeasonTabs = seasonNumbers.isNotEmpty()
     var selectedSeason by remember(series.id) { mutableStateOf(seasonNumbers.firstOrNull() ?: 1) }
     val seasonFocusRequester = remember(series.id) { FocusRequester() }
     val detailsCoroutineScope = rememberCoroutineScope()
@@ -518,7 +519,7 @@ private fun LocalSeriesDetails(
             }
 
             Column {
-                if (seasonNumbers.size > 1) {
+                if (showSeasonTabs) {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(start = 12.dp, end = 32.dp),
@@ -566,7 +567,7 @@ private fun LocalSeriesDetails(
                             onPlay = { onPlayEpisode(episode) },
                             onNavigateLeft = if (index == 0) onNavigateSideRail else null,
                             onNavigateUp = {
-                                if (seasonNumbers.size > 1) {
+                                if (showSeasonTabs) {
                                     seasonFocusRequester.requestFocus()
                                 } else {
                                     backFocusRequester.requestFocus()
