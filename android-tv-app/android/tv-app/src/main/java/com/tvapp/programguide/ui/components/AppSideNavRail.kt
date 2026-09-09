@@ -27,6 +27,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
@@ -78,11 +79,13 @@ fun AppSideNavRail(
     modifier: Modifier = Modifier,
     liveTvFocusRequester: FocusRequester = remember { FocusRequester() },
     vodFocusRequester: FocusRequester = remember { FocusRequester() },
+    localSeriesFocusRequester: FocusRequester = remember { FocusRequester() },
     onNavigateToContent: () -> Unit = {},
 ) {
     var liveTvFocused by remember { mutableStateOf(false) }
     var vodFocused by remember { mutableStateOf(false) }
-    val hasRailFocus = liveTvFocused || vodFocused
+    var localSeriesFocused by remember { mutableStateOf(false) }
+    val hasRailFocus = liveTvFocused || vodFocused || localSeriesFocused
     val isRailExpanded = hasRailFocus
 
     val width = if (isRailExpanded) 176.dp else 56.dp
@@ -164,8 +167,22 @@ fun AppSideNavRail(
                             onSelect = { onDestinationSelected(AppDestination.VOD) },
                             onFocusChanged = { vodFocused = it },
                             onNavigateRight = onNavigateToContent,
-                            onNavigateDown = null,
+                            onNavigateDown = { localSeriesFocusRequester.requestFocus() },
                             onNavigateUp = { liveTvFocusRequester.requestFocus() },
+                        )
+
+                        NavRailItem(
+                            destination = AppDestination.LOCAL_SERIES,
+                            icon = Icons.Default.CollectionsBookmark,
+                            label = "סדרות",
+                            isSelected = currentDestination == AppDestination.LOCAL_SERIES,
+                            isRailExpanded = isRailExpanded,
+                            focusRequester = localSeriesFocusRequester,
+                            onSelect = { onDestinationSelected(AppDestination.LOCAL_SERIES) },
+                            onFocusChanged = { localSeriesFocused = it },
+                            onNavigateRight = onNavigateToContent,
+                            onNavigateDown = null,
+                            onNavigateUp = { vodFocusRequester.requestFocus() },
                         )
                     }
                 }

@@ -122,6 +122,7 @@ enum class AppDestination(
 ) {
     LIVE_TV("שידור חי"),
     VOD("ספריית VOD"),
+    LOCAL_SERIES("סדרות"),
 }
 
 enum class VodWatchStatus {
@@ -152,4 +153,3 @@ data class VodPlaybackProgress(
             else -> VodWatchStatus.NOT_WATCHED
         }
 }
-

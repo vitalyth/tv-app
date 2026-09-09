@@ -136,6 +136,7 @@ import coil.request.SuccessResult
 import com.tvapp.programguide.R
 import com.tvapp.programguide.data.AppDestination
 import com.tvapp.programguide.ui.components.AppSideNavRail
+import com.tvapp.programguide.ui.local.LocalSeriesScreen
 import com.tvapp.programguide.ui.vod.VodScreen
 import com.tvapp.programguide.data.GuideData
 import com.tvapp.programguide.data.TvChannel
@@ -334,15 +335,22 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     var currentDestination by remember { mutableStateOf(AppDestination.LIVE_TV) }
     val vodViewModel: VodViewModel = viewModel()
     val vodUiState by vodViewModel.uiState.collectAsStateWithLifecycle()
+    val localSeriesViewModel: LocalSeriesViewModel = viewModel()
+    val localSeriesUiState by localSeriesViewModel.uiState.collectAsStateWithLifecycle()
     val isVodPlaying = currentDestination == AppDestination.VOD && vodUiState.playingEpisode != null
+    val isLocalSeriesPlaying = currentDestination == AppDestination.LOCAL_SERIES && localSeriesUiState.playingEpisode != null
     val isInitialLoading = currentDestination == AppDestination.LIVE_TV && guideState.guideData == null && guideState.error == null
     val sideRailLiveTvFocusRequester = remember { FocusRequester() }
     val sideRailVodFocusRequester = remember { FocusRequester() }
+    val sideRailLocalSeriesFocusRequester = remember { FocusRequester() }
     val mainGridFocusRequester = remember { FocusRequester() }
     val vodContentFocusRequester = remember { FocusRequester() }
+    val localSeriesContentFocusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     var vodContentFocusNonce by remember { mutableIntStateOf(0) }
+    var localSeriesContentFocusNonce by remember { mutableIntStateOf(0) }
     var vodFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var localSeriesFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     fun requestVodContentFocus() {
         val restorer = vodFocusRestorer
@@ -352,6 +360,18 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             vodContentFocusNonce += 1
             try {
                 vodContentFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun requestLocalSeriesContentFocus() {
+        val restorer = localSeriesFocusRestorer
+        if (restorer != null) {
+            restorer()
+        } else {
+            localSeriesContentFocusNonce += 1
+            try {
+                localSeriesContentFocusRequester.requestFocus()
             } catch (_: Exception) {}
         }
     }
@@ -367,6 +387,10 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             player.pause()
             delay(40)
             requestVodContentFocus()
+        } else if (currentDestination == AppDestination.LOCAL_SERIES) {
+            player.pause()
+            delay(40)
+            requestLocalSeriesContentFocus()
         } else if (currentDestination == AppDestination.LIVE_TV) {
             if (streamingActive && !player.isPlaying) {
                 player.play()
@@ -426,6 +450,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             player.stop()
             activeStreamUrl.value = null
             viewModel.stopPlayback()
+            localSeriesViewModel.stopPlayback()
         }
     )
 
@@ -525,7 +550,38 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         playbackState.playingChannel?.streamUrl,
         isVodPlaying,
         vodUiState.playingStreamUrl,
+        isLocalSeriesPlaying,
+        localSeriesUiState.playingEpisode?.streamUrl,
     ) {
+        if (isLocalSeriesPlaying) {
+            val stream = localSeriesUiState.playingEpisode?.streamUrl
+            if (!stream.isNullOrBlank()) {
+                if (activeStreamUrl.value != stream) {
+                    applyPrimaryVideoProfile(PrimaryVideoProfile.Full)
+                    val mediaItem = when {
+                        stream.contains(".m3u8", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(stream)
+                                .setMimeType(MimeTypes.APPLICATION_M3U8)
+                                .build()
+                        }
+                        stream.contains(".mp4", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(stream)
+                                .setMimeType(MimeTypes.APPLICATION_MP4)
+                                .build()
+                        }
+                        else -> MediaItem.fromUri(stream)
+                    }
+                    player.setMediaItem(mediaItem, 0L)
+                    player.prepare()
+                    activeStreamUrl.value = stream
+                }
+                player.play()
+            }
+            return@LaunchedEffect
+        }
+
         if (isVodPlaying) {
             val vodStream = vodUiState.playingStreamUrl
             if (!vodStream.isNullOrBlank()) {
@@ -575,7 +631,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             return@LaunchedEffect
         }
 
-        if (currentDestination == AppDestination.VOD) {
+        if (currentDestination == AppDestination.VOD || currentDestination == AppDestination.LOCAL_SERIES) {
             player.stop()
             activeStreamUrl.value = null
             return@LaunchedEffect
@@ -617,7 +673,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     MaterialTheme {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Box(Modifier.fillMaxSize().background(ScreenBackground)) {
-                val showNavRail = !playbackState.isPlayerExpanded && !isVodPlaying && !isInitialLoading
+                val showNavRail = !playbackState.isPlayerExpanded && !isVodPlaying && !isLocalSeriesPlaying && !isInitialLoading
                 val contentStartPadding = if (showNavRail) 56.dp else 0.dp
 
                 Box(
@@ -694,6 +750,29 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 },
                             )
                         }
+                        AppDestination.LOCAL_SERIES -> {
+                            LocalSeriesScreen(
+                                viewModel = localSeriesViewModel,
+                                onNavigateSideRail = {
+                                    sideRailLocalSeriesFocusRequester.requestFocus()
+                                },
+                                initialFocusRequester = localSeriesContentFocusRequester,
+                                contentFocusNonce = localSeriesContentFocusNonce,
+                                onRegisterFocusRestorer = { restorer ->
+                                    localSeriesFocusRestorer = restorer
+                                },
+                            )
+
+                            if (isLocalSeriesPlaying) {
+                                PlayerSurface(
+                                    player = stablePlayer,
+                                    playerView = stablePlayerView,
+                                    useController = false,
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -706,6 +785,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 delay(40)
                                 if (destination == AppDestination.VOD) {
                                     requestVodContentFocus()
+                                } else if (destination == AppDestination.LOCAL_SERIES) {
+                                    requestLocalSeriesContentFocus()
                                 } else {
                                     try {
                                         mainGridFocusRequester.requestFocus()
@@ -715,9 +796,12 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         },
                         liveTvFocusRequester = sideRailLiveTvFocusRequester,
                         vodFocusRequester = sideRailVodFocusRequester,
+                        localSeriesFocusRequester = sideRailLocalSeriesFocusRequester,
                         onNavigateToContent = {
                             if (currentDestination == AppDestination.VOD) {
                                 requestVodContentFocus()
+                            } else if (currentDestination == AppDestination.LOCAL_SERIES) {
+                                requestLocalSeriesContentFocus()
                             } else {
                                 try {
                                     mainGridFocusRequester.requestFocus()
