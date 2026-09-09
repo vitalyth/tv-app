@@ -657,7 +657,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             return@LaunchedEffect
         }
 
-        val streamUrl = viewModel.streamUrl(channel)
+        val streamSource = viewModel.selectedStreamSource(channel)
+        val streamUrl = streamSource?.url.orEmpty()
         if (streamUrl.isBlank()) {
             player.stop()
             activeStreamUrl.value = null
@@ -671,10 +672,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                     PrimaryVideoProfile.Mini
                 }
             )
-            val mediaItem = MediaItem.Builder()
-                .setUri(streamUrl)
-                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                .build()
+            val mediaItem = liveMediaItem(streamUrl, streamSource?.mimeType)
             player.setMediaItem(mediaItem)
             player.prepare()
             activeStreamUrl.value = streamUrl
@@ -4097,6 +4095,7 @@ private fun MultiPlayerVideoCell(
                 focusedIndexState = focusedIndexState,
                 audioIndexState = audioIndexState,
                 streamUrl = streamUrl,
+                selectedStreamSource = selectedStreamSource,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -4174,6 +4173,7 @@ private fun ExtraChannelPlayerSurface(
     focusedIndexState: State<Int>,
     audioIndexState: State<Int>,
     streamUrl: (TvChannel) -> String,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -4221,14 +4221,10 @@ private fun ExtraChannelPlayerSurface(
     }
 
     LaunchedEffect(channel.id) {
-        val url = streamUrl(channel)
+        val streamSource = selectedStreamSource(channel)
+        val url = streamSource?.url ?: streamUrl(channel)
         if (url.isBlank()) return@LaunchedEffect
-        player.setMediaItem(
-            MediaItem.Builder()
-                .setUri(url)
-                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                .build()
-        )
+        player.setMediaItem(liveMediaItem(url, streamSource?.mimeType))
         player.prepare()
         player.play()
     }
@@ -5023,6 +5019,25 @@ private fun ExpandedPlayerControls(
         showMetadataPanel = showMetadataPanel,
         onInteraction = onInteraction,
     )
+}
+
+private fun liveMediaItem(url: String, mimeType: String?): MediaItem {
+    val lowerMimeType = mimeType?.lowercase().orEmpty()
+    val resolvedMimeType = when {
+        "dash" in lowerMimeType ||
+            "mpd" in lowerMimeType ||
+            url.contains(".mpd", ignoreCase = true) ||
+            url.contains("/livedash/", ignoreCase = true) ||
+            url.contains(".livx", ignoreCase = true) -> MimeTypes.APPLICATION_MPD
+        "hls" in lowerMimeType ||
+            "mpegurl" in lowerMimeType ||
+            url.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+        else -> MimeTypes.APPLICATION_M3U8
+    }
+    return MediaItem.Builder()
+        .setUri(url)
+        .setMimeType(resolvedMimeType)
+        .build()
 }
 
 @Composable

@@ -297,7 +297,7 @@ class GuideViewModel(
     fun streamSources(channel: TvChannel): List<TvStreamSource> =
         channel.streamSources.ifEmpty {
             channel.streamUrl.takeIf { it.isNotBlank() }?.let { url ->
-                listOf(TvStreamSource(url = url, label = channel.name.ifBlank { "מקור 1" }))
+                listOf(TvStreamSource(url = url, label = channel.name.ifBlank { "מקור 1" }, mimeType = url.inferStreamMimeType()))
             }.orEmpty()
         }
 
@@ -429,6 +429,15 @@ class GuideViewModel(
 
     private fun streamSourcePrefKey(channelId: String): String =
         "$KEY_STREAM_SOURCE_PREFIX$channelId"
+
+    private fun String.inferStreamMimeType(): String? {
+        val lower = lowercase()
+        return when {
+            ".m3u8" in lower -> "application/vnd.apple.mpegurl"
+            ".mpd" in lower || "/livedash/" in lower || ".livx" in lower -> "application/dash+xml"
+            else -> null
+        }
+    }
 
     private data class GuideRange(
         val startSeconds: Long,

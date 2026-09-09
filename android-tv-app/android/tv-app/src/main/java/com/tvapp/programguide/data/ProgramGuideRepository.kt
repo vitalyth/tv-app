@@ -50,6 +50,15 @@ class ProgramGuideRepository(
         array: JSONArray,
         playlistStreams: Map<String, List<PlaylistStream>>,
     ): List<TvChannel> {
+        val mimeTypesByChannelId = buildMap {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val id = item.optString("channelID", item.optString("id")).trim()
+                if (id.isNotEmpty()) {
+                    item.streamMimeType()?.let { put(id, it) }
+                }
+            }
+        }
         return buildList {
             for (index in 0 until array.length()) {
                 val item = array.optJSONObject(index) ?: continue
@@ -85,6 +94,7 @@ class ProgramGuideRepository(
                                 id = stream.url,
                                 label = stream.label.ifBlank { "מקור ${sourceIndex + 1}" },
                                 url = stream.url,
+                                mimeType = stream.channelId?.let { mimeTypesByChannelId[it] } ?: stream.mimeType,
                             )
                         },
                     )
@@ -104,6 +114,8 @@ class ProgramGuideRepository(
     private data class PlaylistStream(
         val url: String,
         val label: String,
+        val channelId: String?,
+        val mimeType: String?,
     )
 
     private fun parsePlaylistStreams(content: String): Map<String, List<PlaylistStream>> {
@@ -124,7 +136,12 @@ class ProgramGuideRepository(
             }
 
             if (!line.startsWith("#") && currentKeys.isNotEmpty()) {
-                val stream = PlaylistStream(url = line, label = currentLabel)
+                val stream = PlaylistStream(
+                    url = line,
+                    label = currentLabel,
+                    channelId = line.queryValue("channel_id"),
+                    mimeType = line.streamMimeTypeFromUrl(),
+                )
                 currentKeys.forEach { key ->
                     val keyStreams = streams.getOrPut(key) { mutableListOf() }
                     if (keyStreams.none { it.url == line }) {
@@ -144,6 +161,36 @@ class ProgramGuideRepository(
         val start = line.indexOf(marker)
         if (start < 0) return ""
         return line.substring(start + marker.length).substringBefore('"').trim()
+    }
+
+    private fun JSONObject.streamMimeType(): String? {
+        val linkDetails = optJSONObject("linkDetails")
+        val link = linkDetails?.optCleanString("link").orEmpty()
+        val live = linkDetails?.optCleanString("live").orEmpty()
+        val streamUrl = optCleanString("streamUrl")
+        val url = link.ifBlank { live }.ifBlank { streamUrl }
+        if (linkDetails?.optBoolean("adaptive", false) == true) return MIME_TYPE_DASH
+        return url.streamMimeTypeFromUrl()
+    }
+
+    private fun String.streamMimeTypeFromUrl(): String? {
+        val lowercase = lowercase()
+        return when {
+            ".m3u8" in lowercase || "mpegurl" in lowercase -> MIME_TYPE_HLS
+            ".mpd" in lowercase || "/livedash/" in lowercase || ".livx" in lowercase -> MIME_TYPE_DASH
+            else -> null
+        }
+    }
+
+    private fun String.queryValue(name: String): String? {
+        val query = substringAfter('?', missingDelimiterValue = "")
+        if (query.isBlank()) return null
+        return query.split('&')
+            .firstNotNullOfOrNull { part ->
+                val key = part.substringBefore('=', "")
+                val value = part.substringAfter('=', "")
+                value.takeIf { key == name && it.isNotBlank() }
+            }
     }
 
     private fun parsePrograms(array: JSONArray?, channelId: String): List<TvProgram> {
@@ -224,5 +271,7 @@ class ProgramGuideRepository(
     private companion object {
         private const val INITIAL_EPG_WINDOW_SECONDS = 6 * 60 * 60L
         private const val EPG_BOUNDARY_LOOKBEHIND_SECONDS = 6 * 60 * 60L
+        private const val MIME_TYPE_DASH = "application/dash+xml"
+        private const val MIME_TYPE_HLS = "application/vnd.apple.mpegurl"
     }
 }

@@ -20,6 +20,7 @@ data class TvStreamSource(
     val url: String,
     val id: String = url,
     val label: String = "",
+    val mimeType: String? = null,
 )
 
 @Immutable
