@@ -385,7 +385,22 @@ private fun LocalSeriesDetails(
     onNavigateSideRail: () -> Unit,
 ) {
     val episodes = series.episodes.sortedWith(compareBy<LocalEpisode> { it.season ?: 0 }.thenBy { it.episode ?: 0 })
+    val seasonNumbers = remember(series.id, episodes) {
+        episodes.map { it.season ?: 1 }.distinct().sorted()
+    }
+    var selectedSeason by remember(series.id) { mutableStateOf(seasonNumbers.firstOrNull() ?: 1) }
+    val seasonFocusRequester = remember(series.id) { FocusRequester() }
+    val detailsCoroutineScope = rememberCoroutineScope()
+    val selectedEpisodes = remember(episodes, selectedSeason) {
+        episodes.filter { (it.season ?: 1) == selectedSeason }
+    }
     val fallbackImageUrl = series.backdropUrl ?: series.posterUrl
+
+    LaunchedEffect(seasonNumbers) {
+        if (seasonNumbers.isNotEmpty() && selectedSeason !in seasonNumbers) {
+            selectedSeason = seasonNumbers.first()
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(LocalBg)) {
         if (!series.backdropUrl.isNullOrBlank()) {
@@ -469,6 +484,9 @@ private fun LocalSeriesDetails(
                         }
                     }
                     Text("${episodes.size} פרקים", color = Color(0xFFE2E8F0), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    if (seasonNumbers.size > 1) {
+                        Text("${seasonNumbers.size} עונות", color = Color(0xFFE2E8F0), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
                     series.metadata?.genres.orEmpty().take(2).joinToString(" · ").takeIf { it.isNotBlank() }?.let {
                         Text(it, color = MutedText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
@@ -500,8 +518,36 @@ private fun LocalSeriesDetails(
             }
 
             Column {
+                if (seasonNumbers.size > 1) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(start = 12.dp, end = 32.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                    ) {
+                        itemsIndexed(seasonNumbers, key = { _, season -> season }) { index, season ->
+                            LocalSeasonTab(
+                                season = season,
+                                selected = season == selectedSeason,
+                                focusRequester = if (index == 0) seasonFocusRequester else remember { FocusRequester() },
+                                onClick = {
+                                    selectedSeason = season
+                                    detailsCoroutineScope.launch {
+                                        delay(90)
+                                        firstEpisodeFocusRequester.requestFocus()
+                                    }
+                                },
+                                onNavigateLeft = if (index == 0) onNavigateSideRail else null,
+                                onNavigateUp = { backFocusRequester.requestFocus() },
+                                onNavigateDown = { firstEpisodeFocusRequester.requestFocus() },
+                            )
+                        }
+                    }
+                }
+
                 Text(
-                    text = "פרקים (${episodes.size})",
+                    text = "פרקים (${selectedEpisodes.size})",
                     color = Color.White,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
@@ -512,19 +558,80 @@ private fun LocalSeriesDetails(
                     contentPadding = PaddingValues(start = 12.dp, end = 32.dp, bottom = 16.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    itemsIndexed(episodes, key = { _, it -> it.id }) { index, episode ->
+                    itemsIndexed(selectedEpisodes, key = { _, it -> it.id }) { index, episode ->
                         LocalEpisodeCard(
                             episode = episode,
                             fallbackImageUrl = fallbackImageUrl,
                             focusRequester = if (index == 0) firstEpisodeFocusRequester else remember { FocusRequester() },
                             onPlay = { onPlayEpisode(episode) },
                             onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                            onNavigateUp = { backFocusRequester.requestFocus() },
+                            onNavigateUp = {
+                                if (seasonNumbers.size > 1) {
+                                    seasonFocusRequester.requestFocus()
+                                } else {
+                                    backFocusRequester.requestFocus()
+                                }
+                            },
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LocalSeasonTab(
+    season: Int,
+    selected: Boolean,
+    focusRequester: FocusRequester,
+    onClick: () -> Unit,
+    onNavigateLeft: (() -> Unit)?,
+    onNavigateUp: () -> Unit,
+    onNavigateDown: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val textColor = when {
+        selected -> Color.White
+        isFocused -> FocusedContent
+        else -> Color(0xFFB8C1CC)
+    }
+    val background = when {
+        isFocused -> FocusedBg
+        selected -> Color(0x26FFFFFF)
+        else -> Color.Transparent
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(background)
+            .tvFocusableClickable(
+                onClick = onClick,
+                interactionSource = interactionSource,
+                focusRequester = focusRequester,
+                onNavigateLeft = onNavigateLeft,
+                onNavigateUp = onNavigateUp,
+                onNavigateDown = onNavigateDown,
+            )
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+    ) {
+        Text(
+            text = "עונה $season",
+            color = textColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .width(30.dp)
+                .height(3.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(if (selected || isFocused) Accent else Color.Transparent),
+        )
     }
 }
 
