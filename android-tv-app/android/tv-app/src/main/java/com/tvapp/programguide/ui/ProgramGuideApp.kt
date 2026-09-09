@@ -3371,6 +3371,18 @@ private fun ExpandedPlayer(
                 handleBack()
                 return true
             }
+            !multiPlayerActive && controlsVisible && (
+                keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP ||
+                    keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN ||
+                    keyCode == AndroidKeyEvent.KEYCODE_DPAD_LEFT ||
+                    keyCode == AndroidKeyEvent.KEYCODE_DPAD_RIGHT ||
+                    keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
+                    keyCode == AndroidKeyEvent.KEYCODE_ENTER ||
+                    keyCode == AndroidKeyEvent.KEYCODE_NUMPAD_ENTER
+                ) -> {
+                lastInteraction += 1
+                return false
+            }
             keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP -> {
                 lastInteraction += 1
                 if (multiPlayerActive) {
