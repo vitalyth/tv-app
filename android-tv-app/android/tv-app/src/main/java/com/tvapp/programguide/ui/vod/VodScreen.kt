@@ -28,8 +28,13 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -48,12 +53,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,6 +102,7 @@ private val SelectedProviderAccent = Color(0xFF10D5D9)
 
 enum class VodFocusZone {
     PROVIDER,
+    SEARCH,
     CATEGORY,
     SERIES,
 }
@@ -160,6 +176,9 @@ fun VodScreen(
                 if (!shouldSuppress) {
                     viewModel.closeSeriesDetails()
                 }
+            }
+            uiState.searchQuery.isNotBlank() -> {
+                viewModel.search("")
             }
             else -> onNavigateSideRail()
         }
@@ -264,10 +283,29 @@ private fun UnifiedVodCatalogView(
     val coroutineScope = rememberCoroutineScope()
     val providerFocusRequesters = remember { providers.associateWith { FocusRequester() } }
     val allCategoryFocusRequester = remember { FocusRequester() }
+    val searchFocusRequester = remember { FocusRequester() }
+    val clearSearchFocusRequester = remember { FocusRequester() }
     var previousDetailsVisible by remember { mutableStateOf(false) }
     val seriesFirstItemFocusRequester = remember { FocusRequester() }
     val seriesFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
     val lastFocusedZoneRef = remember { object { var zone = VodFocusZone.SERIES } }
+    var localQuery by remember(uiState.selectedProvider) { mutableStateOf(uiState.searchQuery) }
+
+    LaunchedEffect(uiState.searchQuery) {
+        if (localQuery != uiState.searchQuery) {
+            localQuery = uiState.searchQuery
+        }
+    }
+
+    LaunchedEffect(localQuery) {
+        if (localQuery == uiState.searchQuery) return@LaunchedEffect
+        if (localQuery.isBlank()) {
+            viewModel.search("")
+        } else {
+            delay(350)
+            viewModel.search(localQuery.trim())
+        }
+    }
 
     fun restoreContentFocus() {
         when (lastFocusedZoneRef.zone) {
@@ -289,6 +327,15 @@ private fun UnifiedVodCatalogView(
             VodFocusZone.CATEGORY -> {
                 try {
                     allCategoryFocusRequester.requestFocus()
+                    return
+                } catch (_: Exception) {}
+                val provider = lastFocusedProviderRef.provider
+                val fallbackReq = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
+                try { fallbackReq?.requestFocus() } catch (_: Exception) {}
+            }
+            VodFocusZone.SEARCH -> {
+                try {
+                    searchFocusRequester.requestFocus()
                     return
                 } catch (_: Exception) {}
                 val provider = lastFocusedProviderRef.provider
@@ -382,6 +429,18 @@ private fun UnifiedVodCatalogView(
         }
     }
 
+    fun requestSearchFocus() {
+        try {
+            searchFocusRequester.requestFocus()
+        } catch (_: Exception) {
+            coroutineScope.launch {
+                try {
+                    searchFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     LaunchedEffect(contentFocusNonce) {
         if (contentFocusNonce > 0 && uiState.selectedSeriesDetails == null && !uiState.isLoadingDetails && uiState.playingEpisode == null) {
             restoreContentFocus()
@@ -427,13 +486,7 @@ private fun UnifiedVodCatalogView(
                         viewModel.selectProvider(provider)
                     },
                     onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                    onNavigateDown = {
-                        if (uiState.categories.isNotEmpty()) {
-                            requestCategoryFocus()
-                        } else {
-                            requestSeriesFocus()
-                        }
-                    },
+                    onNavigateDown = { requestSearchFocus() },
                 )
             }
         }
@@ -444,6 +497,30 @@ private fun UnifiedVodCatalogView(
             totalSeries = uiState.totalSeries,
             categoriesCount = uiState.categories.size,
             isLoading = uiState.isLoadingSeries,
+            searchQuery = localQuery,
+            onSearchQueryChange = { localQuery = it },
+            onClearSearch = {
+                localQuery = ""
+                viewModel.search("")
+            },
+            onSearchSubmit = {
+                val trimmed = localQuery.trim()
+                if (trimmed != uiState.searchQuery) {
+                    viewModel.search(trimmed)
+                }
+            },
+            searchFocusRequester = searchFocusRequester,
+            clearSearchFocusRequester = clearSearchFocusRequester,
+            onSearchFocused = { lastFocusedZoneRef.zone = VodFocusZone.SEARCH },
+            onSearchNavigateUp = { requestProviderFocus(uiState.selectedProvider) },
+            onSearchNavigateDown = {
+                if (uiState.categories.isNotEmpty()) {
+                    requestCategoryFocus()
+                } else {
+                    requestSeriesFocus()
+                }
+            },
+            onSearchNavigateLeft = onNavigateSideRail,
             modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
         )
 
@@ -462,7 +539,7 @@ private fun UnifiedVodCatalogView(
                         onClick = { viewModel.selectCategory(null) },
                         focusRequester = allCategoryFocusRequester,
                         onFocused = { lastFocusedZoneRef.zone = VodFocusZone.CATEGORY },
-                        onNavigateUp = { requestProviderFocus() },
+                        onNavigateUp = { requestSearchFocus() },
                         onNavigateLeft = onNavigateSideRail,
                         onNavigateDown = { requestSeriesFocus() },
                     )
@@ -474,7 +551,7 @@ private fun UnifiedVodCatalogView(
                         isSelected = uiState.selectedCategory == category,
                         onClick = { viewModel.selectCategory(category) },
                         onFocused = { lastFocusedZoneRef.zone = VodFocusZone.CATEGORY },
-                        onNavigateUp = { requestProviderFocus() },
+                        onNavigateUp = { requestSearchFocus() },
                         onNavigateDown = { requestSeriesFocus() },
                     )
                 }
@@ -506,11 +583,29 @@ private fun UnifiedVodCatalogView(
                 }
                 uiState.seriesList.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "לא נמצאו תוכניות בקטגוריה זו",
-                            color = MutedText,
-                            fontSize = 16.sp,
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = if (uiState.searchQuery.isNotBlank()) {
+                                    "לא נמצאו תוכניות עבור \"${uiState.searchQuery}\""
+                                } else {
+                                    "לא נמצאו תוכניות בקטגוריה זו"
+                                },
+                                color = MutedText,
+                                fontSize = 16.sp,
+                                style = RtlTextStyle,
+                            )
+                            if (uiState.searchQuery.isNotBlank()) {
+                                Text(
+                                    text = "נסה לחפש שם אחר או לחץ חזרה לכל התוכניות",
+                                    color = Color(0xFF6B7280),
+                                    fontSize = 13.sp,
+                                    style = RtlTextStyle,
+                                )
+                            }
+                        }
                     }
                 }
                 else -> {
@@ -553,7 +648,7 @@ private fun UnifiedVodCatalogView(
                                         if (uiState.categories.isNotEmpty()) {
                                             requestCategoryFocus()
                                         } else {
-                                            requestProviderFocus()
+                                            requestSearchFocus()
                                         }
                                     }
                                 } else null,
@@ -693,6 +788,16 @@ private fun ChannelDetailsBand(
     totalSeries: Int,
     categoriesCount: Int,
     isLoading: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onClearSearch: () -> Unit,
+    onSearchSubmit: () -> Unit,
+    searchFocusRequester: FocusRequester,
+    clearSearchFocusRequester: FocusRequester,
+    onSearchFocused: () -> Unit,
+    onSearchNavigateUp: () -> Unit,
+    onSearchNavigateDown: () -> Unit,
+    onSearchNavigateLeft: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -719,6 +824,14 @@ private fun ChannelDetailsBand(
                 .graphicsLayer { alpha = 0.09f },
             contentScale = ContentScale.Fit,
         )
+
+        val summary = when {
+            isLoading -> "טוען תוכניות..."
+            searchQuery.isNotBlank() -> if (totalSeries > 0) "$totalSeries תוצאות" else "אין תוצאות"
+            totalSeries > 0 && categoriesCount > 0 -> "$totalSeries תוכניות · $categoriesCount פילטרים"
+            totalSeries > 0 -> "$totalSeries תוכניות"
+            else -> ""
+        }
 
         Row(
             modifier = Modifier
@@ -748,38 +861,288 @@ private fun ChannelDetailsBand(
                     )
                 }
 
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = provider.displayName,
                         color = Color.White,
-                        fontSize = 24.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         style = RtlTextStyle,
                     )
-                    Text(
-                        text = "ערוץ ${provider.channelNumber}",
-                        color = MutedText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        style = RtlTextStyle,
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "ערוץ ${provider.channelNumber}",
+                            color = MutedText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            style = RtlTextStyle,
+                        )
+                        if (summary.isNotBlank()) {
+                            Text(
+                                text = "•",
+                                color = Color(0x668E95A2),
+                                fontSize = 12.sp,
+                            )
+                            Text(
+                                text = summary,
+                                color = if (searchQuery.isNotBlank()) SelectedProviderAccent else Color(0xFFD0D5DD),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                style = RtlTextStyle,
+                            )
+                        }
+                    }
                 }
             }
 
-            val summary = when {
-                isLoading -> "טוען תוכניות"
-                totalSeries > 0 && categoriesCount > 0 -> "$totalSeries תוכניות · $categoriesCount פילטרים"
-                totalSeries > 0 -> "$totalSeries תוכניות"
-                else -> ""
-            }
+            VodSearchBar(
+                provider = provider,
+                query = searchQuery,
+                onQueryChange = onSearchQueryChange,
+                onClear = onClearSearch,
+                onSearch = onSearchSubmit,
+                focusRequester = searchFocusRequester,
+                clearButtonFocusRequester = clearSearchFocusRequester,
+                onFocused = onSearchFocused,
+                onNavigateUp = onSearchNavigateUp,
+                onNavigateDown = onSearchNavigateDown,
+                onNavigateLeft = onSearchNavigateLeft,
+            )
+        }
+    }
+}
 
-            if (summary.isNotBlank()) {
-                Text(
-                    text = summary,
-                    color = Color(0xFFD0D5DD),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    style = RtlTextStyle,
+@Composable
+private fun VodSearchBar(
+    provider: VodProvider,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClear: () -> Unit,
+    onSearch: () -> Unit,
+    focusRequester: FocusRequester,
+    clearButtonFocusRequester: FocusRequester,
+    onFocused: () -> Unit,
+    onNavigateUp: () -> Unit,
+    onNavigateDown: () -> Unit,
+    onNavigateLeft: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isEditing by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val innerTextFieldFocusRequester = remember { FocusRequester() }
+    val searchInteractionSource = remember { MutableInteractionSource() }
+    val isSearchFocused by searchInteractionSource.collectIsFocusedAsState()
+    val clearInteractionSource = remember { MutableInteractionSource() }
+    val isClearFocused by clearInteractionSource.collectIsFocusedAsState()
+
+    LaunchedEffect(isEditing) {
+        if (isEditing) {
+            delay(50)
+            try {
+                innerTextFieldFocusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (_: Exception) {}
+        }
+    }
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val searchBorderColor = when {
+            isEditing -> SelectedProviderAccent
+            isSearchFocused -> FocusedCardBg
+            else -> Color(0x338E95A2)
+        }
+        val searchBg = when {
+            isEditing -> Color(0xFF1B222E)
+            isSearchFocused -> Color(0xFF222834)
+            else -> Color(0x2A14171F)
+        }
+
+        Box(
+            modifier = Modifier
+                .width(320.dp)
+                .height(46.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(searchBg)
+                .border(
+                    width = if (isSearchFocused || isEditing) 2.dp else 1.dp,
+                    color = searchBorderColor,
+                    shape = RoundedCornerShape(999.dp),
+                )
+                .onFocusChanged {
+                    if (it.isFocused) {
+                        onFocused()
+                    }
+                }
+                .then(
+                    if (!isEditing) {
+                        Modifier.tvFocusableClickable(
+                            onClick = {
+                                isEditing = true
+                            },
+                            interactionSource = searchInteractionSource,
+                            focusRequester = focusRequester,
+                            onNavigateLeft = onNavigateLeft,
+                            onNavigateRight = if (query.isNotEmpty()) {
+                                {
+                                    try {
+                                        clearButtonFocusRequester.requestFocus()
+                                    } catch (_: Exception) {}
+                                }
+                            } else null,
+                            onNavigateUp = onNavigateUp,
+                            onNavigateDown = onNavigateDown,
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "חיפוש",
+                    tint = if (isSearchFocused || isEditing) SelectedProviderAccent else MutedText,
+                    modifier = Modifier.size(20.dp),
+                )
+
+                if (isEditing) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(innerTextFieldFocusRequester)
+                            .onPreviewKeyEvent { event ->
+                                if (event.type == KeyEventType.KeyDown) {
+                                    when (event.key) {
+                                        Key.Enter, Key.DirectionCenter, Key.NumPadEnter -> {
+                                            isEditing = false
+                                            keyboardController?.hide()
+                                            onSearch()
+                                            try { focusRequester.requestFocus() } catch (_: Exception) {}
+                                            true
+                                        }
+                                        Key.Back -> {
+                                            isEditing = false
+                                            keyboardController?.hide()
+                                            try { focusRequester.requestFocus() } catch (_: Exception) {}
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            isEditing = false
+                                            keyboardController?.hide()
+                                            onNavigateDown()
+                                            true
+                                        }
+                                        Key.DirectionUp -> {
+                                            isEditing = false
+                                            keyboardController?.hide()
+                                            onNavigateUp()
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                } else false
+                            },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            textDirection = TextDirection.ContentOrRtl,
+                        ),
+                        cursorBrush = SolidColor(SelectedProviderAccent),
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Search,
+                            keyboardType = KeyboardType.Text,
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                isEditing = false
+                                keyboardController?.hide()
+                                onSearch()
+                                try { focusRequester.requestFocus() } catch (_: Exception) {}
+                            }
+                        ),
+                        decorationBox = { innerTextField ->
+                            if (query.isEmpty()) {
+                                Text(
+                                    text = "חפש ב-${provider.displayName}...",
+                                    color = MutedText,
+                                    fontSize = 14.sp,
+                                    style = RtlTextStyle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+                } else {
+                    Text(
+                        text = query.ifEmpty { "חפש ב-${provider.displayName}..." },
+                        color = if (query.isEmpty()) MutedText else Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = if (query.isEmpty()) FontWeight.Normal else FontWeight.Medium,
+                        style = RtlTextStyle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+
+        if (query.isNotEmpty()) {
+            val clearBorderColor = if (isClearFocused) SelectedProviderAccent else Color(0x338E95A2)
+            val clearBg = if (isClearFocused) Color(0xFF222834) else Color(0x2A14171F)
+
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(clearBg)
+                    .border(
+                        width = if (isClearFocused) 2.dp else 1.dp,
+                        color = clearBorderColor,
+                        shape = RoundedCornerShape(999.dp),
+                    )
+                    .onFocusChanged {
+                        if (it.isFocused) onFocused()
+                    }
+                    .tvFocusableClickable(
+                        onClick = {
+                            onClear()
+                            try { focusRequester.requestFocus() } catch (_: Exception) {}
+                        },
+                        interactionSource = clearInteractionSource,
+                        focusRequester = clearButtonFocusRequester,
+                        onNavigateLeft = {
+                            try { focusRequester.requestFocus() } catch (_: Exception) {}
+                        },
+                        onNavigateUp = onNavigateUp,
+                        onNavigateDown = onNavigateDown,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "איפוס חיפוש",
+                    tint = if (isClearFocused) SelectedProviderAccent else MutedText,
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }
