@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.tvapp.programguide.data.VodEpisode
+import com.tvapp.programguide.data.VodPlaybackProgress
 import com.tvapp.programguide.data.VodSeason
 import com.tvapp.programguide.data.VodSeries
 import com.tvapp.programguide.data.VodSeriesDetails
@@ -84,6 +86,19 @@ private val FocusedCardContent = Color(0xFF0A0E14)
 private val MutedText = Color(0xFF8E95A2)
 private val SelectedFilterBg = Color(0xFF262932)
 
+private fun formatTime(millis: Long): String {
+    if (millis <= 0) return "0:00"
+    val totalSeconds = millis / 1000
+    val seconds = totalSeconds % 60
+    val minutes = (totalSeconds / 60) % 60
+    val hours = totalSeconds / 3600
+    return if (hours > 0) {
+        String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+    }
+}
+
 @Composable
 fun VodSeriesDetailsView(
     details: VodSeriesDetails?,
@@ -91,6 +106,7 @@ fun VodSeriesDetailsView(
     isLoading: Boolean,
     error: String?,
     lastPlayedEpisodeId: String? = null,
+    episodeProgress: Map<String, VodPlaybackProgress> = emptyMap(),
     isPlayerActive: Boolean = false,
     onSeasonSelected: (VodSeason) -> Unit,
     onPlayEpisode: (VodEpisode, VodSeries) -> Unit,
@@ -139,8 +155,9 @@ fun VodSeriesDetailsView(
 
     fun rememberedEpisodeId(): String? {
         val lastPlayedId = lastPlayedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
+        val inProgressId = episodes.firstOrNull { episodeProgress[it.id]?.isInProgress == true }?.id
         val focusedId = focusedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
-        return lastPlayedId ?: focusedId ?: episodes.firstOrNull()?.id
+        return lastPlayedId ?: inProgressId ?: focusedId ?: episodes.firstOrNull()?.id
     }
 
     fun requestEpisodeFocus(episodeId: String? = rememberedEpisodeId()) {
@@ -454,10 +471,12 @@ fun VodSeriesDetailsView(
                         ) {
                             itemsIndexed(episodes, key = { _, it -> it.id }) { index, episode ->
                                 val fr = episodeFocusRequesters[episode.id] ?: remember { FocusRequester() }
+                                val progress = episodeProgress[episode.id]
                                 EpisodeCard(
                                     episode = episode,
                                     focusRequester = fr,
                                     isLastPlayed = (episode.id == lastPlayedEpisodeId),
+                                    progress = progress,
                                     onPlay = { onPlayEpisode(episode, series) },
                                     onFocused = { focusedEpisodeId = episode.id },
                                     onNavigateLeft = if (index == 0) onNavigateSideRail else null,
@@ -538,6 +557,7 @@ private fun EpisodeCard(
     focusRequester: FocusRequester,
     onPlay: () -> Unit,
     isLastPlayed: Boolean = false,
+    progress: VodPlaybackProgress? = null,
     onFocused: () -> Unit = {},
     onNavigateLeft: (() -> Unit)? = null,
     onNavigateUp: () -> Unit = {},
@@ -557,11 +577,7 @@ private fun EpisodeCard(
     val titleColor = if (isFocused) FocusedCardContent else Color.White
     val descColor = if (isFocused) Color(0xFF344054) else MutedText
 
-    val borderModifier = when {
-        isFocused -> Modifier.border(2.5.dp, FocusedCardBg, shape)
-        isLastPlayed -> Modifier.border(2.dp, Color(0xFF10D5D9), shape)
-        else -> Modifier
-    }
+    val borderModifier = if (isFocused) Modifier.border(2.5.dp, FocusedCardBg, shape) else Modifier
 
     val context = LocalContext.current
     val imageRequest = remember(episode.imageUrl) {
@@ -623,6 +639,28 @@ private fun EpisodeCard(
                     tint = Color.White,
                     modifier = Modifier.size(24.dp),
                 )
+            }
+
+            // Small timeline (ציר זמן קטן) at bottom of thumbnail - matching example image exactly
+            if (progress != null && (progress.positionMs > 1000L || progress.isCompleted)) {
+                val fraction = if (progress.isCompleted) 1f else progress.progressPercentage.coerceIn(0.04f, 1f)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color(0x99232A38)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = fraction)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFFFF2B44)),
+                    )
+                }
             }
         }
 

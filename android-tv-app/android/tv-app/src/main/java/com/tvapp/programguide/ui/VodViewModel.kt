@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 import com.tvapp.programguide.data.VodNavLevel
+import com.tvapp.programguide.data.VodPlaybackProgress
+import com.tvapp.programguide.data.VodProgressManager
 import com.tvapp.programguide.data.VodRecentItem
 import com.tvapp.programguide.data.VodSeriesPage
 
@@ -48,6 +50,8 @@ data class VodUiState(
     val isResolvingStream: Boolean = false,
     val streamError: String? = null,
     val lastPlayedEpisodeId: String? = null,
+    val episodeProgress: Map<String, VodPlaybackProgress> = emptyMap(),
+    val resumePositionMs: Long? = null,
 )
 
 class VodViewModel(
@@ -56,7 +60,8 @@ class VodViewModel(
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, VodRepository())
 
-    private val _uiState = MutableStateFlow(VodUiState())
+    private val progressManager = VodProgressManager.getInstance(application)
+    private val _uiState = MutableStateFlow(VodUiState(episodeProgress = progressManager.progressFlow.value))
     val uiState: StateFlow<VodUiState> = _uiState.asStateFlow()
 
     private var loadSeriesJob: Job? = null
@@ -66,6 +71,11 @@ class VodViewModel(
 
     init {
         loadRecent()
+        viewModelScope.launch {
+            progressManager.progressFlow.collect { progressMap ->
+                _uiState.update { it.copy(episodeProgress = progressMap) }
+            }
+        }
     }
 
     fun getProviderLogoUrl(provider: VodProvider): String =
@@ -308,6 +318,7 @@ class VodViewModel(
 
     fun openSeriesDetails(series: VodSeries) {
         loadDetailsJob?.cancel()
+        val lastEpisodeId = progressManager.getLastPlayedEpisodeId(series.id)
         loadDetailsJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -315,15 +326,22 @@ class VodViewModel(
                     detailsError = null,
                     selectedSeriesDetails = null,
                     selectedSeason = null,
+                    lastPlayedEpisodeId = lastEpisodeId,
                 )
             }
             runCatching {
                 repository.loadSeriesDetails(series.provider, series.id)
             }.onSuccess { details ->
+                val targetEpisode = lastEpisodeId?.let { id -> details.episodes.firstOrNull { it.id == id } }
+                val initialSeason = if (targetEpisode?.seasonId != null) {
+                    details.seasons.firstOrNull { it.seasonId == targetEpisode.seasonId } ?: details.seasons.firstOrNull()
+                } else {
+                    details.seasons.firstOrNull()
+                }
                 _uiState.update {
                     it.copy(
                         selectedSeriesDetails = details,
-                        selectedSeason = details.seasons.firstOrNull(),
+                        selectedSeason = initialSeason,
                         isLoadingDetails = false,
                         detailsError = null,
                     )
@@ -354,6 +372,8 @@ class VodViewModel(
     }
 
     fun playEpisode(episode: VodEpisode, series: VodSeries) {
+        val resumePos = progressManager.getResumePosition(episode.id)
+        progressManager.setLastPlayedEpisodeId(series.id, episode.id)
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -363,6 +383,7 @@ class VodViewModel(
                     playingSeries = series,
                     playingStreamUrl = null,
                     lastPlayedEpisodeId = episode.id,
+                    resumePositionMs = resumePos,
                 )
             }
             val streamEndpoint = episode.streamEndpoint
@@ -426,8 +447,33 @@ class VodViewModel(
                 playingStreamUrl = null,
                 isResolvingStream = false,
                 streamError = null,
+                resumePositionMs = null,
             )
         }
+    }
+
+    fun savePlaybackProgress(
+        episodeId: String,
+        seriesId: String?,
+        positionMs: Long,
+        durationMs: Long,
+        forceCompleted: Boolean? = null,
+    ) {
+        progressManager.saveProgress(
+            episodeId = episodeId,
+            seriesId = seriesId,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            forceCompleted = forceCompleted,
+        )
+    }
+
+    fun markEpisodeCompleted(episodeId: String, seriesId: String?, durationMs: Long) {
+        progressManager.markCompleted(
+            episodeId = episodeId,
+            seriesId = seriesId,
+            durationMs = durationMs,
+        )
     }
 
     private fun streamEndpointFor(provider: VodProvider, episodeId: String): String {

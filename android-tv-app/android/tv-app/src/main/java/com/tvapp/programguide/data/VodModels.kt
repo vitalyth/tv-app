@@ -124,3 +124,32 @@ enum class AppDestination(
     VOD("ספריית VOD"),
 }
 
+enum class VodWatchStatus {
+    NOT_WATCHED,
+    IN_PROGRESS,
+    COMPLETED,
+}
+
+@Immutable
+data class VodPlaybackProgress(
+    val episodeId: String,
+    val seriesId: String? = null,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val lastWatchedAt: Long = System.currentTimeMillis(),
+    val isCompleted: Boolean = false,
+) {
+    val progressPercentage: Float
+        get() = if (durationMs > 0L) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+
+    val isInProgress: Boolean
+        get() = !isCompleted && positionMs > 1000L && (durationMs <= 0L || progressPercentage < 0.92f)
+
+    val status: VodWatchStatus
+        get() = when {
+            isCompleted -> VodWatchStatus.COMPLETED
+            isInProgress -> VodWatchStatus.IN_PROGRESS
+            else -> VodWatchStatus.NOT_WATCHED
+        }
+}
+

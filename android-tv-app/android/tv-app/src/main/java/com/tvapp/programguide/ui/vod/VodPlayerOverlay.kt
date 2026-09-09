@@ -73,6 +73,8 @@ fun VodPlayerOverlay(
     player: StablePlayer,
     playerView: StablePlayerView,
     modifier: Modifier = Modifier,
+    resumePositionMs: Long? = null,
+    onSaveProgress: ((episodeId: String, seriesId: String?, positionMs: Long, durationMs: Long, forceCompleted: Boolean?) -> Unit)? = null,
 ) {
     val actualPlayer = player.value
     val actualPlayerView = playerView.value
@@ -81,6 +83,16 @@ fun VodPlayerOverlay(
     var isControlsVisible by remember { mutableStateOf(true) }
     var lastInteractionNonce by remember { mutableLongStateOf(0L) }
     var playbackError by remember { mutableStateOf<String?>(null) }
+    var hasAppliedResumeSeek by remember(streamUrl, episode?.id) { mutableStateOf(false) }
+
+    fun saveCurrentProgress(forceCompleted: Boolean? = null) {
+        val ep = episode ?: return
+        val pos = actualPlayer.currentPosition
+        val dur = actualPlayer.duration
+        if (pos > 1000L || dur > 0L) {
+            onSaveProgress?.invoke(ep.id, series?.id, pos, dur, forceCompleted)
+        }
+    }
 
     // When stream changes, reset errors and show controls
     LaunchedEffect(streamUrl) {
@@ -91,15 +103,64 @@ fun VodPlayerOverlay(
         }
     }
 
+    // Active resume-seek watcher: ensures player seeks to target position as soon as it is ready
+    LaunchedEffect(streamUrl, episode?.id, resumePositionMs) {
+        val target = resumePositionMs ?: 0L
+        if (target > 1000L) {
+            var waited = 0
+            while (waited < 60 && actualPlayer.playbackState != Player.STATE_READY) {
+                delay(100)
+                waited++
+            }
+            if (actualPlayer.playbackState == Player.STATE_READY) {
+                if (kotlin.math.abs(actualPlayer.currentPosition - target) > 2000L) {
+                    actualPlayer.seekTo(target)
+                }
+            }
+        }
+    }
+
+    // Periodic progress saver while playing
+    LaunchedEffect(actualPlayer, episode?.id) {
+        while (true) {
+            delay(2000L)
+            if (actualPlayer.isPlaying) {
+                saveCurrentProgress()
+            }
+        }
+    }
+
     // Attach listener to shared player
-    DisposableEffect(actualPlayer) {
+    DisposableEffect(actualPlayer, episode?.id) {
         val listener = object : Player.Listener {
             override fun onPlayerError(playbackException: PlaybackException) {
                 playbackError = "שגיאה בטעינת הפרק"
             }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                when (playbackState) {
+                    Player.STATE_ENDED -> {
+                        saveCurrentProgress(forceCompleted = true)
+                    }
+                    Player.STATE_READY -> {
+                        val target = resumePositionMs ?: 0L
+                        if (target > 1000L && kotlin.math.abs(actualPlayer.currentPosition - target) > 2000L) {
+                            actualPlayer.seekTo(target)
+                        }
+                        saveCurrentProgress()
+                    }
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) {
+                    saveCurrentProgress()
+                }
+            }
         }
         actualPlayer.addListener(listener)
         onDispose {
+            saveCurrentProgress()
             actualPlayer.removeListener(listener)
         }
     }
@@ -129,6 +190,7 @@ fun VodPlayerOverlay(
 
         return when (keyCode) {
             AndroidKeyEvent.KEYCODE_BACK -> {
+                saveCurrentProgress()
                 onClose()
                 true
             }
@@ -203,6 +265,7 @@ fun VodPlayerOverlay(
                 if (event.type == KeyEventType.KeyDown) {
                     when (event.key) {
                         Key.Back -> {
+                            saveCurrentProgress()
                             onClose()
                             true
                         }

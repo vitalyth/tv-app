@@ -559,7 +559,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 .build()
                         }
                     }
-                    player.setMediaItem(mediaItem)
+                    val resumePos = vodUiState.resumePositionMs ?: 0L
+                    if (resumePos > 0L) {
+                        player.setMediaItem(mediaItem, resumePos)
+                        player.seekTo(resumePos)
+                    } else {
+                        player.setMediaItem(mediaItem, 0L)
+                        player.seekTo(0L)
+                    }
                     player.prepare()
                     activeStreamUrl.value = vodStream
                 }

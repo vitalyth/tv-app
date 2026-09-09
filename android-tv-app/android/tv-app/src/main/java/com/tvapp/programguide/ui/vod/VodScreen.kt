@@ -202,6 +202,7 @@ fun VodScreen(
                     isLoading = uiState.isLoadingDetails,
                     error = uiState.detailsError,
                     lastPlayedEpisodeId = uiState.lastPlayedEpisodeId,
+                    episodeProgress = uiState.episodeProgress,
                     isPlayerActive = uiState.playingEpisode != null,
                     onSeasonSelected = viewModel::selectSeason,
                     onPlayEpisode = viewModel::playEpisode,
@@ -229,6 +230,8 @@ fun VodScreen(
                         onClose = ::stopVodPlaybackAndReturnToEpisode,
                         player = player,
                         playerView = playerView,
+                        resumePositionMs = uiState.resumePositionMs,
+                        onSaveProgress = viewModel::savePlaybackProgress,
                     )
                 }
             }
