@@ -36,9 +36,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +60,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -94,14 +97,35 @@ fun LocalSeriesScreen(
     val firstSeriesFocusRequester = remember { FocusRequester() }
     val backFocusRequester = remember { FocusRequester() }
     val firstEpisodeFocusRequester = remember { FocusRequester() }
+    val seriesFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    var focusedSeriesId by remember { mutableStateOf<String?>(null) }
 
-    fun requestCatalogFocus() {
+    fun requestCatalogFocus(seriesId: String? = focusedSeriesId) {
+        val target = seriesId?.let { seriesFocusRequesters[it] } ?: firstSeriesFocusRequester
         try {
-            firstSeriesFocusRequester.requestFocus()
+            target.requestFocus()
         } catch (_: Exception) {
             try {
-                initialFocusRequester.requestFocus()
+                firstSeriesFocusRequester.requestFocus()
             } catch (_: Exception) {}
+        }
+    }
+
+    fun closeSeriesAndRestoreCatalogFocus() {
+        val targetSeriesId = focusedSeriesId ?: uiState.selectedSeries?.id
+        viewModel.closeSeries()
+        coroutineScope.launch {
+            delay(140)
+            val targetIndex = uiState.series.indexOfFirst { it.id == targetSeriesId }
+            if (targetIndex >= 0) {
+                try {
+                    gridState.scrollToItem(targetIndex)
+                } catch (_: Exception) {}
+                delay(80)
+            }
+            requestCatalogFocus(targetSeriesId)
+            delay(120)
+            requestCatalogFocus(targetSeriesId)
         }
     }
 
@@ -123,7 +147,7 @@ fun LocalSeriesScreen(
     BackHandler {
         when {
             uiState.playingEpisode != null -> viewModel.stopPlayback()
-            uiState.selectedSeries != null -> viewModel.closeSeries()
+            uiState.selectedSeries != null -> closeSeriesAndRestoreCatalogFocus()
             else -> onNavigateSideRail()
         }
     }
@@ -148,7 +172,7 @@ fun LocalSeriesScreen(
                     series = uiState.selectedSeries!!,
                     backFocusRequester = backFocusRequester,
                     firstEpisodeFocusRequester = firstEpisodeFocusRequester,
-                    onClose = viewModel::closeSeries,
+                    onClose = ::closeSeriesAndRestoreCatalogFocus,
                     onPlayEpisode = { episode -> viewModel.playEpisode(uiState.selectedSeries!!, episode) },
                     onNavigateSideRail = onNavigateSideRail,
                 )
@@ -191,11 +215,20 @@ fun LocalSeriesScreen(
                             .focusProperties { canFocus = false },
                     ) {
                         itemsIndexed(uiState.series, key = { _, it -> it.id }) { index, series ->
+                            val focusRequester = if (index == 0) {
+                                firstSeriesFocusRequester
+                            } else {
+                                seriesFocusRequesters.getOrPut(series.id) { FocusRequester() }
+                            }
                             LocalSeriesCard(
                                 series = series,
-                                focusRequester = if (index == 0) firstSeriesFocusRequester else remember { FocusRequester() },
-                                onClick = { viewModel.openSeries(series) },
+                                focusRequester = focusRequester,
+                                onClick = {
+                                    focusedSeriesId = series.id
+                                    viewModel.openSeries(series)
+                                },
                                 onFocused = {
+                                    focusedSeriesId = series.id
                                     if (uiState.hasMore && index >= uiState.series.lastIndex - 8) {
                                         viewModel.loadMore()
                                     }
@@ -292,20 +325,11 @@ private fun LocalSeriesCard(
                 .background(Color(0xFF1B222D)),
             contentAlignment = Alignment.Center,
         ) {
-            if (!imageUrl.isNullOrBlank()) {
-                val context = LocalContext.current
-                val request = remember(imageUrl) {
-                    ImageRequest.Builder(context).data(imageUrl).size(560, 315).crossfade(false).build()
-                }
-                AsyncImage(
-                    model = request,
-                    contentDescription = series.displayTitle,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(Icons.Default.CollectionsBookmark, contentDescription = null, tint = MutedText, modifier = Modifier.size(42.dp))
-            }
+            LocalArtwork(
+                imageUrl = imageUrl,
+                title = series.displayTitle,
+                modifier = Modifier.fillMaxSize(),
+            )
 
             Box(
                 modifier = Modifier
@@ -361,9 +385,11 @@ private fun LocalSeriesDetails(
     onNavigateSideRail: () -> Unit,
 ) {
     val episodes = series.episodes.sortedWith(compareBy<LocalEpisode> { it.season ?: 0 }.thenBy { it.episode ?: 0 })
+    val fallbackImageUrl = series.backdropUrl ?: series.posterUrl
 
     Box(Modifier.fillMaxSize().background(LocalBg)) {
-        series.backdropUrl?.let { imageUrl ->
+        if (!series.backdropUrl.isNullOrBlank()) {
+            val imageUrl = series.backdropUrl
             val context = LocalContext.current
             val request = remember(imageUrl) {
                 ImageRequest.Builder(context).data(imageUrl).size(1280, 720).crossfade(false).build()
@@ -385,6 +411,8 @@ private fun LocalSeriesDetails(
                         )
                     ),
             )
+        } else {
+            LocalBackdropFallback(title = series.displayTitle)
         }
 
         Column(
@@ -487,6 +515,7 @@ private fun LocalSeriesDetails(
                     itemsIndexed(episodes, key = { _, it -> it.id }) { index, episode ->
                         LocalEpisodeCard(
                             episode = episode,
+                            fallbackImageUrl = fallbackImageUrl,
                             focusRequester = if (index == 0) firstEpisodeFocusRequester else remember { FocusRequester() },
                             onPlay = { onPlayEpisode(episode) },
                             onNavigateLeft = if (index == 0) onNavigateSideRail else null,
@@ -502,6 +531,7 @@ private fun LocalSeriesDetails(
 @Composable
 private fun LocalEpisodeCard(
     episode: LocalEpisode,
+    fallbackImageUrl: String?,
     focusRequester: FocusRequester,
     onPlay: () -> Unit,
     onNavigateLeft: (() -> Unit)?,
@@ -533,18 +563,11 @@ private fun LocalEpisodeCard(
                 .background(Color(0xFF1B222D)),
             contentAlignment = Alignment.Center,
         ) {
-            if (!episode.imageUrl.isNullOrBlank()) {
-                val context = LocalContext.current
-                val request = remember(episode.imageUrl) {
-                    ImageRequest.Builder(context).data(episode.imageUrl).size(440, 260).crossfade(false).build()
-                }
-                AsyncImage(
-                    model = request,
-                    contentDescription = episode.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+            LocalArtwork(
+                imageUrl = episode.imageUrl ?: fallbackImageUrl,
+                title = episode.title,
+                modifier = Modifier.fillMaxSize(),
+            )
             Icon(Icons.Default.PlayArrow, contentDescription = "נגן", tint = Color.White, modifier = Modifier.size(42.dp))
         }
 
@@ -571,5 +594,89 @@ private fun LocalEpisodeCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun LocalArtwork(
+    imageUrl: String?,
+    title: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.background(
+            Brush.linearGradient(
+                listOf(
+                    Color(0xFF1C2533),
+                    Color(0xFF152029),
+                    Color(0xFF301A35),
+                )
+            )
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!imageUrl.isNullOrBlank()) {
+            val context = LocalContext.current
+            val request = remember(imageUrl) {
+                ImageRequest.Builder(context).data(imageUrl).size(560, 315).crossfade(false).build()
+            }
+            AsyncImage(
+                model = request,
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(18.dp),
+            ) {
+                Icon(
+                    Icons.Default.CollectionsBookmark,
+                    contentDescription = null,
+                    tint = Color(0xFFB8C1CC),
+                    modifier = Modifier.size(38.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = title,
+                    color = Color(0xFFE7EBF2),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    style = RtlTextStyle,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalBackdropFallback(title: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    listOf(
+                        Color(0x66353B55),
+                        Color(0xFF080A0C),
+                    )
+                )
+            ),
+        contentAlignment = Alignment.TopEnd,
+    ) {
+        Text(
+            text = title,
+            color = Color(0x14FFFFFF),
+            fontSize = 82.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 48.dp, end = 56.dp),
+        )
     }
 }

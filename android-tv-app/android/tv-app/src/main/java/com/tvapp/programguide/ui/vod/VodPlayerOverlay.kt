@@ -67,6 +67,8 @@ fun VodPlayerOverlay(
     episode: VodEpisode?,
     series: VodSeries?,
     providerLogoUrl: String? = null,
+    providerDisplayNameOverride: String? = null,
+    badgeText: String = "VOD",
     isResolvingStream: Boolean,
     error: String?,
     onClose: () -> Unit,
@@ -378,7 +380,9 @@ fun VodPlayerOverlay(
             modifier = Modifier.fillMaxSize(),
         ) {
             val provider = series?.provider
+            val providerDisplayName = providerDisplayNameOverride ?: provider?.displayName
             val headerText = when {
+                providerDisplayNameOverride != null -> providerDisplayNameOverride
                 provider == null -> null
                 provider.displayName.contains(provider.channelNumber) -> provider.displayName
                 else -> "${provider.channelNumber}  ${provider.displayName}"
@@ -387,11 +391,11 @@ fun VodPlayerOverlay(
             UnifiedPlayerControlsOverlay(
                 player = player,
                 title = episode?.title.orEmpty(),
-                subtitle = listOfNotNull(series?.title, series?.provider?.displayName).joinToString("  |  "),
-                badgeText = "VOD",
+                subtitle = listOfNotNull(series?.title, providerDisplayName).joinToString("  |  "),
+                badgeText = badgeText,
                 isLive = false,
                 logoUrl = providerLogoUrl,
-                providerDisplayName = series?.provider?.displayName,
+                providerDisplayName = providerDisplayName,
                 previewImageUrl = episode?.imageUrl ?: series?.imageUrl,
                 headerChannelText = headerText,
                 showMetadataPanel = true,

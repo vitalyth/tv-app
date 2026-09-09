@@ -135,8 +135,12 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.tvapp.programguide.R
 import com.tvapp.programguide.data.AppDestination
+import com.tvapp.programguide.data.VodEpisode
+import com.tvapp.programguide.data.VodProvider
+import com.tvapp.programguide.data.VodSeries
 import com.tvapp.programguide.ui.components.AppSideNavRail
 import com.tvapp.programguide.ui.local.LocalSeriesScreen
+import com.tvapp.programguide.ui.vod.VodPlayerOverlay
 import com.tvapp.programguide.ui.vod.VodScreen
 import com.tvapp.programguide.data.GuideData
 import com.tvapp.programguide.data.TvChannel
@@ -764,11 +768,43 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                             )
 
                             if (isLocalSeriesPlaying) {
-                                PlayerSurface(
+                                val localEpisode = localSeriesUiState.playingEpisode
+                                val localSeries = localSeriesUiState.playingSeries
+                                VodPlayerOverlay(
+                                    streamUrl = localEpisode?.streamUrl,
+                                    episode = localEpisode?.let { episode ->
+                                        VodEpisode(
+                                            id = episode.id,
+                                            programId = localSeries?.id.orEmpty(),
+                                            seasonId = episode.season?.let { "season-$it" },
+                                            title = episode.title,
+                                            description = episode.overview.orEmpty(),
+                                            imageUrl = episode.imageUrl ?: localSeries?.backdropUrl ?: localSeries?.posterUrl,
+                                            playUrl = episode.streamUrl,
+                                            streamEndpoint = null,
+                                            displayOrder = episode.episode ?: 0,
+                                        )
+                                    },
+                                    series = localSeries?.let { series ->
+                                        VodSeries(
+                                            id = series.id,
+                                            title = series.displayTitle,
+                                            description = series.metadata?.overview.orEmpty(),
+                                            imageUrl = series.backdropUrl ?: series.posterUrl,
+                                            episodeCount = series.episodes.size,
+                                            seasonCount = series.metadata?.numberOfSeasons ?: 0,
+                                            genre = series.metadata?.genres.orEmpty().take(2).joinToString(" · ").takeIf { it.isNotBlank() },
+                                            provider = VodProvider.KAN11,
+                                        )
+                                    },
+                                    providerLogoUrl = null,
+                                    providerDisplayNameOverride = "סדרות",
+                                    badgeText = "סדרות",
+                                    isResolvingStream = false,
+                                    error = null,
+                                    onClose = localSeriesViewModel::stopPlayback,
                                     player = stablePlayer,
                                     playerView = stablePlayerView,
-                                    useController = false,
-                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
