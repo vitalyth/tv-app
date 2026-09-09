@@ -48,7 +48,7 @@ class ProgramGuideRepository(
 
     private fun parseChannels(
         array: JSONArray,
-        playlistStreams: Map<String, String>,
+        playlistStreams: Map<String, List<PlaylistStream>>,
     ): List<TvChannel> {
         return buildList {
             for (index in 0 until array.length()) {
@@ -64,6 +64,12 @@ class ProgramGuideRepository(
                 val name = item.optCleanString("name").ifBlank { id }
                 val channelNumber = item.optCleanString("channelNumber")
                 val number = channelNumber.ifBlank { indexNumber.takeIf { it > 0 }?.toString().orEmpty() }
+                val streamKeys = listOf(tvgId, name)
+                    .filter { it.isNotBlank() }
+                    .ifEmpty { listOf(number).filter { it.isNotBlank() } }
+                val streams = streamKeys
+                    .flatMap { key -> playlistStreams[key].orEmpty() }
+                    .distinctBy { it.url }
                 add(
                     TvChannel(
                         id = id,
@@ -73,10 +79,14 @@ class ProgramGuideRepository(
                         number = number,
                         name = name,
                         logoUrl = resolveLogoUrl(logo),
-                        streamUrl = playlistStreams[name]
-                            ?: playlistStreams[tvgId]
-                            ?: playlistStreams[number]
-                            ?: "",
+                        streamUrl = streams.firstOrNull()?.url.orEmpty(),
+                        streamSources = streams.mapIndexed { sourceIndex, stream ->
+                            TvStreamSource(
+                                id = stream.url,
+                                label = stream.label.ifBlank { "מקור ${sourceIndex + 1}" },
+                                url = stream.url,
+                            )
+                        },
                     )
                 )
             }
@@ -91,10 +101,16 @@ class ProgramGuideRepository(
         }
     }
 
-    private fun parsePlaylistStreams(content: String): Map<String, String> {
+    private data class PlaylistStream(
+        val url: String,
+        val label: String,
+    )
+
+    private fun parsePlaylistStreams(content: String): Map<String, List<PlaylistStream>> {
         val lines = content.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-        val streams = mutableMapOf<String, String>()
+        val streams = linkedMapOf<String, MutableList<PlaylistStream>>()
         var currentKeys = emptyList<String>()
+        var currentLabel = ""
 
         for (line in lines) {
             if (line.startsWith("#EXTINF", ignoreCase = true)) {
@@ -103,12 +119,20 @@ class ProgramGuideRepository(
                 val channelNumber = attribute(line, "tvg-chno")
                 val displayName = line.substringAfterLast(',', "").trim()
                 currentKeys = listOf(tvgId, tvgName, channelNumber, displayName).filter { it.isNotBlank() }
+                currentLabel = displayName.ifBlank { tvgName }
                 continue
             }
 
             if (!line.startsWith("#") && currentKeys.isNotEmpty()) {
-                currentKeys.forEach { streams.putIfAbsent(it, line) }
+                val stream = PlaylistStream(url = line, label = currentLabel)
+                currentKeys.forEach { key ->
+                    val keyStreams = streams.getOrPut(key) { mutableListOf() }
+                    if (keyStreams.none { it.url == line }) {
+                        keyStreams.add(stream)
+                    }
+                }
                 currentKeys = emptyList()
+                currentLabel = ""
             }
         }
 

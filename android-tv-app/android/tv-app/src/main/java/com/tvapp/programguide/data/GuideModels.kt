@@ -12,6 +12,14 @@ data class TvChannel(
     val name: String,
     val logoUrl: String,
     val streamUrl: String,
+    val streamSources: List<TvStreamSource> = streamUrl.takeIf { it.isNotBlank() }?.let { listOf(TvStreamSource(url = it)) }.orEmpty(),
+)
+
+@Immutable
+data class TvStreamSource(
+    val url: String,
+    val id: String = url,
+    val label: String = "",
 )
 
 @Immutable

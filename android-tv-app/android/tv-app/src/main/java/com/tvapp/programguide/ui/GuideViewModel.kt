@@ -8,6 +8,7 @@ import com.tvapp.programguide.data.GuideData
 import com.tvapp.programguide.data.ProgramGuideRepository
 import com.tvapp.programguide.data.TvChannel
 import com.tvapp.programguide.data.TvProgram
+import com.tvapp.programguide.data.TvStreamSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,7 @@ data class GuideUiState(
     val playingProgram: TvProgram? = null,
     val isMiniPlayerPlaying: Boolean = false,
     val isPlayerExpanded: Boolean = false,
+    val selectedStreamSourceIds: Map<String, String> = emptyMap(),
 )
 
 data class GuideDataUiState(
@@ -50,6 +52,7 @@ data class GuidePlaybackUiState(
     val playingProgram: TvProgram? = null,
     val isMiniPlayerPlaying: Boolean = false,
     val isPlayerExpanded: Boolean = false,
+    val selectedStreamSourceIds: Map<String, String> = emptyMap(),
 )
 
 class GuideViewModel(
@@ -83,12 +86,14 @@ class GuideViewModel(
                 playingProgram = state.playingProgram,
                 isMiniPlayerPlaying = state.isMiniPlayerPlaying,
                 isPlayerExpanded = state.isPlayerExpanded,
+                selectedStreamSourceIds = state.selectedStreamSourceIds,
             )
         }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidePlaybackUiState())
     private val loadingGuideRanges = mutableSetOf<GuideRange>()
     private val playbackPrefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val selectedStreamSourceIds = mutableMapOf<String, String>()
     private var lastGuideRefreshMs: Long = 0L
 
     init {
@@ -118,6 +123,7 @@ class GuideViewModel(
                         playingChannel = channel.takeIf { shouldAutoPlay },
                         playingProgram = program.takeIf { shouldAutoPlay },
                         isMiniPlayerPlaying = shouldAutoPlay,
+                        selectedStreamSourceIds = selectedStreamSourceIds.toMap(),
                     )
                 }
                 .onFailure { error ->
@@ -160,6 +166,7 @@ class GuideViewModel(
                             selectedProgram = selectedProgram,
                             playingChannel = playingChannel,
                             playingProgram = playingChannel?.let { currentProgram(data, it) } ?: current.playingProgram,
+                            selectedStreamSourceIds = selectedStreamSourceIds.toMap(),
                         )
                     }
                 }
@@ -284,7 +291,37 @@ class GuideViewModel(
         }
     }
 
-    fun streamUrl(channel: TvChannel): String = repository.streamUrl(channel)
+    fun streamUrl(channel: TvChannel): String =
+        selectedStreamSource(channel)?.url.orEmpty()
+
+    fun streamSources(channel: TvChannel): List<TvStreamSource> =
+        channel.streamSources.ifEmpty {
+            channel.streamUrl.takeIf { it.isNotBlank() }?.let { url ->
+                listOf(TvStreamSource(url = url, label = channel.name.ifBlank { "מקור 1" }))
+            }.orEmpty()
+        }
+
+    fun selectedStreamSource(channel: TvChannel): TvStreamSource? {
+        val sources = streamSources(channel)
+        val savedSourceId = selectedStreamSourceIds[channel.id]
+            ?: playbackPrefs.getString(streamSourcePrefKey(channel.id), null)
+        return savedSourceId?.let { id -> sources.firstOrNull { it.id == id } }
+            ?: sources.firstOrNull()
+    }
+
+    fun selectStreamSource(channel: TvChannel, source: TvStreamSource) {
+        if (source.url.isBlank()) return
+        selectedStreamSourceIds[channel.id] = source.id
+        playbackPrefs.edit()
+            .putString(streamSourcePrefKey(channel.id), source.id)
+            .apply()
+        _uiState.update { state ->
+            state.copy(
+                selectedStreamSourceIds = selectedStreamSourceIds.toMap(),
+                playingChannel = state.playingChannel?.takeIf { it.id != channel.id } ?: channel,
+            )
+        }
+    }
 
     fun ensureGuideRange(visibleStartSeconds: Long, visibleEndSeconds: Long) {
         val state = _uiState.value
@@ -390,6 +427,9 @@ class GuideViewModel(
         playbackPrefs.edit().putString(KEY_LAST_CHANNEL_ID, channel.id).apply()
     }
 
+    private fun streamSourcePrefKey(channelId: String): String =
+        "$KEY_STREAM_SOURCE_PREFIX$channelId"
+
     private data class GuideRange(
         val startSeconds: Long,
         val endSeconds: Long,
@@ -443,6 +483,7 @@ class GuideViewModel(
     private companion object {
         const val PREFS_NAME = "program_guide_playback"
         const val KEY_LAST_CHANNEL_ID = "last_channel_id"
+        const val KEY_STREAM_SOURCE_PREFIX = "stream_source_id:"
         const val LIVE_GUIDE_REFRESH_INTERVAL_MS = 10 * 60 * 1000L
     }
 }

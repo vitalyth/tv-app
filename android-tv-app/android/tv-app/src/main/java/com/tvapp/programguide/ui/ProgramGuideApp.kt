@@ -40,6 +40,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -145,6 +148,7 @@ import com.tvapp.programguide.ui.vod.VodScreen
 import com.tvapp.programguide.data.GuideData
 import com.tvapp.programguide.data.TvChannel
 import com.tvapp.programguide.data.TvProgram
+import com.tvapp.programguide.data.TvStreamSource
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -555,6 +559,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         currentDestination,
         playbackState.isMiniPlayerPlaying,
         playbackState.playingChannel?.streamUrl,
+        playbackState.selectedStreamSourceIds,
         isVodPlaying,
         vodUiState.playingStreamUrl,
         isLocalSeriesPlaying,
@@ -862,6 +867,9 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                     programsByChannel = guideData?.programsByChannel.orEmpty(),
                     nowSeconds = nowSeconds,
                     streamUrl = viewModel::streamUrl,
+                    streamSources = viewModel::streamSources,
+                    selectedStreamSource = viewModel::selectedStreamSource,
+                    onSelectStreamSource = viewModel::selectStreamSource,
                     multiChannels = expandedMultiChannels,
                     multiFocusedIndex = multiPlayerFocusIndex,
                     multiPlayerActive = multiPlayerActive,
@@ -3130,6 +3138,9 @@ private fun ExpandedPlayer(
     programsByChannel: Map<String, List<TvProgram>>,
     nowSeconds: Long,
     streamUrl: (TvChannel) -> String,
+    streamSources: (TvChannel) -> List<TvStreamSource>,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
+    onSelectStreamSource: (TvChannel, TvStreamSource) -> Unit,
     multiChannels: List<TvChannel>,
     multiFocusedIndex: Int,
     multiPlayerActive: Boolean,
@@ -3153,6 +3164,8 @@ private fun ExpandedPlayer(
     var enteredChannelNumberNonce by remember { mutableIntStateOf(0) }
     var addMenuVisible by remember { mutableStateOf(false) }
     var addMenuMounted by remember { mutableStateOf(false) }
+    var sourceMenuVisible by remember { mutableStateOf(false) }
+    var sourceMenuMounted by remember { mutableStateOf(false) }
     val multiControlFocusState = remember { mutableStateOf(MultiControlFocus.None) }
     var multiControlFocus by multiControlFocusState
     var controlsMetadataVisible by remember { mutableStateOf(false) }
@@ -3169,12 +3182,26 @@ private fun ExpandedPlayer(
             }
         }
     }
+    val sourceOptions = remember(channel) {
+        channel?.let(streamSources).orEmpty()
+    }
+    val selectedSource = channel?.let(selectedStreamSource)
+    val hasAlternateSources = sourceOptions.size > 1
+
     fun openAddMenu() {
         if (multiChannels.size >= maxMultiPlayerChannels) return
         controlsVisible = false
         multiControlFocus = MultiControlFocus.None
         addMenuMounted = true
         addMenuVisible = true
+    }
+
+    fun openSourceMenu() {
+        if (!hasAlternateSources) return
+        controlsVisible = false
+        multiControlFocus = MultiControlFocus.None
+        sourceMenuMounted = true
+        sourceMenuVisible = true
     }
 
     fun closeAddMenu(showControls: Boolean = false) {
@@ -3185,8 +3212,19 @@ private fun ExpandedPlayer(
         focusRequester.requestFocus()
     }
 
+    fun closeSourceMenu(showControls: Boolean = false) {
+        sourceMenuVisible = false
+        controlsVisible = showControls
+        multiControlFocus = MultiControlFocus.None
+        lastInteraction += 1
+        focusRequester.requestFocus()
+    }
+
     BackHandler {
         when {
+            sourceMenuVisible -> {
+                closeSourceMenu()
+            }
             addMenuVisible -> {
                 closeAddMenu()
             }
@@ -3270,6 +3308,9 @@ private fun ExpandedPlayer(
 
     fun handleBack() {
         when {
+            sourceMenuVisible -> {
+                closeSourceMenu()
+            }
             addMenuVisible -> {
                 closeAddMenu()
             }
@@ -3285,6 +3326,15 @@ private fun ExpandedPlayer(
         multiFocusedIndexState.intValue.coerceIn(0, multiChannels.lastIndex.coerceAtLeast(0))
 
     fun handleExpandedKey(keyCode: Int): Boolean {
+        if (sourceMenuVisible) {
+            return if (keyCode == AndroidKeyEvent.KEYCODE_BACK) {
+                handleBack()
+                true
+            } else {
+                false
+            }
+        }
+
         if (addMenuVisible) {
             return if (keyCode == AndroidKeyEvent.KEYCODE_BACK) {
                 handleBack()
@@ -3371,6 +3421,15 @@ private fun ExpandedPlayer(
                     controlsVisible = false
                     multiControlFocus = MultiControlFocus.None
                     multiFocusedIndexState.intValue = (currentMultiFocusedIndex() - 1).coerceAtLeast(0)
+                }
+                return true
+            }
+            keyCode == AndroidKeyEvent.KEYCODE_DPAD_LEFT && !multiPlayerActive -> {
+                lastInteraction += 1
+                if (hasAlternateSources) {
+                    openSourceMenu()
+                } else {
+                    controlsVisible = true
                 }
                 return true
             }
@@ -3504,6 +3563,11 @@ private fun ExpandedPlayer(
                     modifier = Modifier.align(Alignment.CenterEnd),
                 )
             }
+            if (!sourceMenuMounted && hasAlternateSources) {
+                SourceMenuPeek(
+                    modifier = Modifier.align(Alignment.CenterStart),
+                )
+            }
         }
         if (enteredChannelNumber.isNotBlank()) {
             ChannelNumberOverlay(
@@ -3527,6 +3591,25 @@ private fun ExpandedPlayer(
                 },
                 visible = addMenuVisible,
                 modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
+        if (sourceMenuMounted && channel != null) {
+            SourceSelectionMenu(
+                channel = channel,
+                sources = sourceOptions,
+                selectedSourceId = selectedSource?.id,
+                onSelectSource = { source ->
+                    onSelectStreamSource(channel, source)
+                    closeSourceMenu()
+                },
+                onClose = {
+                    closeSourceMenu()
+                },
+                onClosed = {
+                    sourceMenuMounted = false
+                },
+                visible = sourceMenuVisible,
+                modifier = Modifier.align(Alignment.CenterStart),
             )
         }
     }
@@ -4496,6 +4579,213 @@ private fun AddChannelMenuRows(
 }
 
 @Composable
+private fun SourceSelectionMenu(
+    channel: TvChannel,
+    sources: List<TvStreamSource>,
+    selectedSourceId: String?,
+    onSelectSource: (TvStreamSource) -> Unit,
+    onClose: () -> Unit,
+    onClosed: () -> Unit,
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val focusRequester = remember { FocusRequester() }
+    val density = LocalDensity.current
+    val panelProgress by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "sourceMenuProgress",
+        finishedListener = { if (!visible) onClosed() },
+    )
+    var selectedIndex by remember(sources, selectedSourceId) {
+        mutableIntStateOf(sources.indexOfFirst { it.id == selectedSourceId }.coerceAtLeast(0))
+    }
+    val listState = rememberLazyListState()
+    var lastMenuInteractionAtMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    fun moveSelection(delta: Int) {
+        if (sources.isEmpty()) return
+        selectedIndex = Math.floorMod(selectedIndex + delta, sources.size)
+        lastMenuInteractionAtMs = System.currentTimeMillis()
+    }
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            delay(40)
+            focusRequester.requestFocus()
+        }
+    }
+    LaunchedEffect(visible, selectedIndex) {
+        if (!visible) return@LaunchedEffect
+        if (sources.isNotEmpty()) {
+            listState.animateScrollToItem(selectedIndex)
+        }
+        while (true) {
+            delay(1_000)
+            if (System.currentTimeMillis() - lastMenuInteractionAtMs >= 7_000) {
+                onClose()
+                break
+            }
+        }
+    }
+
+    Box(
+        modifier
+            .graphicsLayer {
+                translationX = with(density) { (-64.dp).toPx() } * (1f - panelProgress)
+                alpha = 0.74f + 0.26f * panelProgress
+            }
+            .width(292.dp)
+            .fillMaxHeight(0.78f)
+            .clip(RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0xF208141A),
+                        0.74f to Color(0xEA08141A),
+                        1.00f to Color(0xB008141A),
+                    )
+                )
+            )
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent {
+                when {
+                    !visible -> true
+                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionUp -> {
+                        moveSelection(-1)
+                        true
+                    }
+                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown -> {
+                        moveSelection(1)
+                        true
+                    }
+                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionRight -> {
+                        onClose()
+                        true
+                    }
+                    it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft -> true
+                    it.type == KeyEventType.KeyDown && it.key.isActivationKey() -> {
+                        sources.getOrNull(selectedIndex)?.let(onSelectSource)
+                        true
+                    }
+                    it.key.isActivationKey() -> true
+                    else -> false
+                }
+            }
+            .focusable()
+            .padding(start = 12.dp, top = 14.dp, end = 14.dp, bottom = 12.dp),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Text(
+                text = "מקורות שידור",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = listOf(channel.number, channel.name).filter { it.isNotBlank() }.joinToString("  "),
+                color = Color(0xFF9FB1B8),
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp, bottom = 12.dp),
+            )
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                itemsIndexed(sources, key = { _, source -> source.id }) { index, source ->
+                    val isFocused = index == selectedIndex
+                    val isSelected = source.id == selectedSourceId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                when {
+                                    isFocused -> Color(0x66EAFBFC)
+                                    isSelected -> Color(0x2823DDE3)
+                                    else -> Color(0x8A20242A)
+                                }
+                            )
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) PrimaryCyan else Color(0xFF667078))
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = source.label.ifBlank { "מקור ${index + 1}" },
+                                color = if (isFocused) Color.White else Color(0xFFD7E0E4),
+                                fontSize = 14.sp,
+                                fontWeight = if (isSelected || isFocused) FontWeight.Bold else FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = if (isSelected) "מוצג" else "זמין",
+                                color = if (isSelected) PrimaryCyan else Color(0xFF9FB1B8),
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceMenuPeek(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(width = 46.dp, height = 58.dp)
+            .background(
+                Brush.horizontalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0xF208141A),
+                        1.00f to Color(0xD005090D),
+                    )
+                ),
+                RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp),
+            )
+            .border(
+                width = 1.dp,
+                color = Color(0x663B3B3B),
+                shape = RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            repeat(3) { index ->
+                Box(
+                    Modifier
+                        .width(if (index == 1) 23.dp else 17.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(PrimaryCyan)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun AddChannelMenuPeek(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
@@ -4920,7 +5210,8 @@ private fun String.isMostlyRtlText(): Boolean {
 private fun Key.isActivationKey(): Boolean =
     this == Key.DirectionCenter || this == Key.Enter || this == Key.NumPadEnter
 
-private fun TvChannel.hasPlayableStream(): Boolean = streamUrl.isNotBlank()
+private fun TvChannel.hasPlayableStream(): Boolean =
+    streamUrl.isNotBlank() || streamSources.any { it.url.isNotBlank() }
 
 private fun TvProgram.programKey(): String =
     "$channelId:$startSeconds:$endSeconds:$title"
