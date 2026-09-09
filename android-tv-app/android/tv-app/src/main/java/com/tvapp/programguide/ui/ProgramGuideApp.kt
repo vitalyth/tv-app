@@ -389,13 +389,16 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     LaunchedEffect(currentDestination) {
         if (currentDestination == AppDestination.VOD) {
             player.pause()
+            vodViewModel.refreshIfStale()
             delay(40)
             requestVodContentFocus()
         } else if (currentDestination == AppDestination.LOCAL_SERIES) {
             player.pause()
+            localSeriesViewModel.refreshIfStale()
             delay(40)
             requestLocalSeriesContentFocus()
         } else if (currentDestination == AppDestination.LIVE_TV) {
+            viewModel.refreshSilentlyIfStale()
             if (streamingActive && !player.isPlaying) {
                 player.play()
             }

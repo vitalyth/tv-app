@@ -67,7 +67,8 @@ class VodViewModel(
     private var loadSeriesJob: Job? = null
     private var loadDetailsJob: Job? = null
     private var loadRecentJob: Job? = null
-    private val seriesPageCache = LinkedHashMap<String, VodSeriesPage>(16, 0.75f, true)
+    private val seriesPageCache = LinkedHashMap<String, TimedSeriesPage>(16, 0.75f, true)
+    private var lastRecentLoadedMs: Long = 0L
 
     init {
         loadRecent()
@@ -85,8 +86,37 @@ class VodViewModel(
         loadRecentJob?.cancel()
         loadRecentJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingRecent = true) }
-            val items = repository.loadRecentItems()
-            _uiState.update { it.copy(recentItems = items, isLoadingRecent = false) }
+            runCatching {
+                repository.loadRecentItems()
+            }.onSuccess { items ->
+                lastRecentLoadedMs = System.currentTimeMillis()
+                _uiState.update { it.copy(recentItems = items, isLoadingRecent = false) }
+            }.onFailure {
+                _uiState.update { it.copy(isLoadingRecent = false) }
+            }
+        }
+    }
+
+    fun refreshIfStale(force: Boolean = false) {
+        val state = _uiState.value
+        val nowMs = System.currentTimeMillis()
+        if (force || nowMs - lastRecentLoadedMs >= VOD_RECENT_TTL_MS) {
+            loadRecent()
+        }
+        if (state.navLevel == VodNavLevel.SERIES_LIST) {
+            val cachedPage = getCachedSeriesPage(
+                provider = state.selectedProvider,
+                category = state.selectedCategory,
+                query = state.searchQuery,
+            )
+            if (force || cachedPage == null) {
+                loadInitialSeries(
+                    provider = state.selectedProvider,
+                    category = state.selectedCategory,
+                    query = state.searchQuery,
+                    forceRefresh = true,
+                )
+            }
         }
     }
 
@@ -208,25 +238,28 @@ class VodViewModel(
         provider: VodProvider = _uiState.value.selectedProvider,
         category: String? = _uiState.value.selectedCategory,
         query: String = _uiState.value.searchQuery,
+        forceRefresh: Boolean = false,
     ) {
         loadSeriesJob?.cancel()
         loadSeriesJob = viewModelScope.launch {
-            getCachedSeriesPage(provider, category, query)?.let { cachedPage ->
-                _uiState.update {
-                    it.copy(
-                        selectedProvider = provider,
-                        selectedCategory = category,
-                        searchQuery = query,
-                        seriesList = cachedPage.series,
-                        categories = if (cachedPage.categories.isNotEmpty()) cachedPage.categories else it.categories,
-                        hasMoreSeries = cachedPage.hasMore,
-                        totalSeries = cachedPage.total,
-                        isLoadingSeries = false,
-                        isLoadingMoreSeries = false,
-                        seriesError = null,
-                    )
+            if (!forceRefresh) {
+                getCachedSeriesPage(provider, category, query)?.let { cachedPage ->
+                    _uiState.update {
+                        it.copy(
+                            selectedProvider = provider,
+                            selectedCategory = category,
+                            searchQuery = query,
+                            seriesList = cachedPage.series,
+                            categories = if (cachedPage.categories.isNotEmpty()) cachedPage.categories else it.categories,
+                            hasMoreSeries = cachedPage.hasMore,
+                            totalSeries = cachedPage.total,
+                            isLoadingSeries = false,
+                            isLoadingMoreSeries = false,
+                            seriesError = null,
+                        )
+                    }
+                    return@launch
                 }
-                return@launch
             }
 
             _uiState.update { it.copy(isLoadingSeries = true, seriesError = null) }
@@ -300,21 +333,38 @@ class VodViewModel(
     companion object {
         private const val PAGE_SIZE = 30
         private const val SERIES_CACHE_MAX_ENTRIES = 16
+        private const val VOD_SERIES_TTL_MS = 30 * 60 * 1000L
+        private const val VOD_RECENT_TTL_MS = 30 * 60 * 1000L
     }
 
     private fun seriesCacheKey(provider: VodProvider, category: String?, query: String): String =
         "${provider.id}|${category.orEmpty()}|${query.trim()}"
 
-    private fun getCachedSeriesPage(provider: VodProvider, category: String?, query: String): VodSeriesPage? =
-        seriesPageCache[seriesCacheKey(provider, category, query)]
+    private fun getCachedSeriesPage(provider: VodProvider, category: String?, query: String): VodSeriesPage? {
+        val key = seriesCacheKey(provider, category, query)
+        val cached = seriesPageCache[key] ?: return null
+        if (System.currentTimeMillis() - cached.loadedAtMs > VOD_SERIES_TTL_MS) {
+            seriesPageCache.remove(key)
+            return null
+        }
+        return cached.page
+    }
 
     private fun putCachedSeriesPage(provider: VodProvider, category: String?, query: String, page: VodSeriesPage) {
-        seriesPageCache[seriesCacheKey(provider, category, query)] = page
+        seriesPageCache[seriesCacheKey(provider, category, query)] = TimedSeriesPage(
+            page = page,
+            loadedAtMs = System.currentTimeMillis(),
+        )
         if (seriesPageCache.size > SERIES_CACHE_MAX_ENTRIES) {
             val oldest = seriesPageCache.keys.firstOrNull()
             if (oldest != null) seriesPageCache.remove(oldest)
         }
     }
+
+    private data class TimedSeriesPage(
+        val page: VodSeriesPage,
+        val loadedAtMs: Long,
+    )
 
     fun openSeriesDetails(series: VodSeries) {
         loadDetailsJob?.cancel()

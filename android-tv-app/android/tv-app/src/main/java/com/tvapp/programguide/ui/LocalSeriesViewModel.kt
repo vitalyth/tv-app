@@ -35,9 +35,19 @@ class LocalSeriesViewModel(
     private val _uiState = MutableStateFlow(LocalSeriesUiState())
     val uiState: StateFlow<LocalSeriesUiState> = _uiState.asStateFlow()
     private var loadJob: Job? = null
+    private var lastLoadedMs: Long = 0L
 
     init {
         loadInitial()
+    }
+
+    fun refreshIfStale(force: Boolean = false) {
+        val state = _uiState.value
+        val nowMs = System.currentTimeMillis()
+        if (state.selectedSeries != null || state.playingEpisode != null || state.isLoading) return
+        if (force || state.series.isEmpty() || nowMs - lastLoadedMs >= LOCAL_SERIES_TTL_MS) {
+            loadInitial(state.query)
+        }
     }
 
     fun loadInitial(query: String = _uiState.value.query) {
@@ -55,6 +65,7 @@ class LocalSeriesViewModel(
             runCatching {
                 repository.loadSeries(query = query, limit = PAGE_SIZE, offset = 0)
             }.onSuccess { page ->
+                lastLoadedMs = System.currentTimeMillis()
                 _uiState.update {
                     it.copy(
                         series = page.series,
@@ -126,5 +137,6 @@ class LocalSeriesViewModel(
 
     companion object {
         private const val PAGE_SIZE = 48
+        private const val LOCAL_SERIES_TTL_MS = 2 * 60 * 1000L
     }
 }

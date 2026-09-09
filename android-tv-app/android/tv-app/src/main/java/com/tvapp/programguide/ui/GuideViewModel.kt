@@ -9,6 +9,7 @@ import com.tvapp.programguide.data.ProgramGuideRepository
 import com.tvapp.programguide.data.TvChannel
 import com.tvapp.programguide.data.TvProgram
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -87,9 +89,16 @@ class GuideViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GuidePlaybackUiState())
     private val loadingGuideRanges = mutableSetOf<GuideRange>()
     private val playbackPrefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private var lastGuideRefreshMs: Long = 0L
 
     init {
         refresh()
+        viewModelScope.launch {
+            while (isActive) {
+                delay(LIVE_GUIDE_REFRESH_INTERVAL_MS)
+                refreshSilentlyIfStale()
+            }
+        }
     }
 
     fun refresh() {
@@ -97,6 +106,7 @@ class GuideViewModel(
             _uiState.update { it.copy(loading = true, error = null) }
             runCatching { repository.loadGuide() }
                 .onSuccess { data ->
+                    lastGuideRefreshMs = System.currentTimeMillis()
                     val channel = data.lastPlayableChannel() ?: data.channels.firstOrNull()
                     val program = channel?.let { currentProgram(data, it) }
                     val shouldAutoPlay = channel?.hasStream() == true
@@ -116,6 +126,53 @@ class GuideViewModel(
                             loading = false,
                             error = error.message ?: "Guide failed to load",
                         )
+                    }
+                }
+        }
+    }
+
+    fun refreshSilentlyIfStale(force: Boolean = false) {
+        val nowMs = System.currentTimeMillis()
+        if (!force && nowMs - lastGuideRefreshMs < LIVE_GUIDE_REFRESH_INTERVAL_MS) return
+
+        viewModelScope.launch {
+            runCatching { repository.loadGuide() }
+                .onSuccess { data ->
+                    lastGuideRefreshMs = System.currentTimeMillis()
+                    _uiState.update { current ->
+                        val selectedChannel = current.selectedChannel?.let { selected ->
+                            data.channels.firstOrNull { it.id == selected.id }
+                        } ?: data.lastPlayableChannel() ?: data.channels.firstOrNull()
+                        val playingChannel = current.playingChannel?.let { playing ->
+                            data.channels.firstOrNull { it.id == playing.id }
+                        }
+                        val selectedProgram = current.selectedProgram?.let { selected ->
+                            selectedChannel?.let { channel ->
+                                data.programsByChannel[channel.id].orEmpty()
+                                    .firstOrNull { it.identityKey() == selected.identityKey() }
+                            }
+                        } ?: selectedChannel?.let { currentProgram(data, it) }
+                        current.copy(
+                            loading = false,
+                            error = null,
+                            guideData = data,
+                            selectedChannel = selectedChannel,
+                            selectedProgram = selectedProgram,
+                            playingChannel = playingChannel,
+                            playingProgram = playingChannel?.let { currentProgram(data, it) } ?: current.playingProgram,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update { current ->
+                        if (current.guideData == null) {
+                            current.copy(
+                                loading = false,
+                                error = error.message ?: "Guide failed to refresh",
+                            )
+                        } else {
+                            current
+                        }
                     }
                 }
         }
@@ -386,5 +443,6 @@ class GuideViewModel(
     private companion object {
         const val PREFS_NAME = "program_guide_playback"
         const val KEY_LAST_CHANNEL_ID = "last_channel_id"
+        const val LIVE_GUIDE_REFRESH_INTERVAL_MS = 10 * 60 * 1000L
     }
 }
