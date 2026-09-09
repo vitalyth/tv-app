@@ -16,7 +16,6 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -278,6 +277,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val guideState by viewModel.guideState.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val activeStreamUrl = remember { mutableStateOf<String?>(null) }
     var primaryVideoProfile by remember { mutableStateOf<PrimaryVideoProfile?>(null) }
     val trackSelector = remember {
@@ -686,15 +686,11 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Box(Modifier.fillMaxSize().background(ScreenBackground)) {
                 val showNavRail = !playbackState.isPlayerExpanded && !isVodPlaying && !isLocalSeriesPlaying && !isInitialLoading
-                val contentStartPadding by animateDpAsState(
-                    targetValue = when {
-                        !showNavRail -> 0.dp
-                        navRailExpanded -> 176.dp
-                        else -> 56.dp
-                    },
-                    animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
-                    label = "contentStartPadding",
-                )
+                val contentStartPadding = when {
+                    !showNavRail -> 0.dp
+                    navRailExpanded -> 176.dp
+                    else -> 56.dp
+                }
 
                 Box(
                     modifier = Modifier
@@ -833,6 +829,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                     AppSideNavRail(
                         currentDestination = currentDestination,
                         onDestinationSelected = { destination ->
+                            navRailExpanded = false
+                            focusManager.clearFocus(force = true)
                             currentDestination = destination
                             coroutineScope.launch {
                                 delay(40)
