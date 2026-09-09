@@ -73,9 +73,9 @@ class ProgramGuideRepository(
                 val name = item.optCleanString("name").ifBlank { id }
                 val channelNumber = item.optCleanString("channelNumber")
                 val number = channelNumber.ifBlank { indexNumber.takeIf { it > 0 }?.toString().orEmpty() }
-                val streamKeys = listOf(tvgId, name)
+                val streamKeys = listOf(tvgId.streamTvgIdKey(), name.streamNameKey())
                     .filter { it.isNotBlank() }
-                    .ifEmpty { listOf(number).filter { it.isNotBlank() } }
+                    .ifEmpty { listOf(number.streamNumberKey()).filter { it.isNotBlank() } }
                 val streams = streamKeys
                     .flatMap { key -> playlistStreams[key].orEmpty() }
                     .distinctBy { it.url }
@@ -130,7 +130,12 @@ class ProgramGuideRepository(
                 val tvgName = attribute(line, "tvg-name")
                 val channelNumber = attribute(line, "tvg-chno")
                 val displayName = line.substringAfterLast(',', "").trim()
-                currentKeys = listOf(tvgId, tvgName, channelNumber, displayName).filter { it.isNotBlank() }
+                currentKeys = listOf(
+                    tvgId.streamTvgIdKey(),
+                    tvgName.streamNameKey(),
+                    channelNumber.streamNumberKey(),
+                    displayName.streamNameKey(),
+                ).filter { it.isNotBlank() }
                 currentLabel = displayName.ifBlank { tvgName }
                 continue
             }
@@ -192,6 +197,15 @@ class ProgramGuideRepository(
                 value.takeIf { key == name && it.isNotBlank() }
             }
     }
+
+    private fun String.streamTvgIdKey(): String =
+        trim().takeIf { it.isNotBlank() }?.let { "tvg-id:$it" }.orEmpty()
+
+    private fun String.streamNameKey(): String =
+        trim().takeIf { it.isNotBlank() }?.let { "name:$it" }.orEmpty()
+
+    private fun String.streamNumberKey(): String =
+        trim().takeIf { it.isNotBlank() }?.let { "number:$it" }.orEmpty()
 
     private fun parsePrograms(array: JSONArray?, channelId: String): List<TvProgram> {
         if (array == null) return emptyList()
