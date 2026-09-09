@@ -81,12 +81,17 @@ fun AppSideNavRail(
     vodFocusRequester: FocusRequester = remember { FocusRequester() },
     localSeriesFocusRequester: FocusRequester = remember { FocusRequester() },
     onNavigateToContent: () -> Unit = {},
+    onExpandedChanged: (Boolean) -> Unit = {},
 ) {
     var liveTvFocused by remember { mutableStateOf(false) }
     var vodFocused by remember { mutableStateOf(false) }
     var localSeriesFocused by remember { mutableStateOf(false) }
     val hasRailFocus = liveTvFocused || vodFocused || localSeriesFocused
     val isRailExpanded = hasRailFocus
+
+    LaunchedEffect(isRailExpanded) {
+        onExpandedChanged(isRailExpanded)
+    }
 
     val width = if (isRailExpanded) 176.dp else 56.dp
     val railCornerRadius = if (isRailExpanded) 16.dp else 0.dp

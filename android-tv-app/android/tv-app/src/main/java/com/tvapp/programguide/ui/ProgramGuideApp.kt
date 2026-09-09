@@ -16,6 +16,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -337,6 +338,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val stableMultiPlayerView = remember(multiPlayerView) { StablePlayerView(multiPlayerView) }
     val streamingActive = playbackState.isMiniPlayerPlaying || playbackState.isPlayerExpanded
     var detailsVisible by remember { mutableStateOf(false) }
+    var navRailExpanded by remember { mutableStateOf(false) }
     var multiPlayerChannels by remember { mutableStateOf<List<TvChannel>>(emptyList()) }
     var multiPlayerFocusIndex by remember { mutableIntStateOf(0) }
     var multiModeEnabled by remember { mutableStateOf(false) }
@@ -684,7 +686,15 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Box(Modifier.fillMaxSize().background(ScreenBackground)) {
                 val showNavRail = !playbackState.isPlayerExpanded && !isVodPlaying && !isLocalSeriesPlaying && !isInitialLoading
-                val contentStartPadding = if (showNavRail) 56.dp else 0.dp
+                val contentStartPadding by animateDpAsState(
+                    targetValue = when {
+                        !showNavRail -> 0.dp
+                        navRailExpanded -> 176.dp
+                        else -> 56.dp
+                    },
+                    animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
+                    label = "contentStartPadding",
+                )
 
                 Box(
                     modifier = Modifier
@@ -840,6 +850,9 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         liveTvFocusRequester = sideRailLiveTvFocusRequester,
                         vodFocusRequester = sideRailVodFocusRequester,
                         localSeriesFocusRequester = sideRailLocalSeriesFocusRequester,
+                        onExpandedChanged = { expanded ->
+                            navRailExpanded = expanded
+                        },
                         onNavigateToContent = {
                             if (currentDestination == AppDestination.VOD) {
                                 requestVodContentFocus()
