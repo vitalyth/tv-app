@@ -142,8 +142,7 @@ fun VodSeriesDetailsView(
         var succeeded = false
         if (primary != null) {
             try {
-                primary.requestFocus()
-                succeeded = true
+                succeeded = primary.requestFocus()
             } catch (_: Exception) {}
         }
         if (!succeeded && fallback != null) {
@@ -166,10 +165,6 @@ fun VodSeriesDetailsView(
         if (targetIndex < 0) return
         val primaryReq = episodeFocusRequesters[episodeId]
         val fallbackReq = episodes.firstOrNull()?.id?.let { episodeFocusRequesters[it] }
-        try {
-            primaryReq?.requestFocus()
-            return
-        } catch (_: Exception) {}
         coroutineScope.launch {
             try {
                 episodesListState.scrollToItem(targetIndex.coerceAtLeast(0))

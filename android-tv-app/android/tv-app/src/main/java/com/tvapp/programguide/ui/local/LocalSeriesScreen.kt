@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -391,15 +392,40 @@ private fun LocalSeriesDetails(
     val showSeasonTabs = seasonNumbers.isNotEmpty()
     var selectedSeason by remember(series.id) { mutableStateOf(seasonNumbers.firstOrNull() ?: 1) }
     val seasonFocusRequester = remember(series.id) { FocusRequester() }
+    val episodesListState = rememberLazyListState()
     val detailsCoroutineScope = rememberCoroutineScope()
     val selectedEpisodes = remember(episodes, selectedSeason) {
         episodes.filter { (it.season ?: 1) == selectedSeason }
     }
     val fallbackImageUrl = series.backdropUrl ?: series.posterUrl
+    var focusFirstEpisodeAfterSeasonChange by remember(series.id) { mutableStateOf(false) }
+
+    fun requestFirstEpisodeFocus() {
+        detailsCoroutineScope.launch {
+            try {
+                episodesListState.scrollToItem(0)
+            } catch (_: Exception) {}
+            delay(90)
+            try {
+                firstEpisodeFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+            delay(120)
+            try {
+                firstEpisodeFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
 
     LaunchedEffect(seasonNumbers) {
         if (seasonNumbers.isNotEmpty() && selectedSeason !in seasonNumbers) {
             selectedSeason = seasonNumbers.first()
+        }
+    }
+
+    LaunchedEffect(selectedSeason, selectedEpisodes.size) {
+        if (focusFirstEpisodeAfterSeasonChange && selectedEpisodes.isNotEmpty()) {
+            focusFirstEpisodeAfterSeasonChange = false
+            requestFirstEpisodeFocus()
         }
     }
 
@@ -449,7 +475,7 @@ private fun LocalSeriesDetails(
                             interactionSource = backInteractionSource,
                             focusRequester = backFocusRequester,
                             onNavigateLeft = onNavigateSideRail,
-                            onNavigateDown = { firstEpisodeFocusRequester.requestFocus() },
+                            onNavigateDown = { requestFirstEpisodeFocus() },
                         )
                         .padding(horizontal = 18.dp, vertical = 9.dp),
                 ) {
@@ -534,14 +560,11 @@ private fun LocalSeriesDetails(
                                 focusRequester = if (index == 0) seasonFocusRequester else remember { FocusRequester() },
                                 onClick = {
                                     selectedSeason = season
-                                    detailsCoroutineScope.launch {
-                                        delay(90)
-                                        firstEpisodeFocusRequester.requestFocus()
-                                    }
+                                    focusFirstEpisodeAfterSeasonChange = true
                                 },
                                 onNavigateLeft = if (index == 0) onNavigateSideRail else null,
                                 onNavigateUp = { backFocusRequester.requestFocus() },
-                                onNavigateDown = { firstEpisodeFocusRequester.requestFocus() },
+                                onNavigateDown = { requestFirstEpisodeFocus() },
                             )
                         }
                     }
@@ -555,6 +578,7 @@ private fun LocalSeriesDetails(
                     modifier = Modifier.padding(bottom = 12.dp),
                 )
                 LazyRow(
+                    state = episodesListState,
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(start = 12.dp, end = 32.dp, bottom = 8.dp),
                     modifier = Modifier
