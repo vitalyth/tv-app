@@ -711,6 +711,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     onChannelActivated = viewModel::playChannel,
                                     onLiveChannelOpened = viewModel::playChannelExpanded,
                                     onProgramSelected = viewModel::selectChannel,
+                                    selectedStreamSource = viewModel::selectedStreamSource,
                                     onPlayerClick = viewModel::expandPlayer,
                                     onGuideRangeNeeded = viewModel::ensureGuideRange,
                                     gridFocusTarget = gridFocusTarget,
@@ -963,6 +964,7 @@ private fun GuideContent(
     onChannelActivated: (TvChannel, TvProgram?) -> Unit,
     onLiveChannelOpened: (TvChannel, TvProgram?) -> Unit,
     onProgramSelected: (TvChannel, TvProgram?) -> Unit,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
     onPlayerClick: () -> Unit,
     onGuideRangeNeeded: (Long, Long) -> Unit,
     gridFocusTarget: GridFocusTarget?,
@@ -1000,6 +1002,7 @@ private fun GuideContent(
                 isPlayerExpanded = isPlayerExpanded,
                 onPlayerClick = onPlayerClick,
                 onShowNowClick = { showNowRequestNonce += 1 },
+                selectedStreamSource = selectedStreamSource,
                 topPanelFocusRequester = topPanelFocusRequester,
                 gridFocusRequester = gridFocusRequester,
             )
@@ -1034,6 +1037,7 @@ private fun GuideContent(
             ProgramDetailsPage(
                 channel = detailsChannel,
                 program = programForDetails,
+                selectedStreamSource = selectedStreamSource,
                 onPlayLive = {
                     detailsChannel?.let { channel ->
                         onGridFocusRequested(channel, null, true)
@@ -1064,6 +1068,7 @@ private fun TopInfoPanel(
     isPlayerExpanded: Boolean,
     onPlayerClick: () -> Unit,
     onShowNowClick: () -> Unit,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
     topPanelFocusRequester: FocusRequester,
     gridFocusRequester: FocusRequester,
 ) {
@@ -1081,6 +1086,7 @@ private fun TopInfoPanel(
         ProgramHeroPanel(
             channel = channel,
             program = program,
+            sourceName = channel?.let { selectedStreamSource(it).displayNameOrNull() },
             onPlayerClick = onPlayerClick,
             onShowNowClick = onShowNowClick,
             topPanelFocusRequester = topPanelFocusRequester,
@@ -1106,6 +1112,7 @@ private fun TopInfoPanel(
 private fun ProgramHeroPanel(
     channel: TvChannel?,
     program: TvProgram?,
+    sourceName: String?,
     onPlayerClick: () -> Unit,
     onShowNowClick: () -> Unit,
     topPanelFocusRequester: FocusRequester,
@@ -1115,7 +1122,8 @@ private fun ProgramHeroPanel(
     val contentEndPadding = MiniPlayerWidth + 32.dp
     val backgroundUrl = program?.imageUrl ?: channel?.logoUrl
     val title = program?.title ?: channel?.name ?: ""
-    val description = program?.description?.ifBlank { null } ?: channel?.name.orEmpty()
+    val channelDisplayName = sourceName ?: channel?.name.orEmpty()
+    val description = program?.description?.ifBlank { null } ?: channelDisplayName
     val textAlign = if (title.isMostlyRtlText() || description.isMostlyRtlText()) TextAlign.Right else TextAlign.Left
     val contentAlignment = if (textAlign == TextAlign.Right) Alignment.End else Alignment.Start
 
@@ -1210,7 +1218,7 @@ private fun ProgramHeroPanel(
             )
             Spacer(Modifier.width(12.dp))
             Text(
-                text = channel?.name.orEmpty(),
+                text = channelDisplayName,
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
@@ -2876,6 +2884,7 @@ private fun ProgramCell(
 private fun ProgramDetailsPage(
     channel: TvChannel?,
     program: TvProgram,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
     onPlayLive: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -2883,6 +2892,8 @@ private fun ProgramDetailsPage(
     val playFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val canPlayLive = !channel?.streamUrl.isNullOrBlank()
+    val channelDisplayName = channel?.let { selectedStreamSource(it).displayNameOrNull() }
+        ?: channel?.name.orEmpty()
     var selectedAction by remember { mutableStateOf(DetailsAction.Close) }
     val closeFocused = selectedAction == DetailsAction.Close
     val playFocused = selectedAction == DetailsAction.PlayLive
@@ -3024,7 +3035,7 @@ private fun ProgramDetailsPage(
             }
             Spacer(Modifier.height(70.dp))
             Text(
-                text = channel?.name.orEmpty(),
+                text = channelDisplayName,
                 color = Color(0xFFB9C6CC),
                 fontSize = 24.sp,
                 textAlign = TextAlign.Right,
@@ -3529,6 +3540,7 @@ private fun ExpandedPlayer(
                 programsByChannel = programsByChannel,
                 nowSeconds = nowSeconds,
                 streamUrl = streamUrl,
+                selectedStreamSource = selectedStreamSource,
                 modifier = Modifier.fillMaxSize(),
             )
             val columnCount = multiPlayerColumnCount(multiChannels.size)
@@ -3552,6 +3564,7 @@ private fun ExpandedPlayer(
                 player = player,
                 channel = channel,
                 program = program,
+                sourceName = selectedSource.displayNameOrNull(),
                 showMetadataPanel = controlsMetadataVisible,
                 onInteraction = {
                     controlsVisible = true
@@ -3962,6 +3975,7 @@ private fun MultiPlayerGrid(
     programsByChannel: Map<String, List<TvProgram>>,
     nowSeconds: Long,
     streamUrl: (TvChannel) -> String,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -3987,6 +4001,7 @@ private fun MultiPlayerGrid(
             programsByChannel = programsByChannel,
             nowSeconds = nowSeconds,
             streamUrl = streamUrl,
+            selectedStreamSource = selectedStreamSource,
             columnCount = columnCount,
             rowCount = rowCount,
             modifier = Modifier.fillMaxSize(),
@@ -4007,6 +4022,7 @@ private fun MultiPlayerVideoGrid(
     programsByChannel: Map<String, List<TvProgram>>,
     nowSeconds: Long,
     streamUrl: (TvChannel) -> String,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
     columnCount: Int,
     rowCount: Int,
     modifier: Modifier = Modifier,
@@ -4027,6 +4043,7 @@ private fun MultiPlayerVideoGrid(
                             programsByChannel = programsByChannel,
                             nowSeconds = nowSeconds,
                             streamUrl = streamUrl,
+                            selectedStreamSource = selectedStreamSource,
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                     }
@@ -4047,6 +4064,7 @@ private fun MultiPlayerVideoCell(
     programsByChannel: Map<String, List<TvProgram>>,
     nowSeconds: Long,
     streamUrl: (TvChannel) -> String,
+    selectedStreamSource: (TvChannel) -> TvStreamSource?,
     modifier: Modifier = Modifier,
 ) {
     val channel = channels.getOrNull(index)
@@ -4062,6 +4080,7 @@ private fun MultiPlayerVideoCell(
     MultiPlayerTile(
         channel = channel,
         program = currentProgramForNow(programsByChannel[channel.id].orEmpty(), nowSeconds),
+        sourceName = selectedStreamSource(channel).displayNameOrNull(),
         modifier = modifier,
     ) {
         if (index == 0) {
@@ -4088,9 +4107,11 @@ private fun MultiPlayerVideoCell(
 private fun MultiPlayerTile(
     channel: TvChannel,
     program: TvProgram?,
+    sourceName: String?,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    val channelDisplayName = sourceName ?: channel.name
     val tileShape = RoundedCornerShape(12.dp)
     Box(
         modifier
@@ -4126,7 +4147,7 @@ private fun MultiPlayerTile(
                 }
                 Column {
                     Text(
-                        text = listOf(channel.number, channel.name).filter { it.isNotBlank() }.joinToString("  "),
+                        text = listOf(channel.number, channelDisplayName).filter { it.isNotBlank() }.joinToString("  "),
                         color = Color.White,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
@@ -4978,20 +4999,27 @@ private fun ExpandedPlayerControls(
     player: StablePlayer,
     channel: TvChannel?,
     program: TvProgram?,
+    sourceName: String?,
     showMetadataPanel: Boolean,
     onInteraction: () -> Unit,
 ) {
     val isLive = player.value.isCurrentMediaItemLive
+    val channelDisplayName = sourceName ?: channel?.name.orEmpty()
     com.tvapp.programguide.ui.components.UnifiedPlayerControlsOverlay(
         player = player,
-        title = program?.title ?: channel?.name ?: "",
-        subtitle = listOfNotNull(channel?.name, program?.timeRange()?.asLtrText()).joinToString("  |  "),
+        title = program?.title ?: channelDisplayName,
+        subtitle = listOf(channelDisplayName, program?.timeRange()?.asLtrText())
+            .filterNotNull()
+            .filter { it.isNotBlank() }
+            .joinToString("  |  "),
         badgeText = if (isLive) "LIVE" else "DVR",
         isLive = isLive,
         logoUrl = channel?.logoUrl,
-        providerDisplayName = channel?.name,
+        providerDisplayName = channelDisplayName,
         previewImageUrl = program?.imageUrl ?: channel?.logoUrl,
-        headerChannelText = listOfNotNull(channel?.number, channel?.name).joinToString("  "),
+        headerChannelText = listOf(channel?.number.orEmpty(), channelDisplayName)
+            .filter { it.isNotBlank() }
+            .joinToString("  "),
         showMetadataPanel = showMetadataPanel,
         onInteraction = onInteraction,
     )
@@ -5212,6 +5240,9 @@ private fun Key.isActivationKey(): Boolean =
 
 private fun TvChannel.hasPlayableStream(): Boolean =
     streamUrl.isNotBlank() || streamSources.any { it.url.isNotBlank() }
+
+private fun TvStreamSource?.displayNameOrNull(): String? =
+    this?.label?.trim()?.takeIf { it.isNotBlank() }
 
 private fun TvProgram.programKey(): String =
     "$channelId:$startSeconds:$endSeconds:$title"
