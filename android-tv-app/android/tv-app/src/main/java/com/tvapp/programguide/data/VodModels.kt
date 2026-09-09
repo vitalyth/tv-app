@@ -120,6 +120,7 @@ enum class VodNavLevel {
 enum class AppDestination(
     val titleHebrew: String,
 ) {
+    HOME("בית"),
     LIVE_TV("שידור חי"),
     VOD("ספריית VOD"),
     LOCAL_SERIES("סדרות"),

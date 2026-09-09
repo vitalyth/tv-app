@@ -34,6 +34,7 @@ data class GuideUiState(
     val isMiniPlayerPlaying: Boolean = false,
     val isPlayerExpanded: Boolean = false,
     val selectedStreamSourceIds: Map<String, String> = emptyMap(),
+    val recentChannelIds: List<String> = emptyList(),
 )
 
 data class GuideDataUiState(
@@ -43,6 +44,7 @@ data class GuideDataUiState(
     val selectedChannel: TvChannel? = null,
     val selectedProgram: TvProgram? = null,
     val playingChannel: TvChannel? = null,
+    val recentChannelIds: List<String> = emptyList(),
 )
 
 data class GuidePlaybackUiState(
@@ -72,6 +74,7 @@ class GuideViewModel(
                 selectedChannel = state.selectedChannel,
                 selectedProgram = state.selectedProgram,
                 playingChannel = state.playingChannel,
+                recentChannelIds = state.recentChannelIds,
             )
         }
         .distinctUntilChanged()
@@ -124,6 +127,7 @@ class GuideViewModel(
                         playingProgram = program.takeIf { shouldAutoPlay },
                         isMiniPlayerPlaying = shouldAutoPlay,
                         selectedStreamSourceIds = selectedStreamSourceIds.toMap(),
+                        recentChannelIds = recentChannelIds(),
                     )
                 }
                 .onFailure { error ->
@@ -424,8 +428,21 @@ class GuideViewModel(
     }
 
     private fun saveLastChannel(channel: TvChannel) {
-        playbackPrefs.edit().putString(KEY_LAST_CHANNEL_ID, channel.id).apply()
+        val recentIds = (listOf(channel.id) + recentChannelIds().filter { it != channel.id })
+            .take(MAX_RECENT_CHANNELS)
+        playbackPrefs.edit()
+            .putString(KEY_LAST_CHANNEL_ID, channel.id)
+            .putString(KEY_RECENT_CHANNEL_IDS, recentIds.joinToString(","))
+            .apply()
+        _uiState.update { it.copy(recentChannelIds = recentIds) }
     }
+
+    private fun recentChannelIds(): List<String> =
+        playbackPrefs.getString(KEY_RECENT_CHANNEL_IDS, null)
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
 
     private fun streamSourcePrefKey(channelId: String): String =
         "$KEY_STREAM_SOURCE_PREFIX$channelId"
@@ -492,7 +509,9 @@ class GuideViewModel(
     private companion object {
         const val PREFS_NAME = "program_guide_playback"
         const val KEY_LAST_CHANNEL_ID = "last_channel_id"
+        const val KEY_RECENT_CHANNEL_IDS = "recent_channel_ids"
         const val KEY_STREAM_SOURCE_PREFIX = "stream_source_id:"
+        const val MAX_RECENT_CHANNELS = 12
         const val LIVE_GUIDE_REFRESH_INTERVAL_MS = 10 * 60 * 1000L
     }
 }

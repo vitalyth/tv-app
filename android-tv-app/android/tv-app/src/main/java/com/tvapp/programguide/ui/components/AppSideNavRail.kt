@@ -21,6 +21,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ConnectedTv
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material3.Icon
@@ -66,6 +67,7 @@ fun AppSideNavRail(
     currentDestination: AppDestination,
     onDestinationSelected: (AppDestination) -> Unit,
     modifier: Modifier = Modifier,
+    homeFocusRequester: FocusRequester = remember { FocusRequester() },
     liveTvFocusRequester: FocusRequester = remember { FocusRequester() },
     vodFocusRequester: FocusRequester = remember { FocusRequester() },
     localSeriesFocusRequester: FocusRequester = remember { FocusRequester() },
@@ -74,9 +76,10 @@ fun AppSideNavRail(
     forceCollapsed: Boolean = false,
 ) {
     var liveTvFocused by remember { mutableStateOf(false) }
+    var homeFocused by remember { mutableStateOf(false) }
     var vodFocused by remember { mutableStateOf(false) }
     var localSeriesFocused by remember { mutableStateOf(false) }
-    val hasRailFocus = liveTvFocused || vodFocused || localSeriesFocused
+    val hasRailFocus = homeFocused || liveTvFocused || vodFocused || localSeriesFocused
     val isRailExpanded = hasRailFocus && !forceCollapsed
 
     LaunchedEffect(isRailExpanded) {
@@ -139,6 +142,20 @@ fun AppSideNavRail(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         NavRailItem(
+                            destination = AppDestination.HOME,
+                            icon = Icons.Default.Home,
+                            label = "Home",
+                            isSelected = currentDestination == AppDestination.HOME,
+                            isRailExpanded = isRailExpanded,
+                            focusRequester = homeFocusRequester,
+                            onSelect = { onDestinationSelected(AppDestination.HOME) },
+                            onFocusChanged = { homeFocused = it },
+                            onNavigateRight = onNavigateToContent,
+                            onNavigateDown = { liveTvFocusRequester.requestFocus() },
+                            onNavigateUp = null,
+                        )
+
+                        NavRailItem(
                             destination = AppDestination.LIVE_TV,
                             icon = Icons.Default.ConnectedTv,
                             label = "Live",
@@ -149,7 +166,7 @@ fun AppSideNavRail(
                             onFocusChanged = { liveTvFocused = it },
                             onNavigateRight = onNavigateToContent,
                             onNavigateDown = { vodFocusRequester.requestFocus() },
-                            onNavigateUp = null,
+                            onNavigateUp = { homeFocusRequester.requestFocus() },
                         )
 
                         NavRailItem(
