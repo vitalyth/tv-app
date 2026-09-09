@@ -434,7 +434,7 @@ private fun LocalSeriesDetails(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 32.dp, vertical = 24.dp),
+                .padding(horizontal = 32.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(Modifier.fillMaxWidth(0.7f)) {
@@ -469,7 +469,7 @@ private fun LocalSeriesDetails(
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     series.metadata?.rating?.let {
                         Row(
@@ -493,12 +493,12 @@ private fun LocalSeriesDetails(
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = series.displayTitle,
                     color = Color.White,
-                    fontSize = 34.sp,
-                    lineHeight = 40.sp,
+                    fontSize = 30.sp,
+                    lineHeight = 36.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -510,7 +510,7 @@ private fun LocalSeriesDetails(
                         color = Color(0xFFCBD5E1),
                         fontSize = 14.sp,
                         lineHeight = 20.sp,
-                        maxLines = 3,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 10.dp),
                         style = RtlTextStyle,
@@ -525,7 +525,7 @@ private fun LocalSeriesDetails(
                         contentPadding = PaddingValues(start = 12.dp, end = 32.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 10.dp),
+                            .padding(bottom = 8.dp),
                     ) {
                         itemsIndexed(seasonNumbers, key = { _, season -> season }) { index, season ->
                             LocalSeasonTab(
@@ -556,8 +556,10 @@ private fun LocalSeriesDetails(
                 )
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    contentPadding = PaddingValues(start = 12.dp, end = 32.dp, bottom = 16.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 32.dp, bottom = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(250.dp),
                 ) {
                     itemsIndexed(selectedEpisodes, key = { _, it -> it.id }) { index, episode ->
                         LocalEpisodeCard(
@@ -617,7 +619,7 @@ private fun LocalSeasonTab(
                 onNavigateUp = onNavigateUp,
                 onNavigateDown = onNavigateDown,
             )
-            .padding(horizontal = 18.dp, vertical = 9.dp),
+            .padding(horizontal = 18.dp, vertical = 7.dp),
     ) {
         Text(
             text = "עונה $season",
@@ -625,7 +627,7 @@ private fun LocalSeasonTab(
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         Box(
             modifier = Modifier
                 .width(30.dp)
@@ -651,7 +653,8 @@ private fun LocalEpisodeCard(
 
     Column(
         modifier = Modifier
-            .width(230.dp)
+            .width(222.dp)
+            .height(236.dp)
             .clip(shape)
             .background(if (isFocused) FocusedBg else CardBg)
             .then(if (isFocused) Modifier.border(2.5.dp, FocusedBg, shape) else Modifier)
@@ -667,7 +670,7 @@ private fun LocalEpisodeCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(130.dp)
+                .height(112.dp)
                 .background(Color(0xFF1B222D)),
             contentAlignment = Alignment.Center,
         ) {
@@ -685,7 +688,7 @@ private fun LocalEpisodeCard(
                 color = if (isFocused) FocusedContent else Color.White,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = RtlTextStyle,
             )
@@ -694,8 +697,8 @@ private fun LocalEpisodeCard(
                     text = it,
                     color = if (isFocused) Color(0xFF344054) else MutedText,
                     fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    maxLines = 2,
+                    lineHeight = 14.sp,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp),
                     style = RtlTextStyle,
