@@ -27,9 +27,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CollectionsBookmark
-import androidx.compose.material.icons.filled.LiveTv
-import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.ConnectedTv
+import androidx.compose.material.icons.filled.MovieFilter
+import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -145,8 +145,8 @@ fun AppSideNavRail(
                     ) {
                         NavRailItem(
                             destination = AppDestination.LIVE_TV,
-                            icon = Icons.Default.LiveTv,
-                            label = "Live TV",
+                            icon = Icons.Default.ConnectedTv,
+                            label = "Live",
                             isSelected = currentDestination == AppDestination.LIVE_TV,
                             isRailExpanded = isRailExpanded,
                             focusRequester = liveTvFocusRequester,
@@ -159,7 +159,7 @@ fun AppSideNavRail(
 
                         NavRailItem(
                             destination = AppDestination.VOD,
-                            icon = Icons.Default.VideoLibrary,
+                            icon = Icons.Default.MovieFilter,
                             label = "VOD",
                             isSelected = currentDestination == AppDestination.VOD,
                             isRailExpanded = isRailExpanded,
@@ -173,8 +173,8 @@ fun AppSideNavRail(
 
                         NavRailItem(
                             destination = AppDestination.LOCAL_SERIES,
-                            icon = Icons.Default.CollectionsBookmark,
-                            label = "סדרות",
+                            icon = Icons.Default.Subscriptions,
+                            label = "Series",
                             isSelected = currentDestination == AppDestination.LOCAL_SERIES,
                             isRailExpanded = isRailExpanded,
                             focusRequester = localSeriesFocusRequester,
