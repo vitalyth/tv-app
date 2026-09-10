@@ -257,7 +257,7 @@ fun HomeScreen(
 
     LaunchedEffect(focusedVodItem) {
         val item = focusedVodItem ?: return@LaunchedEffect
-        kotlinx.coroutines.delay(2_000L)
+        kotlinx.coroutines.delay(600L)
         if (focusedVodItem?.episodeId != item.episodeId) return@LaunchedEffect
         onPreviewVodItem(item)
     }
@@ -287,15 +287,28 @@ fun HomeScreen(
             focusedVodItem == null &&
             playingVodPreviewEpisodeId == null
 
+        val isVodRendering = focusedVodItem != null &&
+            playingVodPreviewEpisodeId != null &&
+            playingVodPreviewEpisodeId == focusedVodItem?.episodeId &&
+            readyVodPreviewEpisodeId == playingVodPreviewEpisodeId
+
+        val isVideoRendering = isLiveRendering || isVodRendering
+
+        val backgroundImageUrl = if (focusedVodItem != null) {
+            focusedVodItem?.imageUrl ?: activeProgram?.imageUrl ?: activeChannel?.logoUrl
+        } else {
+            activeProgram?.imageUrl ?: activeChannel?.logoUrl
+        }
+
         HomeArtwork(
-            imageUrl = activeProgram?.imageUrl ?: activeChannel?.logoUrl,
-            title = activeProgram?.title ?: activeChannel?.name.orEmpty(),
+            imageUrl = backgroundImageUrl,
+            title = heroTitle,
             modifier = Modifier.fillMaxSize(),
         )
         HomeInlinePlayer(
             player = player,
             playerView = playerView,
-            visible = isLiveRendering,
+            visible = isVideoRendering,
             modifier = Modifier.fillMaxSize(),
         )
         Box(
@@ -428,6 +441,22 @@ fun HomeScreen(
                                             episode = item.episode,
                                             progress = item.progress,
                                             onClick = { onPlayLocalEpisode(item.series, item.episode) },
+                                            onFocusChanged = { isFocused ->
+                                                if (isFocused) {
+                                                    onStopLivePreview()
+                                                    focusedVodItem = VodRecentItem(
+                                                        id = item.episode.id,
+                                                        episodeId = item.episode.id,
+                                                        title = item.episode.title,
+                                                        programId = item.series.id,
+                                                        programName = item.series.displayTitle,
+                                                        channelName = item.series.displayTitle,
+                                                        imageUrl = item.episode.imageUrl ?: item.series.backdropUrl ?: item.series.posterUrl,
+                                                        description = item.episode.overview,
+                                                        provider = VodProvider.KAN11,
+                                                    )
+                                                }
+                                            },
                                             onNavigateLeft = if (index == 0) onNavigateSideRail else null,
                                         )
                                     }
@@ -537,7 +566,7 @@ private fun HomeHero(
             .height(176.dp)
             .padding(start = 12.dp, top = 2.dp, bottom = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(20.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
         // 1. Program Preview Card (16:9 aspect ratio)
         Box(
@@ -895,9 +924,10 @@ private fun LocalEpisodeCard(
     episode: LocalEpisode,
     progress: VodPlaybackProgress?,
     onClick: () -> Unit,
+    onFocusChanged: ((Boolean) -> Unit)? = null,
     onNavigateLeft: (() -> Unit)?,
 ) {
-    FocusCard(width = 238.dp, height = 164.dp, onClick = onClick, onNavigateLeft = onNavigateLeft) { isFocused ->
+    FocusCard(width = 238.dp, height = 164.dp, onClick = onClick, onFocusChanged = onFocusChanged, onNavigateLeft = onNavigateLeft) { isFocused ->
         HomeArtwork(
             imageUrl = episode.imageUrl ?: series.backdropUrl ?: series.posterUrl,
             title = episode.title,

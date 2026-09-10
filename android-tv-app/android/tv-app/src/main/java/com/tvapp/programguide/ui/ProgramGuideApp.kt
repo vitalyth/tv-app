@@ -764,7 +764,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         if (currentDestination == AppDestination.HOME && !homeVodPreviewStreamUrl.isNullOrBlank()) {
             val previewStream = homeVodPreviewStreamUrl ?: return@LaunchedEffect
             if (activeStreamUrl.value != previewStream) {
-                applyPrimaryVideoProfile(PrimaryVideoProfile.Mini)
+                applyPrimaryVideoProfile(PrimaryVideoProfile.HomeBackground)
                 val mediaItem = when {
                     previewStream.contains(".mpd", ignoreCase = true) || previewStream.contains(".livx", ignoreCase = true) -> {
                         MediaItem.Builder()
@@ -859,18 +859,9 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         val previewStream = homeVodPreviewStreamUrl ?: return@LaunchedEffect
         val previewEpisodeId = homeVodPreviewEpisodeId ?: return@LaunchedEffect
         var waited = 0
-        while (waited < 60 && (player.playbackState != Player.STATE_READY || player.duration <= 0L)) {
+        while (waited < 30 && player.playbackState != Player.STATE_READY && player.playbackState != Player.STATE_BUFFERING) {
             delay(100L)
             waited++
-        }
-        if (
-            currentDestination == AppDestination.HOME &&
-            homeVodPreviewEpisodeId == previewEpisodeId &&
-            activeStreamUrl.value == previewStream &&
-            player.duration > 0L
-        ) {
-            val middlePosition = (player.duration / 2L).coerceAtLeast(0L)
-            player.seekTo(middlePosition)
         }
         if (
             currentDestination == AppDestination.HOME &&
@@ -878,20 +869,6 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             activeStreamUrl.value == previewStream
         ) {
             homeVodPreviewSeekReadyEpisodeId = previewEpisodeId
-        }
-        delay(10_000L)
-        if (
-            currentDestination == AppDestination.HOME &&
-            homeVodPreviewEpisodeId == previewEpisodeId &&
-            activeStreamUrl.value == previewStream
-        ) {
-            homeVodPreviewEpisodeId = null
-            homeVodPreviewStreamUrl = null
-            homeVodPreviewSeekReadyEpisodeId = null
-            renderedStreamUrl.value = null
-            activeStreamUrl.value = null
-            player.stop()
-            player.clearMediaItems()
         }
     }
 
@@ -956,10 +933,9 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     }
                                 },
                                 playingVodPreviewEpisodeId = homeVodPreviewEpisodeId,
-                                readyVodPreviewEpisodeId = homeVodPreviewEpisodeId.takeIf { episodeId ->
+                                readyVodPreviewEpisodeId = homeVodPreviewEpisodeId.takeIf {
                                     !homeVodPreviewStreamUrl.isNullOrBlank() &&
-                                        renderedStreamUrl.value == homeVodPreviewStreamUrl &&
-                                        homeVodPreviewSeekReadyEpisodeId == episodeId
+                                        (renderedStreamUrl.value == homeVodPreviewStreamUrl || player.playbackState == Player.STATE_READY)
                                 },
                                 initialFocusRequester = homeContentFocusRequester,
                                 isMuted = homeIsMuted,
