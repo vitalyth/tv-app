@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +29,8 @@ import androidx.compose.material.icons.filled.ConnectedTv
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subscriptions
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,11 +56,15 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.viewinterop.AndroidView
 import android.view.ViewGroup
 import androidx.media3.ui.AspectRatioFrameLayout
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.tvapp.programguide.BuildConfig
 import com.tvapp.programguide.data.AppDestination
 import com.tvapp.programguide.data.GuideData
 import com.tvapp.programguide.data.LocalEpisode
@@ -105,6 +112,8 @@ fun HomeScreen(
     readyVodPreviewEpisodeId: String?,
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester = remember { FocusRequester() },
+    isMuted: Boolean = false,
+    onToggleMute: () -> Unit = {},
     contentFocusNonce: Int = 0,
     liveRowFocusNonce: Int = 0,
     restoreLiveChannelId: String? = null,
@@ -155,6 +164,36 @@ fun HomeScreen(
         focusedLiveItem?.program ?: activeChannel?.let { currentPrograms[it.id].orEmpty().currentProgram(nowSeconds) }
     } else {
         heroProgram
+    }
+
+    val isVodActive = focusedVodItem != null
+    val heroTitle = if (isVodActive) {
+        focusedVodItem?.title.orEmpty()
+    } else {
+        activeProgram?.title ?: activeChannel?.name.orEmpty().ifBlank { "שידור חי" }
+    }
+    val heroSubtitle = if (isVodActive) {
+        listOfNotNull(focusedVodItem?.channelName, focusedVodItem?.programName).distinct().joinToString(" · ").ifBlank { focusedVodItem?.provider?.displayName.orEmpty() }
+    } else {
+        activeChannel?.name.orEmpty()
+    }
+    val heroDescription = if (isVodActive) {
+        focusedVodItem?.description?.trim().orEmpty()
+    } else {
+        activeProgram?.description?.trim().orEmpty()
+    }
+    val heroTimeRange = if (!isVodActive && activeProgram != null && activeProgram.startSeconds > 0) {
+        activeProgram.timeRange()
+    } else null
+    val heroChannelLogoUrl = if (isVodActive) {
+        focusedVodItem?.provider?.let { BuildConfig.PROGRAM_GUIDE_API_BASE_URL.trimEnd('/').removeSuffix("/api") + "/ch/" + it.logoPath.trimStart('/') }
+    } else {
+        activeChannel?.logoUrl
+    }
+    val heroProgramImageUrl = if (isVodActive) {
+        focusedVodItem?.imageUrl
+    } else {
+        activeProgram?.imageUrl ?: activeChannel?.logoUrl
     }
 
     val continueItems = remember(vodRecentItems, vodWatchedItems, vodProgress, localSeries, localProgress) {
@@ -282,159 +321,178 @@ fun HomeScreen(
                     )
                 )
         )
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 32.dp, end = 32.dp, top = 16.dp, bottom = 8.dp),
         ) {
-            item {
-                HomeHero(
-                    channel = activeChannel,
-                    program = activeProgram,
-                    focusRequester = firstFocusRequester,
-                    onClick = {
-                        if (activeChannel != null) onPlayLiveChannel(activeChannel, activeProgram)
-                    },
-                    onNavigateLeft = onNavigateSideRail,
-                    onNavigateDown = {
-                        val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, liveRowFocusRequesters.lastIndex.coerceAtLeast(0))
-                        focusScope.launch {
-                            liveRowState.scrollToItem(targetIndex)
-                            kotlinx.coroutines.delay(80L)
-                            val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: firstRowFocusRequester
+            HomeHero(
+                title = heroTitle,
+                subtitle = heroSubtitle,
+                description = heroDescription,
+                timeRange = heroTimeRange,
+                channelLogoUrl = heroChannelLogoUrl,
+                programImageUrl = heroProgramImageUrl,
+                isLive = !isVodActive,
+                isMuted = isMuted,
+                onToggleMute = onToggleMute,
+                playFocusRequester = firstFocusRequester,
+                onClickPlay = {
+                    if (focusedVodItem != null) {
+                        onPlayRecentVod(focusedVodItem!!)
+                    } else if (activeChannel != null) {
+                        onPlayLiveChannel(activeChannel, activeProgram)
+                    }
+                },
+                onNavigateLeft = onNavigateSideRail,
+                onNavigateDown = {
+                    val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, liveRowFocusRequesters.lastIndex.coerceAtLeast(0))
+                    focusScope.launch {
+                        liveRowState.scrollToItem(targetIndex)
+                        kotlinx.coroutines.delay(80L)
+                        val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: firstRowFocusRequester
+                        try {
                             targetRequester.requestFocus()
+                        } catch (_: Exception) {
+                            firstRowFocusRequester.requestFocus()
                         }
-                    },
-                    onFocusChanged = { isFocused ->
-                        if (isFocused) {
-                            focusedLiveChannelId = null
-                        }
-                    },
-                )
-            }
+                    }
+                },
+                onFocusChanged = { isFocused ->
+                    if (isFocused) {
+                        focusedLiveChannelId = null
+                        focusedVodItem = null
+                    }
+                },
+            )
 
-            if (currentLiveItems.isNotEmpty()) {
-                item {
-                    HomeRow(title = "ערוצים חיים", state = liveRowState) {
-                        itemsIndexed(currentLiveItems, key = { _, item -> item.channel.id }) { index, item ->
-                            val channel = item.channel
-                            val program = item.program
-                            LiveChannelCard(
-                                channel = channel,
-                                program = program,
-                                focusRequester = liveRowFocusRequesters.getOrNull(index) ?: if (index == 0) firstRowFocusRequester else null,
-                                onClick = { onPlayLiveChannel(channel, program) },
-                                onFocusChanged = { isFocused ->
-                                    if (isFocused) {
-                                        onStopVodPreview()
-                                        lastFocusedLiveChannelIndex = index
-                                        onLiveChannelFocused(channel.id)
-                                        focusedLiveChannelId = channel.id
-                                    }
-                                },
-                                onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                                onNavigateUp = { firstFocusRequester.requestFocus() },
-                            )
+            Spacer(Modifier.height(8.dp))
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 24.dp),
+            ) {
+                if (currentLiveItems.isNotEmpty()) {
+                    item {
+                        HomeRow(title = "ערוצים חיים", state = liveRowState) {
+                            itemsIndexed(currentLiveItems, key = { _, item -> item.channel.id }) { index, item ->
+                                val channel = item.channel
+                                val program = item.program
+                                LiveChannelCard(
+                                    channel = channel,
+                                    program = program,
+                                    focusRequester = liveRowFocusRequesters.getOrNull(index) ?: if (index == 0) firstRowFocusRequester else null,
+                                    onClick = { onPlayLiveChannel(channel, program) },
+                                    onFocusChanged = { isFocused ->
+                                        if (isFocused) {
+                                            onStopVodPreview()
+                                            focusedVodItem = null
+                                            lastFocusedLiveChannelIndex = index
+                                            onLiveChannelFocused(channel.id)
+                                            focusedLiveChannelId = channel.id
+                                        }
+                                    },
+                                    onNavigateLeft = if (index == 0) onNavigateSideRail else null,
+                                    onNavigateUp = { firstFocusRequester.requestFocus() },
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            if (continueItems.isNotEmpty()) {
-                item {
-                    HomeRow(title = "המשך צפייה") {
-                        itemsIndexed(continueItems, key = { _, item -> item.key }) { index, item ->
-                            when (item) {
-                                is HomeContinueItem.Vod -> {
-                                    VodRecentCard(
-                                        item = item.item,
-                                        progress = item.progress,
-                                        onClick = { onPlayRecentVod(item.item) },
-                                        onFocusChanged = { isFocused ->
-                                            if (isFocused) {
-                                                onStopLivePreview()
-                                                focusedVodItem = item.item
-                                            } else if (focusedVodItem?.episodeId == item.item.episodeId) {
-                                                focusedVodItem = null
-                                                onStopVodPreview()
-                                            }
-                                        },
-                                        onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                                    )
-                                }
-                                is HomeContinueItem.Local -> {
-                                    LocalEpisodeCard(
-                                        series = item.series,
-                                        episode = item.episode,
-                                        progress = item.progress,
-                                        onClick = { onPlayLocalEpisode(item.series, item.episode) },
-                                        onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                                    )
+                if (continueItems.isNotEmpty()) {
+                    item {
+                        HomeRow(title = "המשך צפייה") {
+                            itemsIndexed(continueItems, key = { _, item -> item.key }) { index, item ->
+                                when (item) {
+                                    is HomeContinueItem.Vod -> {
+                                        VodRecentCard(
+                                            item = item.item,
+                                            progress = item.progress,
+                                            onClick = { onPlayRecentVod(item.item) },
+                                            onFocusChanged = { isFocused ->
+                                                if (isFocused) {
+                                                    onStopLivePreview()
+                                                    focusedVodItem = item.item
+                                                }
+                                            },
+                                            onNavigateLeft = if (index == 0) onNavigateSideRail else null,
+                                        )
+                                    }
+                                    is HomeContinueItem.Local -> {
+                                        LocalEpisodeCard(
+                                            series = item.series,
+                                            episode = item.episode,
+                                            progress = item.progress,
+                                            onClick = { onPlayLocalEpisode(item.series, item.episode) },
+                                            onNavigateLeft = if (index == 0) onNavigateSideRail else null,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if (recentVodItems.isNotEmpty()) {
-                item {
-                    HomeRow(title = "תכני VOD חדשים") {
-                        itemsIndexed(recentVodItems.take(14), key = { _, item -> "recent_vod:${item.episodeId}" }) { index, item ->
-                            VodRecentCard(
-                                item = item,
-                                progress = vodProgress[item.episodeId],
-                                onClick = { onPlayRecentVod(item) },
-                                onFocusChanged = { isFocused ->
-                                    if (isFocused) {
-                                        onStopLivePreview()
-                                        focusedVodItem = item
-                                    } else if (focusedVodItem?.episodeId == item.episodeId) {
-                                        focusedVodItem = null
-                                        onStopVodPreview()
-                                    }
-                                },
-                                onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                            )
+                if (recentVodItems.isNotEmpty()) {
+                    item {
+                        HomeRow(title = "תכני VOD חדשים") {
+                            itemsIndexed(recentVodItems.take(14), key = { _, item -> "recent_vod:${item.episodeId}" }) { index, item ->
+                                VodRecentCard(
+                                    item = item,
+                                    progress = vodProgress[item.episodeId],
+                                    onClick = { onPlayRecentVod(item) },
+                                    onFocusChanged = { isFocused ->
+                                        if (isFocused) {
+                                            onStopLivePreview()
+                                            focusedVodItem = item
+                                        }
+                                    },
+                                    onNavigateLeft = if (index == 0) onNavigateSideRail else null,
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            item {
-                HomeRow(title = "עוד לצפות") {
-                    item {
-                        ShortcutCard(
-                            title = "Live TV",
-                            subtitle = "כל הערוצים החיים",
-                            icon = Icons.Default.ConnectedTv,
-                            onClick = { onOpenDestination(AppDestination.LIVE_TV) },
-                            onNavigateLeft = onNavigateSideRail,
-                        )
-                    }
-                    item {
-                        ShortcutCard(
-                            title = "VOD",
-                            subtitle = "ספריות הערוצים",
-                            icon = Icons.Default.MovieFilter,
-                            onClick = { onOpenDestination(AppDestination.VOD) },
-                        )
-                    }
-                    item {
-                        ShortcutCard(
-                            title = "Series",
-                            subtitle = "סדרות מהמכשיר",
-                            icon = Icons.Default.Subscriptions,
-                            onClick = { onOpenDestination(AppDestination.LOCAL_SERIES) },
-                        )
-                    }
-                    itemsIndexed(VodProvider.entries, key = { _, provider -> provider.id }) { _, provider ->
-                        ShortcutCard(
-                            title = provider.displayName,
-                            subtitle = "VOD ${provider.channelNumber}",
-                            icon = Icons.Default.PlayArrow,
-                            onClick = { onOpenVodProvider(provider) },
-                        )
+                item {
+                    HomeRow(title = "עוד לצפות") {
+                        item {
+                            ShortcutCard(
+                                title = "Live TV",
+                                subtitle = "כל הערוצים החיים",
+                                icon = Icons.Default.ConnectedTv,
+                                onClick = { onOpenDestination(AppDestination.LIVE_TV) },
+                                onNavigateLeft = onNavigateSideRail,
+                            )
+                        }
+                        item {
+                            ShortcutCard(
+                                title = "VOD",
+                                subtitle = "ספריות הערוצים",
+                                icon = Icons.Default.MovieFilter,
+                                onClick = { onOpenDestination(AppDestination.VOD) },
+                            )
+                        }
+                        item {
+                            ShortcutCard(
+                                title = "Series",
+                                subtitle = "סדרות מהמכשיר",
+                                icon = Icons.Default.Subscriptions,
+                                onClick = { onOpenDestination(AppDestination.LOCAL_SERIES) },
+                            )
+                        }
+                        itemsIndexed(VodProvider.entries, key = { _, provider -> provider.id }) { _, provider ->
+                            ShortcutCard(
+                                title = provider.displayName,
+                                subtitle = "VOD ${provider.channelNumber}",
+                                icon = Icons.Default.PlayArrow,
+                                onClick = { onOpenVodProvider(provider) },
+                            )
+                        }
                     }
                 }
             }
@@ -444,99 +502,294 @@ fun HomeScreen(
 
 @Composable
 private fun HomeHero(
-    channel: TvChannel?,
-    program: TvProgram?,
-    focusRequester: FocusRequester,
-    onClick: () -> Unit,
+    title: String,
+    subtitle: String,
+    description: String,
+    timeRange: String?,
+    channelLogoUrl: String?,
+    programImageUrl: String?,
+    isLive: Boolean,
+    isMuted: Boolean,
+    onToggleMute: () -> Unit,
+    playFocusRequester: FocusRequester,
+    onClickPlay: () -> Unit,
     onNavigateLeft: () -> Unit,
     onNavigateDown: () -> Unit,
     onFocusChanged: ((Boolean) -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     val playInteractionSource = remember { MutableInteractionSource() }
     val isPlayFocused by playInteractionSource.collectIsFocusedAsState()
 
-    LaunchedEffect(isPlayFocused) {
-        onFocusChanged?.invoke(isPlayFocused)
+    val muteInteractionSource = remember { MutableInteractionSource() }
+    val isMuteFocused by muteInteractionSource.collectIsFocusedAsState()
+
+    val muteFocusRequester = remember { FocusRequester() }
+
+    val isHeroFocused = isPlayFocused || isMuteFocused
+    LaunchedEffect(isHeroFocused) {
+        onFocusChanged?.invoke(isHeroFocused)
     }
 
-    Box(
-        modifier = Modifier
+    Row(
+        modifier = modifier
             .fillMaxWidth()
-            .height(258.dp),
+            .height(176.dp)
+            .padding(start = 12.dp, top = 2.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 1. Program Preview Card (16:9 aspect ratio)
         Box(
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth(if (isPlayFocused) 0.42f else 0.28f)
-                .height(if (isPlayFocused) 3.dp else 1.dp)
-                .background(
-                    if (isPlayFocused) Accent else Color(0x66FFFFFF)
-                )
-        )
-        Column(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 34.dp, end = 34.dp, bottom = 8.dp)
-                .fillMaxWidth(0.58f),
+                .width(182.dp)
+                .height(102.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF141A23))
+                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp)),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LiveBadge()
-                Text(channel?.name.orEmpty(), color = MutedText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = program?.title ?: "שידור חי",
-                color = Color.White,
-                fontSize = 33.sp,
-                lineHeight = 39.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = RtlTextStyle,
+            val previewUrl = programImageUrl ?: channelLogoUrl
+            HomeArtwork(
+                imageUrl = previewUrl,
+                title = title,
+                modifier = Modifier.fillMaxSize(),
             )
-            if (!program?.description.isNullOrBlank()) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = program?.description.orEmpty(),
-                    color = Color(0xFFD0D5DD),
-                    fontSize = 15.sp,
-                    lineHeight = 21.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = RtlTextStyle,
-                )
-            }
-            Spacer(Modifier.height(20.dp))
+            // Gradient scrim at the bottom of the card
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isPlayFocused) FocusedBg else Color(0xFFE91E35))
-                    .then(if (isPlayFocused) Modifier.border(2.dp, FocusedBg, RoundedCornerShape(8.dp)) else Modifier)
-                    .tvFocusableClickable(
-                        onClick = onClick,
-                        interactionSource = playInteractionSource,
-                        focusRequester = focusRequester,
-                        onNavigateLeft = onNavigateLeft,
-                        onNavigateDown = onNavigateDown,
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.45f to Color(0x22000000),
+                            1f to Color(0xD9080A0C),
+                        )
                     )
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+            )
+            // Channel logo badge inside thumbnail card
+            if (!channelLogoUrl.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xD90E141D))
+                        .border(0.5.dp, Color(0x44FFFFFF), RoundedCornerShape(6.dp))
+                        .padding(2.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
+                    AsyncImage(
+                        model = channelLogoUrl,
                         contentDescription = null,
-                        tint = if (isPlayFocused) FocusedContent else Color.White,
-                        modifier = Modifier.size(22.dp),
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
                     )
+                }
+            }
+        }
+
+        // 2. Info Column (Full remaining width across the screen!)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            // Row 1: Badges & Channel Metadata
+            Row(
+                modifier = Modifier.height(24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (!channelLogoUrl.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Color(0x33FFFFFF))
+                            .padding(2.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AsyncImage(
+                            model = channelLogoUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+                if (isLive) {
+                    LiveBadge()
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Accent)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "VOD",
+                            color = Color(0xFF091016),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                if (subtitle.isNotBlank()) {
                     Text(
-                        text = "נגן",
-                        color = if (isPlayFocused) FocusedContent else Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = subtitle,
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                }
+                if (!timeRange.isNullOrBlank()) {
+                    Text(
+                        text = "·  $timeRange",
+                        color = MutedText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            // Row 2: Program Title (Full width, bold, crisp with text shadow)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(34.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    text = title.ifBlank { "שידור חי" },
+                    color = Color.White,
+                    fontSize = 25.sp,
+                    lineHeight = 30.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(
+                        shadow = Shadow(
+                            color = Color(0xEE000000),
+                            offset = Offset(1.5f, 1.5f),
+                            blurRadius = 4f,
+                        )
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            // Row 3: Program Description (Fixed 40dp height, 2 lines, full width)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                contentAlignment = Alignment.TopStart,
+            ) {
+                val displayDescription = description.trim().ifBlank {
+                    if (isLive && subtitle.isNotBlank()) "שידור חי בערוץ $subtitle" else ""
+                }
+                if (displayDescription.isNotBlank()) {
+                    Text(
+                        text = displayDescription,
+                        color = Color(0xFFD1D5DB),
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(
+                            shadow = Shadow(
+                                color = Color(0xEE000000),
+                                offset = Offset(1f, 1f),
+                                blurRadius = 3f,
+                            )
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            // Row 4: Action Buttons (Play & Mute)
+            Row(
+                modifier = Modifier.height(38.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Play button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isPlayFocused) FocusedBg else Color(0xFFE91E35))
+                        .then(if (isPlayFocused) Modifier.border(2.dp, FocusedBg, RoundedCornerShape(8.dp)) else Modifier)
+                        .tvFocusableClickable(
+                            onClick = onClickPlay,
+                            interactionSource = playInteractionSource,
+                            focusRequester = playFocusRequester,
+                            onNavigateLeft = onNavigateLeft,
+                            onNavigateRight = { muteFocusRequester.requestFocus() },
+                            onNavigateDown = onNavigateDown,
+                        )
+                        .padding(horizontal = 22.dp, vertical = 8.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = if (isPlayFocused) FocusedContent else Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            text = "נגן",
+                            color = if (isPlayFocused) FocusedContent else Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
+                // Mute / Unmute Button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isMuteFocused) FocusedBg
+                            else if (isMuted) Color(0x3DFFFFFF)
+                            else Color(0x24FFFFFF)
+                        )
+                        .then(if (isMuteFocused) Modifier.border(2.dp, FocusedBg, RoundedCornerShape(8.dp)) else Modifier)
+                        .tvFocusableClickable(
+                            onClick = onToggleMute,
+                            interactionSource = muteInteractionSource,
+                            focusRequester = muteFocusRequester,
+                            onNavigateLeft = { playFocusRequester.requestFocus() },
+                            onNavigateDown = onNavigateDown,
+                        )
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (isMuted) "הפעל קול" else "השתק",
+                            tint = if (isMuteFocused) FocusedContent else Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            text = if (isMuted) "מושתק" else "קול פעיל",
+                            color = if (isMuteFocused) FocusedContent else Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }

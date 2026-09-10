@@ -346,6 +346,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     var homeVodPreviewSeekReadyEpisodeId by remember { mutableStateOf<String?>(null) }
     var homeVodPreviewLoadToken by remember { mutableIntStateOf(0) }
     var homeBackgroundChannelId by remember { mutableStateOf<String?>(null) }
+    var homeIsMuted by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -570,7 +571,11 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     fun applyPrimaryVideoProfile(profile: PrimaryVideoProfile) {
         if (primaryVideoProfile == profile) return
         primaryVideoProfile = profile
-        player.volume = if (profile == PrimaryVideoProfile.MultiBackground || profile == PrimaryVideoProfile.HomeBackground) 0f else 1f
+        player.volume = when (profile) {
+            PrimaryVideoProfile.MultiBackground -> 0f
+            PrimaryVideoProfile.HomeBackground -> if (homeIsMuted) 0f else 1f
+            else -> 1f
+        }
         trackSelector.setParameters(
             trackSelector.buildUponParameters().apply {
                 when (profile) {
@@ -839,9 +844,15 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             activeStreamProfile.value = targetProfile
         }
         if (currentDestination == AppDestination.HOME && homeBackgroundChannelId == channel.id && !playbackState.isPlayerExpanded) {
-            player.volume = 0f
+            player.volume = if (homeIsMuted) 0f else 1f
         }
         player.play()
+    }
+
+    LaunchedEffect(homeIsMuted, currentDestination, playbackState.isPlayerExpanded) {
+        if (currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded) {
+            player.volume = if (homeIsMuted) 0f else 1f
+        }
     }
 
     LaunchedEffect(homeVodPreviewStreamUrl, homeVodPreviewEpisodeId) {
@@ -951,6 +962,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                         homeVodPreviewSeekReadyEpisodeId == episodeId
                                 },
                                 initialFocusRequester = homeContentFocusRequester,
+                                isMuted = homeIsMuted,
+                                onToggleMute = { homeIsMuted = !homeIsMuted },
                                 contentFocusNonce = homeContentFocusNonce,
                                 liveRowFocusNonce = homeLiveRowFocusNonce,
                                 restoreLiveChannelId = homeLiveFocusChannelId,
