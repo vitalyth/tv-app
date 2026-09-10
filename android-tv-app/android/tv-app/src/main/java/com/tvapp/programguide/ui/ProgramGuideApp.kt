@@ -452,6 +452,15 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         sideRailLiveTvFocusRequester.requestFocus()
     }
 
+    BackHandler(
+        enabled = currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded
+    ) {
+        if (!navRailExpanded) {
+            sideNavForceCollapsed = false
+            sideRailHomeFocusRequester.requestFocus()
+        }
+    }
+
     LaunchedEffect(currentDestination) {
         if (currentDestination == AppDestination.HOME) {
             openingHomeLivePlayer = false
@@ -465,16 +474,19 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                 requestHomeContentFocus()
             }
         } else if (currentDestination == AppDestination.VOD) {
+            homeBackgroundChannelId = null
             player.pause()
             vodViewModel.refreshIfStale()
             delay(40)
             requestVodContentFocus()
         } else if (currentDestination == AppDestination.LOCAL_SERIES) {
+            homeBackgroundChannelId = null
             player.pause()
             localSeriesViewModel.refreshIfStale()
             delay(40)
             requestLocalSeriesContentFocus()
         } else if (currentDestination == AppDestination.LIVE_TV) {
+            homeBackgroundChannelId = null
             viewModel.refreshSilentlyIfStale()
             if (streamingActive && !player.isPlaying) {
                 player.play()
@@ -983,7 +995,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     viewModel.previewChannel(channel, program)
                                 },
                                 onStopLivePreview = {
-                                    if (currentDestination == AppDestination.HOME && !openingHomeLivePlayer) {
+                                    if (!openingHomeLivePlayer) {
+                                        homeBackgroundChannelId = null
                                         viewModel.stopPreviewPlayback()
                                         renderedStreamUrl.value = null
                                         activeStreamUrl.value = null

@@ -203,13 +203,14 @@ fun HomeScreen(
         heroChannel?.id,
         heroProgram?.startSeconds,
         heroProgram?.title,
+        focusedLiveChannelId,
         focusedVodItem?.episodeId,
         armedPreviewChannelId,
         playingLiveChannelId,
         playingVodPreviewEpisodeId,
     ) {
         val channel = heroChannel ?: return@LaunchedEffect
-        if (focusedVodItem != null || armedPreviewChannelId != null || playingVodPreviewEpisodeId != null) return@LaunchedEffect
+        if (focusedLiveChannelId != null || focusedVodItem != null || armedPreviewChannelId != null || playingVodPreviewEpisodeId != null) return@LaunchedEffect
         if (playingLiveChannelId != channel.id) {
             onPreviewHomeBackground(channel, heroProgram)
         }
@@ -341,15 +342,15 @@ fun HomeScreen(
                                 focusRequester = liveRowFocusRequesters.getOrNull(index) ?: if (index == 0) firstRowFocusRequester else null,
                                 player = player,
                                 playerView = playerView,
-                                attachPlayer = focusedLiveChannelId == channel.id && playingLiveChannelId == channel.id,
-                                showPlayer = focusedLiveChannelId == channel.id && readyLiveChannelId == channel.id,
+                                attachPlayer = armedPreviewChannelId == channel.id && playingLiveChannelId == channel.id,
+                                showPlayer = armedPreviewChannelId == channel.id && readyLiveChannelId == channel.id,
                                 onClick = { onPlayLiveChannel(channel, program) },
                                 onFocusChanged = { isFocused ->
                                     if (isFocused) {
                                         onStopVodPreview()
                                         if (playingLiveChannelId != null && playingLiveChannelId != channel.id && playingLiveChannelId != backgroundLiveChannelId) {
-                                            armedPreviewChannelId = null
-                                            onStopLivePreview()
+                                             armedPreviewChannelId = null
+                                             onStopLivePreview()
                                         }
                                         lastFocusedLiveChannelIndex = index
                                         onLiveChannelFocused(channel.id)
@@ -363,6 +364,7 @@ fun HomeScreen(
                                     }
                                 },
                                 onNavigateLeft = if (index == 0) onNavigateSideRail else null,
+                                onNavigateUp = { firstFocusRequester.requestFocus() },
                             )
                         }
                     }
@@ -415,7 +417,7 @@ fun HomeScreen(
             if (recentVodItems.isNotEmpty()) {
                 item {
                     HomeRow(title = "תכני VOD חדשים") {
-                        itemsIndexed(recentVodItems.take(14), key = { _, item -> item.id }) { index, item ->
+                        itemsIndexed(recentVodItems.take(14), key = { _, item -> "recent_vod:${item.episodeId}" }) { index, item ->
                             VodRecentCard(
                                 item = item,
                                 progress = vodProgress[item.episodeId],
@@ -609,6 +611,7 @@ private fun LiveChannelCard(
     onClick: () -> Unit,
     onFocusChanged: (Boolean) -> Unit,
     onNavigateLeft: (() -> Unit)?,
+    onNavigateUp: (() -> Unit)? = null,
 ) {
     FocusCard(
         width = 238.dp,
@@ -617,6 +620,7 @@ private fun LiveChannelCard(
         onClick = onClick,
         onFocusChanged = onFocusChanged,
         onNavigateLeft = onNavigateLeft,
+        onNavigateUp = onNavigateUp,
     ) { isFocused ->
         if (attachPlayer) {
             HomeInlinePlayer(player = player, playerView = playerView, visible = showPlayer, modifier = Modifier.fillMaxSize())
@@ -802,6 +806,7 @@ private fun FocusCard(
     onClick: () -> Unit,
     onFocusChanged: ((Boolean) -> Unit)? = null,
     onNavigateLeft: (() -> Unit)?,
+    onNavigateUp: (() -> Unit)? = null,
     content: @Composable BoxScope.(Boolean) -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -820,6 +825,7 @@ private fun FocusCard(
                 interactionSource = interactionSource,
                 focusRequester = focusRequester,
                 onNavigateLeft = onNavigateLeft,
+                onNavigateUp = onNavigateUp,
             ),
     ) {
         content(isFocused)
