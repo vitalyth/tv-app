@@ -99,6 +99,8 @@ fun HomeScreen(
     playerView: StablePlayerView,
     playingLiveChannelId: String?,
     readyLiveChannelId: String?,
+    backgroundLiveChannelId: String?,
+    readyBackgroundLiveChannelId: String?,
     playingVodPreviewEpisodeId: String?,
     readyVodPreviewEpisodeId: String?,
     modifier: Modifier = Modifier,
@@ -108,6 +110,7 @@ fun HomeScreen(
     restoreLiveChannelId: String? = null,
     onLiveChannelFocused: (String) -> Unit = {},
     onPlayLiveChannel: (TvChannel, TvProgram?) -> Unit,
+    onPreviewHomeBackground: (TvChannel, TvProgram?) -> Unit,
     onPreviewLiveChannel: (TvChannel, TvProgram?) -> Unit,
     onStopLivePreview: () -> Unit,
     onPreviewVodItem: (VodRecentItem) -> Unit,
@@ -196,6 +199,22 @@ fun HomeScreen(
         onPreviewLiveChannel(item.channel, item.program)
     }
 
+    LaunchedEffect(
+        heroChannel?.id,
+        heroProgram?.startSeconds,
+        heroProgram?.title,
+        focusedVodItem?.episodeId,
+        armedPreviewChannelId,
+        playingLiveChannelId,
+        playingVodPreviewEpisodeId,
+    ) {
+        val channel = heroChannel ?: return@LaunchedEffect
+        if (focusedVodItem != null || armedPreviewChannelId != null || playingVodPreviewEpisodeId != null) return@LaunchedEffect
+        if (playingLiveChannelId != channel.id) {
+            onPreviewHomeBackground(channel, heroProgram)
+        }
+    }
+
     LaunchedEffect(focusedLiveChannelId, playingLiveChannelId) {
         val focusedId = focusedLiveChannelId
         if (playingLiveChannelId != null && focusedId != null && playingLiveChannelId != focusedId) {
@@ -205,9 +224,13 @@ fun HomeScreen(
     }
 
     LaunchedEffect(focusedLiveChannelId, playingLiveChannelId) {
-        if (focusedLiveChannelId != null || playingLiveChannelId == null) return@LaunchedEffect
+        if (
+            focusedLiveChannelId != null ||
+            playingLiveChannelId == null ||
+            playingLiveChannelId == backgroundLiveChannelId
+        ) return@LaunchedEffect
         kotlinx.coroutines.delay(250L)
-        if (focusedLiveChannelId == null) {
+        if (focusedLiveChannelId == null && playingLiveChannelId != backgroundLiveChannelId) {
             armedPreviewChannelId = null
             onStopLivePreview()
         }
@@ -239,6 +262,47 @@ fun HomeScreen(
             .fillMaxSize()
             .background(ScreenBg),
     ) {
+        val showBackgroundPlayer = backgroundLiveChannelId != null &&
+            playingLiveChannelId == backgroundLiveChannelId &&
+            armedPreviewChannelId == null &&
+            focusedVodItem == null &&
+            playingVodPreviewEpisodeId == null
+        HomeArtwork(
+            imageUrl = heroProgram?.imageUrl ?: heroChannel?.logoUrl,
+            title = heroProgram?.title ?: heroChannel?.name.orEmpty(),
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (showBackgroundPlayer) {
+            HomeInlinePlayer(
+                player = player,
+                playerView = playerView,
+                visible = true,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color(0x59080A0C),
+                        0.34f to Color(0x80080A0C),
+                        0.54f to Color(0xD9080A0C),
+                        1f to Color(0xFA080A0C),
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        0f to Color(0xC9080A0C),
+                        0.52f to Color(0x66080A0C),
+                        1f to Color(0x22080A0C),
+                    )
+                )
+        )
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 36.dp),
@@ -283,7 +347,7 @@ fun HomeScreen(
                                 onFocusChanged = { isFocused ->
                                     if (isFocused) {
                                         onStopVodPreview()
-                                        if (playingLiveChannelId != null && playingLiveChannelId != channel.id) {
+                                        if (playingLiveChannelId != null && playingLiveChannelId != channel.id && playingLiveChannelId != backgroundLiveChannelId) {
                                             armedPreviewChannelId = null
                                             onStopLivePreview()
                                         }
@@ -293,7 +357,7 @@ fun HomeScreen(
                                     } else if (focusedLiveChannelId == channel.id) {
                                         focusedLiveChannelId = null
                                         armedPreviewChannelId = null
-                                        if (playingLiveChannelId == channel.id) {
+                                        if (playingLiveChannelId == channel.id && backgroundLiveChannelId != channel.id) {
                                             onStopLivePreview()
                                         }
                                     }
@@ -428,41 +492,27 @@ private fun HomeHero(
     onNavigateLeft: () -> Unit,
     onNavigateDown: () -> Unit,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val imageUrl = program?.imageUrl ?: channel?.logoUrl
+    val playInteractionSource = remember { MutableInteractionSource() }
+    val isPlayFocused by playInteractionSource.collectIsFocusedAsState()
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(258.dp)
-            .clip(CardShape)
-            .background(CardBg)
-            .then(if (isFocused) Modifier.border(3.dp, FocusedBg, CardShape) else Modifier)
-            .tvFocusableClickable(
-                onClick = onClick,
-                interactionSource = interactionSource,
-                focusRequester = focusRequester,
-                onNavigateLeft = onNavigateLeft,
-                onNavigateDown = onNavigateDown,
-            ),
+            .height(258.dp),
     ) {
-        HomeArtwork(imageUrl = imageUrl, title = program?.title ?: channel?.name.orEmpty(), modifier = Modifier.fillMaxSize())
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .align(Alignment.BottomStart)
+                .fillMaxWidth(if (isPlayFocused) 0.42f else 0.28f)
+                .height(if (isPlayFocused) 3.dp else 1.dp)
                 .background(
-                    Brush.horizontalGradient(
-                        0f to Color(0xE6080A0C),
-                        0.48f to Color(0xA6080A0C),
-                        1f to Color(0x33080A0C),
-                    )
+                    if (isPlayFocused) Accent else Color(0x66FFFFFF)
                 )
         )
         Column(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .padding(start = 34.dp, end = 34.dp)
+                .padding(start = 34.dp, end = 34.dp, bottom = 8.dp)
                 .fillMaxWidth(0.58f),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -491,6 +541,39 @@ private fun HomeHero(
                     overflow = TextOverflow.Ellipsis,
                     style = RtlTextStyle,
                 )
+            }
+            Spacer(Modifier.height(20.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isPlayFocused) FocusedBg else Color(0xFFE91E35))
+                    .then(if (isPlayFocused) Modifier.border(2.dp, FocusedBg, RoundedCornerShape(8.dp)) else Modifier)
+                    .tvFocusableClickable(
+                        onClick = onClick,
+                        interactionSource = playInteractionSource,
+                        focusRequester = focusRequester,
+                        onNavigateLeft = onNavigateLeft,
+                        onNavigateDown = onNavigateDown,
+                    )
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = if (isPlayFocused) FocusedContent else Color.White,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Text(
+                        text = "נגן",
+                        color = if (isPlayFocused) FocusedContent else Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
     }

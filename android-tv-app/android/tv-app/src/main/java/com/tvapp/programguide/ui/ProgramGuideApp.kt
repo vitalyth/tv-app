@@ -209,6 +209,7 @@ private class StableProgramList(val value: List<TvProgram>)
 
 private enum class PrimaryVideoProfile {
     Mini,
+    HomeBackground,
     Full,
     MultiFocused,
     MultiBackground,
@@ -281,6 +282,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val activeStreamUrl = remember { mutableStateOf<String?>(null) }
+    val activeStreamProfile = remember { mutableStateOf<PrimaryVideoProfile?>(null) }
     val renderedStreamUrl = remember { mutableStateOf<String?>(null) }
     var primaryVideoProfile by remember { mutableStateOf<PrimaryVideoProfile?>(null) }
     val trackSelector = remember {
@@ -343,6 +345,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     var homeVodPreviewStreamUrl by remember { mutableStateOf<String?>(null) }
     var homeVodPreviewSeekReadyEpisodeId by remember { mutableStateOf<String?>(null) }
     var homeVodPreviewLoadToken by remember { mutableIntStateOf(0) }
+    var homeBackgroundChannelId by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -555,11 +558,18 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     fun applyPrimaryVideoProfile(profile: PrimaryVideoProfile) {
         if (primaryVideoProfile == profile) return
         primaryVideoProfile = profile
-        player.volume = if (profile == PrimaryVideoProfile.MultiBackground) 0f else 1f
+        player.volume = if (profile == PrimaryVideoProfile.MultiBackground || profile == PrimaryVideoProfile.HomeBackground) 0f else 1f
         trackSelector.setParameters(
             trackSelector.buildUponParameters().apply {
                 when (profile) {
                     PrimaryVideoProfile.Mini -> {
+                        setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                        setMaxVideoBitrate(Int.MAX_VALUE)
+                        setForceLowestBitrate(false)
+                        setExceedVideoConstraintsIfNecessary(true)
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    }
+                    PrimaryVideoProfile.HomeBackground -> {
                         setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
                         setMaxVideoBitrate(Int.MAX_VALUE)
                         setForceLowestBitrate(false)
@@ -798,20 +808,26 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             renderedStreamUrl.value = null
             return@LaunchedEffect
         }
-        if (activeStreamUrl.value != streamUrl) {
-            applyPrimaryVideoProfile(
-                if (playbackState.isPlayerExpanded) {
-                    PrimaryVideoProfile.Full
-                } else {
-                    PrimaryVideoProfile.Mini
-                }
-            )
+        val targetProfile = if (playbackState.isPlayerExpanded) {
+            PrimaryVideoProfile.Full
+        } else if (currentDestination == AppDestination.HOME && homeBackgroundChannelId == channel.id) {
+            PrimaryVideoProfile.HomeBackground
+        } else {
+            PrimaryVideoProfile.Mini
+        }
+        if (activeStreamUrl.value != streamUrl || activeStreamProfile.value != targetProfile) {
+            applyPrimaryVideoProfile(targetProfile)
             val mediaItem = liveMediaItem(streamUrl, streamSource?.mimeType)
             renderedStreamUrl.value = null
             activeStreamUrl.value = null
+            activeStreamProfile.value = null
             player.setMediaItem(mediaItem)
             player.prepare()
             activeStreamUrl.value = streamUrl
+            activeStreamProfile.value = targetProfile
+        }
+        if (currentDestination == AppDestination.HOME && homeBackgroundChannelId == channel.id && !playbackState.isPlayerExpanded) {
+            player.volume = 0f
         }
         player.play()
     }
@@ -903,6 +919,19 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                             renderedStreamUrl.value == streamUrl
                                     }
                                 },
+                                backgroundLiveChannelId = homeBackgroundChannelId,
+                                readyBackgroundLiveChannelId = playbackState.playingChannel?.let { channel ->
+                                    val streamUrl = viewModel.selectedStreamSource(channel)?.url.orEmpty()
+                                    channel.id.takeIf {
+                                        currentDestination == AppDestination.HOME &&
+                                            homeBackgroundChannelId == channel.id &&
+                                            playbackState.isMiniPlayerPlaying &&
+                                            !playbackState.isPlayerExpanded &&
+                                            homeVodPreviewEpisodeId == null &&
+                                            streamUrl.isNotBlank() &&
+                                            renderedStreamUrl.value == streamUrl
+                                    }
+                                },
                                 playingVodPreviewEpisodeId = homeVodPreviewEpisodeId,
                                 readyVodPreviewEpisodeId = homeVodPreviewEpisodeId.takeIf { episodeId ->
                                     !homeVodPreviewStreamUrl.isNullOrBlank() &&
@@ -931,7 +960,18 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     currentDestination = AppDestination.LIVE_TV
                                     viewModel.playChannelExpanded(channel, program)
                                 },
+                                onPreviewHomeBackground = { channel, program ->
+                                    if (currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded) {
+                                        homeBackgroundChannelId = channel.id
+                                        homeVodPreviewLoadToken += 1
+                                        homeVodPreviewEpisodeId = null
+                                        homeVodPreviewStreamUrl = null
+                                        homeVodPreviewSeekReadyEpisodeId = null
+                                        viewModel.previewChannel(channel, program)
+                                    }
+                                },
                                 onPreviewLiveChannel = { channel, program ->
+                                    homeBackgroundChannelId = null
                                     homeVodPreviewLoadToken += 1
                                     homeVodPreviewEpisodeId = null
                                     homeVodPreviewStreamUrl = null
@@ -954,6 +994,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 onPreviewVodItem = { recent ->
                                     homeVodPreviewLoadToken += 1
                                     val loadToken = homeVodPreviewLoadToken
+                                    homeBackgroundChannelId = null
                                     viewModel.stopPreviewPlayback()
                                     homeVodPreviewEpisodeId = recent.episodeId
                                     homeVodPreviewStreamUrl = null

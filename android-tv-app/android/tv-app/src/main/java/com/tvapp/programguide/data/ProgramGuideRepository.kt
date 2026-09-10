@@ -141,15 +141,16 @@ class ProgramGuideRepository(
             }
 
             if (!line.startsWith("#") && currentKeys.isNotEmpty()) {
+                val streamUrl = line.normalizedLiveStreamUrl()
                 val stream = PlaylistStream(
-                    url = line,
+                    url = streamUrl,
                     label = currentLabel,
-                    channelId = line.queryValue("channel_id"),
-                    mimeType = line.streamMimeTypeFromUrl(),
+                    channelId = streamUrl.queryValue("channel_id"),
+                    mimeType = streamUrl.streamMimeTypeFromUrl(),
                 )
                 currentKeys.forEach { key ->
                     val keyStreams = streams.getOrPut(key) { mutableListOf() }
-                    if (keyStreams.none { it.url == line }) {
+                    if (keyStreams.none { it.url == streamUrl }) {
                         keyStreams.add(stream)
                     }
                 }
@@ -185,6 +186,22 @@ class ProgramGuideRepository(
             ".mpd" in lowercase || "/livedash/" in lowercase || ".livx" in lowercase -> MIME_TYPE_DASH
             else -> null
         }
+    }
+
+    private fun String.normalizedLiveStreamUrl(): String {
+        val channelId = queryValue("channel_id").orEmpty()
+        val needsKanVpn = channelId in setOf(
+            "ch_11",
+            "ch_11b",
+            "ch_11c",
+            "ch_11d",
+            "ch_23",
+            "ch_23b",
+            "ch_33",
+            "ch_33b",
+        )
+        if (!needsKanVpn || queryValue("vpn") == "true") return this
+        return this + if ('?' in this) "&vpn=true" else "?vpn=true"
     }
 
     private fun String.queryValue(name: String): String? {
