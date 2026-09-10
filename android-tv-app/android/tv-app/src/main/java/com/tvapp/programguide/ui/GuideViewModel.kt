@@ -216,6 +216,33 @@ class GuideViewModel(
         }
     }
 
+    fun previewChannel(channel: TvChannel, program: TvProgram?) {
+        if (!channel.hasStream()) return
+        _uiState.update { state ->
+            if (state.isPlayerExpanded) return@update state
+            state.copy(
+                selectedChannel = channel,
+                selectedProgram = program,
+                playingChannel = channel,
+                playingProgram = program,
+                isMiniPlayerPlaying = true,
+                isPlayerExpanded = false,
+            )
+        }
+    }
+
+    fun stopPreviewPlayback() {
+        _uiState.update { state ->
+            if (state.isPlayerExpanded) return@update state
+            state.copy(
+                playingChannel = null,
+                playingProgram = null,
+                isMiniPlayerPlaying = false,
+                isPlayerExpanded = false,
+            )
+        }
+    }
+
     fun playChannelExpanded(channel: TvChannel, program: TvProgram?) {
         if (!channel.hasStream()) return
         saveLastChannel(channel)

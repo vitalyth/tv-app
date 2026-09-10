@@ -75,6 +75,7 @@ import com.tvapp.programguide.data.VodPlaybackProgress
 import com.tvapp.programguide.data.VodSeason
 import com.tvapp.programguide.data.VodSeries
 import com.tvapp.programguide.data.VodSeriesDetails
+import com.tvapp.programguide.ui.VodEpisodeFocusTarget
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -106,10 +107,12 @@ fun VodSeriesDetailsView(
     isLoading: Boolean,
     error: String?,
     lastPlayedEpisodeId: String? = null,
+    episodeFocusTarget: VodEpisodeFocusTarget? = null,
     episodeProgress: Map<String, VodPlaybackProgress> = emptyMap(),
     isPlayerActive: Boolean = false,
     onSeasonSelected: (VodSeason) -> Unit,
     onPlayEpisode: (VodEpisode, VodSeries) -> Unit,
+    onEpisodeFocusRestored: (Int) -> Unit = {},
     onClose: () -> Unit,
     onNavigateSideRail: () -> Unit,
     contentFocusNonce: Int = 0,
@@ -134,9 +137,8 @@ fun VodSeriesDetailsView(
         episodes.associate { it.id to FocusRequester() }
     }
     val coroutineScope = rememberCoroutineScope()
-    var selectedSeasonId by remember(series?.id) { mutableStateOf(selectedSeason?.seasonId) }
     var focusedEpisodeId by remember(series?.id) { mutableStateOf<String?>(null) }
-    var prevPlayerActive by remember { mutableStateOf(false) }
+    var pendingEpisodeFocusTarget by remember(series?.id) { mutableStateOf<VodEpisodeFocusTarget?>(null) }
 
     fun safeRequestFocus(primary: FocusRequester?, fallback: FocusRequester? = null) {
         var succeeded = false
@@ -204,23 +206,48 @@ fun VodSeriesDetailsView(
         onDispose {}
     }
 
-    // When returning from player, restore focus to the episode that was played
-    LaunchedEffect(isPlayerActive) {
-        if (prevPlayerActive && !isPlayerActive) {
-            val targetId = lastPlayedEpisodeId ?: rememberedEpisodeId()
-            if (targetId != null) {
-                val targetEpisode = details?.episodes?.firstOrNull { it.id == targetId }
-                if (targetEpisode?.seasonId != null && seasons.size > 1 && selectedSeason?.seasonId != targetEpisode.seasonId) {
-                    seasons.firstOrNull { it.seasonId == targetEpisode.seasonId }?.let { matchingSeason ->
-                        onSeasonSelected(matchingSeason)
-                    }
-                }
-                focusedEpisodeId = targetId
-                delay(80)
-                requestEpisodeFocus(targetId)
+    LaunchedEffect(episodeFocusTarget?.nonce, details?.series?.id) {
+        val target = episodeFocusTarget ?: return@LaunchedEffect
+        val currentDetails = details ?: return@LaunchedEffect
+        if (currentDetails.series.id != target.seriesId) return@LaunchedEffect
+
+        val targetEpisode = currentDetails.episodes.firstOrNull { it.id == target.episodeId }
+        val targetSeasonId = target.seasonId ?: targetEpisode?.seasonId
+        if (targetSeasonId != null && seasons.size > 1 && selectedSeason?.seasonId != targetSeasonId) {
+            seasons.firstOrNull { it.seasonId == targetSeasonId }?.let { matchingSeason ->
+                pendingEpisodeFocusTarget = target
+                onSeasonSelected(matchingSeason)
+                return@LaunchedEffect
             }
         }
-        prevPlayerActive = isPlayerActive
+        pendingEpisodeFocusTarget = target
+    }
+
+    LaunchedEffect(pendingEpisodeFocusTarget?.nonce, selectedSeason?.seasonId, episodes.size) {
+        val target = pendingEpisodeFocusTarget ?: return@LaunchedEffect
+        val currentDetails = details ?: return@LaunchedEffect
+        if (currentDetails.series.id != target.seriesId) {
+            pendingEpisodeFocusTarget = null
+            onEpisodeFocusRestored(target.nonce)
+            return@LaunchedEffect
+        }
+
+        val targetEpisode = currentDetails.episodes.firstOrNull { it.id == target.episodeId }
+        val targetSeasonId = target.seasonId ?: targetEpisode?.seasonId
+        if (targetSeasonId != null && seasons.size > 1 && selectedSeason?.seasonId != targetSeasonId) {
+            seasons.firstOrNull { it.seasonId == targetSeasonId }?.let { matchingSeason ->
+                onSeasonSelected(matchingSeason)
+            }
+            return@LaunchedEffect
+        }
+
+        if (episodes.none { it.id == target.episodeId }) return@LaunchedEffect
+
+        focusedEpisodeId = target.episodeId
+        delay(110)
+        requestEpisodeFocus(target.episodeId)
+        pendingEpisodeFocusTarget = null
+        onEpisodeFocusRestored(target.nonce)
     }
 
     // Initial focus when details view loads
@@ -233,6 +260,7 @@ fun VodSeriesDetailsView(
 
     // Focus update when selected season changes
     LaunchedEffect(selectedSeason?.seasonId) {
+        if (pendingEpisodeFocusTarget != null) return@LaunchedEffect
         val targetId = lastPlayedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
             ?: episodes.firstOrNull()?.id
         focusedEpisodeId = targetId

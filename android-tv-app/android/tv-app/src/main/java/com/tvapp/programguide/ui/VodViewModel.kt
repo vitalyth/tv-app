@@ -51,7 +51,16 @@ data class VodUiState(
     val streamError: String? = null,
     val lastPlayedEpisodeId: String? = null,
     val episodeProgress: Map<String, VodPlaybackProgress> = emptyMap(),
+    val watchedItems: List<VodRecentItem> = emptyList(),
     val resumePositionMs: Long? = null,
+    val episodeFocusTarget: VodEpisodeFocusTarget? = null,
+)
+
+data class VodEpisodeFocusTarget(
+    val seriesId: String,
+    val seasonId: String?,
+    val episodeId: String,
+    val nonce: Int,
 )
 
 class VodViewModel(
@@ -61,7 +70,12 @@ class VodViewModel(
     constructor(application: Application) : this(application, VodRepository())
 
     private val progressManager = VodProgressManager.getInstance(application)
-    private val _uiState = MutableStateFlow(VodUiState(episodeProgress = progressManager.progressFlow.value))
+    private val _uiState = MutableStateFlow(
+        VodUiState(
+            episodeProgress = progressManager.progressFlow.value,
+            watchedItems = progressManager.recentItemsFlow.value,
+        )
+    )
     val uiState: StateFlow<VodUiState> = _uiState.asStateFlow()
 
     private var loadSeriesJob: Job? = null
@@ -69,12 +83,18 @@ class VodViewModel(
     private var loadRecentJob: Job? = null
     private val seriesPageCache = LinkedHashMap<String, TimedSeriesPage>(16, 0.75f, true)
     private var lastRecentLoadedMs: Long = 0L
+    private var episodeFocusNonce: Int = 0
 
     init {
         loadRecent()
         viewModelScope.launch {
             progressManager.progressFlow.collect { progressMap ->
                 _uiState.update { it.copy(episodeProgress = progressMap) }
+            }
+        }
+        viewModelScope.launch {
+            progressManager.recentItemsFlow.collect { items ->
+                _uiState.update { it.copy(watchedItems = items) }
             }
         }
     }
@@ -424,6 +444,19 @@ class VodViewModel(
     fun playEpisode(episode: VodEpisode, series: VodSeries) {
         val resumePos = progressManager.getResumePosition(episode.id)
         progressManager.setLastPlayedEpisodeId(series.id, episode.id)
+        progressManager.saveRecentItem(
+            VodRecentItem(
+                id = episode.id,
+                episodeId = episode.id,
+                title = episode.title,
+                programId = series.id,
+                programName = series.title,
+                channelName = series.provider.displayName,
+                imageUrl = episode.imageUrl ?: series.imageUrl,
+                description = episode.description.takeIf { it.isNotBlank() } ?: series.description,
+                provider = series.provider,
+            )
+        )
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -434,6 +467,7 @@ class VodViewModel(
                     playingStreamUrl = null,
                     lastPlayedEpisodeId = episode.id,
                     resumePositionMs = resumePos,
+                    episodeFocusTarget = null,
                 )
             }
             val streamEndpoint = episode.streamEndpoint
@@ -465,9 +499,10 @@ class VodViewModel(
     }
 
     fun playRecentItem(recent: VodRecentItem) {
+        val programId = recent.programId
         val dummyEpisode = VodEpisode(
             id = recent.episodeId,
-            programId = recent.programId ?: recent.id,
+            programId = programId ?: recent.id,
             seasonId = null,
             title = recent.title,
             description = recent.description.orEmpty(),
@@ -477,7 +512,7 @@ class VodViewModel(
             displayOrder = 1,
         )
         val dummySeries = VodSeries(
-            id = recent.programId ?: recent.id,
+            id = programId ?: recent.id,
             title = recent.programName ?: recent.channelName ?: recent.provider.displayName,
             description = recent.description.orEmpty(),
             imageUrl = recent.imageUrl,
@@ -487,9 +522,74 @@ class VodViewModel(
             provider = recent.provider,
         )
         playEpisode(dummyEpisode, dummySeries)
+        if (!programId.isNullOrBlank()) {
+            loadDetailsForPlayingRecentItem(recent, programId)
+        }
+    }
+
+    private fun loadDetailsForPlayingRecentItem(recent: VodRecentItem, programId: String) {
+        loadDetailsJob?.cancel()
+        loadDetailsJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoadingDetails = true,
+                    detailsError = null,
+                    selectedSeriesDetails = null,
+                    selectedSeason = null,
+                    lastPlayedEpisodeId = recent.episodeId,
+                )
+            }
+            runCatching {
+                repository.loadSeriesDetails(recent.provider, programId)
+            }.onSuccess { details ->
+                val targetEpisode = details.episodes.firstOrNull { it.id == recent.episodeId }
+                val targetSeason = targetEpisode?.seasonId
+                    ?.let { seasonId -> details.seasons.firstOrNull { it.seasonId == seasonId } }
+                    ?: details.seasons.firstOrNull()
+                _uiState.update { state ->
+                    val shouldUpgradePlayingItem =
+                        state.playingSeries?.id == programId &&
+                            state.playingEpisode?.id == recent.episodeId &&
+                            targetEpisode != null
+                    state.copy(
+                        selectedSeriesDetails = details,
+                        selectedSeason = targetSeason,
+                        isLoadingDetails = false,
+                        detailsError = null,
+                        playingSeries = if (state.playingSeries?.id == programId) details.series else state.playingSeries,
+                        playingEpisode = if (shouldUpgradePlayingItem) targetEpisode else state.playingEpisode,
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isLoadingDetails = false,
+                        detailsError = error.message ?: "שגיאה בטעינת פרטי תוכנית",
+                    )
+                }
+            }
+        }
+    }
+
+    suspend fun resolveRecentItemPreviewStream(recent: VodRecentItem): String? {
+        return repository.resolveEpisodeStream(
+            streamEndpoint = streamEndpointFor(recent.provider, recent.episodeId),
+            provider = recent.provider,
+        )
     }
 
     fun stopVodPlayback() {
+        val current = _uiState.value
+        val focusTarget = current.playingEpisode?.let { episode ->
+            current.playingSeries?.let { series ->
+                VodEpisodeFocusTarget(
+                    seriesId = series.id,
+                    seasonId = episode.seasonId,
+                    episodeId = episode.id,
+                    nonce = ++episodeFocusNonce,
+                )
+            }
+        }
         _uiState.update {
             it.copy(
                 playingEpisode = null,
@@ -498,7 +598,18 @@ class VodViewModel(
                 isResolvingStream = false,
                 streamError = null,
                 resumePositionMs = null,
+                episodeFocusTarget = focusTarget,
             )
+        }
+    }
+
+    fun consumeEpisodeFocusTarget(nonce: Int) {
+        _uiState.update {
+            if (it.episodeFocusTarget?.nonce == nonce) {
+                it.copy(episodeFocusTarget = null)
+            } else {
+                it
+            }
         }
     }
 

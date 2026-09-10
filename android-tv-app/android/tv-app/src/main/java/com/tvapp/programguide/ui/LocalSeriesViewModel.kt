@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.tvapp.programguide.data.LocalEpisode
 import com.tvapp.programguide.data.LocalSeries
 import com.tvapp.programguide.data.LocalSeriesRepository
+import com.tvapp.programguide.data.VodPlaybackProgress
+import com.tvapp.programguide.data.VodProgressManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,8 @@ data class LocalSeriesUiState(
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val error: String? = null,
+    val episodeProgress: Map<String, VodPlaybackProgress> = emptyMap(),
+    val resumePositionMs: Long? = null,
 )
 
 class LocalSeriesViewModel(
@@ -32,13 +36,23 @@ class LocalSeriesViewModel(
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, LocalSeriesRepository())
 
-    private val _uiState = MutableStateFlow(LocalSeriesUiState())
+    private val progressManager = VodProgressManager.getInstance(application)
+    private val _uiState = MutableStateFlow(
+        LocalSeriesUiState(
+            episodeProgress = progressManager.progressFlow.value,
+        )
+    )
     val uiState: StateFlow<LocalSeriesUiState> = _uiState.asStateFlow()
     private var loadJob: Job? = null
     private var lastLoadedMs: Long = 0L
 
     init {
         loadInitial()
+        viewModelScope.launch {
+            progressManager.progressFlow.collect { progressMap ->
+                _uiState.update { it.copy(episodeProgress = progressMap) }
+            }
+        }
     }
 
     fun refreshIfStale(force: Boolean = false) {
@@ -118,10 +132,13 @@ class LocalSeriesViewModel(
     }
 
     fun playEpisode(series: LocalSeries, episode: LocalEpisode) {
+        val resumePos = progressManager.getResumePosition(episode.id)
+        progressManager.setLastPlayedEpisodeId(series.id, episode.id)
         _uiState.update {
             it.copy(
                 playingSeries = series,
                 playingEpisode = episode,
+                resumePositionMs = resumePos,
             )
         }
     }
@@ -131,8 +148,25 @@ class LocalSeriesViewModel(
             it.copy(
                 playingSeries = null,
                 playingEpisode = null,
+                resumePositionMs = null,
             )
         }
+    }
+
+    fun savePlaybackProgress(
+        episodeId: String,
+        seriesId: String?,
+        positionMs: Long,
+        durationMs: Long,
+        forceCompleted: Boolean? = null,
+    ) {
+        progressManager.saveProgress(
+            episodeId = episodeId,
+            seriesId = seriesId,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            forceCompleted = forceCompleted,
+        )
     }
 
     companion object {

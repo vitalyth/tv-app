@@ -15,8 +15,12 @@ class VodProgressManager private constructor(context: Context) {
     private val _progressFlow = MutableStateFlow<Map<String, VodPlaybackProgress>>(emptyMap())
     val progressFlow: StateFlow<Map<String, VodPlaybackProgress>> = _progressFlow.asStateFlow()
 
+    private val _recentItemsFlow = MutableStateFlow<List<VodRecentItem>>(emptyList())
+    val recentItemsFlow: StateFlow<List<VodRecentItem>> = _recentItemsFlow.asStateFlow()
+
     init {
         loadAllProgress()
+        loadAllRecentItems()
     }
 
     private fun loadAllProgress() {
@@ -30,6 +34,19 @@ class VodProgressManager private constructor(context: Context) {
             }
         }
         _progressFlow.value = loaded
+    }
+
+    private fun loadAllRecentItems() {
+        _recentItemsFlow.value = prefs.all
+            .mapNotNull { (key, value) ->
+                if (key.startsWith(PREFIX_RECENT_ITEM) && value is String) {
+                    deserializeRecentItem(value)
+                } else {
+                    null
+                }
+            }
+            .sortedByDescending { item -> _progressFlow.value[item.episodeId]?.lastWatchedAt ?: 0L }
+            .take(MAX_RECENT_ITEMS)
     }
 
     @Synchronized
@@ -105,6 +122,23 @@ class VodProgressManager private constructor(context: Context) {
         prefs.edit().putString(PREFIX_SERIES_LAST + seriesId, episodeId).apply()
     }
 
+    @Synchronized
+    fun saveRecentItem(item: VodRecentItem) {
+        if (item.episodeId.isBlank()) return
+
+        val existing = _recentItemsFlow.value.filter { it.episodeId != item.episodeId }
+        val updated = (listOf(item) + existing).take(MAX_RECENT_ITEMS)
+        _recentItemsFlow.value = updated
+
+        val editor = prefs.edit()
+        editor.putString(PREFIX_RECENT_ITEM + item.episodeId, serializeRecentItem(item))
+        val keepKeys = updated.map { PREFIX_RECENT_ITEM + it.episodeId }.toSet()
+        prefs.all.keys
+            .filter { it.startsWith(PREFIX_RECENT_ITEM) && it !in keepKeys }
+            .forEach(editor::remove)
+        editor.apply()
+    }
+
     private fun serialize(item: VodPlaybackProgress): String {
         val json = JSONObject()
         json.put("episodeId", item.episodeId)
@@ -138,10 +172,46 @@ class VodProgressManager private constructor(context: Context) {
         }
     }
 
+    private fun serializeRecentItem(item: VodRecentItem): String {
+        val json = JSONObject()
+        json.put("id", item.id)
+        json.put("episodeId", item.episodeId)
+        json.put("title", item.title)
+        json.put("programId", item.programId.orEmpty())
+        json.put("programName", item.programName.orEmpty())
+        json.put("channelName", item.channelName.orEmpty())
+        json.put("imageUrl", item.imageUrl.orEmpty())
+        json.put("description", item.description.orEmpty())
+        json.put("provider", item.provider.id)
+        return json.toString()
+    }
+
+    private fun deserializeRecentItem(str: String): VodRecentItem? {
+        return try {
+            val json = JSONObject(str)
+            val episodeId = json.getString("episodeId")
+            VodRecentItem(
+                id = json.optString("id", episodeId).ifBlank { episodeId },
+                episodeId = episodeId,
+                title = json.optString("title", "פרק"),
+                programId = json.optString("programId").takeIf { it.isNotBlank() },
+                programName = json.optString("programName").takeIf { it.isNotBlank() },
+                channelName = json.optString("channelName").takeIf { it.isNotBlank() },
+                imageUrl = json.optString("imageUrl").takeIf { it.isNotBlank() },
+                description = json.optString("description").takeIf { it.isNotBlank() },
+                provider = VodProvider.fromId(json.optString("provider")),
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     companion object {
         private const val PREFS_NAME = "vod_playback_progress"
         private const val PREFIX_EPISODE = "ep_"
         private const val PREFIX_SERIES_LAST = "series_last_"
+        private const val PREFIX_RECENT_ITEM = "recent_item_"
+        private const val MAX_RECENT_ITEMS = 60
 
         @Volatile
         private var instance: VodProgressManager? = null
@@ -153,4 +223,3 @@ class VodProgressManager private constructor(context: Context) {
         }
     }
 }
-
