@@ -205,13 +205,12 @@ fun HomeScreen(
             localProgress = localProgress,
         )
     }
-    val firstRowFocusRequester = remember { FocusRequester() }
-    val firstFocusRequester = initialFocusRequester
+    val playFocusRequester = remember { FocusRequester() }
     val liveRowState = rememberLazyListState()
     val focusScope = rememberCoroutineScope()
-    val liveRowFocusRequesters = remember(currentLiveItems.map { it.channel.id }, firstRowFocusRequester) {
+    val liveRowFocusRequesters = remember(currentLiveItems.map { it.channel.id }, initialFocusRequester) {
         List(currentLiveItems.size) { index ->
-            if (index == 0) firstRowFocusRequester else FocusRequester()
+            if (index == 0) initialFocusRequester else FocusRequester()
         }
     }
     val recentVodItems = remember(vodRecentItems, vodWatchedItems) {
@@ -220,10 +219,27 @@ fun HomeScreen(
             .take(12)
     }
 
+    var hasRequestedInitialFocus by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentLiveItems.isNotEmpty()) {
+        if (currentLiveItems.isNotEmpty() && !hasRequestedInitialFocus) {
+            hasRequestedInitialFocus = true
+            for (attempt in 0..4) {
+                kotlinx.coroutines.delay(60L)
+                try {
+                    initialFocusRequester.requestFocus()
+                    break
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     LaunchedEffect(contentFocusNonce) {
         if (contentFocusNonce > 0) {
             try {
-                firstFocusRequester.requestFocus()
+                val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, liveRowFocusRequesters.lastIndex.coerceAtLeast(0))
+                val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: initialFocusRequester
+                targetRequester.requestFocus()
             } catch (_: Exception) {}
         }
     }
@@ -349,7 +365,7 @@ fun HomeScreen(
                 isLive = !isVodActive,
                 isMuted = isMuted,
                 onToggleMute = onToggleMute,
-                playFocusRequester = firstFocusRequester,
+                playFocusRequester = playFocusRequester,
                 onClickPlay = {
                     if (focusedVodItem != null) {
                         onPlayRecentVod(focusedVodItem!!)
@@ -363,11 +379,11 @@ fun HomeScreen(
                     focusScope.launch {
                         liveRowState.scrollToItem(targetIndex)
                         kotlinx.coroutines.delay(80L)
-                        val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: firstRowFocusRequester
+                        val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: initialFocusRequester
                         try {
                             targetRequester.requestFocus()
                         } catch (_: Exception) {
-                            firstRowFocusRequester.requestFocus()
+                            initialFocusRequester.requestFocus()
                         }
                     }
                 },
@@ -397,7 +413,7 @@ fun HomeScreen(
                                 LiveChannelCard(
                                     channel = channel,
                                     program = program,
-                                    focusRequester = liveRowFocusRequesters.getOrNull(index) ?: if (index == 0) firstRowFocusRequester else null,
+                                    focusRequester = liveRowFocusRequesters.getOrNull(index) ?: if (index == 0) initialFocusRequester else null,
                                     onClick = { onPlayLiveChannel(channel, program) },
                                     onFocusChanged = { isFocused ->
                                         if (isFocused) {
@@ -409,7 +425,7 @@ fun HomeScreen(
                                         }
                                     },
                                     onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                                    onNavigateUp = { firstFocusRequester.requestFocus() },
+                                    onNavigateUp = { playFocusRequester.requestFocus() },
                                 )
                             }
                         }
