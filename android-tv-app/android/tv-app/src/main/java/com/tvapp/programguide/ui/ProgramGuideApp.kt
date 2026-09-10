@@ -331,7 +331,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             isFocusable = false
             isFocusableInTouchMode = false
-            setKeepContentOnPlayerReset(false)
+            setKeepContentOnPlayerReset(true)
             setEnableComposeSurfaceSyncWorkaround(false)
             hideController()
             layoutParams = ViewGroup.LayoutParams(
@@ -983,15 +983,10 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     }
                                 },
                                 onPreviewLiveChannel = { channel, program ->
-                                    homeBackgroundChannelId = null
-                                    homeVodPreviewLoadToken += 1
+                                    homeBackgroundChannelId = channel.id
                                     homeVodPreviewEpisodeId = null
                                     homeVodPreviewStreamUrl = null
                                     homeVodPreviewSeekReadyEpisodeId = null
-                                    renderedStreamUrl.value = null
-                                    activeStreamUrl.value = null
-                                    player.stop()
-                                    player.clearMediaItems()
                                     viewModel.previewChannel(channel, program)
                                 },
                                 onStopLivePreview = {

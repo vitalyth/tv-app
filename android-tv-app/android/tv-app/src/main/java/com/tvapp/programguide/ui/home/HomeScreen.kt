@@ -139,6 +139,24 @@ fun HomeScreen(
     val heroLiveItem = currentLiveItems.firstOrNull()
     val heroChannel = heroLiveItem?.channel ?: recentLiveChannels.firstOrNull()
     val heroProgram = heroLiveItem?.program ?: heroChannel?.let { currentPrograms[it.id].orEmpty().currentProgram(nowSeconds) }
+
+    var focusedLiveChannelId by remember { mutableStateOf<String?>(null) }
+    var lastFocusedLiveChannelIndex by remember { mutableStateOf(0) }
+    var focusedVodItem by remember { mutableStateOf<VodRecentItem?>(null) }
+
+    val focusedLiveItem = remember(focusedLiveChannelId, currentLiveItems) {
+        focusedLiveChannelId?.let { id -> currentLiveItems.firstOrNull { it.channel.id == id } }
+    }
+    val focusedLiveChannel = remember(focusedLiveChannelId, liveChannels) {
+        focusedLiveChannelId?.let { id -> liveChannels.firstOrNull { it.id == id } }
+    }
+    val activeChannel = focusedLiveChannel ?: focusedLiveItem?.channel ?: heroChannel
+    val activeProgram = if (focusedLiveChannelId != null) {
+        focusedLiveItem?.program ?: activeChannel?.let { currentPrograms[it.id].orEmpty().currentProgram(nowSeconds) }
+    } else {
+        heroProgram
+    }
+
     val continueItems = remember(vodRecentItems, vodWatchedItems, vodProgress, localSeries, localProgress) {
         buildContinueItems(
             vodRecentItems = vodRecentItems,
@@ -162,10 +180,6 @@ fun HomeScreen(
             .distinctBy { it.episodeId }
             .take(12)
     }
-    var focusedLiveChannelId by remember { mutableStateOf<String?>(null) }
-    var lastFocusedLiveChannelIndex by remember { mutableStateOf(0) }
-    var armedPreviewChannelId by remember { mutableStateOf<String?>(null) }
-    var focusedVodItem by remember { mutableStateOf<VodRecentItem?>(null) }
 
     LaunchedEffect(contentFocusNonce) {
         if (contentFocusNonce > 0) {
@@ -190,51 +204,16 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(focusedLiveChannelId, currentLiveItems) {
-        val focusedId = focusedLiveChannelId ?: return@LaunchedEffect
-        kotlinx.coroutines.delay(2_000L)
-        if (focusedLiveChannelId != focusedId) return@LaunchedEffect
-        val item = currentLiveItems.firstOrNull { it.channel.id == focusedId } ?: return@LaunchedEffect
-        armedPreviewChannelId = focusedId
-        onPreviewLiveChannel(item.channel, item.program)
-    }
-
-    LaunchedEffect(
-        heroChannel?.id,
-        heroProgram?.startSeconds,
-        heroProgram?.title,
-        focusedLiveChannelId,
-        focusedVodItem?.episodeId,
-        armedPreviewChannelId,
-        playingLiveChannelId,
-        playingVodPreviewEpisodeId,
-    ) {
-        val channel = heroChannel ?: return@LaunchedEffect
-        if (focusedLiveChannelId != null || focusedVodItem != null || armedPreviewChannelId != null || playingVodPreviewEpisodeId != null) return@LaunchedEffect
-        if (playingLiveChannelId != channel.id) {
-            onPreviewHomeBackground(channel, heroProgram)
+    LaunchedEffect(activeChannel?.id) {
+        val targetChannel = activeChannel ?: return@LaunchedEffect
+        val targetProgram = activeProgram
+        if (playingLiveChannelId == targetChannel.id) return@LaunchedEffect
+        if (focusedLiveChannelId != null) {
+            kotlinx.coroutines.delay(800L)
+            if (focusedLiveChannelId != targetChannel.id) return@LaunchedEffect
         }
-    }
-
-    LaunchedEffect(focusedLiveChannelId, playingLiveChannelId) {
-        val focusedId = focusedLiveChannelId
-        if (playingLiveChannelId != null && focusedId != null && playingLiveChannelId != focusedId) {
-            armedPreviewChannelId = null
-            onStopLivePreview()
-        }
-    }
-
-    LaunchedEffect(focusedLiveChannelId, playingLiveChannelId) {
-        if (
-            focusedLiveChannelId != null ||
-            playingLiveChannelId == null ||
-            playingLiveChannelId == backgroundLiveChannelId
-        ) return@LaunchedEffect
-        kotlinx.coroutines.delay(250L)
-        if (focusedLiveChannelId == null && playingLiveChannelId != backgroundLiveChannelId) {
-            armedPreviewChannelId = null
-            onStopLivePreview()
-        }
+        if (focusedVodItem != null || playingVodPreviewEpisodeId != null) return@LaunchedEffect
+        onPreviewHomeBackground(targetChannel, targetProgram)
     }
 
     LaunchedEffect(focusedVodItem) {
@@ -263,24 +242,23 @@ fun HomeScreen(
             .fillMaxSize()
             .background(ScreenBg),
     ) {
-        val showBackgroundPlayer = backgroundLiveChannelId != null &&
-            playingLiveChannelId == backgroundLiveChannelId &&
-            armedPreviewChannelId == null &&
+        val isLiveRendering = playingLiveChannelId != null &&
+            playingLiveChannelId == activeChannel?.id &&
+            (playingLiveChannelId == readyBackgroundLiveChannelId || playingLiveChannelId == readyLiveChannelId) &&
             focusedVodItem == null &&
             playingVodPreviewEpisodeId == null
+
         HomeArtwork(
-            imageUrl = heroProgram?.imageUrl ?: heroChannel?.logoUrl,
-            title = heroProgram?.title ?: heroChannel?.name.orEmpty(),
+            imageUrl = activeProgram?.imageUrl ?: activeChannel?.logoUrl,
+            title = activeProgram?.title ?: activeChannel?.name.orEmpty(),
             modifier = Modifier.fillMaxSize(),
         )
-        if (showBackgroundPlayer) {
-            HomeInlinePlayer(
-                player = player,
-                playerView = playerView,
-                visible = true,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        HomeInlinePlayer(
+            player = player,
+            playerView = playerView,
+            visible = isLiveRendering,
+            modifier = Modifier.fillMaxSize(),
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -311,11 +289,11 @@ fun HomeScreen(
         ) {
             item {
                 HomeHero(
-                    channel = heroChannel,
-                    program = heroProgram,
+                    channel = activeChannel,
+                    program = activeProgram,
                     focusRequester = firstFocusRequester,
                     onClick = {
-                        if (heroChannel != null) onPlayLiveChannel(heroChannel, heroProgram)
+                        if (activeChannel != null) onPlayLiveChannel(activeChannel, activeProgram)
                     },
                     onNavigateLeft = onNavigateSideRail,
                     onNavigateDown = {
@@ -325,6 +303,11 @@ fun HomeScreen(
                             kotlinx.coroutines.delay(80L)
                             val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: firstRowFocusRequester
                             targetRequester.requestFocus()
+                        }
+                    },
+                    onFocusChanged = { isFocused ->
+                        if (isFocused) {
+                            focusedLiveChannelId = null
                         }
                     },
                 )
@@ -340,27 +323,13 @@ fun HomeScreen(
                                 channel = channel,
                                 program = program,
                                 focusRequester = liveRowFocusRequesters.getOrNull(index) ?: if (index == 0) firstRowFocusRequester else null,
-                                player = player,
-                                playerView = playerView,
-                                attachPlayer = armedPreviewChannelId == channel.id && playingLiveChannelId == channel.id,
-                                showPlayer = armedPreviewChannelId == channel.id && readyLiveChannelId == channel.id,
                                 onClick = { onPlayLiveChannel(channel, program) },
                                 onFocusChanged = { isFocused ->
                                     if (isFocused) {
                                         onStopVodPreview()
-                                        if (playingLiveChannelId != null && playingLiveChannelId != channel.id && playingLiveChannelId != backgroundLiveChannelId) {
-                                             armedPreviewChannelId = null
-                                             onStopLivePreview()
-                                        }
                                         lastFocusedLiveChannelIndex = index
                                         onLiveChannelFocused(channel.id)
                                         focusedLiveChannelId = channel.id
-                                    } else if (focusedLiveChannelId == channel.id) {
-                                        focusedLiveChannelId = null
-                                        armedPreviewChannelId = null
-                                        if (playingLiveChannelId == channel.id && backgroundLiveChannelId != channel.id) {
-                                            onStopLivePreview()
-                                        }
                                     }
                                 },
                                 onNavigateLeft = if (index == 0) onNavigateSideRail else null,
@@ -380,12 +349,6 @@ fun HomeScreen(
                                     VodRecentCard(
                                         item = item.item,
                                         progress = item.progress,
-                                        player = player,
-                                        playerView = playerView,
-                                        attachPlayer = focusedVodItem?.episodeId == item.item.episodeId &&
-                                            playingVodPreviewEpisodeId == item.item.episodeId,
-                                        showPlayer = focusedVodItem?.episodeId == item.item.episodeId &&
-                                            readyVodPreviewEpisodeId == item.item.episodeId,
                                         onClick = { onPlayRecentVod(item.item) },
                                         onFocusChanged = { isFocused ->
                                             if (isFocused) {
@@ -421,12 +384,6 @@ fun HomeScreen(
                             VodRecentCard(
                                 item = item,
                                 progress = vodProgress[item.episodeId],
-                                player = player,
-                                playerView = playerView,
-                                attachPlayer = focusedVodItem?.episodeId == item.episodeId &&
-                                    playingVodPreviewEpisodeId == item.episodeId,
-                                showPlayer = focusedVodItem?.episodeId == item.episodeId &&
-                                    readyVodPreviewEpisodeId == item.episodeId,
                                 onClick = { onPlayRecentVod(item) },
                                 onFocusChanged = { isFocused ->
                                     if (isFocused) {
@@ -493,9 +450,14 @@ private fun HomeHero(
     onClick: () -> Unit,
     onNavigateLeft: () -> Unit,
     onNavigateDown: () -> Unit,
+    onFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
     val playInteractionSource = remember { MutableInteractionSource() }
     val isPlayFocused by playInteractionSource.collectIsFocusedAsState()
+
+    LaunchedEffect(isPlayFocused) {
+        onFocusChanged?.invoke(isPlayFocused)
+    }
 
     Box(
         modifier = Modifier
@@ -604,10 +566,6 @@ private fun LiveChannelCard(
     channel: TvChannel,
     program: TvProgram?,
     focusRequester: FocusRequester?,
-    player: StablePlayer,
-    playerView: StablePlayerView,
-    attachPlayer: Boolean,
-    showPlayer: Boolean,
     onClick: () -> Unit,
     onFocusChanged: (Boolean) -> Unit,
     onNavigateLeft: (() -> Unit)?,
@@ -622,16 +580,11 @@ private fun LiveChannelCard(
         onNavigateLeft = onNavigateLeft,
         onNavigateUp = onNavigateUp,
     ) { isFocused ->
-        if (attachPlayer) {
-            HomeInlinePlayer(player = player, playerView = playerView, visible = showPlayer, modifier = Modifier.fillMaxSize())
-        }
-        if (!showPlayer) {
-            HomeArtwork(
-                imageUrl = program?.imageUrl ?: channel.logoUrl,
-                title = channel.name,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        HomeArtwork(
+            imageUrl = program?.imageUrl ?: channel.logoUrl,
+            title = channel.name,
+            modifier = Modifier.fillMaxSize(),
+        )
         CardScrim()
         Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
             Text(channel.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -719,21 +672,12 @@ private fun LocalEpisodeCard(
 private fun VodRecentCard(
     item: VodRecentItem,
     progress: VodPlaybackProgress?,
-    player: StablePlayer? = null,
-    playerView: StablePlayerView? = null,
-    attachPlayer: Boolean = false,
-    showPlayer: Boolean = false,
     onClick: () -> Unit,
     onFocusChanged: ((Boolean) -> Unit)? = null,
     onNavigateLeft: (() -> Unit)?,
 ) {
     FocusCard(width = 238.dp, height = 164.dp, onClick = onClick, onFocusChanged = onFocusChanged, onNavigateLeft = onNavigateLeft) { isFocused ->
-        if (attachPlayer && player != null && playerView != null) {
-            HomeInlinePlayer(player = player, playerView = playerView, visible = showPlayer, modifier = Modifier.fillMaxSize())
-        }
-        if (!showPlayer) {
-            HomeArtwork(imageUrl = item.imageUrl, title = item.title, modifier = Modifier.fillMaxSize())
-        }
+        HomeArtwork(imageUrl = item.imageUrl, title = item.title, modifier = Modifier.fillMaxSize())
         CardScrim()
         Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
             Text(item.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = RtlTextStyle)
