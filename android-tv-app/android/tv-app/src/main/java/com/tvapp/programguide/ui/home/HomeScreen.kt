@@ -138,13 +138,12 @@ fun HomeScreen(
         val recent = recentChannelIds.mapNotNull { byId[it] }
         (recent + liveChannels).distinctBy { it.id }.take(12)
     }
-    val currentLiveItems = remember(liveChannels, currentPrograms, nowSeconds) {
-        liveChannels.mapNotNull { channel ->
-            currentPrograms[channel.id].orEmpty()
-                .currentProgramNow(nowSeconds)
-                ?.let { program -> HomeLiveItem(channel = channel, program = program) }
-        }.sortedByDescending { it.program.startSeconds }
-            .take(12)
+    val currentLiveItems = remember(recentLiveChannels, currentPrograms, nowSeconds) {
+        recentLiveChannels.mapNotNull { channel ->
+            val program = currentPrograms[channel.id].orEmpty().currentProgramNow(nowSeconds)
+                ?: currentPrograms[channel.id].orEmpty().currentProgram(nowSeconds)
+            program?.let { HomeLiveItem(channel = channel, program = it) }
+        }.take(12)
     }
     val heroLiveItem = currentLiveItems.firstOrNull()
     val heroChannel = heroLiveItem?.channel ?: recentLiveChannels.firstOrNull()
@@ -191,11 +190,6 @@ fun HomeScreen(
     } else {
         activeChannel?.logoUrl
     }
-    val heroProgramImageUrl = if (isVodActive) {
-        focusedVodItem?.imageUrl
-    } else {
-        activeProgram?.imageUrl ?: activeChannel?.logoUrl
-    }
 
     val continueItems = remember(vodRecentItems, vodWatchedItems, vodProgress, localSeries, localProgress) {
         buildContinueItems(
@@ -206,13 +200,12 @@ fun HomeScreen(
             localProgress = localProgress,
         )
     }
-    val playFocusRequester = remember { FocusRequester() }
+    val muteFocusRequester = remember { FocusRequester() }
     val liveRowState = rememberLazyListState()
     val focusScope = rememberCoroutineScope()
-    val liveRowFocusRequesters = remember(currentLiveItems.map { it.channel.id }, initialFocusRequester) {
-        List(currentLiveItems.size) { index ->
-            if (index == 0) initialFocusRequester else FocusRequester()
-        }
+    val channelFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    fun focusRequesterFor(channelId: String, index: Int): FocusRequester {
+        return if (index == 0) initialFocusRequester else channelFocusRequesters.getOrPut(channelId) { FocusRequester() }
     }
     val recentVodItems = remember(vodRecentItems, vodWatchedItems) {
         (vodRecentItems + vodWatchedItems)
@@ -235,27 +228,45 @@ fun HomeScreen(
         }
     }
 
+    LaunchedEffect(currentLiveItems) {
+        if (focusedLiveChannelId != null && currentLiveItems.none { it.channel.id == focusedLiveChannelId }) {
+            val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, (currentLiveItems.size - 1).coerceAtLeast(0))
+            val replacement = currentLiveItems.getOrNull(targetIndex)
+            if (replacement != null) {
+                focusedLiveChannelId = replacement.channel.id
+                lastFocusedLiveChannelIndex = targetIndex
+                val requester = focusRequesterFor(replacement.channel.id, targetIndex)
+                try {
+                    requester.requestFocus()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     LaunchedEffect(contentFocusNonce) {
         if (contentFocusNonce > 0) {
             try {
-                val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, liveRowFocusRequesters.lastIndex.coerceAtLeast(0))
-                val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: initialFocusRequester
+                val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, (currentLiveItems.size - 1).coerceAtLeast(0))
+                val targetChannel = currentLiveItems.getOrNull(targetIndex)
+                val targetRequester = targetChannel?.let { focusRequesterFor(it.channel.id, targetIndex) } ?: initialFocusRequester
                 targetRequester.requestFocus()
             } catch (_: Exception) {}
         }
     }
 
-    LaunchedEffect(liveRowFocusNonce, liveRowFocusRequesters) {
+    LaunchedEffect(liveRowFocusNonce) {
         if (liveRowFocusNonce > 0) {
             try {
                 val restoredIndex = restoreLiveChannelId
                     ?.let { channelId -> currentLiveItems.indexOfFirst { it.channel.id == channelId } }
                     ?.takeIf { it >= 0 }
                 val targetIndex = (restoredIndex ?: lastFocusedLiveChannelIndex)
-                    .coerceIn(0, liveRowFocusRequesters.lastIndex.coerceAtLeast(0))
+                    .coerceIn(0, (currentLiveItems.size - 1).coerceAtLeast(0))
                 liveRowState.scrollToItem(targetIndex)
                 kotlinx.coroutines.delay(80L)
-                liveRowFocusRequesters.getOrNull(targetIndex)?.requestFocus()
+                val targetChannel = currentLiveItems.getOrNull(targetIndex)
+                val targetRequester = targetChannel?.let { focusRequesterFor(it.channel.id, targetIndex) } ?: initialFocusRequester
+                targetRequester.requestFocus()
             } catch (_: Exception) {}
         }
     }
@@ -333,9 +344,9 @@ fun HomeScreen(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color(0x59080A0C),
-                        0.34f to Color(0x80080A0C),
-                        0.54f to Color(0xD9080A0C),
+                        0f to Color.Transparent,
+                        0.32f to Color(0x30080A0C),
+                        0.54f to Color(0xB8080A0C),
                         1f to Color(0xFA080A0C),
                     )
                 )
@@ -345,9 +356,10 @@ fun HomeScreen(
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xC9080A0C),
-                        0.52f to Color(0x66080A0C),
-                        1f to Color(0x22080A0C),
+                        0f to Color(0xD4080A0C),
+                        0.40f to Color(0x94080A0C),
+                        0.66f to Color(0x18080A0C),
+                        1f to Color.Transparent,
                     )
                 )
         )
@@ -362,25 +374,18 @@ fun HomeScreen(
                 description = heroDescription,
                 timeRange = heroTimeRange,
                 channelLogoUrl = heroChannelLogoUrl,
-                programImageUrl = heroProgramImageUrl,
                 isLive = !isVodActive,
                 isMuted = isMuted,
                 onToggleMute = onToggleMute,
-                playFocusRequester = playFocusRequester,
-                onClickPlay = {
-                    if (focusedVodItem != null) {
-                        onPlayRecentVod(focusedVodItem!!)
-                    } else if (activeChannel != null) {
-                        onPlayLiveChannel(activeChannel, activeProgram)
-                    }
-                },
+                muteFocusRequester = muteFocusRequester,
                 onNavigateLeft = onNavigateSideRail,
                 onNavigateDown = {
-                    val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, liveRowFocusRequesters.lastIndex.coerceAtLeast(0))
+                    val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, (currentLiveItems.size - 1).coerceAtLeast(0))
                     focusScope.launch {
                         liveRowState.scrollToItem(targetIndex)
                         kotlinx.coroutines.delay(80L)
-                        val targetRequester = liveRowFocusRequesters.getOrNull(targetIndex) ?: initialFocusRequester
+                        val targetChannel = currentLiveItems.getOrNull(targetIndex)
+                        val targetRequester = targetChannel?.let { focusRequesterFor(it.channel.id, targetIndex) } ?: initialFocusRequester
                         try {
                             targetRequester.requestFocus()
                         } catch (_: Exception) {
@@ -414,7 +419,7 @@ fun HomeScreen(
                                 LiveChannelCard(
                                     channel = channel,
                                     program = program,
-                                    focusRequester = liveRowFocusRequesters.getOrNull(index) ?: if (index == 0) initialFocusRequester else null,
+                                    focusRequester = focusRequesterFor(channel.id, index),
                                     onClick = { onPlayLiveChannel(channel, program) },
                                     onFocusChanged = { isFocused ->
                                         if (isFocused) {
@@ -426,7 +431,7 @@ fun HomeScreen(
                                         }
                                     },
                                     onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                                    onNavigateUp = { playFocusRequester.requestFocus() },
+                                    onNavigateUp = { muteFocusRequester.requestFocus() },
                                 )
                             }
                         }
@@ -553,94 +558,36 @@ private fun HomeHero(
     description: String,
     timeRange: String?,
     channelLogoUrl: String?,
-    programImageUrl: String?,
     isLive: Boolean,
     isMuted: Boolean,
     onToggleMute: () -> Unit,
-    playFocusRequester: FocusRequester,
-    onClickPlay: () -> Unit,
+    muteFocusRequester: FocusRequester,
     onNavigateLeft: () -> Unit,
     onNavigateDown: () -> Unit,
     onFocusChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val playInteractionSource = remember { MutableInteractionSource() }
-    val isPlayFocused by playInteractionSource.collectIsFocusedAsState()
-
     val muteInteractionSource = remember { MutableInteractionSource() }
     val isMuteFocused by muteInteractionSource.collectIsFocusedAsState()
 
-    val muteFocusRequester = remember { FocusRequester() }
-
-    val isHeroFocused = isPlayFocused || isMuteFocused
-    LaunchedEffect(isHeroFocused) {
-        onFocusChanged?.invoke(isHeroFocused)
+    LaunchedEffect(isMuteFocused) {
+        onFocusChanged?.invoke(isMuteFocused)
     }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(176.dp)
-            .padding(start = 12.dp, top = 2.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
+            .height(130.dp)
+            .padding(start = 12.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top,
     ) {
-        // 1. Program Preview Card (16:9 aspect ratio)
-        Box(
-            modifier = Modifier
-                .width(182.dp)
-                .height(102.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF141A23))
-                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp)),
-        ) {
-            val previewUrl = programImageUrl ?: channelLogoUrl
-            HomeArtwork(
-                imageUrl = previewUrl,
-                title = title,
-                modifier = Modifier.fillMaxSize(),
-            )
-            // Gradient scrim at the bottom of the card
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.45f to Color(0x22000000),
-                            1f to Color(0xD9080A0C),
-                        )
-                    )
-            )
-            // Channel logo badge inside thumbnail card
-            if (!channelLogoUrl.isNullOrBlank()) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(6.dp)
-                        .size(26.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xD90E141D))
-                        .border(0.5.dp, Color(0x44FFFFFF), RoundedCornerShape(6.dp))
-                        .padding(2.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AsyncImage(
-                        model = channelLogoUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
-
-        // 2. Info Column (Full remaining width across the screen!)
+        // Info Column (Full available width across the left/center)
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight(),
-            verticalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // Row 1: Badges & Channel Metadata
             Row(
@@ -703,7 +650,7 @@ private fun HomeHero(
                 }
             }
 
-            // Row 2: Program Title (Full width, bold, crisp with text shadow)
+            // Row 2: Program Title (Bold, crisp with text shadow)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -729,11 +676,11 @@ private fun HomeHero(
                 )
             }
 
-            // Row 3: Program Description (Fixed 40dp height, 2 lines, full width)
+            // Row 3: Program Description (Fixed 44dp height, 2 lines, full width)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp),
+                    .height(44.dp),
                 contentAlignment = Alignment.TopStart,
             ) {
                 val displayDescription = description.trim().ifBlank {
@@ -758,86 +705,38 @@ private fun HomeHero(
                     )
                 }
             }
+        }
 
-            // Row 4: Action Buttons (Play & Mute)
-            Row(
-                modifier = Modifier.height(38.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                // Play button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isPlayFocused) FocusedBg else Color(0xFFE91E35))
-                        .then(if (isPlayFocused) Modifier.border(2.dp, FocusedBg, RoundedCornerShape(8.dp)) else Modifier)
-                        .tvFocusableClickable(
-                            onClick = onClickPlay,
-                            interactionSource = playInteractionSource,
-                            focusRequester = playFocusRequester,
-                            onNavigateLeft = onNavigateLeft,
-                            onNavigateRight = { muteFocusRequester.requestFocus() },
-                            onNavigateDown = onNavigateDown,
-                        )
-                        .padding(horizontal = 22.dp, vertical = 8.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = if (isPlayFocused) FocusedContent else Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Text(
-                            text = "נגן",
-                            color = if (isPlayFocused) FocusedContent else Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-
-                // Mute / Unmute Button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (isMuteFocused) FocusedBg
-                            else if (isMuted) Color(0x3DFFFFFF)
-                            else Color(0x24FFFFFF)
-                        )
-                        .then(if (isMuteFocused) Modifier.border(2.dp, FocusedBg, RoundedCornerShape(8.dp)) else Modifier)
-                        .tvFocusableClickable(
-                            onClick = onToggleMute,
-                            interactionSource = muteInteractionSource,
-                            focusRequester = muteFocusRequester,
-                            onNavigateLeft = { playFocusRequester.requestFocus() },
-                            onNavigateDown = onNavigateDown,
-                        )
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Icon(
-                            imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = if (isMuted) "הפעל קול" else "השתק",
-                            tint = if (isMuteFocused) FocusedContent else Color.White,
-                            modifier = Modifier.size(20.dp),
-                        )
-                        Text(
-                            text = if (isMuted) "מושתק" else "קול פעיל",
-                            color = if (isMuteFocused) FocusedContent else Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
-            }
+        // Mute / Unmute Button (Small icon only in the opposite corner: Top-Right)
+        Box(
+            modifier = Modifier
+                .padding(top = 2.dp, start = 16.dp)
+                .size(38.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    if (isMuteFocused) FocusedBg
+                    else Color(0x4D0E141D)
+                )
+                .border(
+                    width = if (isMuteFocused) 2.dp else 1.dp,
+                    color = if (isMuteFocused) FocusedBg else Color(0x44FFFFFF),
+                    shape = RoundedCornerShape(8.dp),
+                )
+                .tvFocusableClickable(
+                    onClick = onToggleMute,
+                    interactionSource = muteInteractionSource,
+                    focusRequester = muteFocusRequester,
+                    onNavigateDown = onNavigateDown,
+                    onNavigateLeft = onNavigateLeft,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = if (isMuted) "הפעל קול" else "השתק",
+                tint = if (isMuteFocused) FocusedContent else Color.White,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
