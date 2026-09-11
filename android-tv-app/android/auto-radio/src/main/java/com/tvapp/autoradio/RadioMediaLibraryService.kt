@@ -350,8 +350,15 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private fun loadStationOnCast(remoteClient: RemoteMediaClient, station: RadioStation): Boolean {
         val nowPlaying = nowPlayingCache[station.id]?.info
         val metadata = CastMediaMetadata(CastMediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
-            putString(CastMediaMetadata.KEY_TITLE, station.name)
-            putString(CastMediaMetadata.KEY_ARTIST, nowPlaying?.title ?: localizedString(R.string.no_info))
+            if (nowPlaying != null && nowPlaying.title.isNotBlank()) {
+                putString(CastMediaMetadata.KEY_TITLE, nowPlaying.title)
+                putString(CastMediaMetadata.KEY_ARTIST, nowPlaying.artist ?: station.name)
+                putString(CastMediaMetadata.KEY_ALBUM_TITLE, station.name)
+            } else {
+                putString(CastMediaMetadata.KEY_TITLE, station.name)
+                putString(CastMediaMetadata.KEY_ARTIST, localizedString(R.string.no_info))
+                putString(CastMediaMetadata.KEY_ALBUM_TITLE, station.name)
+            }
             addImage(WebImage(stationArtworkUri(station.logo)))
         }
 
@@ -414,7 +421,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
         Log.d(LOG_TAG, "Resuming local playback: ${station.id}")
         playbackErrorMessage = null
         clearPendingPlaybackRetry(resetCount = true)
-        player.setMediaItem(station.toMediaItem())
+        player.setMediaItem(station.toMediaItem(includeNowPlaying = true))
         player.prepare()
         player.play()
     }
@@ -877,7 +884,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                         if (station != null) {
                             Log.d(LOG_TAG, "Resolved requested media item '${requested.mediaId}' to station '${station.id}'")
                             rememberStation(station)
-                            station.toMediaItem()
+                            station.toMediaItem(includeNowPlaying = true)
                         } else {
                             requested.takeIf { it.localConfiguration != null }
                         }
@@ -902,7 +909,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                         if (station != null) {
                             Log.d(LOG_TAG, "Resolved setMediaItems request '${requested.mediaId}' to station '${station.id}'")
                             rememberStation(station)
-                            station.toMediaItem()
+                            station.toMediaItem(includeNowPlaying = true)
                         } else {
                             requested.takeIf { it.localConfiguration != null }
                         }
@@ -912,7 +919,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
                         defaultVoiceStation(stations)?.let { station ->
                             Log.d(LOG_TAG, "Using default voice station '${station.id}'")
                             rememberStation(station)
-                            listOf(station.toMediaItem())
+                            listOf(station.toMediaItem(includeNowPlaying = true))
                         } ?: emptyList()
                     }
 
@@ -1194,18 +1201,16 @@ class RadioMediaLibraryService : MediaLibraryService() {
     ): MediaItem {
         val nowPlaying = if (useNowPlayingOverride) {
             nowPlayingOverride
+        } else if (includeNowPlaying) {
+            nowPlayingCache[id]?.info
         } else {
             null
         }
-        val subtitle = nowPlaying?.title ?: if (includeNowPlaying || useNowPlayingOverride) localizedString(R.string.no_info) else null
-        val description = nowPlayingText(nowPlaying) ?: subtitle
+
         val metadataBuilder = MediaMetadata.Builder()
-            .setTitle(name)
-            .setArtist(subtitle)
-            .setSubtitle(nowPlaying?.detail ?: subtitle)
-            .setDescription(description)
             .setIsBrowsable(false)
             .setIsPlayable(true)
+            .setArtworkUri(stationArtworkUri(logo))
             .setExtras(
                 Bundle().apply {
                     putBoolean("is_live", true)
@@ -1216,7 +1221,40 @@ class RadioMediaLibraryService : MediaLibraryService() {
                 }
             )
 
-        metadataBuilder.setArtworkUri(stationArtworkUri(logo))
+        if (includeNowPlaying || useNowPlayingOverride) {
+            if (nowPlaying != null && nowPlaying.title.isNotBlank()) {
+                val songTitle = nowPlaying.title
+                val rawArtist = nowPlaying.artist ?: nowPlaying.detail ?: name
+                val artistName = if (nowPlaying.artist != null) "$rawArtist\n$name" else rawArtist
+                val fullDescription = nowPlayingText(nowPlaying) ?: nowPlaying.fullTitle
+
+                metadataBuilder
+                    .setTitle(songTitle)
+                    .setArtist(artistName)
+                    .setAlbumTitle(name)
+                    .setSubtitle(artistName)
+                    .setDisplayTitle(songTitle)
+                    .setDescription(fullDescription)
+            } else {
+                val liveBroadcast = groupTitle ?: localizedString(R.string.live_broadcast)
+                metadataBuilder
+                    .setTitle(name)
+                    .setArtist(liveBroadcast)
+                    .setAlbumTitle(name)
+                    .setSubtitle(localizedString(R.string.no_info))
+                    .setDisplayTitle(name)
+                    .setDescription(name)
+            }
+        } else {
+            val browseSubtitle = groupTitle ?: localizedString(R.string.live_broadcast)
+            metadataBuilder
+                .setTitle(name)
+                .setArtist(browseSubtitle)
+                .setAlbumTitle(name)
+                .setSubtitle(browseSubtitle)
+                .setDisplayTitle(name)
+                .setDescription(name)
+        }
 
         val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(id)
@@ -1277,11 +1315,23 @@ class RadioMediaLibraryService : MediaLibraryService() {
             nowPlayingOverride = nowPlaying,
             useNowPlayingOverride = true,
         )
-        val currentDescription = currentItem.mediaMetadata.description?.toString()
-        val updatedDescription = updatedItem.mediaMetadata.description?.toString()
+        val currentTitle = currentItem.mediaMetadata.title?.toString()
+        val updatedTitle = updatedItem.mediaMetadata.title?.toString()
+        val currentArtist = currentItem.mediaMetadata.artist?.toString()
+        val updatedArtist = updatedItem.mediaMetadata.artist?.toString()
+        val currentAlbum = currentItem.mediaMetadata.albumTitle?.toString()
+        val updatedAlbum = updatedItem.mediaMetadata.albumTitle?.toString()
         val currentSubtitle = currentItem.mediaMetadata.subtitle?.toString()
         val updatedSubtitle = updatedItem.mediaMetadata.subtitle?.toString()
-        if (currentDescription == updatedDescription && currentSubtitle == updatedSubtitle) {
+        val currentDescription = currentItem.mediaMetadata.description?.toString()
+        val updatedDescription = updatedItem.mediaMetadata.description?.toString()
+
+        if (currentTitle == updatedTitle &&
+            currentArtist == updatedArtist &&
+            currentAlbum == updatedAlbum &&
+            currentSubtitle == updatedSubtitle &&
+            currentDescription == updatedDescription
+        ) {
             return
         }
 
@@ -1294,7 +1344,7 @@ class RadioMediaLibraryService : MediaLibraryService() {
     private fun nowPlayingText(info: NowPlayingInfo?): String? {
         info ?: return null
         return buildString {
-            append(info.title)
+            append(info.fullTitle)
             info.detail?.takeIf { it.isNotBlank() }?.let {
                 append(" · ")
                 append(it)

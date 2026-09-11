@@ -74,4 +74,5 @@
     <string name="show_all">הצג הכל</string>
     <string name="all_stations_group">כל השאר</string>
     <string name="playback_error">שגיאת ניגון: %1$s</string>
+    <string name="live_broadcast">שידור חי</string>
 </resources>

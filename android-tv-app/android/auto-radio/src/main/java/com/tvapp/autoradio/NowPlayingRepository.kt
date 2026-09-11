@@ -8,14 +8,19 @@ import java.util.Locale
 
 data class NowPlayingInfo(
     val title: String,
+    val artist: String? = null,
     val detail: String? = null,
-)
+) {
+    val fullTitle: String
+        get() = if (!artist.isNullOrBlank()) "$artist - $title" else title
+}
 
 class NowPlayingRepository {
     fun nowPlayingFromMetadataText(rawMetadata: String?): NowPlayingInfo? {
         return rawMetadata
             ?.repairMetadataEncoding()
             ?.htmlToPlainText()
+            ?.decodeUrlIfNeeded()
             ?.parseIcyStreamInfo()
             ?.takeIf { it.title.isUsefulNowPlayingText() }
     }
@@ -34,7 +39,7 @@ class NowPlayingRepository {
     }
 
     private fun String.looksLikeMetadataMojibake(): Boolean {
-        if (any { it == 'Ã' || it == 'Â' || it == '×' || it == '�' }) {
+        if (any { it == 'Ã' || it == 'Â' || it == '×' || it == '\uFFFD' }) {
             return true
         }
 
@@ -83,7 +88,7 @@ class NowPlayingRepository {
     private fun String.metadataTextScore(): Int {
         val hebrew = count { it in '\u0590'..'\u05FF' }
         val replacements = count { it == '\uFFFD' }
-        val mojibakeMarkers = count { it == 'Ã' || it == 'Â' || it == '×' || it == '�' }
+        val mojibakeMarkers = count { it == 'Ã' || it == 'Â' || it == '×' || it == '\uFFFD' }
         val suspiciousLatin = count { it in 'À'..'ÿ' }
         val readable = count { it.isLetterOrDigit() || it in '\u0590'..'\u05FF' }
         return hebrew * 8 + readable - replacements * 20 - mojibakeMarkers * 8 - suspiciousLatin * 2
@@ -91,22 +96,105 @@ class NowPlayingRepository {
 
     private fun String.htmlToPlainText(): String {
         val compact = replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-        val spanned = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            Html.fromHtml(compact, Html.FROM_HTML_MODE_LEGACY)
-        } else {
-            @Suppress("DEPRECATION")
-            Html.fromHtml(compact)
+        val decoded = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                Html.fromHtml(compact, Html.FROM_HTML_MODE_LEGACY).toString()
+            } else {
+                @Suppress("DEPRECATION")
+                Html.fromHtml(compact).toString()
+            }
+        } catch (_: Throwable) {
+            compact.replace("&amp;", "&")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&apos;", "'")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&nbsp;", " ")
         }
-        return spanned.toString()
+        return decoded
             .replace(Regex("\\s+"), " ")
             .trim()
     }
 
+    private fun String.decodeUrlIfNeeded(): String {
+        return if (contains('%')) {
+            runCatching { URLDecoder.decode(this, "UTF-8") }.getOrDefault(this)
+        } else {
+            this
+        }
+    }
+
     private fun String.isUsefulNowPlayingText(): Boolean {
         val normalized = lowercase(Locale.US).trim()
-        return normalized.isNotBlank() &&
-            normalized !in IGNORED_TITLES &&
+        if (normalized.isBlank()) return false
+        if (none { it.isLetterOrDigit() || it in '\u0590'..'\u05FF' }) return false
+        return normalized !in IGNORED_TITLES &&
             IGNORED_TITLE_PARTS.none { normalized.contains(it) }
+    }
+
+    private data class ParsedTrackInfo(
+        val title: String,
+        val artist: String? = null,
+        val detail: String? = null,
+    )
+
+    private fun splitArtistAndTitle(raw: String): ParsedTrackInfo {
+        var text = raw.cleanDisplayMetadata()
+        if (text.isBlank()) {
+            return ParsedTrackInfo(title = "")
+        }
+
+        text = text.replace(PREFIX_STRIP_REGEX, "").trim()
+
+        val parts = text.split(TRACK_ARTIST_SEPARATOR_REGEX)
+        if (parts.size >= 2) {
+            val candidateArtist = parts[0].cleanDisplayMetadata()
+            if (parts.size == 3 && parts[2].looksLikeStationBranding()) {
+                val candidateTitle = parts[1].cleanDisplayMetadata()
+                val branding = parts[2].cleanDisplayMetadata()
+                if (candidateArtist.isUsefulNowPlayingText() && candidateTitle.isUsefulNowPlayingText()) {
+                    return ParsedTrackInfo(
+                        title = candidateTitle,
+                        artist = candidateArtist,
+                        detail = branding,
+                    )
+                }
+            }
+
+            val candidateTitle = parts.drop(1).joinToString(" - ").cleanDisplayMetadata()
+            if (candidateArtist.isUsefulNowPlayingText() && candidateTitle.isUsefulNowPlayingText()) {
+                return ParsedTrackInfo(
+                    title = candidateTitle,
+                    artist = candidateArtist,
+                )
+            }
+        }
+
+        return ParsedTrackInfo(title = text)
+    }
+
+    private fun String.stripDuplicateArtistPrefix(artist: String): String {
+        val trimmedArtist = artist.trim()
+        if (trimmedArtist.isBlank()) return this
+        if (startsWith(trimmedArtist, ignoreCase = true)) {
+            val remainder = substring(trimmedArtist.length).trim()
+            val stripped = remainder.replace(Regex("""^[-–—|:]\s*"""), "").trim()
+            if (stripped.isNotBlank()) {
+                return stripped
+            }
+        }
+        return this
+    }
+
+    private fun String.looksLikeStationBranding(): Boolean {
+        val lower = lowercase(Locale.US).trim()
+        return lower.contains("fm") ||
+            lower.contains("radio") ||
+            lower.contains(".co") ||
+            lower.contains(".com") ||
+            lower.contains("רדיו") ||
+            lower.contains("תחנה")
     }
 
     private fun String.parseIcyStreamInfo(): NowPlayingInfo? {
@@ -117,52 +205,84 @@ class NowPlayingRepository {
 
         val rawFields = STREAM_KEY_VALUE_REGEX.findAll(compact)
             .associate { match ->
-                match.groupValues[1].lowercase(Locale.US) to match.groupValues[3].trim()
+                val key = match.groupValues[1].lowercase(Locale.US)
+                val quoted = match.groupValues[3]
+                val unquoted = match.groupValues[4]
+                val value = (if (quoted.isNotEmpty()) quoted else unquoted).trim()
+                key to value
             } + compact.queryMetadataFields()
+
         val hasAdvertisementMetadata = rawFields["songtype"]?.equals("A", ignoreCase = true) == true ||
             rawFields.keys.any { it in ADVERTISEMENT_METADATA_FIELDS } ||
             TECHNICAL_METADATA_PARTS.any { compact.lowercase(Locale.US).contains(it) }
+
         val fields = rawFields
             .filterKeys { it !in IGNORED_METADATA_FIELDS }
             .mapValues { (_, value) -> value.cleanDisplayMetadata() }
             .filterValues { it.isUsefulNowPlayingText() && !it.isLikelyTechnicalMetadataValue() }
+
         val program = fields.firstValue("program", "show", "showname", "programname", "program_name")
-        val song = fields.firstValue("text", "title", "song", "track", "cue_title")
-        val artist = fields.firstValue("artist", "trackartist", "track_artist", "cue_artist")
+        val song = fields.firstValue("streamtitle", "stream_title", "title", "song", "track", "text", "cue_title")
+        val artist = fields.firstValue("streamartist", "stream_artist", "artist", "trackartist", "track_artist", "cue_artist")
             ?: compact.substringBeforeFirstField()
                 .trim()
                 .trimEnd('-', '–', '—', ':', '|')
                 .trim()
                 .takeIf { it.isUsefulNowPlayingText() && !it.isLikelyTechnicalMetadataValue() }
 
+        val cleanProgram = program?.cleanDisplayMetadata()
+
         if (!song.isNullOrBlank()) {
-            val title = listOfNotNull(artist, song)
-                .filter { it.isNotBlank() }
-                .joinToString(" - ")
-                .cleanDisplayMetadata()
+            val cleanSong = song.cleanDisplayMetadata()
+            val cleanArtist = artist?.cleanDisplayMetadata()
+
+            if (!cleanArtist.isNullOrBlank()) {
+                val finalTitle = cleanSong.stripDuplicateArtistPrefix(cleanArtist).ifBlank { cleanSong }
+                return NowPlayingInfo(
+                    title = finalTitle,
+                    artist = cleanArtist,
+                    detail = cleanProgram,
+                )
+            } else {
+                val parsed = splitArtistAndTitle(cleanSong)
+                return NowPlayingInfo(
+                    title = parsed.title,
+                    artist = parsed.artist,
+                    detail = cleanProgram ?: parsed.detail,
+                )
+            }
+        }
+
+        if (!artist.isNullOrBlank()) {
+            val cleanArtist = artist.cleanDisplayMetadata()
+            val parsed = splitArtistAndTitle(cleanArtist)
             return NowPlayingInfo(
-                title = title,
-                detail = program?.cleanDisplayMetadata(),
+                title = parsed.title,
+                artist = parsed.artist,
+                detail = cleanProgram ?: parsed.detail,
             )
         }
 
         val cleaned = compact
             .replace(STREAM_KEY_VALUE_FIELDS_REGEX, "")
             .cleanDisplayMetadata()
+
         if (cleaned.isBlank()) {
             if (hasAdvertisementMetadata) {
                 return NowPlayingInfo(title = ADVERTISEMENT_TEXT)
             }
-            return program?.cleanDisplayMetadata()?.let { NowPlayingInfo(title = it) }
+            return cleanProgram?.let { NowPlayingInfo(title = it) }
         }
 
         if (cleaned.isLikelyTechnicalMetadataValue() && hasAdvertisementMetadata) {
             return NowPlayingInfo(title = ADVERTISEMENT_TEXT)
         }
 
+        val parsed = splitArtistAndTitle(cleaned)
         return NowPlayingInfo(
-            title = cleaned,
-            detail = program?.cleanDisplayMetadata(),
+            title = parsed.title,
+            artist = parsed.artist,
+            detail = cleanProgram ?: parsed.detail,
         )
     }
 
@@ -199,17 +319,12 @@ class NowPlayingRepository {
     }
 
     private fun String.queryMetadataText(): String? {
-        listOf(indexOf('?'), indexOf('&'))
-            .filter { it >= 0 }
-            .minOrNull()
-            ?.let { index ->
-                val candidate = substring(index + 1)
-                if (QUERY_METADATA_REGEX.containsMatchIn(candidate)) {
-                    return candidate
-                }
-            }
-
-        return takeIf { QUERY_METADATA_REGEX.containsMatchIn(it) }
+        if (!contains('?') && !contains('&')) {
+            return null
+        }
+        val queryStart = indexOf('?').takeIf { it >= 0 }?.plus(1) ?: 0
+        val candidate = substring(queryStart)
+        return candidate.takeIf { candidate.contains('&') && QUERY_METADATA_REGEX.containsMatchIn(candidate) }
     }
 
     private fun String.decodeQueryField(): String {
@@ -217,11 +332,11 @@ class NowPlayingRepository {
     }
 
     private fun String.cleanDisplayMetadata(): String {
-        return replace(Regex("\\s+[-–—|:]\\s*$"), "")
+        return replace(Regex("\\s+[-–—|:;]\\s*$"), "")
             .replace(Regex("\\s+"), " ")
             .trim()
-            .trimEnd('-', '–', '—')
-            .trim()
+            .trimEnd('-', '–', '—', ':', '|', ';')
+            .trim('"', '\'', '“', '”', '‘', '’', ' ', ';')
     }
 
     private fun String.isLikelyTechnicalMetadataValue(): Boolean {
@@ -231,17 +346,28 @@ class NowPlayingRepository {
             return true
         }
 
-        val compact = normalized.replace(Regex("\\s+"), "")
-        val base64LikeChars = compact.count {
-            it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '+' || it == '/' || it == '=' || it == '-' || it == '_'
+        if (normalized.contains(" ")) {
+            return false
         }
-        return compact.length >= 32 && base64LikeChars.toFloat() / compact.length >= 0.95f
+
+        if (normalized.length >= 32) {
+            val hasDigits = normalized.any { it.isDigit() }
+            val hasLetters = normalized.any { it in 'A'..'Z' || it in 'a'..'z' }
+            val hasBase64Symbols = normalized.any { it == '+' || it == '/' || it == '=' }
+            if (hasDigits && (hasLetters || hasBase64Symbols)) {
+                return true
+            }
+        }
+
+        return false
     }
 
-    private companion object {
-        private val STREAM_KEY_VALUE_REGEX = Regex("""\b([A-Za-z_][A-Za-z0-9_]*)=(["'])(.*?)\2""")
-        private val STREAM_KEY_VALUE_FIELDS_REGEX = Regex("""(?:^|\s+)\w+=(["']).*?\1""")
-        private const val ADVERTISEMENT_TEXT = "Advertisement"
+    companion object {
+        private val TRACK_ARTIST_SEPARATOR_REGEX = Regex("""\s+[-–—|~]\s*|\s*[-–—|~]\s+""")
+        private val PREFIX_STRIP_REGEX = Regex("""^(?:now playing|now_playing|np|playing|live|on air)\s*[:\-–—|]\s*""", RegexOption.IGNORE_CASE)
+        private val STREAM_KEY_VALUE_REGEX = Regex("""\b([A-Za-z_][A-Za-z0-9_]*)=(?:(["'])(.*?)\2|([^;'&]+))""")
+        private val STREAM_KEY_VALUE_FIELDS_REGEX = Regex("""(?:^|\s+|;)\s*\w+=(?:(["']).*?\1|[^;'&]+)\s*;?""")
+        const val ADVERTISEMENT_TEXT = "Advertisement"
         private val ADVERTISEMENT_METADATA_FIELDS = setOf(
             "ad",
             "adcontext",
@@ -262,7 +388,7 @@ class NowPlayingRepository {
             "url",
             "website",
         ) + ADVERTISEMENT_METADATA_FIELDS
-        private val IGNORED_TITLES = setOf("unknown", "live", "radio")
+        private val IGNORED_TITLES = setOf("unknown", "live", "radio", "unknown artist", "various artists", "n/a", "none", "null")
         private val IGNORED_TITLE_PARTS = listOf(
             "powered by",
             "cdn",
@@ -273,9 +399,8 @@ class NowPlayingRepository {
             "doubleclick",
             "googlesyndication",
             "pubads",
-            "streamurl",
             "vast",
         )
-        private val QUERY_METADATA_REGEX = Regex("""(?:^|&)[A-Za-z_][A-Za-z0-9_]*=""")
+        private val QUERY_METADATA_REGEX = Regex("""(?:^|[?&])[A-Za-z_][A-Za-z0-9_]*=""")
     }
 }

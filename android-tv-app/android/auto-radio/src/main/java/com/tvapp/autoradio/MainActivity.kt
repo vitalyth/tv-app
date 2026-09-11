@@ -3400,20 +3400,32 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val metadata = mediaMetadata ?: return
-        val title = metadata
-            .artist
-            ?.toString()
-            ?.takeIf { isRealNowPlayingValue(it) }
-        if (title == null) {
+        val rawTitle = metadata.title?.toString()?.takeIf { isRealNowPlayingValue(it) && it != station.name }
+        val rawArtist = metadata.artist?.toString()?.takeIf { isRealNowPlayingValue(it) && it != station.name }
+        val rawSubtitle = metadata.subtitle?.toString()?.takeIf { isRealNowPlayingValue(it) && it != station.name }
+
+        val info = if (rawTitle != null) {
+            NowPlayingInfo(
+                title = rawTitle,
+                artist = rawArtist,
+                detail = rawSubtitle?.takeIf { it != rawTitle && it != rawArtist },
+            )
+        } else if (rawArtist != null) {
+            NowPlayingInfo(
+                title = rawArtist,
+                artist = null,
+                detail = rawSubtitle?.takeIf { it != rawArtist },
+            )
+        } else {
+            null
+        }
+
+        if (info == null) {
             nowPlayingCache.remove(station.id)
             updateActiveNowPlayingText(station)
             return
         }
-        val detail = metadata.subtitle
-            ?.toString()
-            ?.takeIf { isRealNowPlayingValue(it) && it != title }
 
-        val info = NowPlayingInfo(title = title, detail = detail)
         if (nowPlayingCache[station.id] == info) {
             return
         }
@@ -3438,13 +3450,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isRealNowPlayingValue(value: String): Boolean {
-        return value.isNotBlank() && value != "Live radio" && value != localizedString(R.string.no_info)
+        return value.isNotBlank() &&
+            value != "Live radio" &&
+            value != localizedString(R.string.live_broadcast) &&
+            value != localizedString(R.string.no_info)
     }
 
     private fun nowPlayingTextFor(station: RadioStation): String? {
         val info = nowPlayingCache[station.id] ?: return null
         return buildString {
-            append(info.title)
+            append(info.fullTitle)
             info.detail?.takeIf { it.isNotBlank() }?.let {
                 append(" · ")
                 append(it)
@@ -3453,20 +3468,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mediaItemFor(station: RadioStation): MediaItem {
+        val nowPlaying = nowPlayingCache[station.id]
+        val metadataBuilder = MediaMetadata.Builder()
+            .setArtworkUri(station.logo?.takeIf { it.isNotBlank() }?.let(Uri::parse))
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+
+        if (nowPlaying != null && nowPlaying.title.isNotBlank()) {
+            val songTitle = nowPlaying.title
+            val artistName = nowPlaying.artist ?: nowPlaying.detail ?: station.name
+            metadataBuilder
+                .setTitle(songTitle)
+                .setArtist(artistName)
+                .setAlbumTitle(station.name)
+                .setSubtitle(artistName)
+                .setDisplayTitle(songTitle)
+                .setDescription(nowPlayingTextFor(station) ?: nowPlaying.fullTitle)
+        } else {
+            metadataBuilder
+                .setTitle(station.name)
+                .setArtist(localizedString(R.string.live_broadcast))
+                .setAlbumTitle(station.name)
+                .setSubtitle(localizedString(R.string.no_info))
+                .setDisplayTitle(station.name)
+                .setDescription(station.name)
+        }
+
         val mediaItemBuilder = MediaItem.Builder()
             .setMediaId(station.id)
             .setUri(repository.streamUriFor(station.id))
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(station.name)
-                    .setArtist(localizedString(R.string.no_info))
-                    .setSubtitle(localizedString(R.string.no_info))
-                    .setDescription(localizedString(R.string.no_info))
-                    .setArtworkUri(station.logo?.takeIf { it.isNotBlank() }?.let(Uri::parse))
-                    .setIsBrowsable(false)
-                    .setIsPlayable(true)
-                    .build()
-            )
+            .setMediaMetadata(metadataBuilder.build())
 
         repository.streamMimeTypeFor(station.id)?.let { mediaItemBuilder.setMimeType(it) }
         return mediaItemBuilder.build()
