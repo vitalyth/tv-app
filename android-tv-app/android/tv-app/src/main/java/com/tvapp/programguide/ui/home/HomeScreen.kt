@@ -557,7 +557,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun HomeHero(
+internal fun HomeHero(
     title: String,
     subtitle: String,
     description: String,
@@ -808,7 +808,7 @@ private fun LiveChannelCard(
 }
 
 @Composable
-private fun HomeInlinePlayer(
+internal fun HomeInlinePlayer(
     player: StablePlayer,
     playerView: StablePlayerView,
     visible: Boolean,
@@ -826,6 +826,7 @@ private fun HomeInlinePlayer(
     AndroidView(
         factory = {
             (playerView.value.parent as? ViewGroup)?.removeView(playerView.value)
+            playerView.value.player = player.value
             playerView.value.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             playerView.value.useController = false
             playerView.value.alpha = alpha
@@ -1025,7 +1026,7 @@ private fun FocusCard(
 }
 
 @Composable
-private fun HomeArtwork(imageUrl: String?, title: String, modifier: Modifier = Modifier) {
+internal fun HomeArtwork(imageUrl: String?, title: String, modifier: Modifier = Modifier) {
     if (!imageUrl.isNullOrBlank()) {
         val context = LocalContext.current
         val request = remember(imageUrl) {
