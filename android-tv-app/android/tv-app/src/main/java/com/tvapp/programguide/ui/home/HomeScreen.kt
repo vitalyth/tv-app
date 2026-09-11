@@ -795,6 +795,26 @@ private fun LiveChannelCard(
             }
         }
         LiveBadge(Modifier.align(Alignment.TopStart).padding(9.dp))
+        if (channel.logoUrl.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(9.dp)
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xB3080A0C))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
+                    .padding(3.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = channel.logoUrl,
+                    contentDescription = channel.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 }
 
@@ -906,6 +926,29 @@ private fun VodRecentCard(
         }
         if (progress != null && progress.isInProgress) {
             ProgressBar(progress)
+        }
+        val providerLogoUrl = remember(item.provider) {
+            BuildConfig.PROGRAM_GUIDE_API_BASE_URL.trimEnd('/').removeSuffix("/api") + "/ch/" + item.provider.logoPath.trimStart('/')
+        }
+        if (providerLogoUrl.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(9.dp)
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xB3080A0C))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
+                    .padding(3.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = providerLogoUrl,
+                    contentDescription = item.channelName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }
