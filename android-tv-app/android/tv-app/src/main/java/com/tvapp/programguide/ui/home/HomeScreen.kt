@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.viewinterop.AndroidView
 import android.view.ViewGroup
+import androidx.media3.common.Player
 import androidx.media3.ui.AspectRatioFrameLayout
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -903,12 +904,21 @@ private fun HomeInlinePlayer(
     modifier: Modifier = Modifier,
 ) {
     val alpha = if (visible) 1f else 0f
+    val shouldKeepScreenOn = visible && (player.value.isPlaying || (player.value.playWhenReady && player.value.playbackState != Player.STATE_IDLE && player.value.playbackState != Player.STATE_ENDED))
+
+    DisposableEffect(playerView.value) {
+        onDispose {
+            playerView.value.keepScreenOn = false
+        }
+    }
+
     AndroidView(
         factory = {
             (playerView.value.parent as? ViewGroup)?.removeView(playerView.value)
             playerView.value.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             playerView.value.useController = false
             playerView.value.alpha = alpha
+            playerView.value.keepScreenOn = shouldKeepScreenOn
             playerView.value.layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -920,6 +930,9 @@ private fun HomeInlinePlayer(
                 it.player = player.value
             }
             it.alpha = alpha
+            if (it.keepScreenOn != shouldKeepScreenOn) {
+                it.keepScreenOn = shouldKeepScreenOn
+            }
             if (it.resizeMode != AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
                 it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             }

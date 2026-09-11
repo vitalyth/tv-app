@@ -245,16 +245,45 @@ private fun KeepScreenOnEffect(enabled: Boolean) {
     val activity = LocalContext.current.findActivity()
 
     DisposableEffect(activity, enabled) {
+        val window = activity?.window
+        println("KeepScreenOnEffect: enabled=$enabled, window=$window")
         if (enabled) {
-            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
 
         onDispose {
-            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            println("KeepScreenOnEffect onDispose (was enabled=$enabled)")
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
+}
+
+@Composable
+private fun rememberPlayerIsPlaying(player: Player): Boolean {
+    fun Player.isActivelyPlaying(): Boolean {
+        val active = isPlaying || (playWhenReady && (playbackState == Player.STATE_READY || playbackState == Player.STATE_BUFFERING))
+        println("KeepScreenOn isActivelyPlaying: isPlaying=$isPlaying, playWhenReady=$playWhenReady, state=$playbackState -> active=$active")
+        return active
+    }
+
+    var isPlaying by remember(player) { mutableStateOf(player.isActivelyPlaying()) }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onEvents(p: Player, events: Player.Events) {
+                isPlaying = p.isActivelyPlaying()
+            }
+        }
+        player.addListener(listener)
+        isPlaying = player.isActivelyPlaying()
+        onDispose {
+            player.removeListener(listener)
+        }
+    }
+
+    return isPlaying
 }
 
 @Composable
@@ -299,6 +328,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             .setMediaSourceFactory(DefaultMediaSourceFactory(SharedHttpDataSourceFactory))
             .setTrackSelector(trackSelector)
             .setLoadControl(createPrimaryPlayerLoadControl())
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             .apply {
             playWhenReady = true
@@ -549,7 +579,15 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         multiPlayerChannels = playbackState.playingChannel?.let(::listOf).orEmpty()
     }
 
-    KeepScreenOnEffect(enabled = streamingActive)
+    val playerIsPlaying = rememberPlayerIsPlaying(player)
+    val isVodResolving = isVodPlaying && vodUiState.isResolvingStream
+    val isPlayerActive = playerIsPlaying || isVodResolving
+    val isBigPlayerActive = playbackState.isPlayerExpanded || isVodPlaying || isLocalSeriesPlaying
+    val isAnyPlaybackActive = isBigPlayerActive || streamingActive ||
+        (currentDestination == AppDestination.HOME && (homeBackgroundChannelId != null || homeVodPreviewEpisodeId != null))
+    val shouldKeepScreenOn = isAnyPlaybackActive && isPlayerActive
+
+    KeepScreenOnEffect(enabled = shouldKeepScreenOn)
     StopPlaybackOnStopEffect(
         onStop = {
             player.stop()
@@ -1105,6 +1143,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                             .height(TopPanelHeight)
                                     },
                                     showLeadingFade = !playbackState.isPlayerExpanded,
+                                    keepScreenOn = shouldKeepScreenOn,
                                 )
                             }
                         }
@@ -5232,6 +5271,7 @@ private fun PlayerSurface(
     resizeMode: Int = AspectRatioFrameLayout.RESIZE_MODE_FIT,
     modifier: Modifier = Modifier,
     showLeadingFade: Boolean = false,
+    keepScreenOn: Boolean = false,
 ) {
     val loading = rememberPlayerLoadingState(player.value)
     Box(modifier.clipToBounds()) {
@@ -5239,6 +5279,7 @@ private fun PlayerSurface(
             factory = {
                 (playerView.value.parent as? ViewGroup)?.removeView(playerView.value)
                 playerView.value.resizeMode = resizeMode
+                playerView.value.keepScreenOn = keepScreenOn
                 playerView.value.layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -5248,6 +5289,9 @@ private fun PlayerSurface(
             update = {
                 if (it.player !== player.value) {
                     it.player = player.value
+                }
+                if (it.keepScreenOn != keepScreenOn) {
+                    it.keepScreenOn = keepScreenOn
                 }
                 if (it.alpha != 1f) {
                     it.alpha = 1f

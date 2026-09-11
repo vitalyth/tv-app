@@ -132,14 +132,23 @@ fun VodPlayerOverlay(
         }
     }
 
+    var isPlayerPlaying by remember(actualPlayer) {
+        mutableStateOf(actualPlayer.isPlaying || (actualPlayer.playWhenReady && actualPlayer.playbackState != Player.STATE_IDLE && actualPlayer.playbackState != Player.STATE_ENDED))
+    }
+
     // Attach listener to shared player
     DisposableEffect(actualPlayer, episode?.id) {
+        fun updatePlaying() {
+            isPlayerPlaying = actualPlayer.isPlaying || (actualPlayer.playWhenReady && actualPlayer.playbackState != Player.STATE_IDLE && actualPlayer.playbackState != Player.STATE_ENDED)
+        }
         val listener = object : Player.Listener {
             override fun onPlayerError(playbackException: PlaybackException) {
                 playbackError = "שגיאה בטעינת הפרק"
+                updatePlaying()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                updatePlaying()
                 when (playbackState) {
                     Player.STATE_ENDED -> {
                         saveCurrentProgress(forceCompleted = true)
@@ -154,13 +163,19 @@ fun VodPlayerOverlay(
                 }
             }
 
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                updatePlaying()
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                updatePlaying()
                 if (!isPlaying) {
                     saveCurrentProgress()
                 }
             }
         }
         actualPlayer.addListener(listener)
+        updatePlaying()
         onDispose {
             saveCurrentProgress()
             actualPlayer.removeListener(listener)
@@ -170,6 +185,7 @@ fun VodPlayerOverlay(
     // Detach player view when overlay leaves composition
     DisposableEffect(actualPlayerView) {
         onDispose {
+            actualPlayerView.keepScreenOn = false
             (actualPlayerView.parent as? ViewGroup)?.removeView(actualPlayerView)
         }
     }
@@ -296,6 +312,7 @@ fun VodPlayerOverlay(
                 (actualPlayerView.parent as? ViewGroup)?.removeView(actualPlayerView)
                 actualPlayerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 actualPlayerView.useController = false
+                actualPlayerView.keepScreenOn = isPlayerPlaying || isResolvingStream
                 actualPlayerView.layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -308,6 +325,10 @@ fun VodPlayerOverlay(
                 }
                 it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 it.useController = false
+                val keepOn = isPlayerPlaying || isResolvingStream
+                if (it.keepScreenOn != keepOn) {
+                    it.keepScreenOn = keepOn
+                }
             },
             modifier = Modifier.fillMaxSize(),
         )
