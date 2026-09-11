@@ -360,8 +360,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     }
     val stablePlayer = remember(player) { StablePlayer(player) }
     val playerView = remember(player) {
-        (LayoutInflater.from(context).inflate(R.layout.player_view, null) as PlayerView).apply {
-            this.player = player
+        (LayoutInflater.from(context).inflate(R.layout.player_view_texture, null) as PlayerView).apply {
+            (videoSurfaceView as? TextureView)?.isOpaque = true
             useController = false
             controllerAutoShow = true
             controllerShowTimeoutMs = 3_000
@@ -3776,6 +3776,15 @@ private fun ExpandedPlayer(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(12.dp),
+            )
+        } else {
+            PlayerSurface(
+                player = player,
+                playerView = primaryPlayerView,
+                useController = false,
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT,
+                modifier = Modifier.fillMaxSize(),
+                keepScreenOn = true,
             )
         }
         if (!multiPlayerActive && controlsVisible) {
