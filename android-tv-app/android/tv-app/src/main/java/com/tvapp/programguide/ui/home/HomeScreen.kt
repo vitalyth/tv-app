@@ -571,6 +571,7 @@ internal fun HomeHero(
     onNavigateDown: () -> Unit,
     onFocusChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    showVodBadge: Boolean = true,
 ) {
     val muteInteractionSource = remember { MutableInteractionSource() }
     val isMuteFocused by muteInteractionSource.collectIsFocusedAsState()
@@ -618,7 +619,7 @@ internal fun HomeHero(
                 }
                 if (isLive) {
                     LiveBadge()
-                } else {
+                } else if (showVodBadge) {
                     VodBadge()
                 }
                 if (subtitle.isNotBlank()) {

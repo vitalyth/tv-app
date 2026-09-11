@@ -573,14 +573,11 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             delay(40)
             requestLocalSeriesContentFocus()
         } else if (currentDestination == AppDestination.LIVE_TV) {
-            homeBackgroundChannelId = null
-            viewModel.refreshSilentlyIfStale()
-            val targetChannel = playbackState.playingChannel ?: guideState.selectedChannel ?: guideState.guideData?.channels?.firstOrNull()
-            if (playbackState.playingChannel == null && targetChannel != null) {
-                viewModel.playChannel(targetChannel, guideState.selectedProgram)
-            } else if (streamingActive && !player.isPlaying) {
-                player.play()
+            if (homeBackgroundChannelId != null || (playbackState.playingChannel != null && !playbackState.isPlayerExpanded && expandedPlayerReturnDestination != AppDestination.LIVE_TV)) {
+                homeBackgroundChannelId = null
+                viewModel.stopPreviewPlayback()
             }
+            viewModel.refreshSilentlyIfStale()
             if (!isInitialLoading && !playbackState.isPlayerExpanded) {
                 delay(40)
                 try {
@@ -952,7 +949,13 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             return@LaunchedEffect
         }
 
-        val channel = playbackState.playingChannel ?: return@LaunchedEffect
+        val channel = playbackState.playingChannel
+        if (channel == null) {
+            player.stop()
+            activeStreamUrl.value = null
+            renderedStreamUrl.value = null
+            return@LaunchedEffect
+        }
         val shouldPlay = playbackState.isMiniPlayerPlaying || playbackState.isPlayerExpanded
         if (!shouldPlay) {
             player.stop()
@@ -1226,6 +1229,11 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                         isMiniPlayerPlaying = playbackState.isMiniPlayerPlaying,
                                         isPlayerExpanded = playbackState.isPlayerExpanded,
                                         onChannelActivated = viewModel::playChannel,
+                                        onStopPlayback = viewModel::stopPreviewPlayback,
+                                        isLiveStreamReady = { channel ->
+                                            val streamUrl = viewModel.selectedStreamSource(channel)?.url.orEmpty()
+                                            streamUrl.isNotBlank() && (renderedStreamUrl.value == streamUrl || player.playbackState == Player.STATE_READY)
+                                        },
                                         onLiveChannelOpened = { channel, program ->
                                             expandedPlayerReturnDestination = AppDestination.LIVE_TV
                                             viewModel.playChannelExpanded(channel, program)
@@ -1486,6 +1494,8 @@ private fun GuideContent(
     isMiniPlayerPlaying: Boolean,
     isPlayerExpanded: Boolean,
     onChannelActivated: (TvChannel, TvProgram?) -> Unit,
+    onStopPlayback: () -> Unit = {},
+    isLiveStreamReady: (TvChannel) -> Boolean = { true },
     onLiveChannelOpened: (TvChannel, TvProgram?) -> Unit,
     onProgramSelected: (TvChannel, TvProgram?) -> Unit,
     selectedStreamSource: (TvChannel) -> TvStreamSource?,
@@ -1518,6 +1528,7 @@ private fun GuideContent(
     DisposableEffect(Unit) {
         onDispose {
             onDetailsVisibleChanged(false)
+            onStopPlayback()
         }
     }
 
@@ -1526,11 +1537,64 @@ private fun GuideContent(
         data.programsByChannel[ch.id]?.let { currentProgramForNow(it, nowSeconds) }
     }
 
-    LaunchedEffect(playingChannel?.id, data.channels) {
-        if (playingChannel == null && data.channels.isNotEmpty()) {
-            val target = selectedChannel ?: data.channels.firstOrNull()
-            if (target != null) {
-                onChannelActivated(target, selectedProgram)
+    val isLive = activeProgram != null && isCurrent(activeProgram, nowSeconds)
+
+    var livePreviewChannelId by remember {
+        mutableStateOf(
+            if (playingChannel != null && !isPlayerExpanded && activeProgram != null && isCurrent(activeProgram, nowSeconds)) {
+                playingChannel.id
+            } else {
+                null
+            }
+        )
+    }
+
+    LaunchedEffect(isPlayerExpanded) {
+        if (!isPlayerExpanded && playingChannel != null && activeChannel?.id == playingChannel.id && isLive) {
+            livePreviewChannelId = playingChannel.id
+        }
+    }
+
+    LaunchedEffect(
+        activeChannel?.id,
+        activeProgram?.programKey(),
+        isPlayerExpanded,
+        detailsProgram != null,
+        suspendGridAutoPlay,
+        isLive,
+    ) {
+        if (isPlayerExpanded || detailsProgram != null || suspendGridAutoPlay) {
+            return@LaunchedEffect
+        }
+
+        val channel = activeChannel
+        val program = activeProgram
+
+        if (!isLive || channel == null) {
+            livePreviewChannelId = null
+            if (playingChannel != null) {
+                onStopPlayback()
+            }
+            return@LaunchedEffect
+        }
+
+        if (livePreviewChannelId != channel.id) {
+            if (playingChannel != null && playingChannel.id != channel.id) {
+                onStopPlayback()
+            }
+            livePreviewChannelId = null
+
+            delay(2000L)
+
+            if (isCurrent(program, nowSeconds)) {
+                livePreviewChannelId = channel.id
+                if (playingChannel?.id != channel.id) {
+                    onChannelActivated(channel, program)
+                }
+            }
+        } else {
+            if (playingChannel?.id != channel.id) {
+                onChannelActivated(channel, program)
             }
         }
     }
@@ -1538,7 +1602,7 @@ private fun GuideContent(
     val heroTitle = activeProgram?.title ?: activeChannel?.name ?: "שידור חי"
     val heroSubtitle = activeChannel?.name.orEmpty()
     val heroDescription = activeProgram?.description?.ifBlank { null }
-        ?: "שידור חי בערוץ ${activeChannel?.name.orEmpty()}"
+        ?: if (isLive) "שידור חי בערוץ ${activeChannel?.name.orEmpty()}" else activeChannel?.name.orEmpty()
     val heroTimeRange = activeProgram?.timeRange()
     val heroChannelLogoUrl = activeChannel?.logoUrl
 
@@ -1547,7 +1611,19 @@ private fun GuideContent(
             .fillMaxSize()
             .background(Color.Black),
     ) {
-        val isVideoRendering = playingChannel != null && !isPlayerExpanded
+        val isVideoRendering = livePreviewChannelId != null &&
+            livePreviewChannelId == playingChannel?.id &&
+            !isPlayerExpanded &&
+            playingChannel?.let(isLiveStreamReady) == true
+
+        val backgroundImageUrl = activeProgram?.imageUrl ?: activeChannel?.logoUrl
+
+        HomeArtwork(
+            imageUrl = backgroundImageUrl,
+            title = heroTitle,
+            modifier = Modifier.fillMaxSize(),
+        )
+
         HomeInlinePlayer(
             player = player,
             playerView = playerView,
@@ -1597,7 +1673,8 @@ private fun GuideContent(
                     description = heroDescription,
                     timeRange = heroTimeRange,
                     channelLogoUrl = heroChannelLogoUrl,
-                    isLive = true,
+                    isLive = isLive,
+                    showVodBadge = false,
                     isMuted = isMuted,
                     onToggleMute = onToggleMute,
                     muteFocusRequester = muteFocusRequester,
@@ -1976,22 +2053,6 @@ private fun ProgramGrid(
 
     LaunchedEffect(activeSelectionChannel, activeSelectionProgram) {
         onSelectionFocused(activeSelectionChannel, activeSelectionProgram)
-    }
-
-    LaunchedEffect(
-        activeSelectionChannel?.id,
-        activeSelectionProgram?.programKey(),
-        gridFocused,
-        playingChannelId,
-    ) {
-        if (!gridFocused) return@LaunchedEffect
-        if (isGridAutoPlaySuspended()) return@LaunchedEffect
-        if (activeSelectionChannel?.id == playingChannelId) return@LaunchedEffect
-        delay(3_000)
-        activeSelectionChannel?.let { channel ->
-            if (channel.id == playingChannelId) return@let
-            onChannelActivated(channel, currentSelectionProgram)
-        }
     }
 
     LaunchedEffect(activeSelectionChannel?.id, activeSelectionProgramKeys) {
