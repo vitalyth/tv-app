@@ -397,7 +397,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val stableHomeInlinePlayerView = remember(homeInlinePlayerView) { StablePlayerView(homeInlinePlayerView) }
     val guideInlinePlayerView = remember(player) {
         (LayoutInflater.from(context).inflate(R.layout.player_view_texture, null) as PlayerView).apply {
-            (videoSurfaceView as? TextureView)?.isOpaque = false
+            (videoSurfaceView as? TextureView)?.isOpaque = true
             useController = false
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             isFocusable = false
@@ -1545,46 +1545,14 @@ private fun GuideContent(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF080A0C)),
+            .background(Color.Black),
     ) {
-        HomeArtwork(
-            imageUrl = activeProgram?.imageUrl ?: activeChannel?.logoUrl,
-            title = heroTitle,
-            modifier = Modifier.fillMaxSize(),
-        )
-
         val isVideoRendering = playingChannel != null && !isPlayerExpanded
         HomeInlinePlayer(
             player = player,
             playerView = playerView,
             visible = isVideoRendering,
             modifier = Modifier.fillMaxSize(),
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.38f to Color.Transparent,
-                        0.55f to Color(0xB8080A0C),
-                        1f to Color(0xFA080A0C),
-                    )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color(0xD4080A0C),
-                        0.35f to Color(0x94080A0C),
-                        0.50f to Color(0x20080A0C),
-                        0.58f to Color.Transparent,
-                        1f to Color.Transparent,
-                    )
-                )
         )
 
         Column(
@@ -2301,14 +2269,6 @@ private fun CanvasGuideGrid(
         val visibleEndSeconds = visibleStartSeconds + ((size.width - channelWidthPx) / (slotWidthPx / HALF_HOUR_SECONDS)).toLong()
 
         drawRect(Color.Transparent)
-        drawRect(
-            brush = Brush.verticalGradient(
-                listOf(Color(0xFF081723), Color(0x66081723), Color.Transparent),
-                startY = 0f,
-                endY = headerHeightPx + 42.dp.toPx(),
-            ),
-            size = Size(size.width, headerHeightPx + 42.dp.toPx()),
-        )
 
         val nativeCanvas = drawContext.canvas.nativeCanvas
         fun Paint.withText(sizePx: Float, color: Int = this.color, bold: Boolean = false): Paint {
