@@ -43,6 +43,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,13 +89,7 @@ fun AppSideNavRail(
     }
 
     val width = if (isRailExpanded) 176.dp else 56.dp
-    val railCornerRadius = if (isRailExpanded) 16.dp else 0.dp
-    val railShape = RoundedCornerShape(
-        topStart = 0.dp,
-        bottomStart = 0.dp,
-        topEnd = railCornerRadius,
-        bottomEnd = railCornerRadius,
-    )
+    val railShape = RectangleShape
 
     val railBgColor = if (isRailExpanded) Color(0xF80A0E17) else Color(0xFA080A0D)
 
