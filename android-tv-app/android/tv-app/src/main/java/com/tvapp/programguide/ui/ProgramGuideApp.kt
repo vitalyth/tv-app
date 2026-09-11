@@ -1513,6 +1513,7 @@ private fun GuideContent(
     muteFocusRequester: FocusRequester,
 ) {
     val gridFocusRequester = externalGridFocusRequester ?: remember { FocusRequester() }
+    val fullScreenFocusRequester = remember { FocusRequester() }
     var blockGridActivationUntilMs by remember { mutableLongStateOf(0L) }
     var suspendGridAutoPlay by remember { mutableStateOf(false) }
     var detailsChannel by remember { mutableStateOf<TvChannel?>(null) }
@@ -1637,9 +1638,10 @@ private fun GuideContent(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.38f to Color.Transparent,
-                        0.55f to Color(0xB8080A0C),
-                        1f to Color(0xFA080A0C),
+                        0.28f to Color.Transparent,
+                        0.44f to Color(0xCC080A0C),
+                        0.60f to Color(0xF6080A0C),
+                        1f to Color(0xFF080A0C),
                     )
                 )
         )
@@ -1648,10 +1650,11 @@ private fun GuideContent(
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xD4080A0C),
-                        0.35f to Color(0x94080A0C),
-                        0.50f to Color(0x20080A0C),
-                        0.58f to Color.Transparent,
+                        0f to Color(0xF8080A0C),
+                        0.32f to Color(0xEB080A0C),
+                        0.48f to Color(0xC0080A0C),
+                        0.62f to Color(0x40080A0C),
+                        0.74f to Color.Transparent,
                         1f to Color.Transparent,
                     )
                 )
@@ -1678,14 +1681,19 @@ private fun GuideContent(
                     isMuted = isMuted,
                     onToggleMute = onToggleMute,
                     muteFocusRequester = muteFocusRequester,
+                    hasActivePlayer = isVideoRendering,
+                    onOpenFullScreen = {
+                        activeChannel?.let { ch -> onLiveChannelOpened(ch, activeProgram) } ?: onPlayerClick()
+                    },
+                    fullScreenFocusRequester = fullScreenFocusRequester,
                     onNavigateLeft = onNavigateSideRail,
                     onNavigateDown = {
                         try {
                             gridFocusRequester.requestFocus()
                         } catch (_: Exception) {}
                     },
-                    onFocusChanged = { isMuteFocused ->
-                        if (isMuteFocused) {
+                    onFocusChanged = { isHeroActionFocused ->
+                        if (isHeroActionFocused) {
                             focusedChannel = null
                             focusedProgram = null
                         }
@@ -1721,7 +1729,7 @@ private fun GuideContent(
                 focusTarget = gridFocusTarget,
                 showNowRequestNonce = 0,
                 gridFocusRequester = gridFocusRequester,
-                topFocusRequester = muteFocusRequester,
+                topFocusRequester = if (isVideoRendering) fullScreenFocusRequester else null,
                 onNavigateSideRail = onNavigateSideRail,
                 modifier = Modifier
                     .weight(1f)
@@ -1771,7 +1779,7 @@ private fun ProgramGrid(
     focusTarget: GridFocusTarget?,
     showNowRequestNonce: Int,
     gridFocusRequester: FocusRequester,
-    topFocusRequester: FocusRequester,
+    topFocusRequester: FocusRequester? = null,
     onNavigateSideRail: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -2116,7 +2124,11 @@ private fun ProgramGrid(
                                 if (!acceptNavigationEvent()) {
                                     true
                                 } else if (selectedRowIndex == 0) {
-                                    topFocusRequester.requestFocus()
+                                    topFocusRequester?.let {
+                                        try {
+                                            it.requestFocus()
+                                        } catch (_: Exception) {}
+                                    }
                                 } else {
                                     moveSelectedRow(-1)
                                 }

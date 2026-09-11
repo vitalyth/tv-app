@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ConnectedTv
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subscriptions
@@ -201,6 +202,7 @@ fun HomeScreen(
         )
     }
     val muteFocusRequester = remember { FocusRequester() }
+    val fullScreenFocusRequester = remember { FocusRequester() }
     val liveRowState = rememberLazyListState()
     val focusScope = rememberCoroutineScope()
     val channelFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
@@ -349,9 +351,10 @@ fun HomeScreen(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.38f to Color.Transparent,
-                        0.55f to Color(0xB8080A0C),
-                        1f to Color(0xFA080A0C),
+                        0.28f to Color.Transparent,
+                        0.44f to Color(0xCC080A0C),
+                        0.60f to Color(0xF6080A0C),
+                        1f to Color(0xFF080A0C),
                     )
                 )
         )
@@ -360,10 +363,11 @@ fun HomeScreen(
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xD4080A0C),
-                        0.35f to Color(0x94080A0C),
-                        0.50f to Color(0x20080A0C),
-                        0.58f to Color.Transparent,
+                        0f to Color(0xF8080A0C),
+                        0.32f to Color(0xEB080A0C),
+                        0.48f to Color(0xC0080A0C),
+                        0.62f to Color(0x40080A0C),
+                        0.74f to Color.Transparent,
                         1f to Color.Transparent,
                     )
                 )
@@ -383,6 +387,15 @@ fun HomeScreen(
                 isMuted = isMuted,
                 onToggleMute = onToggleMute,
                 muteFocusRequester = muteFocusRequester,
+                hasActivePlayer = isVideoRendering,
+                onOpenFullScreen = {
+                    if (isVodActive) {
+                        focusedVodItem?.let(onPlayRecentVod)
+                    } else {
+                        activeChannel?.let { ch -> onPlayLiveChannel(ch, activeProgram) }
+                    }
+                },
+                fullScreenFocusRequester = fullScreenFocusRequester,
                 onNavigateLeft = onNavigateSideRail,
                 onNavigateDown = {
                     val targetIndex = lastFocusedLiveChannelIndex.coerceIn(0, (currentLiveItems.size - 1).coerceAtLeast(0))
@@ -436,7 +449,15 @@ fun HomeScreen(
                                         }
                                     },
                                     onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                                    onNavigateUp = { muteFocusRequester.requestFocus() },
+                                    onNavigateUp = if (isVideoRendering) {
+                                        {
+                                            try {
+                                                fullScreenFocusRequester.requestFocus()
+                                            } catch (_: Exception) {
+                                                muteFocusRequester.requestFocus()
+                                            }
+                                        }
+                                    } else null,
                                 )
                             }
                         }
@@ -572,12 +593,18 @@ internal fun HomeHero(
     onFocusChanged: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
     showVodBadge: Boolean = true,
+    hasActivePlayer: Boolean = false,
+    onOpenFullScreen: (() -> Unit)? = null,
+    fullScreenFocusRequester: FocusRequester = remember { FocusRequester() },
 ) {
     val muteInteractionSource = remember { MutableInteractionSource() }
     val isMuteFocused by muteInteractionSource.collectIsFocusedAsState()
 
-    LaunchedEffect(isMuteFocused) {
-        onFocusChanged?.invoke(isMuteFocused)
+    val fullScreenInteractionSource = remember { MutableInteractionSource() }
+    val isFullScreenFocused by fullScreenInteractionSource.collectIsFocusedAsState()
+
+    LaunchedEffect(isMuteFocused, isFullScreenFocused) {
+        onFocusChanged?.invoke(isMuteFocused || isFullScreenFocused)
     }
 
     Row(
@@ -700,36 +727,84 @@ internal fun HomeHero(
             }
         }
 
-        // Mute / Unmute Button (Small icon only in the opposite corner: Top-Right)
-        Box(
-            modifier = Modifier
-                .padding(start = 20.dp)
-                .size(38.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                    if (isMuteFocused) FocusedBg
-                    else Color(0x4D0E141D)
-                )
-                .border(
-                    width = if (isMuteFocused) 2.dp else 1.dp,
-                    color = if (isMuteFocused) FocusedBg else Color(0x44FFFFFF),
-                    shape = RoundedCornerShape(8.dp),
-                )
-                .tvFocusableClickable(
-                    onClick = onToggleMute,
-                    interactionSource = muteInteractionSource,
-                    focusRequester = muteFocusRequester,
-                    onNavigateDown = onNavigateDown,
-                    onNavigateLeft = onNavigateLeft,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                contentDescription = if (isMuted) "הפעל קול" else "השתק",
-                tint = if (isMuteFocused) FocusedContent else Color.White,
-                modifier = Modifier.size(20.dp),
-            )
+        // Action Buttons: Fullscreen & Mute (Only visible when player is active in background)
+        if (hasActivePlayer) {
+            Row(
+                modifier = Modifier.padding(start = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Fullscreen Button
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isFullScreenFocused) FocusedBg
+                            else Color(0x4D0E141D)
+                        )
+                        .border(
+                            width = if (isFullScreenFocused) 2.dp else 1.dp,
+                            color = if (isFullScreenFocused) FocusedBg else Color(0x44FFFFFF),
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        .tvFocusableClickable(
+                            onClick = { onOpenFullScreen?.invoke() },
+                            interactionSource = fullScreenInteractionSource,
+                            focusRequester = fullScreenFocusRequester,
+                            onNavigateDown = onNavigateDown,
+                            onNavigateLeft = onNavigateLeft,
+                            onNavigateRight = {
+                                try {
+                                    muteFocusRequester.requestFocus()
+                                } catch (_: Exception) {}
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Fullscreen,
+                        contentDescription = "מסך מלא",
+                        tint = if (isFullScreenFocused) FocusedContent else Color.White,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+
+                // Mute / Unmute Button
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isMuteFocused) FocusedBg
+                            else Color(0x4D0E141D)
+                        )
+                        .border(
+                            width = if (isMuteFocused) 2.dp else 1.dp,
+                            color = if (isMuteFocused) FocusedBg else Color(0x44FFFFFF),
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        .tvFocusableClickable(
+                            onClick = onToggleMute,
+                            interactionSource = muteInteractionSource,
+                            focusRequester = muteFocusRequester,
+                            onNavigateDown = onNavigateDown,
+                            onNavigateLeft = {
+                                try {
+                                    fullScreenFocusRequester.requestFocus()
+                                } catch (_: Exception) {}
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = if (isMuted) "הפעל קול" else "השתק",
+                        tint = if (isMuteFocused) FocusedContent else Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
     }
 }
