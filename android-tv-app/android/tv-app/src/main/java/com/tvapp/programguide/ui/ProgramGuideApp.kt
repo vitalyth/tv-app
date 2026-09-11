@@ -397,7 +397,6 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val stableHomeInlinePlayerView = remember(homeInlinePlayerView) { StablePlayerView(homeInlinePlayerView) }
     val guideInlinePlayerView = remember(player) {
         (LayoutInflater.from(context).inflate(R.layout.player_view_texture, null) as PlayerView).apply {
-            this.player = player
             (videoSurfaceView as? TextureView)?.isOpaque = false
             useController = false
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -758,14 +757,29 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         if (multiPlayerActive) {
             playerView.player = null
             homeInlinePlayerView.player = null
+            guideInlinePlayerView.player = null
             multiPlayerView.player = player
         } else if (currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded) {
             playerView.player = null
             multiPlayerView.player = null
+            guideInlinePlayerView.player = null
+            if (homeInlinePlayerView.player !== player) {
+                homeInlinePlayerView.player = player
+            }
+        } else if (currentDestination == AppDestination.LIVE_TV && !playbackState.isPlayerExpanded) {
+            playerView.player = null
+            multiPlayerView.player = null
+            homeInlinePlayerView.player = null
+            if (guideInlinePlayerView.player !== player) {
+                guideInlinePlayerView.player = player
+            }
         } else {
             multiPlayerView.player = null
             homeInlinePlayerView.player = null
-            playerView.player = player
+            guideInlinePlayerView.player = null
+            if (playerView.player !== player) {
+                playerView.player = player
+            }
         }
     }
 
@@ -1237,18 +1251,6 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                             } else {
                                 Box(Modifier.fillMaxSize().background(Color.Black))
                             }
-
-                            if (playbackState.isPlayerExpanded && streamingActive && playbackState.playingChannel != null && !multiPlayerActive) {
-                                PlayerSurface(
-                                    player = stablePlayer,
-                                    playerView = stablePlayerView,
-                                    useController = false,
-                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT,
-                                    modifier = Modifier.fillMaxSize(),
-                                    showLeadingFade = false,
-                                    keepScreenOn = shouldKeepScreenOn,
-                                )
-                            }
                         }
                         AppDestination.VOD -> {
                             VodScreen(
@@ -1588,31 +1590,37 @@ private fun GuideContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 32.dp, end = 32.dp, top = 36.dp, bottom = 8.dp),
+                .padding(top = 28.dp),
         ) {
-            HomeHero(
-                title = heroTitle,
-                subtitle = heroSubtitle,
-                description = heroDescription,
-                timeRange = heroTimeRange,
-                channelLogoUrl = heroChannelLogoUrl,
-                isLive = true,
-                isMuted = isMuted,
-                onToggleMute = onToggleMute,
-                muteFocusRequester = muteFocusRequester,
-                onNavigateLeft = onNavigateSideRail,
-                onNavigateDown = {
-                    try {
-                        gridFocusRequester.requestFocus()
-                    } catch (_: Exception) {}
-                },
-                onFocusChanged = { isMuteFocused ->
-                    if (isMuteFocused) {
-                        focusedChannel = null
-                        focusedProgram = null
-                    }
-                },
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, end = 32.dp),
+            ) {
+                HomeHero(
+                    title = heroTitle,
+                    subtitle = heroSubtitle,
+                    description = heroDescription,
+                    timeRange = heroTimeRange,
+                    channelLogoUrl = heroChannelLogoUrl,
+                    isLive = true,
+                    isMuted = isMuted,
+                    onToggleMute = onToggleMute,
+                    muteFocusRequester = muteFocusRequester,
+                    onNavigateLeft = onNavigateSideRail,
+                    onNavigateDown = {
+                        try {
+                            gridFocusRequester.requestFocus()
+                        } catch (_: Exception) {}
+                    },
+                    onFocusChanged = { isMuteFocused ->
+                        if (isMuteFocused) {
+                            focusedChannel = null
+                            focusedProgram = null
+                        }
+                    },
+                )
+            }
 
             Spacer(Modifier.height(8.dp))
 
