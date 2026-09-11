@@ -366,7 +366,7 @@ fun HomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 32.dp, end = 32.dp, top = 16.dp, bottom = 8.dp),
+                .padding(start = 32.dp, end = 32.dp, top = 36.dp, bottom = 8.dp),
         ) {
             HomeHero(
                 title = heroTitle,
@@ -577,8 +577,7 @@ private fun HomeHero(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(130.dp)
-            .padding(start = 12.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+            .height(160.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top,
     ) {
@@ -587,19 +586,19 @@ private fun HomeHero(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             // Row 1: Badges & Channel Metadata
             Row(
-                modifier = Modifier.height(24.dp),
+                modifier = Modifier.height(26.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (!channelLogoUrl.isNullOrBlank()) {
                     Box(
                         modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(5.dp))
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(6.dp))
                             .background(Color(0x33FFFFFF))
                             .padding(2.dp),
                         contentAlignment = Alignment.Center,
@@ -654,14 +653,14 @@ private fun HomeHero(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(34.dp),
+                    .height(40.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Text(
                     text = title.ifBlank { "שידור חי" },
                     color = Color.White,
-                    fontSize = 25.sp,
-                    lineHeight = 30.sp,
+                    fontSize = 28.sp,
+                    lineHeight = 34.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -676,11 +675,11 @@ private fun HomeHero(
                 )
             }
 
-            // Row 3: Program Description (Fixed 44dp height, 2 lines, full width)
+            // Row 3: Program Description (Fixed height, 2 lines, crisp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp),
+                    .height(52.dp),
                 contentAlignment = Alignment.TopStart,
             ) {
                 val displayDescription = description.trim().ifBlank {
@@ -690,8 +689,8 @@ private fun HomeHero(
                     Text(
                         text = displayDescription,
                         color = Color(0xFFD1D5DB),
-                        fontSize = 13.sp,
-                        lineHeight = 19.sp,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         style = TextStyle(
@@ -710,7 +709,7 @@ private fun HomeHero(
         // Mute / Unmute Button (Small icon only in the opposite corner: Top-Right)
         Box(
             modifier = Modifier
-                .padding(top = 2.dp, start = 16.dp)
+                .padding(start = 20.dp)
                 .size(38.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(
