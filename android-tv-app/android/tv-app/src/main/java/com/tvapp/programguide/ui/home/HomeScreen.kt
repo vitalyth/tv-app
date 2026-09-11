@@ -349,8 +349,8 @@ fun HomeScreen(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.32f to Color(0x30080A0C),
-                        0.54f to Color(0xB8080A0C),
+                        0.38f to Color.Transparent,
+                        0.55f to Color(0xB8080A0C),
                         1f to Color(0xFA080A0C),
                     )
                 )
@@ -361,8 +361,9 @@ fun HomeScreen(
                 .background(
                     Brush.horizontalGradient(
                         0f to Color(0xD4080A0C),
-                        0.40f to Color(0x94080A0C),
-                        0.66f to Color(0x18080A0C),
+                        0.35f to Color(0x94080A0C),
+                        0.50f to Color(0x20080A0C),
+                        0.58f to Color.Transparent,
                         1f to Color.Transparent,
                     )
                 )
@@ -618,19 +619,7 @@ private fun HomeHero(
                 if (isLive) {
                     LiveBadge()
                 } else {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Accent)
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "VOD",
-                            color = Color(0xFF091016),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
+                    VodBadge()
                 }
                 if (subtitle.isNotBlank()) {
                     Text(
@@ -899,6 +888,7 @@ private fun LocalEpisodeCard(
         if (progress != null && progress.isInProgress) {
             ProgressBar(progress)
         }
+        VodBadge(Modifier.align(Alignment.TopStart).padding(9.dp))
     }
 }
 
@@ -927,6 +917,7 @@ private fun VodRecentCard(
         if (progress != null && progress.isInProgress) {
             ProgressBar(progress)
         }
+        VodBadge(Modifier.align(Alignment.TopStart).padding(9.dp))
         val providerLogoUrl = remember(item.provider) {
             BuildConfig.PROGRAM_GUIDE_API_BASE_URL.trimEnd('/').removeSuffix("/api") + "/ch/" + item.provider.logoPath.trimStart('/')
         }
@@ -1072,6 +1063,21 @@ private fun LiveBadge(modifier: Modifier = Modifier) {
     ) {
         Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
         Text("LIVE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun VodBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Accent)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.Default.MovieFilter, contentDescription = null, tint = Color(0xFF091016), modifier = Modifier.size(13.dp))
+        Text("VOD", color = Color(0xFF091016), fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
