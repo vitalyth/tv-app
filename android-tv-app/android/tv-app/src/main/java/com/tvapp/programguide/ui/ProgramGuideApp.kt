@@ -456,11 +456,26 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     var localSeriesContentFocusNonce by remember { mutableIntStateOf(0) }
     var vodFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var localSeriesFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var sideNavForceCollapsed by remember { mutableStateOf(false) }
+    var sideNavForceCollapsed by remember { mutableStateOf(true) }
     var openingHomeLivePlayer by remember { mutableStateOf(false) }
     var expandedPlayerReturnDestination by remember { mutableStateOf(AppDestination.LIVE_TV) }
     var homeLiveFocusChannelId by remember { mutableStateOf<String?>(null) }
     var restoreHomeLiveRowOnReturn by remember { mutableStateOf(false) }
+
+    fun openSideRail(destination: AppDestination) {
+        sideNavForceCollapsed = false
+        coroutineScope.launch {
+            delay(20)
+            try {
+                when (destination) {
+                    AppDestination.HOME -> sideRailHomeFocusRequester.requestFocus()
+                    AppDestination.LIVE_TV -> sideRailLiveTvFocusRequester.requestFocus()
+                    AppDestination.VOD -> sideRailVodFocusRequester.requestFocus()
+                    AppDestination.LOCAL_SERIES -> sideRailLocalSeriesFocusRequester.requestFocus()
+                }
+            } catch (_: Exception) {}
+        }
+    }
 
     fun requestVodContentFocus() {
         val restorer = vodFocusRestorer
@@ -500,16 +515,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     BackHandler(
         enabled = currentDestination == AppDestination.LIVE_TV && !playbackState.isPlayerExpanded && !detailsVisible && !isInitialLoading
     ) {
-        sideNavForceCollapsed = false
-        sideRailLiveTvFocusRequester.requestFocus()
+        openSideRail(AppDestination.LIVE_TV)
     }
 
     BackHandler(
         enabled = currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded
     ) {
         if (!navRailExpanded) {
-            sideNavForceCollapsed = false
-            sideRailHomeFocusRequester.requestFocus()
+            openSideRail(AppDestination.HOME)
         }
     }
 
@@ -977,8 +990,26 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                 ) {
                     when (currentDestination) {
                         AppDestination.HOME -> {
-                            HomeScreen(
-                                guideData = guideState.guideData,
+                            if (guideState.error != null && guideState.guideData == null) {
+                                GuideError(guideState.error ?: "שגיאה בטעינת לוח השידורים", viewModel::refresh)
+                            } else if (guideState.guideData == null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(ScreenBackground)
+                                        .focusRequester(homeContentFocusRequester)
+                                        .focusable(),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    androidx.compose.material3.CircularProgressIndicator(
+                                        color = Color(0xFFE91E35),
+                                        modifier = Modifier.size(44.dp),
+                                        strokeWidth = 3.dp,
+                                    )
+                                }
+                            } else {
+                                HomeScreen(
+                                    guideData = guideState.guideData,
                                 recentChannelIds = guideState.recentChannelIds,
                                 vodRecentItems = vodUiState.recentItems,
                                 vodWatchedItems = vodUiState.watchedItems,
@@ -1127,13 +1158,11 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     currentDestination = AppDestination.VOD
                                     vodViewModel.openChannel(provider)
                                 },
-                                onNavigateSideRail = {
-                                    sideNavForceCollapsed = false
-                                    sideRailHomeFocusRequester.requestFocus()
-                                },
+                                onNavigateSideRail = { openSideRail(AppDestination.HOME) },
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
+                    }
                         AppDestination.LIVE_TV -> {
                             if (!playbackState.isPlayerExpanded) {
                                 when {
@@ -1163,10 +1192,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                         onGridFocusRequested = { channel, program, live ->
                                             requestGridFocus(channel, program, live)
                                         },
-                                        onNavigateSideRail = {
-                                            sideNavForceCollapsed = false
-                                            sideRailLiveTvFocusRequester.requestFocus()
-                                        },
+                                        onNavigateSideRail = { openSideRail(AppDestination.LIVE_TV) },
                                         externalGridFocusRequester = mainGridFocusRequester,
                                     )
                                 }
@@ -1200,10 +1226,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         AppDestination.VOD -> {
                             VodScreen(
                                 viewModel = vodViewModel,
-                                onNavigateSideRail = {
-                                    sideNavForceCollapsed = false
-                                    sideRailVodFocusRequester.requestFocus()
-                                },
+                                onNavigateSideRail = { openSideRail(AppDestination.VOD) },
                                 initialFocusRequester = vodContentFocusRequester,
                                 contentFocusNonce = vodContentFocusNonce,
                                 player = stablePlayer,
@@ -1216,10 +1239,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         AppDestination.LOCAL_SERIES -> {
                             LocalSeriesScreen(
                                 viewModel = localSeriesViewModel,
-                                onNavigateSideRail = {
-                                    sideNavForceCollapsed = false
-                                    sideRailLocalSeriesFocusRequester.requestFocus()
-                                },
+                                onNavigateSideRail = { openSideRail(AppDestination.LOCAL_SERIES) },
                                 initialFocusRequester = localSeriesContentFocusRequester,
                                 contentFocusNonce = localSeriesContentFocusNonce,
                                 onRegisterFocusRestorer = { restorer ->

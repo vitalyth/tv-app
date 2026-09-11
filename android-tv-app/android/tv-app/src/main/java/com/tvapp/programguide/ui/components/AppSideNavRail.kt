@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -104,6 +105,7 @@ fun AppSideNavRail(
                 .fillMaxHeight()
                 .width(width)
                 .zIndex(50f)
+                .focusProperties { canFocus = !forceCollapsed }
                 .then(
                     if (isRailExpanded) {
                         Modifier.drawBehind {
@@ -153,6 +155,7 @@ fun AppSideNavRail(
                             onNavigateRight = onNavigateToContent,
                             onNavigateDown = { liveTvFocusRequester.requestFocus() },
                             onNavigateUp = null,
+                            forceCollapsed = forceCollapsed,
                         )
 
                         NavRailItem(
@@ -167,6 +170,7 @@ fun AppSideNavRail(
                             onNavigateRight = onNavigateToContent,
                             onNavigateDown = { vodFocusRequester.requestFocus() },
                             onNavigateUp = { homeFocusRequester.requestFocus() },
+                            forceCollapsed = forceCollapsed,
                         )
 
                         NavRailItem(
@@ -181,6 +185,7 @@ fun AppSideNavRail(
                             onNavigateRight = onNavigateToContent,
                             onNavigateDown = { localSeriesFocusRequester.requestFocus() },
                             onNavigateUp = { liveTvFocusRequester.requestFocus() },
+                            forceCollapsed = forceCollapsed,
                         )
 
                         NavRailItem(
@@ -195,6 +200,7 @@ fun AppSideNavRail(
                             onNavigateRight = onNavigateToContent,
                             onNavigateDown = null,
                             onNavigateUp = { vodFocusRequester.requestFocus() },
+                            forceCollapsed = forceCollapsed,
                         )
                     }
                 }
@@ -216,6 +222,7 @@ private fun NavRailItem(
     onNavigateRight: (() -> Unit)? = null,
     onNavigateDown: (() -> Unit)? = null,
     onNavigateUp: (() -> Unit)? = null,
+    forceCollapsed: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -247,6 +254,7 @@ private fun NavRailItem(
             .height(40.dp)
             .clip(shape)
             .background(bgColor)
+            .focusProperties { canFocus = !forceCollapsed }
             .onPreviewKeyEvent { event ->
                 if (event.key == Key.Back) {
                     if (event.type == KeyEventType.KeyUp) {
@@ -261,6 +269,7 @@ private fun NavRailItem(
             .tvFocusableClickable(
                 onClick = onSelect,
                 interactionSource = interactionSource,
+                enabled = !forceCollapsed,
                 focusRequester = focusRequester,
                 onNavigateRight = onNavigateRight,
                 onNavigateDown = onNavigateDown,

@@ -218,12 +218,16 @@ fun HomeScreen(
     LaunchedEffect(currentLiveItems.isNotEmpty()) {
         if (currentLiveItems.isNotEmpty() && !hasRequestedInitialFocus) {
             hasRequestedInitialFocus = true
-            for (attempt in 0..4) {
-                kotlinx.coroutines.delay(60L)
-                try {
-                    initialFocusRequester.requestFocus()
-                    break
-                } catch (_: Exception) {}
+            try {
+                initialFocusRequester.requestFocus()
+            } catch (_: Exception) {
+                for (attempt in 0..4) {
+                    kotlinx.coroutines.delay(30L)
+                    try {
+                        initialFocusRequester.requestFocus()
+                        break
+                    } catch (_: Exception) {}
+                }
             }
         }
     }
