@@ -1,5 +1,5 @@
 // Use the nginx entrypoint so images, streams, and JSON share one reachable TV host.
-export const API_BASE_URL = 'http://192.168.86.75:8001/api';
+export const API_BASE_URL = 'https://tv.bestcams.net/api';
 export const WEB_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, '');
 
 export interface LiveChannel {

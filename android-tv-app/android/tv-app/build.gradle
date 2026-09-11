@@ -12,10 +12,10 @@ android {
         applicationId "com.tvapp.programguide"
         minSdkVersion 26
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0"
+        versionCode 3
+        versionName "1.1"
 
-        buildConfigField "String", "PROGRAM_GUIDE_API_BASE_URL", "\"${project.findProperty("PROGRAM_GUIDE_API_BASE_URL") ?: "http://192.168.86.75:8001/api"}\""
+        buildConfigField "String", "PROGRAM_GUIDE_API_BASE_URL", "\"${project.findProperty("PROGRAM_GUIDE_API_BASE_URL") ?: "https://tv.bestcams.net/api"}\""
         buildConfigField "String", "KAN_VOD_VPN_MODE", "\"${project.findProperty("KAN_VOD_VPN_MODE") ?: "vpn"}\""
     }
 
