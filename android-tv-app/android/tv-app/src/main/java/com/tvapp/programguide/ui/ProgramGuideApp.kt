@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.TextureView
@@ -286,14 +287,34 @@ private fun rememberPlayerIsPlaying(player: Player): Boolean {
     return isPlaying
 }
 
-@Composable
-private fun StopPlaybackOnStopEffect(onStop: () -> Unit) {
-    val lifecycleOwner = LocalLifecycleOwner.current
+private const val APP_SESSION_TIMEOUT_MS = 15 * 60 * 1000L
 
-    DisposableEffect(lifecycleOwner, onStop) {
+@Composable
+private fun AppLifecycleSessionEffect(
+    onStop: () -> Unit,
+    onStart: (elapsedMs: Long) -> Unit,
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentOnStop by rememberUpdatedState(onStop)
+    val currentOnStart by rememberUpdatedState(onStart)
+    var lastStoppedAtMs by remember { mutableLongStateOf(0L) }
+
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                onStop()
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    lastStoppedAtMs = SystemClock.elapsedRealtime()
+                    currentOnStop()
+                }
+                Lifecycle.Event.ON_START -> {
+                    val stoppedAt = lastStoppedAtMs
+                    if (stoppedAt > 0L) {
+                        val elapsedMs = SystemClock.elapsedRealtime() - stoppedAt
+                        lastStoppedAtMs = 0L
+                        currentOnStart(elapsedMs)
+                    }
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -588,12 +609,33 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val shouldKeepScreenOn = isAnyPlaybackActive && isPlayerActive
 
     KeepScreenOnEffect(enabled = shouldKeepScreenOn)
-    StopPlaybackOnStopEffect(
+    var playbackEpoch by remember { mutableLongStateOf(0L) }
+    var savedVodPositionMs by remember { mutableStateOf<Long?>(null) }
+    var savedLocalPositionMs by remember { mutableStateOf<Long?>(null) }
+
+    AppLifecycleSessionEffect(
         onStop = {
+            savedVodPositionMs = if (isVodPlaying) player.currentPosition.coerceAtLeast(0L) else null
+            savedLocalPositionMs = if (isLocalSeriesPlaying) player.currentPosition.coerceAtLeast(0L) else null
             player.stop()
             activeStreamUrl.value = null
-            viewModel.stopPlayback()
-            localSeriesViewModel.stopPlayback()
+            activeStreamProfile.value = null
+            renderedStreamUrl.value = null
+        },
+        onStart = { elapsedMs ->
+            if (elapsedMs > APP_SESSION_TIMEOUT_MS) {
+                savedVodPositionMs = null
+                savedLocalPositionMs = null
+                currentDestination = AppDestination.HOME
+                viewModel.stopPlayback()
+                vodViewModel.stopVodPlayback()
+                localSeriesViewModel.stopPlayback()
+                vodViewModel.closeSeriesDetails()
+                localSeriesViewModel.closeSeries()
+                viewModel.refresh()
+                vodViewModel.loadRecent()
+            }
+            playbackEpoch++
         }
     )
 
@@ -707,6 +749,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     LaunchedEffect(
         currentDestination,
         playbackState.isMiniPlayerPlaying,
+        playbackState.isPlayerExpanded,
         playbackState.playingChannel?.streamUrl,
         playbackState.selectedStreamSourceIds,
         isVodPlaying,
@@ -714,6 +757,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         homeVodPreviewStreamUrl,
         isLocalSeriesPlaying,
         localSeriesUiState.playingEpisode?.streamUrl,
+        playbackEpoch,
     ) {
         if (isLocalSeriesPlaying) {
             val stream = localSeriesUiState.playingEpisode?.streamUrl
@@ -735,9 +779,14 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         }
                         else -> MediaItem.fromUri(stream)
                     }
+                    val targetPos = savedLocalPositionMs ?: 0L
+                    savedLocalPositionMs = null
                     renderedStreamUrl.value = null
                     activeStreamUrl.value = null
-                    player.setMediaItem(mediaItem, 0L)
+                    player.setMediaItem(mediaItem, targetPos)
+                    if (targetPos > 0L) {
+                        player.seekTo(targetPos)
+                    }
                     player.prepare()
                     activeStreamUrl.value = stream
                 }
@@ -779,7 +828,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 .build()
                         }
                     }
-                    val resumePos = vodUiState.resumePositionMs ?: 0L
+                    val resumePos = savedVodPositionMs ?: vodUiState.resumePositionMs ?: 0L
+                    savedVodPositionMs = null
                     if (resumePos > 0L) {
                         renderedStreamUrl.value = null
                         activeStreamUrl.value = null
