@@ -385,7 +385,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             isFocusable = false
             isFocusableInTouchMode = false
-            setKeepContentOnPlayerReset(true)
+            setKeepContentOnPlayerReset(false)
             setEnableComposeSurfaceSyncWorkaround(false)
             hideController()
             layoutParams = ViewGroup.LayoutParams(
@@ -402,7 +402,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             isFocusable = false
             isFocusableInTouchMode = false
-            setKeepContentOnPlayerReset(true)
+            setKeepContentOnPlayerReset(false)
             setEnableComposeSurfaceSyncWorkaround(false)
             hideController()
             layoutParams = ViewGroup.LayoutParams(
@@ -573,10 +573,13 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             delay(40)
             requestLocalSeriesContentFocus()
         } else if (currentDestination == AppDestination.LIVE_TV) {
-            if (homeBackgroundChannelId != null || (playbackState.playingChannel != null && !playbackState.isPlayerExpanded && expandedPlayerReturnDestination != AppDestination.LIVE_TV)) {
-                homeBackgroundChannelId = null
-                viewModel.stopPreviewPlayback()
+            if (!openingHomeLivePlayer && !playbackState.isPlayerExpanded) {
+                if (homeBackgroundChannelId != null || (playbackState.playingChannel != null && expandedPlayerReturnDestination != AppDestination.LIVE_TV)) {
+                    homeBackgroundChannelId = null
+                    viewModel.stopPreviewPlayback()
+                }
             }
+            openingHomeLivePlayer = false
             viewModel.refreshSilentlyIfStale()
             if (!isInitialLoading && !playbackState.isPlayerExpanded) {
                 delay(40)
@@ -979,21 +982,24 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         } else {
             PrimaryVideoProfile.Mini
         }
-        if (activeStreamUrl.value != streamUrl || activeStreamProfile.value != targetProfile) {
+        if (activeStreamUrl.value != streamUrl || player.playbackState == Player.STATE_IDLE) {
+            renderedStreamUrl.value = null
+            activeStreamUrl.value = streamUrl
+            activeStreamProfile.value = targetProfile
             applyPrimaryVideoProfile(targetProfile)
             val mediaItem = liveMediaItem(streamUrl, streamSource?.mimeType)
-            renderedStreamUrl.value = null
-            activeStreamUrl.value = null
-            activeStreamProfile.value = null
             player.setMediaItem(mediaItem)
             player.prepare()
-            activeStreamUrl.value = streamUrl
+        } else if (activeStreamProfile.value != targetProfile) {
+            applyPrimaryVideoProfile(targetProfile)
             activeStreamProfile.value = targetProfile
         }
         if (currentDestination == AppDestination.HOME && homeBackgroundChannelId == channel.id && !playbackState.isPlayerExpanded) {
             player.volume = if (homeIsMuted) 0f else 1f
         } else if (currentDestination == AppDestination.LIVE_TV && !playbackState.isPlayerExpanded) {
             player.volume = if (liveTvIsMuted) 0f else 1f
+        } else if (playbackState.isPlayerExpanded) {
+            player.volume = 1f
         }
         player.play()
     }
@@ -1003,6 +1009,8 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             player.volume = if (homeIsMuted) 0f else 1f
         } else if (currentDestination == AppDestination.LIVE_TV && !playbackState.isPlayerExpanded) {
             player.volume = if (liveTvIsMuted) 0f else 1f
+        } else if (playbackState.isPlayerExpanded) {
+            player.volume = 1f
         }
     }
 
@@ -1108,6 +1116,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 },
                                 initialFocusRequester = homeContentFocusRequester,
                                 isMuted = homeIsMuted,
+                                isPlayerExpanded = playbackState.isPlayerExpanded,
                                 onToggleMute = { homeIsMuted = !homeIsMuted },
                                 contentFocusNonce = homeContentFocusNonce,
                                 liveRowFocusNonce = homeLiveRowFocusNonce,
@@ -1123,10 +1132,15 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     homeVodPreviewEpisodeId = null
                                     homeVodPreviewStreamUrl = null
                                     homeVodPreviewSeekReadyEpisodeId = null
-                                    renderedStreamUrl.value = null
-                                    activeStreamUrl.value = null
-                                    player.stop()
-                                    player.clearMediaItems()
+                                    val isAlreadyPlaying = playbackState.playingChannel?.id == channel.id &&
+                                        activeStreamUrl.value != null &&
+                                        player.playbackState != Player.STATE_IDLE
+                                    if (!isAlreadyPlaying) {
+                                        renderedStreamUrl.value = null
+                                        activeStreamUrl.value = null
+                                        player.stop()
+                                        player.clearMediaItems()
+                                    }
                                     currentDestination = AppDestination.LIVE_TV
                                     viewModel.playChannelExpanded(channel, program)
                                 },
@@ -1148,7 +1162,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                     viewModel.previewChannel(channel, program)
                                 },
                                 onStopLivePreview = {
-                                    if (!openingHomeLivePlayer && currentDestination != AppDestination.LIVE_TV) {
+                                    if (!openingHomeLivePlayer && !playbackState.isPlayerExpanded && currentDestination != AppDestination.LIVE_TV) {
                                         homeBackgroundChannelId = null
                                         viewModel.stopPreviewPlayback()
                                         renderedStreamUrl.value = null
@@ -1214,50 +1228,46 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         }
                     }
                         AppDestination.LIVE_TV -> {
-                            if (!playbackState.isPlayerExpanded) {
-                                when {
-                                    guideState.error != null -> GuideError(guideState.error ?: "Error", viewModel::refresh)
-                                    guideState.loading || guideState.guideData == null -> GuideMessage(stringResource(R.string.loading_guide))
-                                    else -> GuideContent(
-                                        data = guideState.guideData!!,
-                                        selectedChannel = guideState.selectedChannel,
-                                        selectedProgram = guideState.selectedProgram,
-                                        displayChannel = playbackState.playingChannel ?: playbackState.selectedChannel,
-                                        displayProgram = currentPlayingProgram ?: playbackState.selectedProgram,
-                                        playingChannel = playbackState.playingChannel,
-                                        playingProgram = currentPlayingProgram,
-                                        isMiniPlayerPlaying = playbackState.isMiniPlayerPlaying,
-                                        isPlayerExpanded = playbackState.isPlayerExpanded,
-                                        onChannelActivated = viewModel::playChannel,
-                                        onStopPlayback = viewModel::stopPreviewPlayback,
-                                        isLiveStreamReady = { channel ->
-                                            val streamUrl = viewModel.selectedStreamSource(channel)?.url.orEmpty()
-                                            streamUrl.isNotBlank() && (renderedStreamUrl.value == streamUrl || player.playbackState == Player.STATE_READY)
-                                        },
-                                        onLiveChannelOpened = { channel, program ->
-                                            expandedPlayerReturnDestination = AppDestination.LIVE_TV
-                                            viewModel.playChannelExpanded(channel, program)
-                                        },
-                                        onProgramSelected = viewModel::selectChannel,
-                                        selectedStreamSource = viewModel::selectedStreamSource,
-                                        onPlayerClick = viewModel::expandPlayer,
-                                        onGuideRangeNeeded = viewModel::ensureGuideRange,
-                                        gridFocusTarget = gridFocusTarget,
-                                        onDetailsVisibleChanged = { detailsVisible = it },
-                                        onGridFocusRequested = { channel, program, live ->
-                                            requestGridFocus(channel, program, live)
-                                        },
-                                        onNavigateSideRail = { openSideRail(AppDestination.LIVE_TV) },
-                                        externalGridFocusRequester = mainGridFocusRequester,
-                                        player = stablePlayer,
-                                        playerView = stableGuideInlinePlayerView,
-                                        isMuted = liveTvIsMuted,
-                                        onToggleMute = { liveTvIsMuted = !liveTvIsMuted },
-                                        muteFocusRequester = liveTvMuteFocusRequester,
-                                    )
-                                }
-                            } else {
-                                Box(Modifier.fillMaxSize().background(Color.Black))
+                            when {
+                                guideState.error != null -> GuideError(guideState.error ?: "Error", viewModel::refresh)
+                                guideState.loading || guideState.guideData == null -> GuideMessage(stringResource(R.string.loading_guide))
+                                else -> GuideContent(
+                                    data = guideState.guideData!!,
+                                    selectedChannel = guideState.selectedChannel,
+                                    selectedProgram = guideState.selectedProgram,
+                                    displayChannel = playbackState.playingChannel ?: playbackState.selectedChannel,
+                                    displayProgram = currentPlayingProgram ?: playbackState.selectedProgram,
+                                    playingChannel = playbackState.playingChannel,
+                                    playingProgram = currentPlayingProgram,
+                                    isMiniPlayerPlaying = playbackState.isMiniPlayerPlaying,
+                                    isPlayerExpanded = playbackState.isPlayerExpanded,
+                                    onChannelActivated = viewModel::playChannel,
+                                    onStopPlayback = viewModel::stopPreviewPlayback,
+                                    isLiveStreamReady = { channel ->
+                                        val streamUrl = viewModel.selectedStreamSource(channel)?.url.orEmpty()
+                                        streamUrl.isNotBlank() && renderedStreamUrl.value == streamUrl
+                                    },
+                                    onLiveChannelOpened = { channel, program ->
+                                        expandedPlayerReturnDestination = AppDestination.LIVE_TV
+                                        viewModel.playChannelExpanded(channel, program)
+                                    },
+                                    onProgramSelected = viewModel::selectChannel,
+                                    selectedStreamSource = viewModel::selectedStreamSource,
+                                    onPlayerClick = viewModel::expandPlayer,
+                                    onGuideRangeNeeded = viewModel::ensureGuideRange,
+                                    gridFocusTarget = gridFocusTarget,
+                                    onDetailsVisibleChanged = { detailsVisible = it },
+                                    onGridFocusRequested = { channel, program, live ->
+                                        requestGridFocus(channel, program, live)
+                                    },
+                                    onNavigateSideRail = { openSideRail(AppDestination.LIVE_TV) },
+                                    externalGridFocusRequester = mainGridFocusRequester,
+                                    player = stablePlayer,
+                                    playerView = stableGuideInlinePlayerView,
+                                    isMuted = liveTvIsMuted,
+                                    onToggleMute = { liveTvIsMuted = !liveTvIsMuted },
+                                    muteFocusRequester = liveTvMuteFocusRequester,
+                                )
                             }
                         }
                         AppDestination.VOD -> {
@@ -1470,6 +1480,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         viewModel.collapsePlayer()
                         if (returnDestination == AppDestination.HOME) {
                             restoreHomeLiveRowOnReturn = true
+                            homeBackgroundChannelId = playbackState.playingChannel?.id
                             currentDestination = AppDestination.HOME
                         } else {
                             requestGridFocus(playbackState.playingChannel, live = true)
@@ -1629,6 +1640,7 @@ private fun GuideContent(
             player = player,
             playerView = playerView,
             visible = isVideoRendering,
+            isPlayerExpanded = isPlayerExpanded,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -5144,6 +5156,11 @@ private fun PlayerSurface(
     keepScreenOn: Boolean = false,
 ) {
     val loading = rememberPlayerLoadingState(player.value)
+    DisposableEffect(playerView.value) {
+        onDispose {
+            playerView.value.player = null
+        }
+    }
     Box(modifier.clipToBounds()) {
         AndroidView(
             factory = {

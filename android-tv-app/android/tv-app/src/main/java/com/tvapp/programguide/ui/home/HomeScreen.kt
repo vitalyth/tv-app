@@ -115,6 +115,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester = remember { FocusRequester() },
     isMuted: Boolean = false,
+    isPlayerExpanded: Boolean = false,
     onToggleMute: () -> Unit = {},
     contentFocusNonce: Int = 0,
     liveRowFocusNonce: Int = 0,
@@ -343,6 +344,7 @@ fun HomeScreen(
             player = player,
             playerView = playerView,
             visible = isVideoRendering,
+            isPlayerExpanded = isPlayerExpanded,
             modifier = Modifier.fillMaxSize(),
         )
         Box(
@@ -888,6 +890,7 @@ internal fun HomeInlinePlayer(
     player: StablePlayer,
     playerView: StablePlayerView,
     visible: Boolean,
+    isPlayerExpanded: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val alpha = if (visible) 1f else 0f
@@ -895,6 +898,7 @@ internal fun HomeInlinePlayer(
 
     DisposableEffect(playerView.value) {
         onDispose {
+            playerView.value.player = null
             playerView.value.keepScreenOn = false
         }
     }
@@ -902,7 +906,7 @@ internal fun HomeInlinePlayer(
     AndroidView(
         factory = {
             (playerView.value.parent as? ViewGroup)?.removeView(playerView.value)
-            playerView.value.player = player.value
+            playerView.value.player = if (isPlayerExpanded) null else player.value
             playerView.value.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             playerView.value.useController = false
             playerView.value.alpha = alpha
@@ -914,8 +918,9 @@ internal fun HomeInlinePlayer(
             playerView.value
         },
         update = {
-            if (it.player !== player.value) {
-                it.player = player.value
+            val targetPlayer = if (isPlayerExpanded) null else player.value
+            if (it.player !== targetPlayer) {
+                it.player = targetPlayer
             }
             it.alpha = alpha
             if (it.keepScreenOn != shouldKeepScreenOn) {
