@@ -1555,6 +1555,32 @@ private fun GuideContent(
             modifier = Modifier.fillMaxSize(),
         )
 
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.38f to Color.Transparent,
+                        0.55f to Color(0xB8080A0C),
+                        1f to Color(0xFA080A0C),
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        0f to Color(0xD4080A0C),
+                        0.35f to Color(0x94080A0C),
+                        0.50f to Color(0x20080A0C),
+                        0.58f to Color.Transparent,
+                        1f to Color.Transparent,
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
