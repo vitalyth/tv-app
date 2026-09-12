@@ -279,15 +279,22 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(activeChannel?.id) {
+    LaunchedEffect(
+        activeChannel?.id,
+        focusedVodItem != null,
+        playingLiveChannelId,
+        playingVodPreviewEpisodeId,
+        focusedLiveChannelId,
+        backgroundLiveChannelId,
+    ) {
+        if (focusedVodItem != null || playingVodPreviewEpisodeId != null) return@LaunchedEffect
         val targetChannel = activeChannel ?: return@LaunchedEffect
         val targetProgram = activeProgram
-        if (playingLiveChannelId == targetChannel.id) return@LaunchedEffect
-        if (focusedLiveChannelId != null) {
-            kotlinx.coroutines.delay(800L)
+        if (playingLiveChannelId == targetChannel.id && backgroundLiveChannelId == targetChannel.id) return@LaunchedEffect
+        if (focusedLiveChannelId != null && focusedLiveChannelId == targetChannel.id && playingLiveChannelId != targetChannel.id) {
+            kotlinx.coroutines.delay(350L)
             if (focusedLiveChannelId != targetChannel.id) return@LaunchedEffect
         }
-        if (focusedVodItem != null || playingVodPreviewEpisodeId != null) return@LaunchedEffect
         onPreviewHomeBackground(targetChannel, targetProgram)
     }
 
