@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId "com.tvapp.programguide"
-        minSdkVersion 26
+        minSdkVersion 23
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 3
         versionName "1.1"
@@ -30,6 +30,12 @@ android {
             storePassword "android"
             keyAlias "androiddebugkey"
             keyPassword "android"
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+        debug {
+            v1SigningEnabled true
+            v2SigningEnabled true
         }
     }
 
