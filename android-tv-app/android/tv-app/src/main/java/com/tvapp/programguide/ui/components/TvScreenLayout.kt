@@ -476,7 +476,12 @@ fun TvArtwork(imageUrl: String?, title: String, modifier: Modifier = Modifier) {
     if (!imageUrl.isNullOrBlank()) {
         val context = LocalContext.current
         val request = remember(imageUrl) {
-            ImageRequest.Builder(context).data(imageUrl).size(640, 360).crossfade(false).build()
+            ImageRequest.Builder(context)
+                .data(imageUrl)
+                .size(1920, 1080)
+                .crossfade(250)
+                .allowHardware(true)
+                .build()
         }
         AsyncImage(model = request, contentDescription = title, contentScale = ContentScale.Crop, modifier = modifier)
     } else {
@@ -497,6 +502,10 @@ fun TvInlinePlayer(
     isPlayerExpanded: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    if (isPlayerExpanded) {
+        return
+    }
+
     val alpha = if (visible) 1f else 0f
     val shouldKeepScreenOn = visible && (player.value.isPlaying || (player.value.playWhenReady && player.value.playbackState != Player.STATE_IDLE && player.value.playbackState != Player.STATE_ENDED))
 

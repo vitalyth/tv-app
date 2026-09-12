@@ -105,6 +105,7 @@ fun VodScreen(
     initialFocusRequester: FocusRequester = remember { FocusRequester() },
     contentFocusNonce: Int = 0,
     player: StablePlayer? = null,
+    inlinePlayerView: StablePlayerView? = null,
     playerView: StablePlayerView? = null,
     onRegisterFocusRestorer: (((() -> Unit) -> Unit))? = null,
 ) {
@@ -173,7 +174,7 @@ fun VodScreen(
                 initialFocusRequester = initialFocusRequester,
                 contentFocusNonce = contentFocusNonce,
                 player = player,
-                playerView = playerView,
+                playerView = inlinePlayerView ?: playerView,
                 lastFocusedSeriesId = lastFocusedSeriesId,
                 onSeriesClicked = { series ->
                     lastFocusedSeriesId = series.id
@@ -203,6 +204,7 @@ fun VodScreen(
                     episodeProgress = uiState.episodeProgress,
                     isPlayerActive = uiState.playingEpisode != null,
                     player = player,
+                    inlinePlayerView = inlinePlayerView,
                     playerView = playerView,
                     viewModel = viewModel,
                     onSeasonSelected = viewModel::selectSeason,
@@ -264,6 +266,8 @@ private fun VodCatalogView(
     val seriesFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
 
     var focusedSeries by remember { mutableStateOf<VodSeries?>(null) }
+    var focusedCircleProvider by remember { mutableStateOf<VodProvider?>(null) }
+    var isAllCircleFocused by remember { mutableStateOf(false) }
     var previousDetailsVisible by remember { mutableStateOf(false) }
 
     // Keep focusedSeries in sync with the first item or remembered item
@@ -293,12 +297,15 @@ private fun VodCatalogView(
                     try {
                         gridState.scrollToItem(targetIndex.coerceAtLeast(0))
                     } catch (_: Exception) {}
-                    delay(90)
-                    val requester = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
-                    try {
-                        requester.requestFocus()
-                    } catch (_: Exception) {
-                        try { seriesFirstItemFocusRequester.requestFocus() } catch (_: Exception) {}
+                    for (retryDelay in listOf(60L, 140L, 280L, 450L)) {
+                        delay(retryDelay)
+                        val requester = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+                        try {
+                            requester.requestFocus()
+                            break
+                        } catch (_: Exception) {
+                            try { seriesFirstItemFocusRequester.requestFocus() } catch (_: Exception) {}
+                        }
                     }
                 }
             }
@@ -354,21 +361,53 @@ private fun VodCatalogView(
 
     val activeSeries = focusedSeries ?: uiState.seriesList.firstOrNull()
 
-    val heroTitle = activeSeries?.title
-        ?: if (uiState.selectedProvider == null) "תוכניות VOD" else uiState.selectedProvider!!.displayName
-
-    val heroSubtitle = listOfNotNull(
-        activeSeries?.provider?.displayName ?: uiState.selectedProvider?.displayName ?: "כל הערוצים",
-        activeSeries?.genre?.takeIf { !it.isNullOrBlank() && it.lowercase() != "null" },
-    ).joinToString(" · ")
-
-    val heroDescription = activeSeries?.description?.trim().orEmpty()
-
-    val heroChannelLogoUrl = (activeSeries?.provider ?: uiState.selectedProvider)?.let {
-        viewModel.getProviderLogoUrl(it)
+    val heroTitle = when {
+        isAllCircleFocused -> "ספריית VOD"
+        focusedCircleProvider != null -> focusedCircleProvider!!.displayName
+        else -> activeSeries?.title
+            ?: if (uiState.selectedProvider == null) "תוכניות VOD" else uiState.selectedProvider!!.displayName
     }
 
-    val backgroundImageUrl = activeSeries?.imageUrl
+    val heroSubtitle = when {
+        isAllCircleFocused -> "כל הערוצים · סדרות ותוכניות"
+        focusedCircleProvider != null -> "ערוץ VOD · סדרות ותוכניות"
+        else -> listOfNotNull(
+            activeSeries?.provider?.displayName ?: uiState.selectedProvider?.displayName ?: "כל הערוצים",
+            activeSeries?.genre?.takeIf { !it.isNullOrBlank() && it.lowercase() != "null" },
+        ).joinToString(" · ")
+    }
+
+    val heroDescription = when {
+        isAllCircleFocused -> "מבחר תוכניות, סדרות ופרקים מכל הערוצים המובילים בישראל: כאן 11, קשת 12, רשת 13, ערוץ 14 ו-i24NEWS"
+        focusedCircleProvider != null -> when (focusedCircleProvider) {
+            VodProvider.KAN11 -> "סדרות דרמה, דוקו, קומדיה ותוכניות אקטואליה מבית כאן 11"
+            VodProvider.KESHET12 -> "התוכניות והסדרות המובילות של קשת 12 ו-+12 לצפייה ישירה"
+            VodProvider.RESHET13 -> "תוכניות הריאליטי, התחקירים והאקטואליה של רשת 13 לצפייה ישירה"
+            VodProvider.CHANNEL14 -> "תוכניות האקטואליה, הפטריוטים והמהדורות של ערוץ 14"
+            VodProvider.I24NEWS -> "מהדורות החדשות, התוכניות והמגזינים של i24NEWS"
+            else -> "תוכניות וסדרות לצפייה ישירה"
+        }
+        else -> activeSeries?.description?.trim().orEmpty()
+    }
+
+    val heroChannelLogoUrl = when {
+        isAllCircleFocused -> null
+        focusedCircleProvider != null -> viewModel.getProviderLogoUrl(focusedCircleProvider!!)
+        else -> (activeSeries?.provider ?: uiState.selectedProvider)?.let {
+            viewModel.getProviderLogoUrl(it)
+        }
+    }
+
+    val genericVodArtwork = "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=1920&q=80"
+
+    val backgroundImageUrl = when {
+        isAllCircleFocused -> genericVodArtwork
+        focusedCircleProvider != null -> {
+            uiState.seriesList.firstOrNull { it.provider == focusedCircleProvider }?.imageUrl
+                ?: genericVodArtwork
+        }
+        else -> activeSeries?.imageUrl
+    }
 
     TvScreenLayout(
         player = player ?: StablePlayer(androidx.media3.exoplayer.ExoPlayer.Builder(LocalContext.current).build()),
@@ -388,6 +427,8 @@ private fun VodCatalogView(
         onToggleMute = {},
         onNavigateLeft = onNavigateSideRail,
         onNavigateDown = {
+            isAllCircleFocused = false
+            focusedCircleProvider = null
             try {
                 val targetId = lastFocusedSeriesId
                 val targetReq = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
@@ -402,8 +443,18 @@ private fun VodCatalogView(
                     viewModel.selectProvider(provider)
                 },
                 getLogoUrl = viewModel::getProviderLogoUrl,
+                onAllFocused = {
+                    isAllCircleFocused = true
+                    focusedCircleProvider = null
+                },
+                onProviderFocused = { provider ->
+                    isAllCircleFocused = false
+                    focusedCircleProvider = provider
+                },
                 onNavigateSideRail = onNavigateSideRail,
                 onNavigateDown = {
+                    isAllCircleFocused = false
+                    focusedCircleProvider = null
                     try {
                         val targetId = lastFocusedSeriesId
                         val targetReq = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester

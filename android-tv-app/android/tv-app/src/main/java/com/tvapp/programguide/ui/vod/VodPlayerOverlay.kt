@@ -310,6 +310,9 @@ fun VodPlayerOverlay(
         AndroidView(
             factory = {
                 (actualPlayerView.parent as? ViewGroup)?.removeView(actualPlayerView)
+                actualPlayerView.player = actualPlayer
+                actualPlayerView.alpha = 1f
+                actualPlayerView.visibility = android.view.View.VISIBLE
                 actualPlayerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 actualPlayerView.useController = false
                 actualPlayerView.keepScreenOn = isPlayerPlaying || isResolvingStream
@@ -323,6 +326,8 @@ fun VodPlayerOverlay(
                 if (it.player !== actualPlayer) {
                     it.player = actualPlayer
                 }
+                it.alpha = 1f
+                it.visibility = android.view.View.VISIBLE
                 it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 it.useController = false
                 val keepOn = isPlayerPlaying || isResolvingStream
