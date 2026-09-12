@@ -2659,23 +2659,28 @@ private fun CanvasGuideGrid(
         if (nowSeconds in startSeconds..endSeconds) {
             val nowX = channelWidthPx + ((nowSeconds - startSeconds) / HALF_HOUR_SECONDS.toFloat()) * slotWidthPx - scrollPx
             if (nowX in channelWidthPx..size.width) {
+                val bubbleWidthPx = 50.dp.toPx()
+                val bubbleHeightPx = 18.dp.toPx()
+                val bubbleTop = (headerHeightPx - bubbleHeightPx) / 2f
+                val bubbleBottom = bubbleTop + bubbleHeightPx
+
                 drawRect(
-                    color = PrimaryCyan,
-                    topLeft = Offset(nowX - 1.dp.toPx(), headerHeightPx),
-                    size = Size(2.dp.toPx(), size.height - headerHeightPx),
+                    color = Color(0x80E21D2F),
+                    topLeft = Offset(nowX - 1.dp.toPx(), bubbleBottom),
+                    size = Size(2.dp.toPx(), size.height - bubbleBottom),
                 )
                 drawRoundRect(
-                    color = PrimaryCyan,
-                    topLeft = Offset(nowX - 39.dp.toPx(), headerHeightPx - 24.dp.toPx()),
-                    size = Size(78.dp.toPx(), 22.dp.toPx()),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()),
+                    color = Color(0xD9E21D2F),
+                    topLeft = Offset(nowX - bubbleWidthPx / 2f, bubbleTop),
+                    size = Size(bubbleWidthPx, bubbleHeightPx),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()),
                 )
                 drawAlignedText(
                     text = TimeFormatter.format(Instant.ofEpochSecond(nowSeconds).atZone(ZoneId.systemDefault())),
                     x = nowX,
-                    centerY = headerHeightPx - 13.dp.toPx(),
-                    maxWidth = 68.dp.toPx(),
-                    paint = darkTextPaint.withText(size12Px, android.graphics.Color.rgb(3, 16, 18), bold = true),
+                    centerY = headerHeightPx / 2f,
+                    maxWidth = 44.dp.toPx(),
+                    paint = titlePaint.withText(size11Px, android.graphics.Color.WHITE, bold = true),
                     align = Paint.Align.CENTER,
                 )
             }
@@ -2768,21 +2773,21 @@ private fun TimeHeader(
                     Modifier
                         .offset {
                             IntOffset(
-                                x = (nowOffsetPx - scrollOffsetPx() - with(density) { 39.dp.toPx() }).roundToInt(),
+                                x = (nowOffsetPx - scrollOffsetPx() - with(density) { 25.dp.toPx() }).roundToInt(),
                                 y = 0,
                             )
                         }
-                        .width(78.dp)
-                        .height(22.dp)
+                        .width(50.dp)
+                        .height(18.dp)
                         .align(Alignment.BottomStart)
-                        .background(PrimaryCyan, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp),
+                        .background(Color(0xD9E21D2F), RoundedCornerShape(5.dp))
+                        .padding(horizontal = 4.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = TimeFormatter.format(Instant.ofEpochSecond(nowSeconds).atZone(ZoneId.systemDefault())),
-                        color = Color(0xFF031012),
-                        fontSize = 12.sp,
+                        color = Color.White,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Clip,
@@ -2820,7 +2825,7 @@ private fun LiveNowLine(
                         .offset { IntOffset(nowOffsetPx.roundToInt(), 0) }
                         .width(2.dp)
                         .fillMaxHeight()
-                        .background(PrimaryCyan)
+                        .background(Color(0x80E21D2F))
                 )
             }
         }
