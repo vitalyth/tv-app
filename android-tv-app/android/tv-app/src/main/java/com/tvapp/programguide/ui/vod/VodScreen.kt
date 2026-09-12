@@ -533,6 +533,8 @@ private fun VodCatalogView(
                                 series = series,
                                 focusRequester = seriesRequester,
                                 onFocused = {
+                                    isAllCircleFocused = false
+                                    focusedCircleProvider = null
                                     focusedSeries = series
                                     onSeriesFocused(series)
                                 },
@@ -578,6 +580,8 @@ private fun ChannelCirclesRow(
     selectedProvider: VodProvider?,
     onSelectProvider: (VodProvider?) -> Unit,
     getLogoUrl: (VodProvider) -> String,
+    onAllFocused: () -> Unit,
+    onProviderFocused: (VodProvider) -> Unit,
     onNavigateSideRail: () -> Unit,
     onNavigateDown: () -> Unit,
     firstCircleFocusRequester: FocusRequester,
@@ -604,6 +608,12 @@ private fun ChannelCirclesRow(
         val isAllSelected = (selectedProvider == null)
         val allInteractionSource = remember { MutableInteractionSource() }
         val isAllFocused by allInteractionSource.collectIsFocusedAsState()
+
+        LaunchedEffect(isAllFocused) {
+            if (isAllFocused) {
+                onAllFocused()
+            }
+        }
 
         val allBg = when {
             isAllFocused -> FocusedCardBg
@@ -650,6 +660,12 @@ private fun ChannelCirclesRow(
             val interactionSource = remember { MutableInteractionSource() }
             val isFocused by interactionSource.collectIsFocusedAsState()
             val requester = circleRequesters[provider] ?: remember { FocusRequester() }
+
+            LaunchedEffect(isFocused, provider) {
+                if (isFocused) {
+                    onProviderFocused(provider)
+                }
+            }
 
             val bg = when {
                 isFocused -> FocusedCardBg
