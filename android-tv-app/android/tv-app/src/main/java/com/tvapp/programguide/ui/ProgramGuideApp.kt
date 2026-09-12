@@ -2240,13 +2240,13 @@ private fun ChannelLogoOverlay(
                 val y = with(density) { (visibleTopPx + (visibleBottomPx - visibleTopPx) / 2f - 20.dp.toPx()).toDp() }
                 key(channel.id) {
                     AsyncImage(
-                        model = rememberSizedImageRequest(channel.logoUrl, width = 64, height = 64),
+                        model = rememberSizedImageRequest(channel.logoUrl, width = 80, height = 80),
                         contentDescription = null,
-                        contentScale = ContentScale.Fit,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .offset(x = x, y = y)
                             .size(40.dp)
-                            .padding(4.dp),
+                            .clip(RoundedCornerShape(6.dp)),
                     )
                 }
             }
@@ -2967,14 +2967,15 @@ private fun ChannelCell(
             Box(
                 modifier = Modifier
                     .size(36.dp)
-                    .background(Color(0xFF26272C), RoundedCornerShape(6.dp))
-                    .padding(5.dp),
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF26272C)),
                 contentAlignment = Alignment.Center,
             ) {
                 if (channel.logoUrl.isNotBlank()) {
                     AsyncImage(
                         model = rememberSizedImageRequest(channel.logoUrl, width = 72, height = 72),
                         contentDescription = null,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -4441,7 +4442,10 @@ private fun MultiPlayerTile(
                     AsyncImage(
                         model = rememberSizedImageRequest(channel.logoUrl, width = 96, height = 96),
                         contentDescription = null,
-                        modifier = Modifier.size(42.dp),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(6.dp)),
                     )
                     Spacer(Modifier.width(10.dp))
                 }

@@ -754,9 +754,9 @@ private fun ProviderTab(
                     model = logoUrl,
                     contentDescription = provider.displayName,
                     modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(6.dp)),
-                    contentScale = ContentScale.Fit,
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Crop,
                 )
             }
 

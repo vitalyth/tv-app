@@ -634,14 +634,13 @@ internal fun HomeHero(
                         modifier = Modifier
                             .size(26.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0x33FFFFFF))
-                            .padding(2.dp),
+                            .background(Color(0x33FFFFFF)),
                         contentAlignment = Alignment.Center,
                     ) {
                         AsyncImage(
                             model = channelLogoUrl,
                             contentDescription = null,
-                            contentScale = ContentScale.Fit,
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -870,14 +869,13 @@ private fun LiveChannelCard(
                     .size(28.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(Color(0xB3080A0C))
-                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
-                    .padding(3.dp),
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 AsyncImage(
                     model = channel.logoUrl,
                     contentDescription = channel.name,
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1011,14 +1009,13 @@ private fun VodRecentCard(
                     .size(28.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(Color(0xB3080A0C))
-                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
-                    .padding(3.dp),
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 AsyncImage(
                     model = providerLogoUrl,
                     contentDescription = item.channelName,
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
