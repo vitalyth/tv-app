@@ -40,6 +40,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -57,6 +59,8 @@ import com.tvapp.programguide.ui.StablePlayer
 import com.tvapp.programguide.ui.StablePlayerView
 import com.tvapp.programguide.ui.TvKeyEventBridge
 import com.tvapp.programguide.ui.components.UnifiedPlayerControlsOverlay
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlinx.coroutines.delay
 
 private val PlayerAccentColor = Color(0xFFF2F4F7)
@@ -88,6 +92,19 @@ fun VodPlayerOverlay(
     var lastInteractionNonce by remember { mutableLongStateOf(0L) }
     var playbackError by remember { mutableStateOf<String?>(null) }
     var hasAppliedResumeSeek by remember(streamUrl, episode?.id) { mutableStateOf(false) }
+    var hasRenderedFirstFrame by remember(streamUrl, episode?.id) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val posterUrl = episode?.imageUrl ?: series?.imageUrl
+    val posterRequest = remember(posterUrl) {
+        posterUrl?.takeIf { it.isNotBlank() }?.let {
+            ImageRequest.Builder(context)
+                .data(it)
+                .size(1920, 1080)
+                .crossfade(false)
+                .allowHardware(true)
+                .build()
+        }
+    }
 
     fun saveCurrentProgress(forceCompleted: Boolean? = null) {
         val ep = episode ?: return
@@ -102,6 +119,7 @@ fun VodPlayerOverlay(
     LaunchedEffect(streamUrl, episode?.id) {
         if (!streamUrl.isNullOrBlank()) {
             playbackError = null
+            hasRenderedFirstFrame = false
             isControlsVisible = true
             lastInteractionNonce++
             val currentUri = actualPlayer.currentMediaItem?.localConfiguration?.uri?.toString()
@@ -192,13 +210,19 @@ fun VodPlayerOverlay(
         val listener = object : Player.Listener {
             override fun onPlayerError(playbackException: PlaybackException) {
                 playbackError = "שגיאה בטעינת הפרק"
+                hasRenderedFirstFrame = false
                 updatePlaying()
+            }
+
+            override fun onRenderedFirstFrame() {
+                hasRenderedFirstFrame = true
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updatePlaying()
                 when (playbackState) {
                     Player.STATE_ENDED -> {
+                        hasRenderedFirstFrame = false
                         saveCurrentProgress(forceCompleted = true)
                     }
                     Player.STATE_READY -> {
@@ -355,12 +379,26 @@ fun VodPlayerOverlay(
                 }
             }
     ) {
+        if (posterRequest != null && !hasRenderedFirstFrame) {
+            AsyncImage(
+                model = posterRequest,
+                contentDescription = episode?.title ?: series?.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x6605080E)),
+            )
+        }
+
         // Video Surface
         AndroidView(
             factory = {
                 (actualPlayerView.parent as? ViewGroup)?.removeView(actualPlayerView)
                 actualPlayerView.player = actualPlayer
-                actualPlayerView.alpha = 1f
+                actualPlayerView.alpha = if (hasRenderedFirstFrame) 1f else 0f
                 actualPlayerView.visibility = android.view.View.VISIBLE
                 actualPlayerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 actualPlayerView.useController = false
@@ -375,7 +413,7 @@ fun VodPlayerOverlay(
                 if (it.player !== actualPlayer) {
                     it.player = actualPlayer
                 }
-                it.alpha = 1f
+                it.alpha = if (hasRenderedFirstFrame) 1f else 0f
                 it.visibility = android.view.View.VISIBLE
                 it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 it.useController = false

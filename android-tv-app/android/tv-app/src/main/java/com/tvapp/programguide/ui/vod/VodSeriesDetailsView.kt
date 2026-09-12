@@ -391,27 +391,17 @@ fun VodSeriesDetailsView(
         val actualPlayer = player?.value
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
-                isBackgroundEpisodePlaying = true
+                val currentUri = actualPlayer?.currentMediaItem?.localConfiguration?.uri?.toString()
+                if (!isPlayerActive &&
+                    backgroundPreviewStreamUrl != null &&
+                    currentUri == backgroundPreviewStreamUrl
+                ) {
+                    isBackgroundEpisodePlaying = true
+                }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                when (playbackState) {
-                    Player.STATE_READY -> {
-                        val previewEpisodeId = backgroundPreviewEpisodeId
-                        coroutineScope.launch {
-                            delay(350L)
-                            if (!isPlayerActive &&
-                                previewEpisodeId != null &&
-                                previewEpisodeId == backgroundPreviewEpisodeId &&
-                                player?.value?.playbackState == Player.STATE_READY
-                            ) {
-                                isBackgroundEpisodePlaying = true
-                            }
-                        }
-                    }
-                    Player.STATE_IDLE,
-                    Player.STATE_ENDED -> {
-                        isBackgroundEpisodePlaying = false
-                    }
+                if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+                    isBackgroundEpisodePlaying = false
                 }
             }
             override fun onPlayerError(error: PlaybackException) {

@@ -39,6 +39,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,7 +97,7 @@ private val SeriesCardGradient = Brush.verticalGradient(
     ),
 )
 private val RtlTextStyle = androidx.compose.ui.text.TextStyle(textDirection = TextDirection.Rtl)
-private const val GenericVodArtwork = "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=3840&q=90"
+private const val GenericVodArtwork = "file:///android_asset/vod_generic_background.png"
 
 private fun vodSeriesFocusKey(series: VodSeries): String = "${series.provider.id}:${series.id}"
 
@@ -126,6 +127,7 @@ fun VodScreen(
     var catalogFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var detailsFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var lastFocusedSeriesKey by remember { mutableStateOf<String?>(null) }
+    var catalogRestoreNonce by remember { mutableIntStateOf(0) }
 
     val latestUiState by rememberUpdatedState(uiState)
     val latestCatalogFocusRestorer by rememberUpdatedState(catalogFocusRestorer)
@@ -142,9 +144,31 @@ fun VodScreen(
         onDispose {}
     }
 
+    fun rememberSeriesForCatalog(series: VodSeries?) {
+        if (series != null) {
+            lastFocusedSeriesKey = vodSeriesFocusKey(series)
+        }
+    }
+
+    fun closeDetailsAndReturnToCatalog() {
+        rememberSeriesForCatalog(uiState.selectedSeriesDetails?.series ?: uiState.playingSeries)
+        catalogRestoreNonce++
+        viewModel.closeSeriesDetails()
+    }
+
     fun stopVodPlaybackAndReturnToEpisode() {
+        rememberSeriesForCatalog(uiState.playingSeries ?: uiState.selectedSeriesDetails?.series)
         suppressDetailsBackCloseUntil = SystemClock.elapsedRealtime() + 900L
         viewModel.stopVodPlayback()
+    }
+
+    LaunchedEffect(isCatalogActive, catalogRestoreNonce) {
+        if (isCatalogActive && catalogRestoreNonce > 0) {
+            for (waitMs in listOf(80L, 180L, 360L, 620L)) {
+                delay(waitMs)
+                latestCatalogFocusRestorer?.invoke()
+            }
+        }
     }
 
     // Initial load: when entering VOD, load all channels (Requirement 2)
@@ -165,7 +189,7 @@ fun VodScreen(
                 val shouldSuppress = SystemClock.elapsedRealtime() < suppressDetailsBackCloseUntil
                 suppressDetailsBackCloseUntil = 0L
                 if (!shouldSuppress) {
-                    viewModel.closeSeriesDetails()
+                    closeDetailsAndReturnToCatalog()
                 }
             }
             else -> onNavigateSideRail()
@@ -187,6 +211,7 @@ fun VodScreen(
                 player = player,
                 playerView = inlinePlayerView ?: playerView,
                 lastFocusedSeriesKey = lastFocusedSeriesKey,
+                restoreFocusNonce = catalogRestoreNonce,
                 onSeriesClicked = { series ->
                     lastFocusedSeriesKey = vodSeriesFocusKey(series)
                     viewModel.openSeriesDetails(series)
@@ -221,7 +246,7 @@ fun VodScreen(
                     onSeasonSelected = viewModel::selectSeason,
                     onPlayEpisode = viewModel::playEpisode,
                     onEpisodeFocusRestored = viewModel::consumeEpisodeFocusTarget,
-                    onClose = viewModel::closeSeriesDetails,
+                    onClose = ::closeDetailsAndReturnToCatalog,
                     onNavigateSideRail = onNavigateSideRail,
                     contentFocusNonce = contentFocusNonce,
                     onRegisterFocusRestorer = { detailsFocusRestorer = it },
@@ -263,6 +288,7 @@ private fun VodCatalogView(
     player: StablePlayer?,
     playerView: StablePlayerView?,
     lastFocusedSeriesKey: String?,
+    restoreFocusNonce: Int,
     onSeriesClicked: (VodSeries) -> Unit,
     onSeriesFocused: (VodSeries) -> Unit,
     modifier: Modifier = Modifier,
@@ -362,8 +388,13 @@ private fun VodCatalogView(
         onDispose {}
     }
 
-    LaunchedEffect(contentFocusNonce) {
-        if (contentFocusNonce > 0 && uiState.selectedSeriesDetails == null && !uiState.isLoadingDetails && uiState.playingEpisode == null) {
+    LaunchedEffect(contentFocusNonce, restoreFocusNonce) {
+        if (
+            (contentFocusNonce > 0 || restoreFocusNonce > 0) &&
+            uiState.selectedSeriesDetails == null &&
+            !uiState.isLoadingDetails &&
+            uiState.playingEpisode == null
+        ) {
             restoreFocus()
         }
     }
