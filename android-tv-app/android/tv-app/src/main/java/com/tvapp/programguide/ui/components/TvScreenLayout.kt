@@ -66,6 +66,8 @@ private val HeroFocusedBg = Color(0xFFF2F4F7)
 private val HeroFocusedContent = Color(0xFF091016)
 private val HeroMutedText = Color(0xFFB8C1CC)
 private val HeroAccent = Color(0xFF25D4DE)
+private const val TvBackgroundImageWidth = 3840
+private const val TvBackgroundImageHeight = 2160
 
 /**
  * Common layout for TV screens (Home, Live TV Guide, etc.).
@@ -478,7 +480,7 @@ fun TvArtwork(imageUrl: String?, title: String, modifier: Modifier = Modifier) {
         val request = remember(imageUrl) {
             ImageRequest.Builder(context)
                 .data(imageUrl)
-                .size(1920, 1080)
+                .size(TvBackgroundImageWidth, TvBackgroundImageHeight)
                 .crossfade(250)
                 .allowHardware(true)
                 .build()

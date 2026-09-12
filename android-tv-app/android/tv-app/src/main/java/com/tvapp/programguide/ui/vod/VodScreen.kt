@@ -398,7 +398,7 @@ private fun VodCatalogView(
         }
     }
 
-    val genericVodArtwork = "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=1920&q=80"
+    val genericVodArtwork = "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=3840&q=90"
 
     val backgroundImageUrl = when {
         isAllCircleFocused -> genericVodArtwork
