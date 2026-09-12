@@ -2539,17 +2539,19 @@ private fun CanvasGuideGrid(
                     current -> Color(0xFF33363E)
                     else -> Color(0xEE24252A)
                 }
-                val cellLeft = max(channelWidthPx + 3.dp.toPx(), x + 3.dp.toPx())
-                val cellRight = min(size.width - 3.dp.toPx(), x + width - 3.dp.toPx())
+                val sideGapPx = if (width < 24.dp.toPx()) 1.dp.toPx() else 3.dp.toPx()
+                val cellLeft = max(channelWidthPx + sideGapPx, x + sideGapPx)
+                val cellRight = min(size.width - sideGapPx, x + width - sideGapPx)
                 val cellTop = rowTop + 3.dp.toPx()
                 val cellWidth = cellRight - cellLeft
                 val cellHeight = rowHeightPx - rowGapPx
-                if (cellWidth <= 12.dp.toPx()) return@forEach
+                if (cellWidth <= 1.dp.toPx()) return@forEach
+                val cellCornerPx = min(cornerPx, cellWidth / 2f)
                 drawRoundRect(
                     color = background,
                     topLeft = Offset(cellLeft, cellTop),
                     size = Size(cellWidth, cellHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerPx, cornerPx),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cellCornerPx, cellCornerPx),
                 )
                 val programImage = program.imageUrl?.let(programImageCache::get)
                 if (isActiveRow && programImage != null && cellWidth >= 110.dp.toPx()) {
@@ -2622,34 +2624,39 @@ private fun CanvasGuideGrid(
                             align = Paint.Align.CENTER,
                         )
                 }
-                nativeCanvas.save()
-                nativeCanvas.clipRect(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight)
-                val textRight = min(cellLeft + cellWidth - 12.dp.toPx(), x + width - 16.dp.toPx())
-                val textLeftLimit = if (showLiveBadge) {
-                    liveBadgeLeft + liveBadgeWidth + 10.dp.toPx()
-                } else {
-                    cellLeft + 12.dp.toPx()
+                if (cellWidth >= 32.dp.toPx()) {
+                    nativeCanvas.save()
+                    nativeCanvas.clipRect(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight)
+                    val textPaddingPx = min(12.dp.toPx(), cellWidth * 0.12f)
+                    val textRight = min(cellLeft + cellWidth - textPaddingPx, x + width - 16.dp.toPx())
+                    val textLeftLimit = if (showLiveBadge) {
+                        liveBadgeLeft + liveBadgeWidth + 10.dp.toPx()
+                    } else {
+                        cellLeft + textPaddingPx
+                    }
+                    val maxTextWidth = (textRight - textLeftLimit).coerceAtLeast(0f)
+                    if (maxTextWidth >= 16.dp.toPx()) {
+                        val paint = if (focused) darkTextPaint else titlePaint
+                        val textClusterCenterY = cellTop + cellHeight / 2f
+                        val titleCenterY = textClusterCenterY - 11.dp.toPx()
+                        val timeCenterY = textClusterCenterY + 13.dp.toPx()
+                        drawAlignedText(
+                            text = program.title,
+                            x = textRight,
+                            centerY = titleCenterY,
+                            maxWidth = maxTextWidth,
+                            paint = paint.withText(size14Px, if (focused) android.graphics.Color.rgb(7, 17, 20) else android.graphics.Color.WHITE, bold = true),
+                        )
+                        drawAlignedText(
+                            text = program.timeRange(),
+                            x = textRight,
+                            centerY = timeCenterY,
+                            maxWidth = maxTextWidth,
+                            paint = metaPaint.withText(size11Px, if (focused) android.graphics.Color.rgb(50, 58, 62) else android.graphics.Color.rgb(170, 174, 184)),
+                        )
+                    }
+                    nativeCanvas.restore()
                 }
-                val maxTextWidth = max(24.dp.toPx(), textRight - textLeftLimit)
-                val paint = if (focused) darkTextPaint else titlePaint
-                val textClusterCenterY = cellTop + cellHeight / 2f
-                val titleCenterY = textClusterCenterY - 11.dp.toPx()
-                val timeCenterY = textClusterCenterY + 13.dp.toPx()
-                drawAlignedText(
-                    text = program.title,
-                    x = textRight,
-                    centerY = titleCenterY,
-                    maxWidth = maxTextWidth,
-                    paint = paint.withText(size14Px, if (focused) android.graphics.Color.rgb(7, 17, 20) else android.graphics.Color.WHITE, bold = true),
-                )
-                drawAlignedText(
-                    text = program.timeRange(),
-                    x = textRight,
-                    centerY = timeCenterY,
-                    maxWidth = maxTextWidth,
-                    paint = metaPaint.withText(size11Px, if (focused) android.graphics.Color.rgb(50, 58, 62) else android.graphics.Color.rgb(170, 174, 184)),
-                )
-                nativeCanvas.restore()
                 }
                 rowTop += rowHeightPx
             }
