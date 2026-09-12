@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -21,24 +22,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,30 +55,18 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.tvapp.programguide.data.VodProvider
@@ -88,27 +74,17 @@ import com.tvapp.programguide.data.VodSeries
 import com.tvapp.programguide.ui.StablePlayer
 import com.tvapp.programguide.ui.StablePlayerView
 import com.tvapp.programguide.ui.VodViewModel
+import com.tvapp.programguide.ui.components.TvScreenDarkBg
+import com.tvapp.programguide.ui.components.TvScreenLayout
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// Delicate program-grid aligned color palette
 private val DarkBg = Color(0xFF080A0C)
 private val CardBg = Color(0xFF17181B)
 private val FocusedCardBg = Color(0xFFF2F4F7)
 private val FocusedCardContent = Color(0xFF0A0E14)
 private val MutedText = Color(0xFF8E95A2)
-private val SelectedFilterBg = Color(0xFF262932)
-private val SelectedProviderAccent = Color(0xFF10D5D9)
-
-enum class VodFocusZone {
-    PROVIDER,
-    SEARCH,
-    CATEGORY,
-    SERIES,
-}
-
-private class FocusKeyRef(var key: String? = null)
-private class ProviderFocusRef(var provider: VodProvider)
+private val AccentColor = Color(0xFF25D4DE)
 
 private val SeriesCardShape = RoundedCornerShape(8.dp)
 private val FocusedSeriesBorderModifier = Modifier.border(3.dp, FocusedCardBg, SeriesCardShape)
@@ -134,11 +110,11 @@ fun VodScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isCatalogActive = uiState.selectedSeriesDetails == null && !uiState.isLoadingDetails && uiState.playingEpisode == null
-    val lastFocusedProviderRef = remember { ProviderFocusRef(uiState.selectedProvider) }
-    val lastFocusedSeriesRef = remember { FocusKeyRef() }
     var suppressDetailsBackCloseUntil by remember { mutableLongStateOf(0L) }
     var catalogFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var detailsFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var lastFocusedSeriesId by remember { mutableStateOf<String?>(null) }
+
     val latestUiState by rememberUpdatedState(uiState)
     val latestCatalogFocusRestorer by rememberUpdatedState(catalogFocusRestorer)
     val latestDetailsFocusRestorer by rememberUpdatedState(detailsFocusRestorer)
@@ -159,11 +135,14 @@ fun VodScreen(
         viewModel.stopVodPlayback()
     }
 
+    // Initial load: when entering VOD, load all channels (Requirement 2)
     LaunchedEffect(Unit) {
-        lastFocusedProviderRef.provider = uiState.selectedProvider
-        lastFocusedSeriesRef.key = null
         if (uiState.seriesList.isEmpty() && !uiState.isLoadingSeries) {
-            viewModel.loadInitialSeries(uiState.selectedProvider)
+            if (uiState.selectedProvider == null) {
+                viewModel.loadAllChannelsInitialSeries()
+            } else {
+                viewModel.loadInitialSeries(uiState.selectedProvider)
+            }
         }
     }
 
@@ -177,9 +156,6 @@ fun VodScreen(
                     viewModel.closeSeriesDetails()
                 }
             }
-            uiState.searchQuery.isNotBlank() -> {
-                viewModel.search("")
-            }
             else -> onNavigateSideRail()
         }
     }
@@ -188,27 +164,29 @@ fun VodScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(DarkBg)
+                .background(DarkBg),
         ) {
-            UnifiedVodCatalogView(
+            // Main VOD Catalog View
+            VodCatalogView(
                 viewModel = viewModel,
                 onNavigateSideRail = onNavigateSideRail,
                 initialFocusRequester = initialFocusRequester,
                 contentFocusNonce = contentFocusNonce,
-                lastFocusedProviderRef = lastFocusedProviderRef,
-                lastFocusedSeriesRef = lastFocusedSeriesRef,
-                modifier = Modifier.focusProperties { canFocus = isCatalogActive },
-                onProviderFocused = { provider ->
-                    if (isCatalogActive && lastFocusedProviderRef.provider != provider) {
-                        lastFocusedProviderRef.provider = provider
-                        lastFocusedSeriesRef.key = null
-                    }
+                player = player,
+                playerView = playerView,
+                lastFocusedSeriesId = lastFocusedSeriesId,
+                onSeriesClicked = { series ->
+                    lastFocusedSeriesId = series.id
+                    viewModel.openSeriesDetails(series)
                 },
-                onSeriesFocused = { lastFocusedSeriesRef.key = "${it.provider.id}:${it.id}" },
+                onSeriesFocused = { series ->
+                    lastFocusedSeriesId = series.id
+                },
+                modifier = Modifier.focusProperties { canFocus = isCatalogActive },
                 onRegisterFocusRestorer = { catalogFocusRestorer = it },
             )
 
-            // Details Modal / Sheet
+            // Program Details Screen (TvScreenLayout based)
             AnimatedVisibility(
                 visible = uiState.selectedSeriesDetails != null || uiState.isLoadingDetails,
                 enter = fadeIn(),
@@ -224,6 +202,9 @@ fun VodScreen(
                     episodeFocusTarget = uiState.episodeFocusTarget,
                     episodeProgress = uiState.episodeProgress,
                     isPlayerActive = uiState.playingEpisode != null,
+                    player = player,
+                    playerView = playerView,
+                    viewModel = viewModel,
                     onSeasonSelected = viewModel::selectSeason,
                     onPlayEpisode = viewModel::playEpisode,
                     onEpisodeFocusRestored = viewModel::consumeEpisodeFocusTarget,
@@ -234,12 +215,12 @@ fun VodScreen(
                 )
             }
 
-            // Active VOD Player Overlay (rendered directly to prevent alpha-layer washing out)
+            // Fullscreen VOD Player Overlay
             if (uiState.playingEpisode != null && player != null && playerView != null) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .zIndex(30f)
+                        .zIndex(30f),
                 ) {
                     VodPlayerOverlay(
                         streamUrl = uiState.playingStreamUrl,
@@ -261,104 +242,103 @@ fun VodScreen(
 }
 
 @Composable
-private fun UnifiedVodCatalogView(
+private fun VodCatalogView(
     viewModel: VodViewModel,
     onNavigateSideRail: () -> Unit,
     initialFocusRequester: FocusRequester,
     contentFocusNonce: Int,
-    lastFocusedProviderRef: ProviderFocusRef,
-    lastFocusedSeriesRef: FocusKeyRef,
-    modifier: Modifier = Modifier,
-    onProviderFocused: (VodProvider) -> Unit,
+    player: StablePlayer?,
+    playerView: StablePlayerView?,
+    lastFocusedSeriesId: String?,
+    onSeriesClicked: (VodSeries) -> Unit,
     onSeriesFocused: (VodSeries) -> Unit,
+    modifier: Modifier = Modifier,
     onRegisterFocusRestorer: (((() -> Unit) -> Unit))? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val providers = listOf(
-        VodProvider.KAN11,
-        VodProvider.KESHET12,
-        VodProvider.RESHET13,
-        VodProvider.CHANNEL14,
-        VodProvider.I24NEWS,
-    )
     val gridState = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
-    val providerFocusRequesters = remember { providers.associateWith { FocusRequester() } }
-    val allCategoryFocusRequester = remember { FocusRequester() }
-    val searchFocusRequester = remember { FocusRequester() }
-    val clearSearchFocusRequester = remember { FocusRequester() }
-    var previousDetailsVisible by remember { mutableStateOf(false) }
+
+    val channelCirclesFirstFocusRequester = remember { FocusRequester() }
     val seriesFirstItemFocusRequester = remember { FocusRequester() }
     val seriesFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
-    val lastFocusedZoneRef = remember { object { var zone = VodFocusZone.SERIES } }
-    var localQuery by remember(uiState.selectedProvider) { mutableStateOf(uiState.searchQuery) }
 
-    LaunchedEffect(uiState.searchQuery) {
-        if (localQuery != uiState.searchQuery) {
-            localQuery = uiState.searchQuery
-        }
-    }
+    var focusedSeries by remember { mutableStateOf<VodSeries?>(null) }
+    var previousDetailsVisible by remember { mutableStateOf(false) }
 
-    LaunchedEffect(localQuery) {
-        if (localQuery == uiState.searchQuery) return@LaunchedEffect
-        if (localQuery.isBlank()) {
-            viewModel.search("")
+    // Keep focusedSeries in sync with the first item or remembered item
+    LaunchedEffect(uiState.seriesList) {
+        if (uiState.seriesList.isNotEmpty()) {
+            if (focusedSeries == null || uiState.seriesList.none { it.id == focusedSeries?.id }) {
+                val target = lastFocusedSeriesId?.let { id -> uiState.seriesList.firstOrNull { it.id == id } }
+                    ?: uiState.seriesList.firstOrNull()
+                focusedSeries = target
+            }
         } else {
-            delay(350)
-            viewModel.search(localQuery.trim())
+            focusedSeries = null
         }
     }
 
-    fun restoreContentFocus() {
-        when (lastFocusedZoneRef.zone) {
-            VodFocusZone.SERIES -> {
-                val key = lastFocusedSeriesRef.key
-                val target = key?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
-                try {
-                    target.requestFocus()
-                    return
-                } catch (_: Exception) {}
-                try {
-                    seriesFirstItemFocusRequester.requestFocus()
-                    return
-                } catch (_: Exception) {}
-                val provider = lastFocusedProviderRef.provider
-                val fallbackReq = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
-                try { fallbackReq?.requestFocus() } catch (_: Exception) {}
+    // Restore focus when returning from Details (Requirement 9)
+    LaunchedEffect(uiState.selectedSeriesDetails, uiState.isLoadingDetails) {
+        val detailsVisible = uiState.selectedSeriesDetails != null || uiState.isLoadingDetails
+        if (previousDetailsVisible && !detailsVisible) {
+            val targetId = lastFocusedSeriesId
+            val targetIndex = if (targetId != null) {
+                uiState.seriesList.indexOfFirst { it.id == targetId }
+            } else 0
+
+            if (targetIndex >= 0 && uiState.seriesList.isNotEmpty()) {
+                coroutineScope.launch {
+                    try {
+                        gridState.scrollToItem(targetIndex.coerceAtLeast(0))
+                    } catch (_: Exception) {}
+                    delay(90)
+                    val requester = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+                    try {
+                        requester.requestFocus()
+                    } catch (_: Exception) {
+                        try { seriesFirstItemFocusRequester.requestFocus() } catch (_: Exception) {}
+                    }
+                }
             }
-            VodFocusZone.CATEGORY -> {
+        }
+        previousDetailsVisible = detailsVisible
+    }
+
+    fun restoreFocus() {
+        val targetId = lastFocusedSeriesId
+        val targetIndex = if (targetId != null) {
+            uiState.seriesList.indexOfFirst { it.id == targetId }
+        } else 0
+        val requester = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+        try {
+            requester.requestFocus()
+        } catch (_: Exception) {
+            coroutineScope.launch {
                 try {
-                    allCategoryFocusRequester.requestFocus()
-                    return
+                    gridState.scrollToItem(targetIndex.coerceAtLeast(0))
                 } catch (_: Exception) {}
-                val provider = lastFocusedProviderRef.provider
-                val fallbackReq = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
-                try { fallbackReq?.requestFocus() } catch (_: Exception) {}
-            }
-            VodFocusZone.SEARCH -> {
-                try {
-                    searchFocusRequester.requestFocus()
-                    return
-                } catch (_: Exception) {}
-                val provider = lastFocusedProviderRef.provider
-                val fallbackReq = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
-                try { fallbackReq?.requestFocus() } catch (_: Exception) {}
-            }
-            VodFocusZone.PROVIDER -> {
-                val provider = lastFocusedProviderRef.provider
-                val req = if (provider == providers.first()) initialFocusRequester else providerFocusRequesters[provider]
-                try { req?.requestFocus() } catch (_: Exception) {}
+                delay(80)
+                try { requester.requestFocus() } catch (_: Exception) {}
             }
         }
     }
 
     DisposableEffect(Unit) {
         onRegisterFocusRestorer?.invoke {
-            restoreContentFocus()
+            restoreFocus()
         }
         onDispose {}
     }
 
+    LaunchedEffect(contentFocusNonce) {
+        if (contentFocusNonce > 0 && uiState.selectedSeriesDetails == null && !uiState.isLoadingDetails && uiState.playingEpisode == null) {
+            restoreFocus()
+        }
+    }
+
+    // Pagination when scrolling
     LaunchedEffect(gridState) {
         snapshotFlow {
             val total = gridState.layoutInfo.totalItemsCount
@@ -372,196 +352,73 @@ private fun UnifiedVodCatalogView(
         }
     }
 
-    fun requestSeriesFocus(preferredSeriesKey: String? = lastFocusedSeriesRef.key) {
-        if (uiState.seriesList.isEmpty()) return
-        val key = preferredSeriesKey ?: uiState.seriesList.firstOrNull()?.let { "${it.provider.id}:${it.id}" }
-        val target = key?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
-        try {
-            target.requestFocus()
-            return
-        } catch (_: Exception) {}
+    val activeSeries = focusedSeries ?: uiState.seriesList.firstOrNull()
 
-        val targetIndex = key?.let { k ->
-            uiState.seriesList.indexOfFirst { "${it.provider.id}:${it.id}" == k }
-        }?.coerceAtLeast(0) ?: 0
-        coroutineScope.launch {
-            if (targetIndex > 0) {
-                try {
-                    gridState.scrollToItem((targetIndex - 5).coerceAtLeast(0))
-                } catch (_: Exception) {}
-            }
+    val heroTitle = activeSeries?.title
+        ?: if (uiState.selectedProvider == null) "תוכניות VOD" else uiState.selectedProvider!!.displayName
+
+    val heroSubtitle = listOfNotNull(
+        activeSeries?.provider?.displayName ?: uiState.selectedProvider?.displayName ?: "כל הערוצים",
+        activeSeries?.genre?.takeIf { !it.isNullOrBlank() && it.lowercase() != "null" },
+    ).joinToString(" · ")
+
+    val heroDescription = activeSeries?.description?.trim().orEmpty()
+
+    val heroChannelLogoUrl = (activeSeries?.provider ?: uiState.selectedProvider)?.let {
+        viewModel.getProviderLogoUrl(it)
+    }
+
+    val backgroundImageUrl = activeSeries?.imageUrl
+
+    TvScreenLayout(
+        player = player ?: StablePlayer(androidx.media3.exoplayer.ExoPlayer.Builder(LocalContext.current).build()),
+        playerView = playerView ?: StablePlayerView(androidx.media3.ui.PlayerView(LocalContext.current)),
+        isVideoRendering = false,
+        isPlayerExpanded = false,
+        backgroundImageUrl = backgroundImageUrl,
+        artworkTitle = heroTitle,
+        heroTitle = heroTitle,
+        heroSubtitle = heroSubtitle,
+        heroDescription = heroDescription,
+        heroTimeRange = null,
+        heroChannelLogoUrl = heroChannelLogoUrl,
+        isLive = false,
+        showVodBadge = true,
+        isMuted = false,
+        onToggleMute = {},
+        onNavigateLeft = onNavigateSideRail,
+        onNavigateDown = {
             try {
-                target.requestFocus()
-            } catch (_: Exception) {
-                try {
-                    seriesFirstItemFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    fun requestProviderFocus(provider: VodProvider = lastFocusedProviderRef.provider) {
-        val requester = if (provider == providers.first()) {
-            initialFocusRequester
-        } else {
-            providerFocusRequesters[provider]
-        }
-        try {
-            requester?.requestFocus()
-        } catch (_: Exception) {
-            coroutineScope.launch {
-                try {
-                    requester?.requestFocus()
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    fun requestCategoryFocus() {
-        try {
-            allCategoryFocusRequester.requestFocus()
-        } catch (_: Exception) {
-            coroutineScope.launch {
-                try {
-                    allCategoryFocusRequester.requestFocus()
-                } catch (_: Exception) {
-                    requestSeriesFocus()
-                }
-            }
-        }
-    }
-
-    fun requestSearchFocus() {
-        try {
-            searchFocusRequester.requestFocus()
-        } catch (_: Exception) {
-            coroutineScope.launch {
-                try {
-                    searchFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    LaunchedEffect(contentFocusNonce) {
-        if (contentFocusNonce > 0 && uiState.selectedSeriesDetails == null && !uiState.isLoadingDetails && uiState.playingEpisode == null) {
-            restoreContentFocus()
-        }
-    }
-
-    LaunchedEffect(uiState.selectedSeriesDetails, uiState.isLoadingDetails) {
-        val detailsVisible = uiState.selectedSeriesDetails != null || uiState.isLoadingDetails
-        if (previousDetailsVisible && !detailsVisible) {
-            requestSeriesFocus()
-        }
-        previousDetailsVisible = detailsVisible
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(top = 18.dp, start = 24.dp, end = 24.dp),
+                val targetId = lastFocusedSeriesId
+                val targetReq = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+                targetReq.requestFocus()
+            } catch (_: Exception) {}
+        },
+        // Requirement 3: Channel logo circles in top corner instead of mute icons
+        actions = {
+            ChannelCirclesRow(
+                selectedProvider = uiState.selectedProvider,
+                onSelectProvider = { provider ->
+                    viewModel.selectProvider(provider)
+                },
+                getLogoUrl = viewModel::getProviderLogoUrl,
+                onNavigateSideRail = onNavigateSideRail,
+                onNavigateDown = {
+                    try {
+                        val targetId = lastFocusedSeriesId
+                        val targetReq = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+                        targetReq.requestFocus()
+                    } catch (_: Exception) {}
+                },
+                firstCircleFocusRequester = channelCirclesFirstFocusRequester,
+            )
+        },
+        heroPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 32.dp),
+        contentPadding = PaddingValues(start = 32.dp, end = 32.dp, bottom = 16.dp),
+        spacerAfterHero = 8.dp,
+        modifier = modifier,
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 2.dp, vertical = 4.dp),
-        ) {
-            providers.forEachIndexed { index, provider ->
-                ProviderTab(
-                    provider = provider,
-                    logoUrl = viewModel.getProviderLogoUrl(provider),
-                    isSelected = uiState.selectedProvider == provider,
-                    focusRequester = if (provider == providers.first()) {
-                        initialFocusRequester
-                    } else {
-                        providerFocusRequesters[provider]
-                    },
-                    onFocused = {
-                        lastFocusedZoneRef.zone = VodFocusZone.PROVIDER
-                        onProviderFocused(provider)
-                    },
-                    onClick = {
-                        lastFocusedZoneRef.zone = VodFocusZone.PROVIDER
-                        onProviderFocused(provider)
-                        viewModel.selectProvider(provider)
-                    },
-                    onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                    onNavigateDown = { requestSearchFocus() },
-                )
-            }
-        }
-
-        ChannelDetailsBand(
-            provider = uiState.selectedProvider,
-            logoUrl = viewModel.getProviderLogoUrl(uiState.selectedProvider),
-            totalSeries = uiState.totalSeries,
-            categoriesCount = uiState.categories.size,
-            isLoading = uiState.isLoadingSeries,
-            searchQuery = localQuery,
-            onSearchQueryChange = { localQuery = it },
-            onClearSearch = {
-                localQuery = ""
-                viewModel.search("")
-            },
-            onSearchSubmit = {
-                val trimmed = localQuery.trim()
-                if (trimmed != uiState.searchQuery) {
-                    viewModel.search(trimmed)
-                }
-            },
-            searchFocusRequester = searchFocusRequester,
-            clearSearchFocusRequester = clearSearchFocusRequester,
-            onSearchFocused = { lastFocusedZoneRef.zone = VodFocusZone.SEARCH },
-            onSearchNavigateUp = { requestProviderFocus(uiState.selectedProvider) },
-            onSearchNavigateDown = {
-                if (uiState.categories.isNotEmpty()) {
-                    requestCategoryFocus()
-                } else {
-                    requestSeriesFocus()
-                }
-            },
-            onSearchNavigateLeft = onNavigateSideRail,
-            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
-        )
-
-        if (uiState.categories.isNotEmpty()) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(horizontal = 2.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-            ) {
-                item {
-                    CategoryFilterChip(
-                        name = "הכל",
-                        isSelected = uiState.selectedCategory == null,
-                        onClick = { viewModel.selectCategory(null) },
-                        focusRequester = allCategoryFocusRequester,
-                        onFocused = { lastFocusedZoneRef.zone = VodFocusZone.CATEGORY },
-                        onNavigateUp = { requestSearchFocus() },
-                        onNavigateLeft = onNavigateSideRail,
-                        onNavigateDown = { requestSeriesFocus() },
-                    )
-                }
-
-                items(uiState.categories) { category ->
-                    CategoryFilterChip(
-                        name = category,
-                        isSelected = uiState.selectedCategory == category,
-                        onClick = { viewModel.selectCategory(category) },
-                        onFocused = { lastFocusedZoneRef.zone = VodFocusZone.CATEGORY },
-                        onNavigateUp = { requestSearchFocus() },
-                        onNavigateDown = { requestSeriesFocus() },
-                    )
-                }
-            }
-        } else {
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
+        // Content Slot: Grid of Series Cards
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -585,29 +442,12 @@ private fun UnifiedVodCatalogView(
                 }
                 uiState.seriesList.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(
-                                text = if (uiState.searchQuery.isNotBlank()) {
-                                    "לא נמצאו תוכניות עבור \"${uiState.searchQuery}\""
-                                } else {
-                                    "לא נמצאו תוכניות בקטגוריה זו"
-                                },
-                                color = MutedText,
-                                fontSize = 16.sp,
-                                style = RtlTextStyle,
-                            )
-                            if (uiState.searchQuery.isNotBlank()) {
-                                Text(
-                                    text = "נסה לחפש שם אחר או לחץ חזרה לכל התוכניות",
-                                    color = Color(0xFF6B7280),
-                                    fontSize = 13.sp,
-                                    style = RtlTextStyle,
-                                )
-                            }
-                        }
+                        Text(
+                            text = "לא נמצאו תוכניות",
+                            color = MutedText,
+                            fontSize = 16.sp,
+                            style = RtlTextStyle,
+                        )
                     }
                 }
                 else -> {
@@ -625,40 +465,42 @@ private fun UnifiedVodCatalogView(
                             contentType = { _, _ -> "series_card" },
                         ) { index, series ->
                             val seriesKey = "${series.provider.id}:${series.id}"
-                            val seriesRequester = if (index == 0) seriesFirstItemFocusRequester else remember(seriesKey) { FocusRequester() }
+                            val seriesRequester = if (index == 0) {
+                                seriesFirstItemFocusRequester
+                            } else {
+                                remember(seriesKey) { FocusRequester() }
+                            }
+
                             DisposableEffect(seriesKey) {
-                                seriesFocusRequesters[seriesKey] = seriesRequester
+                                seriesFocusRequesters[series.id] = seriesRequester
                                 onDispose {
-                                    seriesFocusRequesters.remove(seriesKey)
+                                    seriesFocusRequesters.remove(series.id)
                                 }
                             }
+
                             SeriesCard(
                                 series = series,
                                 focusRequester = seriesRequester,
                                 onFocused = {
-                                    lastFocusedZoneRef.zone = VodFocusZone.SERIES
+                                    focusedSeries = series
                                     onSeriesFocused(series)
                                 },
                                 onClick = {
-                                    lastFocusedZoneRef.zone = VodFocusZone.SERIES
-                                    onSeriesFocused(series)
-                                    viewModel.openSeriesDetails(series)
+                                    onSeriesClicked(series)
                                 },
                                 onNavigateLeft = if (index % 5 == 0) onNavigateSideRail else null,
                                 onNavigateUp = if (index < 5) {
                                     {
-                                        if (uiState.categories.isNotEmpty()) {
-                                            requestCategoryFocus()
-                                        } else {
-                                            requestSearchFocus()
-                                        }
+                                        try {
+                                            channelCirclesFirstFocusRequester.requestFocus()
+                                        } catch (_: Exception) {}
                                     }
                                 } else null,
                             )
                         }
 
                         if (uiState.isLoadingMoreSeries) {
-                            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(5) }) {
+                            item(span = { GridItemSpan(5) }) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -676,475 +518,140 @@ private fun UnifiedVodCatalogView(
     }
 }
 
+/**
+ * Requirement 3 & 4: Channel logo icons in circles at the top corner.
+ * Clicking on a circle filters to that channel, or clicking "הכל" filters to all channels.
+ */
 @Composable
-private fun ProviderTab(
-    provider: VodProvider,
-    logoUrl: String,
-    isSelected: Boolean,
-    focusRequester: FocusRequester?,
-    onFocused: () -> Unit,
-    onClick: () -> Unit,
-    onNavigateLeft: (() -> Unit)?,
+private fun ChannelCirclesRow(
+    selectedProvider: VodProvider?,
+    onSelectProvider: (VodProvider?) -> Unit,
+    getLogoUrl: (VodProvider) -> String,
+    onNavigateSideRail: () -> Unit,
     onNavigateDown: () -> Unit,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val active = isFocused || isSelected
-
-    val tabBg = when {
-        isSelected -> FocusedCardBg
-        isFocused -> Color(0x22FFFFFF)
-        else -> Color.Transparent
-    }
-    val labelColor = when {
-        isSelected -> FocusedCardContent
-        isFocused -> Color.White
-        else -> MutedText
-    }
-    val focusLineColor = when {
-        isFocused -> SelectedProviderAccent
-        isSelected -> Color.White
-        else -> Color.Transparent
-    }
-    val logoBg = if (active) Color(0x3320232A) else Color.Transparent
-
-    Box(
-        modifier = Modifier
-            .width(154.dp)
-            .height(54.dp)
-            .clip(RoundedCornerShape(999.dp))
-            .background(tabBg)
-            .onFocusChanged {
-                if (it.isFocused) onFocused()
-            }
-            .tvFocusableClickable(
-                onClick = onClick,
-                interactionSource = interactionSource,
-                focusRequester = focusRequester,
-                onNavigateLeft = onNavigateLeft,
-                onNavigateDown = onNavigateDown,
-            ),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        AsyncImage(
-            model = logoUrl,
-            contentDescription = null,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .size(76.dp)
-                .graphicsLayer { alpha = if (active) 0.2f else 0.1f },
-            contentScale = ContentScale.Fit,
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(logoBg),
-                contentAlignment = Alignment.Center,
-            ) {
-                AsyncImage(
-                    model = logoUrl,
-                    contentDescription = provider.displayName,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Crop,
-                )
-            }
-
-            Text(
-                text = provider.displayName,
-                color = labelColor,
-                fontSize = 13.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Start,
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(if (isFocused) 3.dp else 2.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(focusLineColor),
-        )
-    }
-}
-
-@Composable
-private fun ChannelDetailsBand(
-    provider: VodProvider,
-    logoUrl: String,
-    totalSeries: Int,
-    categoriesCount: Int,
-    isLoading: Boolean,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    onClearSearch: () -> Unit,
-    onSearchSubmit: () -> Unit,
-    searchFocusRequester: FocusRequester,
-    clearSearchFocusRequester: FocusRequester,
-    onSearchFocused: () -> Unit,
-    onSearchNavigateUp: () -> Unit,
-    onSearchNavigateDown: () -> Unit,
-    onSearchNavigateLeft: () -> Unit,
+    firstCircleFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(92.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                Brush.horizontalGradient(
-                    listOf(
-                        Color(0xFF12151C),
-                        Color(0xFF101219),
-                        Color(0xFF080A0C),
-                    )
-                )
-            ),
-    ) {
-        AsyncImage(
-            model = logoUrl,
-            contentDescription = null,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .size(168.dp)
-                .graphicsLayer { alpha = 0.09f },
-            contentScale = ContentScale.Fit,
-        )
+    val providers = listOf(
+        VodProvider.KAN11,
+        VodProvider.KESHET12,
+        VodProvider.RESHET13,
+        VodProvider.CHANNEL14,
+        VodProvider.I24NEWS,
+    )
 
-        val summary = when {
-            isLoading -> "טוען תוכניות..."
-            searchQuery.isNotBlank() -> if (totalSeries > 0) "$totalSeries תוצאות" else "אין תוצאות"
-            totalSeries > 0 && categoriesCount > 0 -> "$totalSeries תוכניות · $categoriesCount פילטרים"
-            totalSeries > 0 -> "$totalSeries תוכניות"
-            else -> ""
-        }
+    val circleRequesters = remember { providers.associateWith { FocusRequester() } }
 
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0x1AFFFFFF)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AsyncImage(
-                        model = logoUrl,
-                        contentDescription = provider.displayName,
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = provider.displayName,
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        style = RtlTextStyle,
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "ערוץ ${provider.channelNumber}",
-                            color = MutedText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            style = RtlTextStyle,
-                        )
-                        if (summary.isNotBlank()) {
-                            Text(
-                                text = "•",
-                                color = Color(0x668E95A2),
-                                fontSize = 12.sp,
-                            )
-                            Text(
-                                text = summary,
-                                color = if (searchQuery.isNotBlank()) SelectedProviderAccent else Color(0xFFD0D5DD),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                style = RtlTextStyle,
-                            )
-                        }
-                    }
-                }
-            }
-
-            VodSearchBar(
-                provider = provider,
-                query = searchQuery,
-                onQueryChange = onSearchQueryChange,
-                onClear = onClearSearch,
-                onSearch = onSearchSubmit,
-                focusRequester = searchFocusRequester,
-                clearButtonFocusRequester = clearSearchFocusRequester,
-                onFocused = onSearchFocused,
-                onNavigateUp = onSearchNavigateUp,
-                onNavigateDown = onSearchNavigateDown,
-                onNavigateLeft = onSearchNavigateLeft,
-            )
-        }
-    }
-}
-
-@Composable
-private fun VodSearchBar(
-    provider: VodProvider,
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onClear: () -> Unit,
-    onSearch: () -> Unit,
-    focusRequester: FocusRequester,
-    clearButtonFocusRequester: FocusRequester,
-    onFocused: () -> Unit,
-    onNavigateUp: () -> Unit,
-    onNavigateDown: () -> Unit,
-    onNavigateLeft: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var isEditing by remember { mutableStateOf(false) }
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val innerTextFieldFocusRequester = remember { FocusRequester() }
-    val searchInteractionSource = remember { MutableInteractionSource() }
-    val isSearchFocused by searchInteractionSource.collectIsFocusedAsState()
-    val clearInteractionSource = remember { MutableInteractionSource() }
-    val isClearFocused by clearInteractionSource.collectIsFocusedAsState()
-
-    LaunchedEffect(isEditing) {
-        if (isEditing) {
-            delay(50)
-            try {
-                innerTextFieldFocusRequester.requestFocus()
-                keyboardController?.show()
-            } catch (_: Exception) {}
-        }
-    }
+    val circleSize = 56.dp
 
     Row(
-        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.padding(vertical = 4.dp),
     ) {
-        val searchBorderColor = when {
-            isEditing -> SelectedProviderAccent
-            isSearchFocused -> FocusedCardBg
-            else -> Color(0x338E95A2)
+        // "הכל" (All Channels) Circle
+        val isAllSelected = (selectedProvider == null)
+        val allInteractionSource = remember { MutableInteractionSource() }
+        val isAllFocused by allInteractionSource.collectIsFocusedAsState()
+
+        val allBg = when {
+            isAllFocused -> FocusedCardBg
+            isAllSelected -> Color(0x3325D4DE)
+            else -> Color(0x3317181B)
         }
-        val searchBg = when {
-            isEditing -> Color(0xFF1B222E)
-            isSearchFocused -> Color(0xFF222834)
-            else -> Color(0x2A14171F)
+        val allBorder = when {
+            isAllFocused -> BorderStroke(3.dp, Color.White)
+            isAllSelected -> BorderStroke(2.5.dp, AccentColor)
+            else -> BorderStroke(1.5.dp, Color(0x33FFFFFF))
         }
 
         Box(
             modifier = Modifier
-                .width(320.dp)
-                .height(46.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(searchBg)
-                .border(
-                    width = if (isSearchFocused || isEditing) 2.dp else 1.dp,
-                    color = searchBorderColor,
-                    shape = RoundedCornerShape(999.dp),
-                )
-                .onFocusChanged {
-                    if (it.isFocused) {
-                        onFocused()
-                    }
-                }
-                .then(
-                    if (!isEditing) {
-                        Modifier.tvFocusableClickable(
-                            onClick = {
-                                isEditing = true
-                            },
-                            interactionSource = searchInteractionSource,
-                            focusRequester = focusRequester,
-                            onNavigateLeft = onNavigateLeft,
-                            onNavigateRight = if (query.isNotEmpty()) {
-                                {
-                                    try {
-                                        clearButtonFocusRequester.requestFocus()
-                                    } catch (_: Exception) {}
-                                }
-                            } else null,
-                            onNavigateUp = onNavigateUp,
-                            onNavigateDown = onNavigateDown,
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-                .padding(horizontal = 14.dp),
-            contentAlignment = Alignment.CenterStart,
+                .size(circleSize)
+                .clip(CircleShape)
+                .background(allBg)
+                .border(allBorder, CircleShape)
+                .tvFocusableClickable(
+                    onClick = { onSelectProvider(null) },
+                    interactionSource = allInteractionSource,
+                    focusRequester = firstCircleFocusRequester,
+                    onNavigateLeft = onNavigateSideRail,
+                    onNavigateDown = onNavigateDown,
+                    onNavigateRight = {
+                        try {
+                            circleRequesters[providers.first()]?.requestFocus()
+                        } catch (_: Exception) {}
+                    },
+                ),
+            contentAlignment = Alignment.Center,
         ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "חיפוש",
-                    tint = if (isSearchFocused || isEditing) SelectedProviderAccent else MutedText,
-                    modifier = Modifier.size(20.dp),
-                )
-
-                if (isEditing) {
-                    BasicTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(innerTextFieldFocusRequester)
-                            .onPreviewKeyEvent { event ->
-                                if (event.type == KeyEventType.KeyDown) {
-                                    when (event.key) {
-                                        Key.Enter, Key.DirectionCenter, Key.NumPadEnter -> {
-                                            isEditing = false
-                                            keyboardController?.hide()
-                                            onSearch()
-                                            try { focusRequester.requestFocus() } catch (_: Exception) {}
-                                            true
-                                        }
-                                        Key.Back -> {
-                                            isEditing = false
-                                            keyboardController?.hide()
-                                            try { focusRequester.requestFocus() } catch (_: Exception) {}
-                                            true
-                                        }
-                                        Key.DirectionDown -> {
-                                            isEditing = false
-                                            keyboardController?.hide()
-                                            onNavigateDown()
-                                            true
-                                        }
-                                        Key.DirectionUp -> {
-                                            isEditing = false
-                                            keyboardController?.hide()
-                                            onNavigateUp()
-                                            true
-                                        }
-                                        else -> false
-                                    }
-                                } else false
-                            },
-                        singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            textDirection = TextDirection.ContentOrRtl,
-                        ),
-                        cursorBrush = SolidColor(SelectedProviderAccent),
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Search,
-                            keyboardType = KeyboardType.Text,
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onSearch = {
-                                isEditing = false
-                                keyboardController?.hide()
-                                onSearch()
-                                try { focusRequester.requestFocus() } catch (_: Exception) {}
-                            }
-                        ),
-                        decorationBox = { innerTextField ->
-                            if (query.isEmpty()) {
-                                Text(
-                                    text = "חפש ב-${provider.displayName}...",
-                                    color = MutedText,
-                                    fontSize = 14.sp,
-                                    style = RtlTextStyle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            innerTextField()
-                        }
-                    )
-                } else {
-                    Text(
-                        text = query.ifEmpty { "חפש ב-${provider.displayName}..." },
-                        color = if (query.isEmpty()) MutedText else Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = if (query.isEmpty()) FontWeight.Normal else FontWeight.Medium,
-                        style = RtlTextStyle,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
+            Text(
+                text = "הכל",
+                color = if (isAllFocused) FocusedCardContent else Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
 
-        if (query.isNotEmpty()) {
-            val clearBorderColor = if (isClearFocused) SelectedProviderAccent else Color(0x338E95A2)
-            val clearBg = if (isClearFocused) Color(0xFF222834) else Color(0x2A14171F)
+        // Provider Channel Circles
+        providers.forEachIndexed { index, provider ->
+            val isSelected = (selectedProvider == provider)
+            val interactionSource = remember { MutableInteractionSource() }
+            val isFocused by interactionSource.collectIsFocusedAsState()
+            val requester = circleRequesters[provider] ?: remember { FocusRequester() }
+
+            val bg = when {
+                isFocused -> FocusedCardBg
+                isSelected -> Color(0x3325D4DE)
+                else -> Color(0xFF17181B)
+            }
+            val border = when {
+                isFocused -> BorderStroke(3.dp, Color.White)
+                isSelected -> BorderStroke(2.5.dp, AccentColor)
+                else -> BorderStroke(1.5.dp, Color(0x33FFFFFF))
+            }
 
             Box(
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(clearBg)
-                    .border(
-                        width = if (isClearFocused) 2.dp else 1.dp,
-                        color = clearBorderColor,
-                        shape = RoundedCornerShape(999.dp),
-                    )
-                    .onFocusChanged {
-                        if (it.isFocused) onFocused()
-                    }
+                    .size(circleSize)
+                    .clip(CircleShape)
+                    .background(bg)
+                    .border(border, CircleShape)
                     .tvFocusableClickable(
                         onClick = {
-                            onClear()
-                            try { focusRequester.requestFocus() } catch (_: Exception) {}
+                            if (isSelected) {
+                                onSelectProvider(null) // Toggle back to all
+                            } else {
+                                onSelectProvider(provider)
+                            }
                         },
-                        interactionSource = clearInteractionSource,
-                        focusRequester = clearButtonFocusRequester,
+                        interactionSource = interactionSource,
+                        focusRequester = requester,
                         onNavigateLeft = {
-                            try { focusRequester.requestFocus() } catch (_: Exception) {}
+                            if (index == 0) {
+                                try { firstCircleFocusRequester.requestFocus() } catch (_: Exception) {}
+                            } else {
+                                val prev = providers[index - 1]
+                                try { circleRequesters[prev]?.requestFocus() } catch (_: Exception) {}
+                            }
                         },
-                        onNavigateUp = onNavigateUp,
+                        onNavigateRight = if (index < providers.size - 1) {
+                            {
+                                val next = providers[index + 1]
+                                try { circleRequesters[next]?.requestFocus() } catch (_: Exception) {}
+                            }
+                        } else null,
                         onNavigateDown = onNavigateDown,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "איפוס חיפוש",
-                    tint = if (isClearFocused) SelectedProviderAccent else MutedText,
-                    modifier = Modifier.size(18.dp),
+                AsyncImage(
+                    model = getLogoUrl(provider),
+                    contentDescription = provider.displayName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
                 )
             }
         }
@@ -1152,7 +659,7 @@ private fun VodSearchBar(
 }
 
 /**
- * TV Series Card
+ * TV Series Card for VOD Grid.
  */
 @Composable
 private fun SeriesCard(
@@ -1162,6 +669,7 @@ private fun SeriesCard(
     onClick: () -> Unit,
     onNavigateLeft: (() -> Unit)? = null,
     onNavigateUp: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -1179,9 +687,9 @@ private fun SeriesCard(
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .height(214.dp)
+            .height(205.dp)
             .clip(SeriesCardShape)
             .background(CardBg)
             .then(if (isFocused) FocusedSeriesBorderModifier else Modifier)
@@ -1219,14 +727,16 @@ private fun SeriesCard(
             }
         }
 
+        // Bottom gradient for title readability
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(112.dp)
+                .height(110.dp)
                 .background(SeriesCardGradient),
         )
 
+        // Episode count badge
         if (series.episodeCount > 0) {
             Box(
                 modifier = Modifier
@@ -1245,88 +755,39 @@ private fun SeriesCard(
             }
         }
 
+        // Series details at bottom of card
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
                 .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
+            // Provider pill
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xCC080A0E))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    text = series.provider.displayName,
+                    color = Color(0xFFD0D5DD),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            // Series Title
             Text(
                 text = series.title,
                 color = Color.White,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = RtlTextStyle,
             )
-
-            if (series.description.isNotBlank()) {
-                Text(
-                    text = series.description,
-                    color = Color(0xFFD0D5DD),
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
-                    style = RtlTextStyle,
-                )
-            }
         }
-    }
-}
-
-@Composable
-private fun CategoryFilterChip(
-    name: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester? = null,
-    onFocused: (() -> Unit)? = null,
-    onNavigateLeft: (() -> Unit)? = null,
-    onNavigateUp: (() -> Unit)? = null,
-    onNavigateDown: (() -> Unit)? = null,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-
-    val targetBg = when {
-        isFocused -> FocusedCardBg
-        isSelected -> SelectedFilterBg
-        else -> Color.Transparent
-    }
-    val targetFg = when {
-        isFocused -> FocusedCardContent
-        isSelected -> Color.White
-        else -> MutedText
-    }
-
-    val bg = targetBg
-    val fg = targetFg
-
-    Box(
-        modifier = Modifier
-            .clip(SeriesCardShape)
-            .background(bg)
-            .onFocusChanged {
-                if (it.isFocused) onFocused?.invoke()
-            }
-            .tvFocusableClickable(
-                onClick = onClick,
-                interactionSource = interactionSource,
-                focusRequester = focusRequester,
-                onNavigateLeft = onNavigateLeft,
-                onNavigateUp = onNavigateUp,
-                onNavigateDown = onNavigateDown,
-            )
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = name,
-            color = fg,
-            fontSize = 13.sp,
-            fontWeight = if (isSelected || isFocused) FontWeight.SemiBold else FontWeight.Normal,
-        )
     }
 }

@@ -1,14 +1,10 @@
 package com.tvapp.programguide.ui.vod
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -48,17 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -68,6 +56,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.tvapp.programguide.data.VodEpisode
@@ -75,30 +67,22 @@ import com.tvapp.programguide.data.VodPlaybackProgress
 import com.tvapp.programguide.data.VodSeason
 import com.tvapp.programguide.data.VodSeries
 import com.tvapp.programguide.data.VodSeriesDetails
+import com.tvapp.programguide.ui.StablePlayer
+import com.tvapp.programguide.ui.StablePlayerView
 import com.tvapp.programguide.ui.VodEpisodeFocusTarget
+import com.tvapp.programguide.ui.VodViewModel
+import com.tvapp.programguide.ui.components.TvScreenDarkBg
+import com.tvapp.programguide.ui.components.TvScreenLayout
+import com.tvapp.programguide.ui.components.VodBadge
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// Delicate program-grid aligned color palette without harsh borders
 private val DetailsBg = Color(0xFF080A0C)
 private val CardBg = Color(0xFF17181B)
 private val FocusedCardBg = Color(0xFFF2F4F7)
 private val FocusedCardContent = Color(0xFF0A0E14)
 private val MutedText = Color(0xFF8E95A2)
 private val SelectedFilterBg = Color(0xFF262932)
-
-private fun formatTime(millis: Long): String {
-    if (millis <= 0) return "0:00"
-    val totalSeconds = millis / 1000
-    val seconds = totalSeconds % 60
-    val minutes = (totalSeconds / 60) % 60
-    val hours = totalSeconds / 3600
-    return if (hours > 0) {
-        String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
-    }
-}
 
 @Composable
 fun VodSeriesDetailsView(
@@ -110,6 +94,9 @@ fun VodSeriesDetailsView(
     episodeFocusTarget: VodEpisodeFocusTarget? = null,
     episodeProgress: Map<String, VodPlaybackProgress> = emptyMap(),
     isPlayerActive: Boolean = false,
+    player: StablePlayer? = null,
+    playerView: StablePlayerView? = null,
+    viewModel: VodViewModel? = null,
     onSeasonSelected: (VodSeason) -> Unit,
     onPlayEpisode: (VodEpisode, VodSeries) -> Unit,
     onEpisodeFocusRestored: (Int) -> Unit = {},
@@ -119,81 +106,133 @@ fun VodSeriesDetailsView(
     onRegisterFocusRestorer: (((() -> Unit) -> Unit))? = null,
     modifier: Modifier = Modifier,
 ) {
+    if (isLoading) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(DetailsBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = Color(0xFFE2E8F0))
+        }
+        return
+    }
+
+    if (error != null) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(DetailsBg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    text = error,
+                    color = Color(0xFFF04438),
+                    fontSize = 16.sp,
+                )
+                val backInteractionSource = remember { MutableInteractionSource() }
+                val isBackFocused by backInteractionSource.collectIsFocusedAsState()
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isBackFocused) FocusedCardBg else Color(0x33FFFFFF))
+                        .tvFocusableClickable(
+                            onClick = onClose,
+                            interactionSource = backInteractionSource,
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = "חזרה",
+                        color = if (isBackFocused) FocusedCardContent else Color.White,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    val series = details?.series ?: return
+
+    val distinctSeasonIds = remember(details.episodes) {
+        details.episodes.mapNotNull { it.seasonId }.distinct()
+    }
+    val effectiveSeasons = remember(details.seasons, distinctSeasonIds, series.id) {
+        when {
+            details.seasons.isNotEmpty() -> details.seasons
+            distinctSeasonIds.size > 1 -> distinctSeasonIds.mapIndexed { idx, sId ->
+                VodSeason(
+                    seasonId = sId,
+                    programId = series.id,
+                    title = "עונה ${idx + 1}",
+                    seasonNumber = idx + 1,
+                )
+            }
+            else -> listOf(
+                VodSeason(
+                    seasonId = "season-1",
+                    programId = series.id,
+                    title = "עונה 1",
+                    seasonNumber = 1,
+                )
+            )
+        }
+    }
+
+    val currentSeason = selectedSeason ?: effectiveSeasons.firstOrNull()
+
+    val currentSeasonEpisodes = remember(details.episodes, currentSeason?.seasonId, effectiveSeasons.size) {
+        if (currentSeason != null && effectiveSeasons.size > 1) {
+            val filtered = details.episodes.filter { it.seasonId == currentSeason.seasonId }
+            if (filtered.isNotEmpty()) filtered else details.episodes
+        } else {
+            details.episodes
+        }
+    }
+
     val episodesListState = rememberLazyListState()
     val backFocusRequester = remember { FocusRequester() }
-    val series = details?.series
-    val seasons = details?.seasons.orEmpty()
-    val episodes = if (details != null && selectedSeason != null && seasons.size > 1) {
-        val filtered = details.episodes.filter { it.seasonId == selectedSeason.seasonId }
-        if (filtered.isNotEmpty()) filtered else details.episodes
-    } else {
-        details?.episodes.orEmpty()
+    val fullScreenFocusRequester = remember { FocusRequester() }
+    val muteFocusRequester = remember { FocusRequester() }
+    val seasonFocusRequesters = remember(effectiveSeasons) {
+        effectiveSeasons.associate { it.seasonId to FocusRequester() }
+    }
+    val episodeFocusRequesters = remember(currentSeasonEpisodes) {
+        currentSeasonEpisodes.associate { it.id to FocusRequester() }
     }
 
-    val seasonFocusRequesters = remember(seasons) {
-        seasons.associate { it.seasonId to FocusRequester() }
-    }
-    val episodeFocusRequesters = remember(episodes) {
-        episodes.associate { it.id to FocusRequester() }
-    }
     val coroutineScope = rememberCoroutineScope()
-    var focusedEpisodeId by remember(series?.id) { mutableStateOf<String?>(null) }
-    var pendingEpisodeFocusTarget by remember(series?.id) { mutableStateOf<VodEpisodeFocusTarget?>(null) }
-
-    fun safeRequestFocus(primary: FocusRequester?, fallback: FocusRequester? = null) {
-        var succeeded = false
-        if (primary != null) {
-            try {
-                succeeded = primary.requestFocus()
-            } catch (_: Exception) {}
-        }
-        if (!succeeded && fallback != null) {
-            try {
-                fallback.requestFocus()
-            } catch (_: Exception) {}
-        }
-    }
+    var focusedEpisodeId by remember(series.id) { mutableStateOf<String?>(null) }
+    var pendingEpisodeFocusTarget by remember(series.id) { mutableStateOf<VodEpisodeFocusTarget?>(null) }
+    var isBackgroundEpisodePlaying by remember { mutableStateOf(false) }
+    var isMuted by remember { mutableStateOf(false) }
 
     fun rememberedEpisodeId(): String? {
-        val lastPlayedId = lastPlayedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
-        val inProgressId = episodes.firstOrNull { episodeProgress[it.id]?.isInProgress == true }?.id
-        val focusedId = focusedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
-        return lastPlayedId ?: inProgressId ?: focusedId ?: episodes.firstOrNull()?.id
+        val lastPlayedId = lastPlayedEpisodeId?.takeIf { id -> currentSeasonEpisodes.any { it.id == id } }
+        val inProgressId = currentSeasonEpisodes.firstOrNull { episodeProgress[it.id]?.isInProgress == true }?.id
+        val focusedId = focusedEpisodeId?.takeIf { id -> currentSeasonEpisodes.any { it.id == id } }
+        return lastPlayedId ?: inProgressId ?: focusedId ?: currentSeasonEpisodes.firstOrNull()?.id
     }
 
     fun requestEpisodeFocus(episodeId: String? = rememberedEpisodeId()) {
-        if (episodeId == null || episodes.isEmpty()) return
-        val targetIndex = episodes.indexOfFirst { it.id == episodeId }
+        if (episodeId == null || currentSeasonEpisodes.isEmpty()) return
+        val targetIndex = currentSeasonEpisodes.indexOfFirst { it.id == episodeId }
         if (targetIndex < 0) return
         val primaryReq = episodeFocusRequesters[episodeId]
-        val fallbackReq = episodes.firstOrNull()?.id?.let { episodeFocusRequesters[it] }
+        val fallbackReq = currentSeasonEpisodes.firstOrNull()?.id?.let { episodeFocusRequesters[it] }
         coroutineScope.launch {
             try {
                 episodesListState.scrollToItem(targetIndex.coerceAtLeast(0))
             } catch (_: Exception) {}
             delay(90)
-            safeRequestFocus(
-                primary = primaryReq,
-                fallback = fallbackReq,
-            )
-            delay(120)
-            safeRequestFocus(
-                primary = primaryReq,
-                fallback = fallbackReq,
-            )
-        }
-    }
-
-    fun requestDetailsBodyFocus() {
-        if (seasons.size > 1) {
-            val targetSeason = selectedSeason ?: seasons.firstOrNull()
-            val targetFr = targetSeason?.let { seasonFocusRequesters[it.seasonId] }
-            safeRequestFocus(
-                primary = targetFr,
-                fallback = rememberedEpisodeId()?.let { episodeFocusRequesters[it] },
-            )
-        } else {
-            requestEpisodeFocus()
+            try { primaryReq?.requestFocus() } catch (_: Exception) {
+                try { fallbackReq?.requestFocus() } catch (_: Exception) {}
+            }
         }
     }
 
@@ -206,15 +245,14 @@ fun VodSeriesDetailsView(
         onDispose {}
     }
 
-    LaunchedEffect(episodeFocusTarget?.nonce, details?.series?.id) {
+    LaunchedEffect(episodeFocusTarget?.nonce, series.id) {
         val target = episodeFocusTarget ?: return@LaunchedEffect
-        val currentDetails = details ?: return@LaunchedEffect
-        if (currentDetails.series.id != target.seriesId) return@LaunchedEffect
+        if (details.series.id != target.seriesId) return@LaunchedEffect
 
-        val targetEpisode = currentDetails.episodes.firstOrNull { it.id == target.episodeId }
+        val targetEpisode = details.episodes.firstOrNull { it.id == target.episodeId }
         val targetSeasonId = target.seasonId ?: targetEpisode?.seasonId
-        if (targetSeasonId != null && seasons.size > 1 && selectedSeason?.seasonId != targetSeasonId) {
-            seasons.firstOrNull { it.seasonId == targetSeasonId }?.let { matchingSeason ->
+        if (targetSeasonId != null && effectiveSeasons.size > 1 && selectedSeason?.seasonId != targetSeasonId) {
+            effectiveSeasons.firstOrNull { it.seasonId == targetSeasonId }?.let { matchingSeason ->
                 pendingEpisodeFocusTarget = target
                 onSeasonSelected(matchingSeason)
                 return@LaunchedEffect
@@ -223,25 +261,24 @@ fun VodSeriesDetailsView(
         pendingEpisodeFocusTarget = target
     }
 
-    LaunchedEffect(pendingEpisodeFocusTarget?.nonce, selectedSeason?.seasonId, episodes.size) {
+    LaunchedEffect(pendingEpisodeFocusTarget?.nonce, selectedSeason?.seasonId, currentSeasonEpisodes.size) {
         val target = pendingEpisodeFocusTarget ?: return@LaunchedEffect
-        val currentDetails = details ?: return@LaunchedEffect
-        if (currentDetails.series.id != target.seriesId) {
+        if (details.series.id != target.seriesId) {
             pendingEpisodeFocusTarget = null
             onEpisodeFocusRestored(target.nonce)
             return@LaunchedEffect
         }
 
-        val targetEpisode = currentDetails.episodes.firstOrNull { it.id == target.episodeId }
+        val targetEpisode = details.episodes.firstOrNull { it.id == target.episodeId }
         val targetSeasonId = target.seasonId ?: targetEpisode?.seasonId
-        if (targetSeasonId != null && seasons.size > 1 && selectedSeason?.seasonId != targetSeasonId) {
-            seasons.firstOrNull { it.seasonId == targetSeasonId }?.let { matchingSeason ->
+        if (targetSeasonId != null && effectiveSeasons.size > 1 && selectedSeason?.seasonId != targetSeasonId) {
+            effectiveSeasons.firstOrNull { it.seasonId == targetSeasonId }?.let { matchingSeason ->
                 onSeasonSelected(matchingSeason)
             }
             return@LaunchedEffect
         }
 
-        if (episodes.none { it.id == target.episodeId }) return@LaunchedEffect
+        if (currentSeasonEpisodes.none { it.id == target.episodeId }) return@LaunchedEffect
 
         focusedEpisodeId = target.episodeId
         delay(110)
@@ -250,19 +287,18 @@ fun VodSeriesDetailsView(
         onEpisodeFocusRestored(target.nonce)
     }
 
-    // Initial focus when details view loads
-    LaunchedEffect(details?.series?.id, episodes.size) {
-        if (details != null && episodes.isNotEmpty() && !isPlayerActive) {
+    // Initial focus on episode
+    LaunchedEffect(series.id, currentSeasonEpisodes.size) {
+        if (currentSeasonEpisodes.isNotEmpty() && !isPlayerActive) {
             delay(140)
             requestEpisodeFocus()
         }
     }
 
-    // Focus update when selected season changes
     LaunchedEffect(selectedSeason?.seasonId) {
         if (pendingEpisodeFocusTarget != null) return@LaunchedEffect
-        val targetId = lastPlayedEpisodeId?.takeIf { id -> episodes.any { it.id == id } }
-            ?: episodes.firstOrNull()?.id
+        val targetId = lastPlayedEpisodeId?.takeIf { id -> currentSeasonEpisodes.any { it.id == id } }
+            ?: currentSeasonEpisodes.firstOrNull()?.id
         focusedEpisodeId = targetId
         if (!isPlayerActive && targetId != null) {
             delay(120)
@@ -271,253 +307,294 @@ fun VodSeriesDetailsView(
     }
 
     LaunchedEffect(contentFocusNonce) {
-        if (contentFocusNonce > 0 && details != null && episodes.isNotEmpty() && !isPlayerActive) {
+        if (contentFocusNonce > 0 && currentSeasonEpisodes.isNotEmpty() && !isPlayerActive) {
             requestEpisodeFocus()
         }
     }
 
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(DetailsBg)
+    // Requirement 8: 2-second debounced background preview playback
+    LaunchedEffect(focusedEpisodeId, series.id, isPlayerActive) {
+        isBackgroundEpisodePlaying = false
+        if (isPlayerActive) return@LaunchedEffect
+
+        val epId = focusedEpisodeId ?: return@LaunchedEffect
+        val targetEp = currentSeasonEpisodes.firstOrNull { it.id == epId } ?: return@LaunchedEffect
+        if (viewModel == null || player == null) return@LaunchedEffect
+
+        delay(2000L) // Wait 2 seconds of focus on the episode!
+
+        if (focusedEpisodeId != epId || isPlayerActive) return@LaunchedEffect
+
+        val streamUrl = viewModel.resolveEpisodePreviewStream(targetEp, series)
+        if (!streamUrl.isNullOrBlank() && focusedEpisodeId == epId && !isPlayerActive) {
+            try {
+                val mediaItem = when {
+                    streamUrl.contains(".mpd", ignoreCase = true) || streamUrl.contains(".livx", ignoreCase = true) -> {
+                        MediaItem.Builder()
+                            .setUri(streamUrl)
+                            .setMimeType(MimeTypes.APPLICATION_MPD)
+                            .build()
+                    }
+                    streamUrl.contains(".m3u8", ignoreCase = true) -> {
+                        MediaItem.Builder()
+                            .setUri(streamUrl)
+                            .setMimeType(MimeTypes.APPLICATION_M3U8)
+                            .build()
+                    }
+                    streamUrl.contains(".mp4", ignoreCase = true) -> {
+                        MediaItem.Builder()
+                            .setUri(streamUrl)
+                            .setMimeType(MimeTypes.APPLICATION_MP4)
+                            .build()
+                    }
+                    else -> {
+                        MediaItem.Builder()
+                            .setUri(streamUrl)
+                            .setMimeType(MimeTypes.APPLICATION_M3U8)
+                            .build()
+                    }
+                }
+                player.value.stop()
+                player.value.clearMediaItems()
+                val resumePos = viewModel.getResumePosition(targetEp.id)
+                if (resumePos > 2000L) {
+                    player.value.setMediaItem(mediaItem, resumePos)
+                    player.value.seekTo(resumePos)
+                } else {
+                    player.value.setMediaItem(mediaItem, 0L)
+                }
+                player.value.volume = if (isMuted) 0f else 1f
+                player.value.prepare()
+                player.value.playWhenReady = true
+            } catch (_: Exception) {}
+        }
+    }
+
+    DisposableEffect(player) {
+        val actualPlayer = player?.value
+        val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                isBackgroundEpisodePlaying = true
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    isBackgroundEpisodePlaying = true
+                }
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                isBackgroundEpisodePlaying = false
+            }
+        }
+        actualPlayer?.addListener(listener)
+        onDispose {
+            actualPlayer?.removeListener(listener)
+            actualPlayer?.stop()
+            actualPlayer?.clearMediaItems()
+            isBackgroundEpisodePlaying = false
+        }
+    }
+
+    val focusedEpisode = remember(focusedEpisodeId, currentSeasonEpisodes) {
+        currentSeasonEpisodes.firstOrNull { it.id == focusedEpisodeId }
+            ?: currentSeasonEpisodes.firstOrNull()
+    }
+
+    val heroTitle = remember(focusedEpisode, series) {
+        if (focusedEpisode != null && !focusedEpisode.title.contains(series.title) && focusedEpisode.title.isNotBlank()) {
+            "${series.title} · ${focusedEpisode.title}"
+        } else {
+            focusedEpisode?.title?.takeIf { it.isNotBlank() } ?: series.title
+        }
+    }
+
+    val heroSubtitle = remember(series, currentSeason, focusedEpisode) {
+        listOfNotNull(
+            series.provider.displayName,
+            currentSeason?.title ?: "עונה 1",
+            series.genre.takeIf { !it.isNullOrBlank() && it.lowercase() != "null" },
+        ).joinToString(" · ")
+    }
+
+    val heroDescription = remember(focusedEpisode, series) {
+        focusedEpisode?.description?.trim()?.takeIf { it.isNotBlank() } ?: series.description
+    }
+
+    val backgroundImageUrl = remember(focusedEpisode, series) {
+        focusedEpisode?.imageUrl ?: series.imageUrl
+    }
+
+    val channelLogoUrl = remember(series.provider, viewModel) {
+        viewModel?.getProviderLogoUrl(series.provider)
+    }
+
+    if (player != null && playerView != null) {
+        TvScreenLayout(
+            player = player,
+            playerView = playerView,
+            isVideoRendering = isBackgroundEpisodePlaying,
+            isPlayerExpanded = false,
+            backgroundImageUrl = backgroundImageUrl,
+            artworkTitle = series.title,
+            heroTitle = heroTitle,
+            heroSubtitle = heroSubtitle,
+            heroDescription = heroDescription,
+            heroTimeRange = null,
+            heroChannelLogoUrl = channelLogoUrl,
+            isLive = false,
+            showVodBadge = true,
+            isMuted = isMuted,
+            onToggleMute = {
+                isMuted = !isMuted
+                player.value.volume = if (isMuted) 0f else 1f
+            },
+            muteFocusRequester = muteFocusRequester,
+            onOpenFullScreen = {
+                focusedEpisode?.let { ep -> onPlayEpisode(ep, series) }
+            },
+            fullScreenFocusRequester = fullScreenFocusRequester,
+            onNavigateLeft = onNavigateSideRail,
+            onNavigateDown = {
+                if (effectiveSeasons.size > 1) {
+                    val fr = currentSeason?.let { seasonFocusRequesters[it.seasonId] }
+                    try { fr?.requestFocus() } catch (_: Exception) { requestEpisodeFocus() }
+                } else {
+                    requestEpisodeFocus()
+                }
+            },
+            heroPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 32.dp),
+            contentPadding = PaddingValues(start = 32.dp, end = 32.dp, bottom = 16.dp),
+            spacerAfterHero = 10.dp,
+            modifier = modifier,
         ) {
-            if (isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color(0xFFE2E8F0))
-                }
-                return@Box
-            }
+            // Header Row: Back button + Details badge
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(bottom = 12.dp),
+            ) {
+                val backInteractionSource = remember { MutableInteractionSource() }
+                val isBackFocused by backInteractionSource.collectIsFocusedAsState()
+                val backBg = if (isBackFocused) FocusedCardBg else Color(0x26FFFFFF)
+                val backFg = if (isBackFocused) FocusedCardContent else Color(0xFFF2F4F7)
 
-            if (error != null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = error,
-                        color = Color(0xFFF04438),
-                        fontSize = 16.sp,
-                    )
-                }
-                return@Box
-            }
-
-            if (details == null || series == null) return@Box
-
-            // Background Backdrop with Gradient Overlay
-            if (!series.imageUrl.isNullOrBlank()) {
-                val context = LocalContext.current
-                val backdropRequest = remember(series.imageUrl) {
-                    ImageRequest.Builder(context)
-                        .data(series.imageUrl)
-                        .size(1280, 720)
-                        .crossfade(false)
-                        .build()
-                }
-                AsyncImage(
-                    model = backdropRequest,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.05f
-                            scaleY = 1.05f
-                            alpha = 0.72f
-                        },
-                )
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color(0xB3080A0C),
-                                    Color(0xD9080A0C),
-                                    Color(0xFF080A0C),
-                                )
-                            )
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(backBg)
+                        .tvFocusableClickable(
+                            onClick = onClose,
+                            interactionSource = backInteractionSource,
+                            focusRequester = backFocusRequester,
+                            onNavigateDown = {
+                                if (effectiveSeasons.size > 1) {
+                                    val fr = currentSeason?.let { seasonFocusRequesters[it.seasonId] }
+                                    try { fr?.requestFocus() } catch (_: Exception) { requestEpisodeFocus() }
+                                } else {
+                                    requestEpisodeFocus()
+                                }
+                            },
+                            onNavigateLeft = onNavigateSideRail,
                         )
-                )
-            }
-
-            // Main Layout: Details on left/top, Episodes on bottom
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 32.dp, vertical = 24.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-                // Header / Metadata
-                Column(modifier = Modifier.fillMaxWidth(0.65f)) {
-                    // Top row: Back button & Genre/Channel Badges
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        val backInteractionSource = remember { MutableInteractionSource() }
-                        val isBackFocused by backInteractionSource.collectIsFocusedAsState()
-                        val backBg = if (isBackFocused) FocusedCardBg else Color(0x26FFFFFF)
-                        val backFg = if (isBackFocused) FocusedCardContent else Color(0xFFF2F4F7)
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(backBg)
-	                                .tvFocusableClickable(
-	                                    onClick = onClose,
-	                                    interactionSource = backInteractionSource,
-	                                    focusRequester = backFocusRequester,
-	                                    onNavigateDown = { requestDetailsBodyFocus() },
-	                                    onNavigateUp = {
-	                                        safeRequestFocus(backFocusRequester)
-	                                    },
-	                                    onNavigateLeft = onNavigateSideRail,
-	                                    onNavigateRight = { requestDetailsBodyFocus() },
-	                                )
-                                .padding(horizontal = 18.dp, vertical = 9.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = "חזרה",
-                                    tint = backFg,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Text(
-                                    text = "חזרה",
-                                    color = backFg,
-                                    fontSize = 15.sp,
-                                    fontWeight = if (isBackFocused) FontWeight.Bold else FontWeight.SemiBold,
-                                )
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .background(SelectedFilterBg, RoundedCornerShape(6.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        ) {
-                            Text(
-                                text = series.provider.displayName,
-                                color = Color(0xFFE2E8F0),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-
-                        if (!series.genre.isNullOrBlank() && series.genre.trim().lowercase() != "null") {
-                            Text(
-                                text = series.genre,
-                                color = MutedText,
-                                fontSize = 13.sp,
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Series Title
-                    Text(
-                        text = series.title,
-                        color = Color.White,
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        style = androidx.compose.ui.text.TextStyle(textDirection = TextDirection.Rtl),
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Series Description
-                    Text(
-                        text = series.description,
-                        color = Color(0xFFCBD5E1),
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        style = androidx.compose.ui.text.TextStyle(textDirection = TextDirection.Rtl),
-                    )
-                }
-
-                // Seasons & Episodes Section
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    // Seasons Row (if more than 1 season)
-                    if (seasons.size > 1) {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.padding(bottom = 16.dp),
-                        ) {
-                            items(seasons, key = { it.seasonId }) { season ->
-                                val isSelected = season.seasonId == selectedSeason?.seasonId
-                                val fr = seasonFocusRequesters[season.seasonId] ?: remember { FocusRequester() }
-	                                SeasonChip(
-	                                    season = season,
-	                                    isSelected = isSelected,
-	                                    focusRequester = fr,
-	                                    onClick = { onSeasonSelected(season) },
-	                                    onNavigateUp = { safeRequestFocus(backFocusRequester) },
-	                                    onNavigateDown = {
-	                                        requestEpisodeFocus()
-	                                    },
-	                                    onNavigateLeft = if (season == seasons.firstOrNull()) onNavigateSideRail else null,
-	                                )
-                            }
-                        }
-                    }
-
-                    // Episodes Row
-                    Text(
-                        text = "פרקים (${episodes.size})",
-                        color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-
-                    if (episodes.isEmpty()) {
-                        Text(
-                            text = "אין פרקים זמינים בעונה זו",
-                            color = MutedText,
-                            fontSize = 14.sp,
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "חזרה",
+                            tint = backFg,
+                            modifier = Modifier.size(16.dp),
                         )
-                    } else {
-                        LazyRow(
-                            state = episodesListState,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            contentPadding = PaddingValues(start = 12.dp, end = 32.dp, bottom = 16.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            itemsIndexed(episodes, key = { _, it -> it.id }) { index, episode ->
-                                val fr = episodeFocusRequesters[episode.id] ?: remember { FocusRequester() }
-                                val progress = episodeProgress[episode.id]
-                                EpisodeCard(
-                                    episode = episode,
-                                    focusRequester = fr,
-                                    isLastPlayed = (episode.id == lastPlayedEpisodeId),
-                                    progress = progress,
-                                    onPlay = { onPlayEpisode(episode, series) },
-                                    onFocused = { focusedEpisodeId = episode.id },
-                                    onNavigateLeft = if (index == 0) onNavigateSideRail else null,
-                                    onNavigateUp = {
-                                        if (seasons.size > 1) {
-                                            val targetSeason = selectedSeason ?: seasons.firstOrNull()
-                                            val targetFr = targetSeason?.let { seasonFocusRequesters[it.seasonId] }
-                                            safeRequestFocus(
-                                                primary = targetFr,
-                                                fallback = backFocusRequester,
-                                            )
-                                        } else {
-                                            safeRequestFocus(backFocusRequester)
-                                        }
-                                    },
-                                )
-                            }
-                        }
+                        Text(
+                            text = "חזרה",
+                            color = backFg,
+                            fontSize = 13.sp,
+                            fontWeight = if (isBackFocused) FontWeight.Bold else FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+
+            // Requirement 7: Seasons row
+            if (effectiveSeasons.size > 1) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(bottom = 12.dp),
+                ) {
+                    items(effectiveSeasons, key = { it.seasonId }) { season ->
+                        val isSelected = season.seasonId == currentSeason?.seasonId
+                        val fr = seasonFocusRequesters[season.seasonId] ?: remember(season.seasonId) { FocusRequester() }
+                        SeasonChip(
+                            season = season,
+                            isSelected = isSelected,
+                            focusRequester = fr,
+                            onClick = { onSeasonSelected(season) },
+                            onNavigateUp = {
+                                if (isBackgroundEpisodePlaying) {
+                                    try { fullScreenFocusRequester.requestFocus() } catch (_: Exception) {
+                                        try { backFocusRequester.requestFocus() } catch (_: Exception) {}
+                                    }
+                                } else {
+                                    try { backFocusRequester.requestFocus() } catch (_: Exception) {}
+                                }
+                            },
+                            onNavigateDown = { requestEpisodeFocus() },
+                            onNavigateLeft = if (season == effectiveSeasons.firstOrNull()) onNavigateSideRail else null,
+                        )
+                    }
+                }
+            }
+
+            // Episodes Header & Row
+            Text(
+                text = "פרקים (${currentSeasonEpisodes.size})",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+
+            if (currentSeasonEpisodes.isEmpty()) {
+                Text(
+                    text = "אין פרקים זמינים בעונה זו",
+                    color = MutedText,
+                    fontSize = 14.sp,
+                )
+            } else {
+                LazyRow(
+                    state = episodesListState,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(end = 32.dp, bottom = 12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    itemsIndexed(currentSeasonEpisodes, key = { _, it -> it.id }) { index, episode ->
+                        val fr = episodeFocusRequesters[episode.id] ?: remember(episode.id) { FocusRequester() }
+                        val progress = episodeProgress[episode.id]
+                        EpisodeCard(
+                            episode = episode,
+                            series = series,
+                            channelLogoUrl = channelLogoUrl,
+                            focusRequester = fr,
+                            isLastPlayed = (episode.id == lastPlayedEpisodeId),
+                            progress = progress,
+                            onPlay = { onPlayEpisode(episode, series) },
+                            onFocused = { focusedEpisodeId = episode.id },
+                            onNavigateLeft = if (index == 0) onNavigateSideRail else null,
+                            onNavigateUp = {
+                                if (effectiveSeasons.size > 1) {
+                                    val targetSeason = currentSeason ?: effectiveSeasons.firstOrNull()
+                                    val targetFr = targetSeason?.let { seasonFocusRequesters[it.seasonId] }
+                                    try { targetFr?.requestFocus() } catch (_: Exception) {
+                                        try { backFocusRequester.requestFocus() } catch (_: Exception) {}
+                                    }
+                                } else {
+                                    try { backFocusRequester.requestFocus() } catch (_: Exception) {}
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -541,7 +618,7 @@ private fun SeasonChip(
     val targetBg = when {
         isFocused -> FocusedCardBg
         isSelected -> SelectedFilterBg
-        else -> Color(0x14FFFFFF)
+        else -> Color(0x1AFFFFFF)
     }
     val targetFg = when {
         isFocused -> FocusedCardContent
@@ -555,6 +632,11 @@ private fun SeasonChip(
         modifier = Modifier
             .clip(shape)
             .background(targetBg)
+            .then(
+                if (isSelected && !isFocused) Modifier.border(1.5.dp, Color(0xFF25D4DE), shape)
+                else if (isFocused) Modifier.border(2.5.dp, Color.White, shape)
+                else Modifier
+            )
             .tvFocusableClickable(
                 onClick = onClick,
                 interactionSource = interactionSource,
@@ -575,8 +657,25 @@ private fun SeasonChip(
 }
 
 @Composable
+private fun CardScrim() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.55f to Color(0x33080A0C),
+                    1f to Color(0xE6080A0C),
+                )
+            )
+    )
+}
+
+@Composable
 private fun EpisodeCard(
     episode: VodEpisode,
+    series: VodSeries,
+    channelLogoUrl: String?,
     focusRequester: FocusRequester,
     onPlay: () -> Unit,
     isLastPlayed: Boolean = false,
@@ -594,121 +693,108 @@ private fun EpisodeCard(
         }
     }
 
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(12.dp)
 
-    val bg = if (isFocused) FocusedCardBg else CardBg
-    val titleColor = if (isFocused) FocusedCardContent else Color.White
-    val descColor = if (isFocused) Color(0xFF344054) else MutedText
-
-    val borderModifier = if (isFocused) Modifier.border(2.5.dp, FocusedCardBg, shape) else Modifier
-
-    val context = LocalContext.current
-    val imageRequest = remember(episode.imageUrl) {
-        if (episode.imageUrl.isNullOrBlank()) null
-        else {
-            ImageRequest.Builder(context)
-                .data(episode.imageUrl)
-                .size(440, 260)
-                .crossfade(false)
-                .build()
-        }
-    }
-
-    Column(
+    Box(
         modifier = Modifier
-            .width(230.dp)
-            .then(borderModifier)
+            .width(238.dp)
+            .height(164.dp)
             .clip(shape)
-            .background(bg)
+            .background(if (isFocused) FocusedCardBg else CardBg)
+            .then(if (isFocused) Modifier.border(3.dp, Color.White, shape) else Modifier)
             .tvFocusableClickable(
                 onClick = onPlay,
                 interactionSource = interactionSource,
                 focusRequester = focusRequester,
                 onNavigateLeft = onNavigateLeft,
                 onNavigateUp = onNavigateUp,
-                onNavigateDown = {
-                    // Stay on episode, prevent losing focus downwards
-                },
-            )
+                onNavigateDown = {},
+            ),
     ) {
-        // Thumbnail
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(130.dp)
-                .background(Color(0xFF1B222D)),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (imageRequest != null) {
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = episode.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-
-            // Play Icon overlay
+        val imageUrl = episode.imageUrl ?: series.imageUrl
+        if (!imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = episode.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0x99000000)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "נגן",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
-
-            // Small timeline (ציר זמן קטן) at bottom of thumbnail - matching example image exactly
-            if (progress != null && (progress.positionMs > 1000L || progress.isCompleted)) {
-                val fraction = if (progress.isCompleted) 1f else progress.progressPercentage.coerceIn(0.04f, 1f)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color(0x99232A38)),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(fraction = fraction)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(Color(0xFFFF2B44)),
-                    )
-                }
-            }
+                    .fillMaxSize()
+                    .background(Color(0xFF1B222D)),
+            )
         }
 
-        // Title and description
-        Column(modifier = Modifier.padding(10.dp)) {
+        CardScrim()
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(12.dp),
+        ) {
             Text(
                 text = episode.title,
-                color = titleColor,
-                fontSize = 13.sp,
+                color = Color.White,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = androidx.compose.ui.text.TextStyle(textDirection = TextDirection.Rtl),
+            )
+            val subtitleText = episode.description?.trim()?.takeIf { it.isNotBlank() }
+                ?: listOfNotNull(series.title, episode.seasonId?.let { "עונה $it" }).joinToString(" · ")
+            Text(
+                text = subtitleText,
+                color = if (isFocused) Color(0xFF344054) else MutedText,
+                fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = androidx.compose.ui.text.TextStyle(textDirection = TextDirection.Rtl),
             )
+        }
 
-            if (!episode.description.isNullOrBlank()) {
-                Text(
-                    text = episode.description,
-                    color = descColor,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
-                    style = androidx.compose.ui.text.TextStyle(textDirection = TextDirection.Rtl),
+        if (progress != null && (progress.positionMs > 1000L || progress.isCompleted)) {
+            val fraction = if (progress.isCompleted) 1f else progress.progressPercentage.coerceIn(0.04f, 1f)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .background(Color(0x66232A38)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .height(5.dp)
+                        .background(Color(0xFFFF2B44)),
+                )
+            }
+        }
+
+        VodBadge(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(9.dp)
+        )
+
+        if (!channelLogoUrl.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(9.dp)
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xB3080A0C))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = channelLogoUrl,
+                    contentDescription = series.provider.displayName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }

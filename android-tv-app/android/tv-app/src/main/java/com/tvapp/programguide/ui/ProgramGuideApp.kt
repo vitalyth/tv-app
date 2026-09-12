@@ -961,7 +961,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             return@LaunchedEffect
         }
 
-        if (currentDestination == AppDestination.VOD || currentDestination == AppDestination.LOCAL_SERIES) {
+        if ((currentDestination == AppDestination.VOD && vodUiState.selectedSeriesDetails == null) || currentDestination == AppDestination.LOCAL_SERIES) {
             player.stop()
             activeStreamUrl.value = null
             renderedStreamUrl.value = null

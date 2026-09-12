@@ -12,6 +12,8 @@ import com.tvapp.programguide.data.VodSeriesDetails
 import java.net.URLEncoder
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,10 +28,11 @@ import com.tvapp.programguide.data.VodSeriesPage
 
 data class VodUiState(
     val navLevel: VodNavLevel = VodNavLevel.CHANNELS_HUB,
-    val selectedProvider: VodProvider = VodProvider.KAN11,
+    val selectedProvider: VodProvider? = null,
     val recentItems: List<VodRecentItem> = emptyList(),
     val isLoadingRecent: Boolean = false,
     val seriesList: List<VodSeries> = emptyList(),
+    val allChannelsSeries: List<VodSeries> = emptyList(),
     val categories: List<String> = emptyList(),
     val selectedCategory: String? = null,
     val searchQuery: String = "",
@@ -117,21 +120,34 @@ class VodViewModel(
         }
     }
 
+    val allProviders = listOf(
+        VodProvider.KAN11,
+        VodProvider.KESHET12,
+        VodProvider.RESHET13,
+        VodProvider.CHANNEL14,
+        VodProvider.I24NEWS,
+    )
+
     fun refreshIfStale(force: Boolean = false) {
         val state = _uiState.value
         val nowMs = System.currentTimeMillis()
         if (force || nowMs - lastRecentLoadedMs >= VOD_RECENT_TTL_MS) {
             loadRecent()
         }
-        if (state.navLevel == VodNavLevel.SERIES_LIST) {
+        val provider = state.selectedProvider
+        if (provider == null) {
+            if (force || state.allChannelsSeries.isEmpty()) {
+                loadAllChannelsInitialSeries(forceRefresh = true)
+            }
+        } else {
             val cachedPage = getCachedSeriesPage(
-                provider = state.selectedProvider,
+                provider = provider,
                 category = state.selectedCategory,
                 query = state.searchQuery,
             )
             if (force || cachedPage == null) {
                 loadInitialSeries(
-                    provider = state.selectedProvider,
+                    provider = provider,
                     category = state.selectedCategory,
                     query = state.searchQuery,
                     forceRefresh = true,
@@ -141,22 +157,7 @@ class VodViewModel(
     }
 
     fun openChannel(provider: VodProvider) {
-        _uiState.update {
-            it.copy(
-                navLevel = VodNavLevel.SERIES_LIST,
-                selectedProvider = provider,
-                selectedCategory = null,
-                searchQuery = "",
-                selectedSeriesDetails = null,
-                selectedSeason = null,
-                seriesList = emptyList(),
-                categories = emptyList(),
-                hasMoreSeries = true,
-                isLoadingMoreSeries = false,
-                totalSeries = 0,
-            )
-        }
-        loadInitialSeries(provider = provider)
+        selectProvider(provider)
     }
 
     fun backToChannelsHub() {
@@ -171,8 +172,88 @@ class VodViewModel(
         loadRecent()
     }
 
-    fun selectProvider(provider: VodProvider) {
-        if (_uiState.value.selectedProvider == provider && _uiState.value.seriesList.isNotEmpty()) return
+    fun loadAllChannelsInitialSeries(forceRefresh: Boolean = false) {
+        if (!forceRefresh && _uiState.value.allChannelsSeries.isNotEmpty()) {
+            _uiState.update {
+                it.copy(
+                    selectedProvider = null,
+                    seriesList = it.allChannelsSeries,
+                    totalSeries = it.allChannelsSeries.size,
+                    hasMoreSeries = false,
+                    isLoadingSeries = false,
+                    isLoadingMoreSeries = false,
+                    seriesError = null,
+                )
+            }
+            return
+        }
+
+        loadSeriesJob?.cancel()
+        loadSeriesJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    selectedProvider = null,
+                    isLoadingSeries = it.allChannelsSeries.isEmpty(),
+                    seriesError = null,
+                )
+            }
+
+            val deferredResults = allProviders.map { p ->
+                async {
+                    runCatching {
+                        repository.loadSeries(
+                            provider = p,
+                            query = "",
+                            category = null,
+                            limit = 8,
+                            offset = 0,
+                        ).series
+                    }.getOrDefault(emptyList())
+                }
+            }
+
+            val channelSeriesList = deferredResults.awaitAll()
+
+            // 1 program from each channel at index 0..4 (Requirement 2)
+            val firstOfEach = channelSeriesList.mapNotNull { it.firstOrNull() }
+            val remainingSeries = mutableListOf<VodSeries>()
+            var maxLen = 0
+            channelSeriesList.forEach { if (it.size > maxLen) maxLen = it.size }
+            for (i in 1 until maxLen) {
+                channelSeriesList.forEach { list ->
+                    if (i < list.size) {
+                        remainingSeries.add(list[i])
+                    }
+                }
+            }
+
+            val combined = (firstOfEach + remainingSeries).distinctBy { "${it.provider.id}:${it.id}" }
+
+            _uiState.update {
+                it.copy(
+                    selectedProvider = null,
+                    allChannelsSeries = combined,
+                    seriesList = combined,
+                    totalSeries = combined.size,
+                    hasMoreSeries = false,
+                    isLoadingSeries = false,
+                    isLoadingMoreSeries = false,
+                    seriesError = if (combined.isEmpty()) "לא נמצאו תוכניות" else null,
+                )
+            }
+        }
+    }
+
+    fun selectProvider(provider: VodProvider?) {
+        if (provider == null) {
+            loadAllChannelsInitialSeries()
+            return
+        }
+
+        if (_uiState.value.selectedProvider == provider && _uiState.value.seriesList.isNotEmpty()) {
+            loadAllChannelsInitialSeries()
+            return
+        }
 
         val cachedPage = getCachedSeriesPage(provider = provider, category = null, query = "")
         if (cachedPage != null) {
@@ -216,6 +297,7 @@ class VodViewModel(
     }
 
     fun selectCategory(category: String?) {
+        val provider = _uiState.value.selectedProvider ?: return
         val next = if (category == "הכל" || category == _uiState.value.selectedCategory) null else category
         if (next == _uiState.value.selectedCategory && _uiState.value.seriesList.isNotEmpty()) return
 
@@ -231,13 +313,14 @@ class VodViewModel(
             )
         }
         loadInitialSeries(
-            provider = _uiState.value.selectedProvider,
+            provider = provider,
             category = next,
             query = _uiState.value.searchQuery,
         )
     }
 
     fun search(query: String) {
+        val provider = _uiState.value.selectedProvider ?: return
         _uiState.update {
             it.copy(
                 searchQuery = query,
@@ -248,18 +331,22 @@ class VodViewModel(
             )
         }
         loadInitialSeries(
-            provider = _uiState.value.selectedProvider,
+            provider = provider,
             category = _uiState.value.selectedCategory,
             query = query,
         )
     }
 
     fun loadInitialSeries(
-        provider: VodProvider = _uiState.value.selectedProvider,
+        provider: VodProvider? = _uiState.value.selectedProvider,
         category: String? = _uiState.value.selectedCategory,
         query: String = _uiState.value.searchQuery,
         forceRefresh: Boolean = false,
     ) {
+        if (provider == null) {
+            loadAllChannelsInitialSeries(forceRefresh = forceRefresh)
+            return
+        }
         loadSeriesJob?.cancel()
         loadSeriesJob = viewModelScope.launch {
             if (!forceRefresh) {
@@ -317,6 +404,7 @@ class VodViewModel(
 
     fun loadMoreSeries() {
         val state = _uiState.value
+        val provider = state.selectedProvider ?: return
         if (state.isLoadingSeries || state.isLoadingMoreSeries || !state.hasMoreSeries) return
 
         val offset = state.seriesList.size
@@ -324,7 +412,7 @@ class VodViewModel(
             _uiState.update { it.copy(isLoadingMoreSeries = true) }
             runCatching {
                 repository.loadSeries(
-                    provider = state.selectedProvider,
+                    provider = provider,
                     query = state.searchQuery,
                     category = state.selectedCategory,
                     limit = PAGE_SIZE,
@@ -336,7 +424,7 @@ class VodViewModel(
                     val newSeries = page.series.filter { it.id !in existingIds }
                     val nextSeries = current.seriesList + newSeries
                     val nextPage = page.copy(series = nextSeries)
-                    putCachedSeriesPage(state.selectedProvider, state.selectedCategory, state.searchQuery, nextPage)
+                    putCachedSeriesPage(provider, state.selectedCategory, state.searchQuery, nextPage)
                     current.copy(
                         seriesList = nextSeries,
                         hasMoreSeries = page.hasMore && page.series.isNotEmpty(),
@@ -576,6 +664,19 @@ class VodViewModel(
             streamEndpoint = streamEndpointFor(recent.provider, recent.episodeId),
             provider = recent.provider,
         )
+    }
+
+    suspend fun resolveEpisodePreviewStream(episode: VodEpisode, series: VodSeries): String? {
+        val streamEndpoint = episode.streamEndpoint ?: streamEndpointFor(series.provider, episode.id)
+        return repository.resolveEpisodeStream(
+            streamEndpoint = streamEndpoint,
+            provider = series.provider,
+            fallbackPlayUrl = episode.playUrl,
+        )
+    }
+
+    fun getResumePosition(episodeId: String): Long {
+        return progressManager.getResumePosition(episodeId)
     }
 
     fun stopVodPlayback() {

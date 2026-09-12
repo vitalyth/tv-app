@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -99,6 +100,7 @@ fun TvScreenLayout(
     onNavigateLeft: () -> Unit = {},
     onNavigateDown: () -> Unit = {},
     onFocusChanged: ((Boolean) -> Unit)? = null,
+    actions: (@Composable RowScope.() -> Unit)? = null,
 
     // Layout configuration
     modifier: Modifier = Modifier,
@@ -186,6 +188,7 @@ fun TvScreenLayout(
                     onNavigateLeft = onNavigateLeft,
                     onNavigateDown = onNavigateDown,
                     onFocusChanged = onFocusChanged,
+                    actions = actions,
                 )
             }
 
@@ -231,6 +234,7 @@ fun TvHero(
     hasActivePlayer: Boolean = false,
     onOpenFullScreen: (() -> Unit)? = null,
     fullScreenFocusRequester: FocusRequester = remember { FocusRequester() },
+    actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val muteInteractionSource = remember { MutableInteractionSource() }
     val isMuteFocused by muteInteractionSource.collectIsFocusedAsState()
@@ -375,8 +379,15 @@ fun TvHero(
             }
         }
 
-        // Action Buttons: Fullscreen & Mute (Only visible when player is active in background)
-        if (hasActivePlayer) {
+        // Action Buttons: custom actions slot or default Fullscreen & Mute
+        if (actions != null) {
+            Row(
+                modifier = Modifier.padding(start = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = actions,
+            )
+        } else if (hasActivePlayer) {
             Row(
                 modifier = Modifier.padding(start = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
