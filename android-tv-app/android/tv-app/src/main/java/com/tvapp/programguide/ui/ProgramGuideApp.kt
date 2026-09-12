@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -143,9 +144,7 @@ import com.tvapp.programguide.data.VodEpisode
 import com.tvapp.programguide.data.VodProvider
 import com.tvapp.programguide.data.VodSeries
 import com.tvapp.programguide.ui.components.AppSideNavRail
-import com.tvapp.programguide.ui.home.HomeArtwork
-import com.tvapp.programguide.ui.home.HomeHero
-import com.tvapp.programguide.ui.home.HomeInlinePlayer
+import com.tvapp.programguide.ui.components.TvScreenLayout
 import com.tvapp.programguide.ui.home.HomeScreen
 import com.tvapp.programguide.ui.local.LocalSeriesScreen
 import com.tvapp.programguide.ui.vod.VodPlayerOverlay
@@ -1625,159 +1624,104 @@ private fun GuideContent(
     val heroTimeRange = activeProgram?.timeRange()
     val heroChannelLogoUrl = activeChannel?.logoUrl
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-    ) {
-        val isVideoRendering = livePreviewChannelId != null &&
-            livePreviewChannelId == playingChannel?.id &&
-            !isPlayerExpanded &&
-            playingChannel?.let(isLiveStreamReady) == true
+    val isVideoRendering = livePreviewChannelId != null &&
+        livePreviewChannelId == playingChannel?.id &&
+        !isPlayerExpanded &&
+        playingChannel?.let(isLiveStreamReady) == true
 
-        val backgroundImageUrl = activeProgram?.imageUrl ?: activeChannel?.logoUrl
+    val backgroundImageUrl = activeProgram?.imageUrl ?: activeChannel?.logoUrl
 
-        HomeArtwork(
-            imageUrl = backgroundImageUrl,
-            title = heroTitle,
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        HomeInlinePlayer(
-            player = player,
-            playerView = playerView,
-            visible = isVideoRendering,
-            isPlayerExpanded = isPlayerExpanded,
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.28f to Color.Transparent,
-                        0.44f to Color(0xCC080A0C),
-                        0.60f to Color(0xF6080A0C),
-                        1f to Color(0xFF080A0C),
-                    )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color(0xF8080A0C),
-                        0.32f to Color(0xEB080A0C),
-                        0.48f to Color(0xC0080A0C),
-                        0.62f to Color(0x40080A0C),
-                        0.74f to Color.Transparent,
-                        1f to Color.Transparent,
-                    )
-                )
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 28.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 24.dp, end = 32.dp),
-            ) {
-                HomeHero(
-                    title = heroTitle,
-                    subtitle = heroSubtitle,
-                    description = heroDescription,
-                    timeRange = heroTimeRange,
-                    channelLogoUrl = heroChannelLogoUrl,
-                    isLive = isLive,
-                    showVodBadge = false,
-                    isMuted = isMuted,
-                    onToggleMute = onToggleMute,
-                    muteFocusRequester = muteFocusRequester,
-                    hasActivePlayer = isVideoRendering,
-                    onOpenFullScreen = {
-                        activeChannel?.let { ch -> onLiveChannelOpened(ch, activeProgram) } ?: onPlayerClick()
-                    },
-                    fullScreenFocusRequester = fullScreenFocusRequester,
-                    onNavigateLeft = onNavigateSideRail,
-                    onNavigateDown = {
-                        try {
-                            gridFocusRequester.requestFocus()
-                        } catch (_: Exception) {}
-                    },
-                    onFocusChanged = { isHeroActionFocused ->
-                        if (isHeroActionFocused) {
-                            focusedChannel = null
-                            focusedProgram = null
+    TvScreenLayout(
+        player = player,
+        playerView = playerView,
+        isVideoRendering = isVideoRendering,
+        isPlayerExpanded = isPlayerExpanded,
+        backgroundImageUrl = backgroundImageUrl,
+        artworkTitle = heroTitle,
+        heroTitle = heroTitle,
+        heroSubtitle = heroSubtitle,
+        heroDescription = heroDescription,
+        heroTimeRange = heroTimeRange,
+        heroChannelLogoUrl = heroChannelLogoUrl,
+        isLive = isLive,
+        showVodBadge = false,
+        isMuted = isMuted,
+        onToggleMute = onToggleMute,
+        muteFocusRequester = muteFocusRequester,
+        onOpenFullScreen = {
+            activeChannel?.let { ch -> onLiveChannelOpened(ch, activeProgram) } ?: onPlayerClick()
+        },
+        fullScreenFocusRequester = fullScreenFocusRequester,
+        onNavigateLeft = onNavigateSideRail,
+        onNavigateDown = {
+            try {
+                gridFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        },
+        onFocusChanged = { isHeroActionFocused ->
+            if (isHeroActionFocused) {
+                focusedChannel = null
+                focusedProgram = null
+            }
+        },
+        heroPadding = PaddingValues(start = 24.dp, end = 32.dp, top = 28.dp),
+        contentPadding = PaddingValues(0.dp),
+        spacerAfterHero = 8.dp,
+        overlayContent = {
+            if (programForDetails != null) {
+                ProgramDetailsPage(
+                    channel = detailsChannel,
+                    program = programForDetails,
+                    selectedStreamSource = selectedStreamSource,
+                    onPlayLive = {
+                        detailsChannel?.let { channel ->
+                            onGridFocusRequested(channel, null, true)
+                            detailsChannel = null
+                            detailsProgram = null
+                            onLiveChannelOpened(channel, null)
                         }
+                    },
+                    onClose = {
+                        blockGridActivationUntilMs = System.currentTimeMillis() + 600L
+                        suspendGridAutoPlay = true
+                        onGridFocusRequested(detailsChannel, programForDetails, false)
+                        detailsChannel = null
+                        detailsProgram = null
                     },
                 )
             }
-
-            Spacer(Modifier.height(8.dp))
-
-            ProgramGrid(
-                data = data,
-                selectedChannel = selectedChannel,
-                selectedProgram = selectedProgram,
-                playingChannel = playingChannel,
-                onChannelActivated = onChannelActivated,
-                onLiveChannelOpened = onLiveChannelOpened,
-                onProgramSelected = onProgramSelected,
-                onSelectionFocused = { channel, program ->
-                    focusedChannel = channel
-                    focusedProgram = program
-                },
-                isGridActivationBlocked = {
-                    System.currentTimeMillis() < blockGridActivationUntilMs
-                },
-                isGridAutoPlaySuspended = { suspendGridAutoPlay },
-                onGridNavigationStarted = { suspendGridAutoPlay = false },
-                onProgramDetailsRequested = { channel, program ->
-                    suspendGridAutoPlay = true
-                    detailsChannel = channel
-                    detailsProgram = program
-                },
-                onGuideRangeNeeded = onGuideRangeNeeded,
-                focusTarget = gridFocusTarget,
-                showNowRequestNonce = 0,
-                gridFocusRequester = gridFocusRequester,
-                topFocusRequester = if (isVideoRendering) fullScreenFocusRequester else null,
-                onNavigateSideRail = onNavigateSideRail,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            )
-        }
-
-        if (programForDetails != null) {
-            ProgramDetailsPage(
-                channel = detailsChannel,
-                program = programForDetails,
-                selectedStreamSource = selectedStreamSource,
-                onPlayLive = {
-                    detailsChannel?.let { channel ->
-                        onGridFocusRequested(channel, null, true)
-                        detailsChannel = null
-                        detailsProgram = null
-                        onLiveChannelOpened(channel, null)
-                    }
-                },
-                onClose = {
-                    blockGridActivationUntilMs = System.currentTimeMillis() + 600L
-                    suspendGridAutoPlay = true
-                    onGridFocusRequested(detailsChannel, programForDetails, false)
-                    detailsChannel = null
-                    detailsProgram = null
-                },
-            )
-        }
+        },
+    ) {
+        ProgramGrid(
+            data = data,
+            selectedChannel = selectedChannel,
+            selectedProgram = selectedProgram,
+            playingChannel = playingChannel,
+            onChannelActivated = onChannelActivated,
+            onLiveChannelOpened = onLiveChannelOpened,
+            onProgramSelected = onProgramSelected,
+            onSelectionFocused = { channel, program ->
+                focusedChannel = channel
+                focusedProgram = program
+            },
+            isGridActivationBlocked = {
+                System.currentTimeMillis() < blockGridActivationUntilMs
+            },
+            isGridAutoPlaySuspended = { suspendGridAutoPlay },
+            onGridNavigationStarted = { suspendGridAutoPlay = false },
+            onProgramDetailsRequested = { channel, program ->
+                suspendGridAutoPlay = true
+                detailsChannel = channel
+                detailsProgram = program
+            },
+            onGuideRangeNeeded = onGuideRangeNeeded,
+            focusTarget = gridFocusTarget,
+            showNowRequestNonce = 0,
+            gridFocusRequester = gridFocusRequester,
+            topFocusRequester = if (isVideoRendering) fullScreenFocusRequester else null,
+            onNavigateSideRail = onNavigateSideRail,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 @Composable
