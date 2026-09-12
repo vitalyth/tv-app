@@ -531,6 +531,7 @@ private fun VodCatalogView(
 
                             SeriesCard(
                                 series = series,
+                                channelLogoUrl = viewModel.getProviderLogoUrl(series.provider),
                                 focusRequester = seriesRequester,
                                 onFocused = {
                                     isAllCircleFocused = false
@@ -731,6 +732,7 @@ private fun ChannelCirclesRow(
 @Composable
 private fun SeriesCard(
     series: VodSeries,
+    channelLogoUrl: String?,
     focusRequester: FocusRequester?,
     onFocused: () -> Unit,
     onClick: () -> Unit,
@@ -818,6 +820,26 @@ private fun SeriesCard(
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+
+        if (!channelLogoUrl.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xD9080A0E))
+                    .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = channelLogoUrl,
+                    contentDescription = series.provider.displayName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
