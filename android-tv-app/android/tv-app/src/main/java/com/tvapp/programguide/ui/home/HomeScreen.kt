@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -612,16 +613,14 @@ internal fun HomeHero(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(160.dp),
+            .heightIn(min = 155.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top,
     ) {
         // Info Column (Full available width across the left/center)
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // Row 1: Badges & Channel Metadata
             Row(
@@ -697,24 +696,40 @@ internal fun HomeHero(
                 )
             }
 
-            // Row 3: Program Description (Fixed height, 2 lines, limited to a bit over half screen width)
+            // Row 3: Program Description (Flexible height, up to 3-5 lines, auto-scaled font, limited to a bit over half screen width)
+            val displayDescription = description.trim().ifBlank {
+                if (isLive && subtitle.isNotBlank()) "שידור חי בערוץ $subtitle" else ""
+            }
+            var fontScale by remember(displayDescription) { mutableStateOf(1f) }
+            val descLength = displayDescription.length
+            val (baseSizeSp, baseLineHeightSp, maxLines) = when {
+                descLength <= 130 -> Triple(14f, 20f, 3)
+                descLength <= 230 -> Triple(13f, 18.5f, 3)
+                descLength <= 340 -> Triple(12f, 17f, 4)
+                else -> Triple(11f, 15.5f, 5)
+            }
+            val currentFontSize = (baseSizeSp * fontScale).sp
+            val currentLineHeight = (baseLineHeightSp * fontScale).sp
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.58f)
-                    .height(52.dp),
+                    .heightIn(min = 44.dp),
                 contentAlignment = Alignment.TopStart,
             ) {
-                val displayDescription = description.trim().ifBlank {
-                    if (isLive && subtitle.isNotBlank()) "שידור חי בערוץ $subtitle" else ""
-                }
                 if (displayDescription.isNotBlank()) {
                     Text(
                         text = displayDescription,
                         color = Color(0xFFD1D5DB),
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        maxLines = 2,
+                        fontSize = currentFontSize,
+                        lineHeight = currentLineHeight,
+                        maxLines = maxLines,
                         overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { textLayoutResult ->
+                            if (textLayoutResult.hasVisualOverflow && fontScale > 0.75f) {
+                                fontScale = (fontScale - 0.08f).coerceAtLeast(0.75f)
+                            }
+                        },
                         style = TextStyle(
                             shadow = Shadow(
                                 color = Color(0xEE000000),
