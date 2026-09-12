@@ -697,10 +697,10 @@ internal fun HomeHero(
                 )
             }
 
-            // Row 3: Program Description (Fixed height, 2 lines, crisp)
+            // Row 3: Program Description (Fixed height, 2 lines, limited to a bit over half screen width)
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxWidth(0.58f)
                     .height(52.dp),
                 contentAlignment = Alignment.TopStart,
             ) {

@@ -462,7 +462,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     val localSeriesUiState by localSeriesViewModel.uiState.collectAsStateWithLifecycle()
     val isVodPlaying = currentDestination == AppDestination.VOD && vodUiState.playingEpisode != null
     val isLocalSeriesPlaying = currentDestination == AppDestination.LOCAL_SERIES && localSeriesUiState.playingEpisode != null
-    val isInitialLoading = currentDestination == AppDestination.LIVE_TV && guideState.guideData == null && guideState.error == null
+    val isInitialLoading = guideState.guideData == null && guideState.error == null
     val sideRailHomeFocusRequester = remember { FocusRequester() }
     val sideRailLiveTvFocusRequester = remember { FocusRequester() }
     val sideRailVodFocusRequester = remember { FocusRequester() }
@@ -541,10 +541,17 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     }
 
     BackHandler(
-        enabled = currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded
+        enabled = currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded && !isInitialLoading
     ) {
         if (!navRailExpanded) {
             openSideRail(AppDestination.HOME)
+        }
+    }
+
+    LaunchedEffect(guideState.guideData != null) {
+        if (guideState.guideData != null && currentDestination == AppDestination.HOME) {
+            delay(40)
+            requestHomeContentFocus()
         }
     }
 
@@ -1051,20 +1058,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                             if (guideState.error != null && guideState.guideData == null) {
                                 GuideError(guideState.error ?: "שגיאה בטעינת לוח השידורים", viewModel::refresh)
                             } else if (guideState.guideData == null) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(ScreenBackground)
-                                        .focusRequester(homeContentFocusRequester)
-                                        .focusable(),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    androidx.compose.material3.CircularProgressIndicator(
-                                        color = Color(0xFFE91E35),
-                                        modifier = Modifier.size(44.dp),
-                                        strokeWidth = 3.dp,
-                                    )
-                                }
+                                GuideMessage(stringResource(R.string.loading_guide))
                             } else {
                                 HomeScreen(
                                     guideData = guideState.guideData,
@@ -5395,6 +5389,12 @@ private fun GuideMessage(text: String) {
                 text = "Loading...",
                 color = Color(0xFFB8C4CA),
                 fontSize = 16.sp,
+            )
+            Spacer(Modifier.height(20.dp))
+            androidx.compose.material3.CircularProgressIndicator(
+                color = Color(0xFF25D4DE),
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.5.dp,
             )
         }
     }
