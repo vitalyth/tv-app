@@ -46,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -97,11 +99,56 @@ fun VodPlayerOverlay(
     }
 
     // When stream changes, reset errors and show controls
-    LaunchedEffect(streamUrl) {
+    LaunchedEffect(streamUrl, episode?.id) {
         if (!streamUrl.isNullOrBlank()) {
             playbackError = null
             isControlsVisible = true
             lastInteractionNonce++
+            val currentUri = actualPlayer.currentMediaItem?.localConfiguration?.uri?.toString()
+            val isAlreadyLoaded = currentUri == streamUrl &&
+                actualPlayer.playbackState != Player.STATE_IDLE &&
+                actualPlayer.playbackState != Player.STATE_ENDED
+            hasAppliedResumeSeek = isAlreadyLoaded
+            try {
+                if (isAlreadyLoaded) {
+                    actualPlayer.playWhenReady = true
+                    actualPlayer.play()
+                } else {
+                    val mediaItem = when {
+                        streamUrl.contains(".mpd", ignoreCase = true) || streamUrl.contains(".livx", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(streamUrl)
+                                .setMimeType(MimeTypes.APPLICATION_MPD)
+                                .build()
+                        }
+                        streamUrl.contains(".m3u8", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(streamUrl)
+                                .setMimeType(MimeTypes.APPLICATION_M3U8)
+                                .build()
+                        }
+                        streamUrl.contains(".mp4", ignoreCase = true) -> {
+                            MediaItem.Builder()
+                                .setUri(streamUrl)
+                                .setMimeType(MimeTypes.APPLICATION_MP4)
+                                .build()
+                        }
+                        else -> {
+                            MediaItem.Builder()
+                                .setUri(streamUrl)
+                                .setMimeType(MimeTypes.APPLICATION_M3U8)
+                                .build()
+                        }
+                    }
+                    actualPlayer.stop()
+                    actualPlayer.clearMediaItems()
+                    actualPlayer.setMediaItem(mediaItem, resumePositionMs?.takeIf { it > 2000L } ?: 0L)
+                    actualPlayer.prepare()
+                    actualPlayer.playWhenReady = true
+                }
+            } catch (_: Exception) {
+                playbackError = "שגיאה בטעינת הפרק"
+            }
         }
     }
 
@@ -118,6 +165,7 @@ fun VodPlayerOverlay(
                 if (kotlin.math.abs(actualPlayer.currentPosition - target) > 2000L) {
                     actualPlayer.seekTo(target)
                 }
+                hasAppliedResumeSeek = true
             }
         }
     }
@@ -155,8 +203,9 @@ fun VodPlayerOverlay(
                     }
                     Player.STATE_READY -> {
                         val target = resumePositionMs ?: 0L
-                        if (target > 1000L && kotlin.math.abs(actualPlayer.currentPosition - target) > 2000L) {
+                        if (!hasAppliedResumeSeek && target > 1000L && kotlin.math.abs(actualPlayer.currentPosition - target) > 2000L) {
                             actualPlayer.seekTo(target)
+                            hasAppliedResumeSeek = true
                         }
                         saveCurrentProgress()
                     }

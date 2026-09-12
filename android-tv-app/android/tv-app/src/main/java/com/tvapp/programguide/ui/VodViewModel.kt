@@ -586,6 +586,43 @@ class VodViewModel(
         }
     }
 
+    fun playResolvedEpisode(
+        episode: VodEpisode,
+        series: VodSeries,
+        resolvedStreamUrl: String,
+        currentPositionMs: Long? = null,
+    ) {
+        val resumePos = currentPositionMs
+            ?.takeIf { it > 1000L }
+            ?: progressManager.getResumePosition(episode.id)
+        progressManager.setLastPlayedEpisodeId(series.id, episode.id)
+        progressManager.saveRecentItem(
+            VodRecentItem(
+                id = episode.id,
+                episodeId = episode.id,
+                title = episode.title,
+                programId = series.id,
+                programName = series.title,
+                channelName = series.provider.displayName,
+                imageUrl = episode.imageUrl ?: series.imageUrl,
+                description = episode.description.takeIf { it.isNotBlank() } ?: series.description,
+                provider = series.provider,
+            )
+        )
+        _uiState.update {
+            it.copy(
+                isResolvingStream = false,
+                streamError = null,
+                playingEpisode = episode,
+                playingSeries = series,
+                playingStreamUrl = resolvedStreamUrl,
+                lastPlayedEpisodeId = episode.id,
+                resumePositionMs = resumePos,
+                episodeFocusTarget = null,
+            )
+        }
+    }
+
     fun playRecentItem(recent: VodRecentItem) {
         val programId = recent.programId
         val dummyEpisode = VodEpisode(

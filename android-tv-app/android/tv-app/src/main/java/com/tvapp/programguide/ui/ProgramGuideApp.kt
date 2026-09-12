@@ -791,11 +791,13 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             playerView.player = null
             homeInlinePlayerView.player = null
             guideInlinePlayerView.player = null
+            vodInlinePlayerView.player = null
             multiPlayerView.player = player
         } else if (currentDestination == AppDestination.HOME && !playbackState.isPlayerExpanded) {
             playerView.player = null
             multiPlayerView.player = null
             guideInlinePlayerView.player = null
+            vodInlinePlayerView.player = null
             if (homeInlinePlayerView.player !== player) {
                 homeInlinePlayerView.player = player
             }
@@ -803,13 +805,23 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             playerView.player = null
             multiPlayerView.player = null
             homeInlinePlayerView.player = null
+            vodInlinePlayerView.player = null
             if (guideInlinePlayerView.player !== player) {
                 guideInlinePlayerView.player = player
+            }
+        } else if (currentDestination == AppDestination.VOD && !playbackState.isPlayerExpanded) {
+            playerView.player = null
+            multiPlayerView.player = null
+            homeInlinePlayerView.player = null
+            guideInlinePlayerView.player = null
+            if (vodInlinePlayerView.player !== player) {
+                vodInlinePlayerView.player = player
             }
         } else {
             multiPlayerView.player = null
             homeInlinePlayerView.player = null
             guideInlinePlayerView.player = null
+            vodInlinePlayerView.player = null
             if (playerView.player !== player) {
                 playerView.player = player
             }

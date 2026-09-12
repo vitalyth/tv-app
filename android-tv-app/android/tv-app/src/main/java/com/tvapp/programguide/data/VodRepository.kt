@@ -26,9 +26,9 @@ class VodRepository(
             apiBaseUrl.removeSuffix("/api") + "/" + image.trimStart('/')
         }
 
-        val targetWidth = if (isBackdrop) 1280 else 480
-        val targetHeight = if (isBackdrop) 720 else 270
-        val targetQuality = if (isBackdrop) 85 else 78
+        val targetWidth = if (isBackdrop) 1920 else 640
+        val targetHeight = if (isBackdrop) 1080 else 360
+        val targetQuality = if (isBackdrop) 90 else 82
 
         try {
             if (fullUrl.contains("images.frp1.ott.kaltura.com")) {
@@ -98,7 +98,7 @@ class VodRepository(
             if (id.isEmpty()) continue
             val title = item.optString("title").trim()
             val description = item.optString("description").trim()
-            val image = resolveImageUrl(item.optString("image").trim().takeIf { it.isNotEmpty() })
+            val image = resolveImageUrl(item.optString("image").trim().takeIf { it.isNotEmpty() }, isBackdrop = true)
             val episodeCount = item.optInt("episodeCount", 0)
             val seasonCount = item.optInt("seasonCount", 0)
             val genre = item.optString("program_genre").trim().takeIf { it.isNotEmpty() }

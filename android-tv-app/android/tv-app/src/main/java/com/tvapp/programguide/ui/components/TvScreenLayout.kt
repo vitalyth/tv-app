@@ -133,18 +133,49 @@ fun TvScreenLayout(
             modifier = Modifier.fillMaxSize(),
         )
 
+        val verticalScrimStops = if (isVideoRendering) {
+            arrayOf(
+                0f to Color.Transparent,
+                0.32f to Color.Transparent,
+                0.50f to Color(0x99080A0C),
+                0.70f to Color(0xDD080A0C),
+                1f to Color(0xF6080A0C),
+            )
+        } else {
+            arrayOf(
+                0f to Color.Transparent,
+                0.28f to Color.Transparent,
+                0.44f to Color(0xCC080A0C),
+                0.60f to Color(0xF6080A0C),
+                1f to Color(0xFF080A0C),
+            )
+        }
+        val horizontalScrimStops = if (isVideoRendering) {
+            arrayOf(
+                0f to Color(0xE8080A0C),
+                0.30f to Color(0xC0080A0C),
+                0.46f to Color(0x80080A0C),
+                0.62f to Color(0x24080A0C),
+                0.78f to Color.Transparent,
+                1f to Color.Transparent,
+            )
+        } else {
+            arrayOf(
+                0f to Color(0xF8080A0C),
+                0.32f to Color(0xEB080A0C),
+                0.48f to Color(0xC0080A0C),
+                0.62f to Color(0x40080A0C),
+                0.74f to Color.Transparent,
+                1f to Color.Transparent,
+            )
+        }
+
         // Vertical Scrim Gradient (Top-to-Bottom)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.28f to Color.Transparent,
-                        0.44f to Color(0xCC080A0C),
-                        0.60f to Color(0xF6080A0C),
-                        1f to Color(0xFF080A0C),
-                    )
+                    Brush.verticalGradient(*verticalScrimStops)
                 )
         )
 
@@ -153,14 +184,7 @@ fun TvScreenLayout(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.horizontalGradient(
-                        0f to Color(0xF8080A0C),
-                        0.32f to Color(0xEB080A0C),
-                        0.48f to Color(0xC0080A0C),
-                        0.62f to Color(0x40080A0C),
-                        0.74f to Color.Transparent,
-                        1f to Color.Transparent,
-                    )
+                    Brush.horizontalGradient(*horizontalScrimStops)
                 )
         )
 

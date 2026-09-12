@@ -96,6 +96,17 @@ private val SeriesCardGradient = Brush.verticalGradient(
     ),
 )
 private val RtlTextStyle = androidx.compose.ui.text.TextStyle(textDirection = TextDirection.Rtl)
+private const val GenericVodArtwork = "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=3840&q=90"
+
+private fun vodSeriesFocusKey(series: VodSeries): String = "${series.provider.id}:${series.id}"
+
+private fun providerHeroDescription(provider: VodProvider): String = when (provider) {
+    VodProvider.KAN11 -> "תוכניות מקור, דוקו, דרמה, קומדיה ואקטואליה מבית כאן 11"
+    VodProvider.KESHET12 -> "התוכניות והסדרות המובילות של קשת 12 ו-+12 לצפייה ישירה"
+    VodProvider.RESHET13 -> "תוכניות הריאליטי, התחקירים, החדשות והאקטואליה של רשת 13"
+    VodProvider.CHANNEL14 -> "תוכניות האקטואליה, הפטריוטים, המהדורות ותוכניות הדגל של עכשיו 14"
+    VodProvider.I24NEWS -> "מהדורות החדשות, המגזינים והתוכניות של i24NEWS"
+}
 
 @Composable
 fun VodScreen(
@@ -114,7 +125,7 @@ fun VodScreen(
     var suppressDetailsBackCloseUntil by remember { mutableLongStateOf(0L) }
     var catalogFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var detailsFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var lastFocusedSeriesId by remember { mutableStateOf<String?>(null) }
+    var lastFocusedSeriesKey by remember { mutableStateOf<String?>(null) }
 
     val latestUiState by rememberUpdatedState(uiState)
     val latestCatalogFocusRestorer by rememberUpdatedState(catalogFocusRestorer)
@@ -175,13 +186,13 @@ fun VodScreen(
                 contentFocusNonce = contentFocusNonce,
                 player = player,
                 playerView = inlinePlayerView ?: playerView,
-                lastFocusedSeriesId = lastFocusedSeriesId,
+                lastFocusedSeriesKey = lastFocusedSeriesKey,
                 onSeriesClicked = { series ->
-                    lastFocusedSeriesId = series.id
+                    lastFocusedSeriesKey = vodSeriesFocusKey(series)
                     viewModel.openSeriesDetails(series)
                 },
                 onSeriesFocused = { series ->
-                    lastFocusedSeriesId = series.id
+                    lastFocusedSeriesKey = vodSeriesFocusKey(series)
                 },
                 modifier = Modifier.focusProperties { canFocus = isCatalogActive },
                 onRegisterFocusRestorer = { catalogFocusRestorer = it },
@@ -251,7 +262,7 @@ private fun VodCatalogView(
     contentFocusNonce: Int,
     player: StablePlayer?,
     playerView: StablePlayerView?,
-    lastFocusedSeriesId: String?,
+    lastFocusedSeriesKey: String?,
     onSeriesClicked: (VodSeries) -> Unit,
     onSeriesFocused: (VodSeries) -> Unit,
     modifier: Modifier = Modifier,
@@ -273,8 +284,8 @@ private fun VodCatalogView(
     // Keep focusedSeries in sync with the first item or remembered item
     LaunchedEffect(uiState.seriesList) {
         if (uiState.seriesList.isNotEmpty()) {
-            if (focusedSeries == null || uiState.seriesList.none { it.id == focusedSeries?.id }) {
-                val target = lastFocusedSeriesId?.let { id -> uiState.seriesList.firstOrNull { it.id == id } }
+            if (focusedSeries == null || uiState.seriesList.none { vodSeriesFocusKey(it) == focusedSeries?.let(::vodSeriesFocusKey) }) {
+                val target = lastFocusedSeriesKey?.let { key -> uiState.seriesList.firstOrNull { vodSeriesFocusKey(it) == key } }
                     ?: uiState.seriesList.firstOrNull()
                 focusedSeries = target
             }
@@ -287,9 +298,9 @@ private fun VodCatalogView(
     LaunchedEffect(uiState.selectedSeriesDetails, uiState.isLoadingDetails) {
         val detailsVisible = uiState.selectedSeriesDetails != null || uiState.isLoadingDetails
         if (previousDetailsVisible && !detailsVisible) {
-            val targetId = lastFocusedSeriesId
-            val targetIndex = if (targetId != null) {
-                uiState.seriesList.indexOfFirst { it.id == targetId }
+            val targetKey = lastFocusedSeriesKey
+            val targetIndex = if (targetKey != null) {
+                uiState.seriesList.indexOfFirst { vodSeriesFocusKey(it) == targetKey }
             } else 0
 
             if (targetIndex >= 0 && uiState.seriesList.isNotEmpty()) {
@@ -299,7 +310,7 @@ private fun VodCatalogView(
                     } catch (_: Exception) {}
                     for (retryDelay in listOf(60L, 140L, 280L, 450L)) {
                         delay(retryDelay)
-                        val requester = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+                        val requester = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
                         try {
                             requester.requestFocus()
                             break
@@ -314,11 +325,11 @@ private fun VodCatalogView(
     }
 
     fun restoreFocus() {
-        val targetId = lastFocusedSeriesId
-        val targetIndex = if (targetId != null) {
-            uiState.seriesList.indexOfFirst { it.id == targetId }
+        val targetKey = lastFocusedSeriesKey
+        val targetIndex = if (targetKey != null) {
+            uiState.seriesList.indexOfFirst { vodSeriesFocusKey(it) == targetKey }
         } else 0
-        val requester = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+        val requester = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
         try {
             requester.requestFocus()
         } catch (_: Exception) {
@@ -329,6 +340,18 @@ private fun VodCatalogView(
                 delay(80)
                 try { requester.requestFocus() } catch (_: Exception) {}
             }
+        }
+    }
+
+    LaunchedEffect(uiState.seriesList, uiState.selectedProvider) {
+        if (
+            uiState.seriesList.isNotEmpty() &&
+            uiState.selectedSeriesDetails == null &&
+            !uiState.isLoadingDetails &&
+            uiState.playingEpisode == null
+        ) {
+            delay(240)
+            restoreFocus()
         }
     }
 
@@ -370,7 +393,7 @@ private fun VodCatalogView(
 
     val heroSubtitle = when {
         isAllCircleFocused -> "כל הערוצים · סדרות ותוכניות"
-        focusedCircleProvider != null -> "ערוץ VOD · סדרות ותוכניות"
+        focusedCircleProvider != null -> "ערוץ ${focusedCircleProvider!!.channelNumber} · סדרות ותוכניות"
         else -> listOfNotNull(
             activeSeries?.provider?.displayName ?: uiState.selectedProvider?.displayName ?: "כל הערוצים",
             activeSeries?.genre?.takeIf { !it.isNullOrBlank() && it.lowercase() != "null" },
@@ -379,14 +402,7 @@ private fun VodCatalogView(
 
     val heroDescription = when {
         isAllCircleFocused -> "מבחר תוכניות, סדרות ופרקים מכל הערוצים המובילים בישראל: כאן 11, קשת 12, רשת 13, ערוץ 14 ו-i24NEWS"
-        focusedCircleProvider != null -> when (focusedCircleProvider) {
-            VodProvider.KAN11 -> "סדרות דרמה, דוקו, קומדיה ותוכניות אקטואליה מבית כאן 11"
-            VodProvider.KESHET12 -> "התוכניות והסדרות המובילות של קשת 12 ו-+12 לצפייה ישירה"
-            VodProvider.RESHET13 -> "תוכניות הריאליטי, התחקירים והאקטואליה של רשת 13 לצפייה ישירה"
-            VodProvider.CHANNEL14 -> "תוכניות האקטואליה, הפטריוטים והמהדורות של ערוץ 14"
-            VodProvider.I24NEWS -> "מהדורות החדשות, התוכניות והמגזינים של i24NEWS"
-            else -> "תוכניות וסדרות לצפייה ישירה"
-        }
+        focusedCircleProvider != null -> providerHeroDescription(focusedCircleProvider!!)
         else -> activeSeries?.description?.trim().orEmpty()
     }
 
@@ -398,14 +414,9 @@ private fun VodCatalogView(
         }
     }
 
-    val genericVodArtwork = "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=3840&q=90"
-
     val backgroundImageUrl = when {
-        isAllCircleFocused -> genericVodArtwork
-        focusedCircleProvider != null -> {
-            uiState.seriesList.firstOrNull { it.provider == focusedCircleProvider }?.imageUrl
-                ?: genericVodArtwork
-        }
+        isAllCircleFocused -> GenericVodArtwork
+        focusedCircleProvider != null -> viewModel.getProviderLogoUrl(focusedCircleProvider!!)
         else -> activeSeries?.imageUrl
     }
 
@@ -430,8 +441,8 @@ private fun VodCatalogView(
             isAllCircleFocused = false
             focusedCircleProvider = null
             try {
-                val targetId = lastFocusedSeriesId
-                val targetReq = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+                val targetKey = lastFocusedSeriesKey
+                val targetReq = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
                 targetReq.requestFocus()
             } catch (_: Exception) {}
         },
@@ -456,8 +467,8 @@ private fun VodCatalogView(
                     isAllCircleFocused = false
                     focusedCircleProvider = null
                     try {
-                        val targetId = lastFocusedSeriesId
-                        val targetReq = targetId?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
+                        val targetKey = lastFocusedSeriesKey
+                        val targetReq = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
                         targetReq.requestFocus()
                     } catch (_: Exception) {}
                 },
@@ -515,7 +526,7 @@ private fun VodCatalogView(
                             key = { _, it -> "${it.provider.id}:${it.id}" },
                             contentType = { _, _ -> "series_card" },
                         ) { index, series ->
-                            val seriesKey = "${series.provider.id}:${series.id}"
+                            val seriesKey = vodSeriesFocusKey(series)
                             val seriesRequester = if (index == 0) {
                                 seriesFirstItemFocusRequester
                             } else {
@@ -523,9 +534,9 @@ private fun VodCatalogView(
                             }
 
                             DisposableEffect(seriesKey) {
-                                seriesFocusRequesters[series.id] = seriesRequester
+                                seriesFocusRequesters[seriesKey] = seriesRequester
                                 onDispose {
-                                    seriesFocusRequesters.remove(series.id)
+                                    seriesFocusRequesters.remove(seriesKey)
                                 }
                             }
 
@@ -550,6 +561,7 @@ private fun VodCatalogView(
                                         } catch (_: Exception) {}
                                     }
                                 } else null,
+                                upFocusRequester = if (index < 5) channelCirclesFirstFocusRequester else null,
                             )
                         }
 
@@ -738,6 +750,7 @@ private fun SeriesCard(
     onClick: () -> Unit,
     onNavigateLeft: (() -> Unit)? = null,
     onNavigateUp: (() -> Unit)? = null,
+    upFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -749,8 +762,9 @@ private fun SeriesCard(
         else {
             ImageRequest.Builder(context)
                 .data(series.imageUrl)
-                .size(380, 214)
-                .crossfade(false)
+                .size(640, 360)
+                .crossfade(180)
+                .allowHardware(true)
                 .build()
         }
     }
@@ -762,6 +776,10 @@ private fun SeriesCard(
             .clip(SeriesCardShape)
             .background(CardBg)
             .then(if (isFocused) FocusedSeriesBorderModifier else Modifier)
+            .then(
+                if (upFocusRequester != null) Modifier.focusProperties { up = upFocusRequester }
+                else Modifier
+            )
             .onFocusChanged {
                 if (it.isFocused) onFocused()
             }
@@ -838,8 +856,10 @@ private fun SeriesCard(
                 AsyncImage(
                     model = channelLogoUrl,
                     contentDescription = series.provider.displayName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(3.dp),
                 )
             }
         }

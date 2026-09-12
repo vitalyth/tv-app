@@ -211,6 +211,8 @@ fun VodSeriesDetailsView(
     var focusedEpisodeId by remember(series.id) { mutableStateOf<String?>(null) }
     var pendingEpisodeFocusTarget by remember(series.id) { mutableStateOf<VodEpisodeFocusTarget?>(null) }
     var isBackgroundEpisodePlaying by remember { mutableStateOf(false) }
+    var backgroundPreviewEpisodeId by remember { mutableStateOf<String?>(null) }
+    var backgroundPreviewStreamUrl by remember { mutableStateOf<String?>(null) }
     var isMuted by remember { mutableStateOf(false) }
 
     fun rememberedEpisodeId(): String? {
@@ -321,11 +323,14 @@ fun VodSeriesDetailsView(
     // Requirement 8: 2-second debounced background preview playback
     LaunchedEffect(focusedEpisodeId, series.id, isPlayerActive) {
         isBackgroundEpisodePlaying = false
+        if (isPlayerActive) return@LaunchedEffect
+
+        backgroundPreviewEpisodeId = null
+        backgroundPreviewStreamUrl = null
         try {
             player?.value?.stop()
             player?.value?.clearMediaItems()
         } catch (_: Exception) {}
-        if (isPlayerActive) return@LaunchedEffect
 
         val epId = focusedEpisodeId ?: return@LaunchedEffect
         val targetEp = currentSeasonEpisodes.firstOrNull { it.id == epId } ?: return@LaunchedEffect
@@ -376,6 +381,8 @@ fun VodSeriesDetailsView(
                 player.value.volume = if (isMuted) 0f else 1f
                 player.value.prepare()
                 player.value.playWhenReady = true
+                backgroundPreviewEpisodeId = epId
+                backgroundPreviewStreamUrl = streamUrl
             } catch (_: Exception) {}
         }
     }
@@ -387,8 +394,24 @@ fun VodSeriesDetailsView(
                 isBackgroundEpisodePlaying = true
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
-                    isBackgroundEpisodePlaying = true
+                when (playbackState) {
+                    Player.STATE_READY -> {
+                        val previewEpisodeId = backgroundPreviewEpisodeId
+                        coroutineScope.launch {
+                            delay(350L)
+                            if (!isPlayerActive &&
+                                previewEpisodeId != null &&
+                                previewEpisodeId == backgroundPreviewEpisodeId &&
+                                player?.value?.playbackState == Player.STATE_READY
+                            ) {
+                                isBackgroundEpisodePlaying = true
+                            }
+                        }
+                    }
+                    Player.STATE_IDLE,
+                    Player.STATE_ENDED -> {
+                        isBackgroundEpisodePlaying = false
+                    }
                 }
             }
             override fun onPlayerError(error: PlaybackException) {
@@ -449,6 +472,21 @@ fun VodSeriesDetailsView(
         viewModel?.getProviderLogoUrl(series.provider)
     }
 
+    fun openFullscreenEpisode(episode: VodEpisode) {
+        val previewUrl = backgroundPreviewStreamUrl
+            ?.takeIf { backgroundPreviewEpisodeId == episode.id && it.isNotBlank() }
+        if (previewUrl != null && viewModel != null && player != null) {
+            viewModel.playResolvedEpisode(
+                episode = episode,
+                series = series,
+                resolvedStreamUrl = previewUrl,
+                currentPositionMs = player.value.currentPosition,
+            )
+        } else {
+            onPlayEpisode(episode, series)
+        }
+    }
+
     val effectiveInlinePlayerView = inlinePlayerView ?: playerView
     if (player != null && effectiveInlinePlayerView != null) {
         TvScreenLayout(
@@ -472,7 +510,7 @@ fun VodSeriesDetailsView(
             },
             muteFocusRequester = muteFocusRequester,
             onOpenFullScreen = {
-                focusedEpisode?.let { ep -> onPlayEpisode(ep, series) }
+                focusedEpisode?.let(::openFullscreenEpisode)
             },
             fullScreenFocusRequester = fullScreenFocusRequester,
             onNavigateLeft = onNavigateSideRail,
@@ -606,7 +644,7 @@ fun VodSeriesDetailsView(
                             focusRequester = fr,
                             isLastPlayed = (episode.id == lastPlayedEpisodeId),
                             progress = progress,
-                            onPlay = { onPlayEpisode(episode, series) },
+                            onPlay = { openFullscreenEpisode(episode) },
                             onFocused = { focusedEpisodeId = episode.id },
                             onNavigateLeft = if (index == 0) onNavigateSideRail else null,
                             onNavigateUp = {
