@@ -411,6 +411,23 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         }
     }
     val stableGuideInlinePlayerView = remember(guideInlinePlayerView) { StablePlayerView(guideInlinePlayerView) }
+    val vodInlinePlayerView = remember(player) {
+        (LayoutInflater.from(context).inflate(R.layout.player_view_texture, null) as PlayerView).apply {
+            (videoSurfaceView as? TextureView)?.isOpaque = false
+            useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            isFocusable = false
+            isFocusableInTouchMode = false
+            setKeepContentOnPlayerReset(false)
+            setEnableComposeSurfaceSyncWorkaround(false)
+            hideController()
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+    }
+    val stableVodInlinePlayerView = remember(vodInlinePlayerView) { StablePlayerView(vodInlinePlayerView) }
     var liveTvIsMuted by remember { mutableStateOf(false) }
     val liveTvMuteFocusRequester = remember { FocusRequester() }
     var homeVodPreviewEpisodeId by remember { mutableStateOf<String?>(null) }
@@ -1283,6 +1300,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 initialFocusRequester = vodContentFocusRequester,
                                 contentFocusNonce = vodContentFocusNonce,
                                 player = stablePlayer,
+                                inlinePlayerView = stableVodInlinePlayerView,
                                 playerView = stablePlayerView,
                                 onRegisterFocusRestorer = { restorer ->
                                     vodFocusRestorer = restorer

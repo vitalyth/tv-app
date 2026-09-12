@@ -95,6 +95,7 @@ fun VodSeriesDetailsView(
     episodeProgress: Map<String, VodPlaybackProgress> = emptyMap(),
     isPlayerActive: Boolean = false,
     player: StablePlayer? = null,
+    inlinePlayerView: StablePlayerView? = null,
     playerView: StablePlayerView? = null,
     viewModel: VodViewModel? = null,
     onSeasonSelected: (VodSeason) -> Unit,
@@ -229,9 +230,14 @@ fun VodSeriesDetailsView(
             try {
                 episodesListState.scrollToItem(targetIndex.coerceAtLeast(0))
             } catch (_: Exception) {}
-            delay(90)
-            try { primaryReq?.requestFocus() } catch (_: Exception) {
-                try { fallbackReq?.requestFocus() } catch (_: Exception) {}
+            for (retryDelay in listOf(50L, 120L, 250L, 400L)) {
+                delay(retryDelay)
+                try {
+                    primaryReq?.requestFocus()
+                    break
+                } catch (_: Exception) {
+                    try { fallbackReq?.requestFocus() } catch (_: Exception) {}
+                }
             }
         }
     }
@@ -315,6 +321,10 @@ fun VodSeriesDetailsView(
     // Requirement 8: 2-second debounced background preview playback
     LaunchedEffect(focusedEpisodeId, series.id, isPlayerActive) {
         isBackgroundEpisodePlaying = false
+        try {
+            player?.value?.stop()
+            player?.value?.clearMediaItems()
+        } catch (_: Exception) {}
         if (isPlayerActive) return@LaunchedEffect
 
         val epId = focusedEpisodeId ?: return@LaunchedEffect
@@ -423,16 +433,29 @@ fun VodSeriesDetailsView(
         focusedEpisode?.imageUrl ?: series.imageUrl
     }
 
+    LaunchedEffect(isPlayerActive) {
+        if (!isPlayerActive) {
+            val targetEpisodeId = lastPlayedEpisodeId ?: focusedEpisodeId ?: currentSeasonEpisodes.firstOrNull()?.id
+            if (targetEpisodeId != null) {
+                for (waitMs in listOf(60L, 140L, 280L)) {
+                    delay(waitMs)
+                    requestEpisodeFocus(targetEpisodeId)
+                }
+            }
+        }
+    }
+
     val channelLogoUrl = remember(series.provider, viewModel) {
         viewModel?.getProviderLogoUrl(series.provider)
     }
 
-    if (player != null && playerView != null) {
+    val effectiveInlinePlayerView = inlinePlayerView ?: playerView
+    if (player != null && effectiveInlinePlayerView != null) {
         TvScreenLayout(
             player = player,
-            playerView = playerView,
+            playerView = effectiveInlinePlayerView,
             isVideoRendering = isBackgroundEpisodePlaying,
-            isPlayerExpanded = false,
+            isPlayerExpanded = isPlayerActive,
             backgroundImageUrl = backgroundImageUrl,
             artworkTitle = series.title,
             heroTitle = heroTitle,
@@ -466,7 +489,10 @@ fun VodSeriesDetailsView(
             spacerAfterHero = 10.dp,
             modifier = modifier,
         ) {
-            // Header Row: Back button + Details badge
+            // Requirement: Episodes + Seasons + Back always at the bottom of the page
+            Spacer(modifier = Modifier.weight(1f))
+
+            // Header Row: Back button
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
