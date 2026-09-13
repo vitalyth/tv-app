@@ -1,6 +1,5 @@
 package com.tvapp.programguide.ui.vod
 
-import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -36,7 +35,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -123,7 +121,6 @@ fun VodScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val hasDetailsSurface = uiState.selectedSeriesDetails != null || uiState.isLoadingDetails
     val isCatalogActive = !hasDetailsSurface && uiState.playingEpisode == null
-    var suppressDetailsBackCloseUntil by remember { mutableLongStateOf(0L) }
     var catalogFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var detailsFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var lastFocusedSeriesKey by remember { mutableStateOf<String?>(null) }
@@ -159,7 +156,6 @@ fun VodScreen(
 
     fun stopVodPlaybackAndReturnToEpisode() {
         rememberSeriesForCatalog(uiState.playingSeries ?: uiState.selectedSeriesDetails?.series)
-        suppressDetailsBackCloseUntil = SystemClock.elapsedRealtime() + 900L
         viewModel.stopVodPlayback()
     }
 
@@ -177,13 +173,7 @@ fun VodScreen(
     BackHandler {
         when {
             uiState.playingEpisode != null -> stopVodPlaybackAndReturnToEpisode()
-            uiState.selectedSeriesDetails != null || uiState.isLoadingDetails -> {
-                val shouldSuppress = SystemClock.elapsedRealtime() < suppressDetailsBackCloseUntil
-                suppressDetailsBackCloseUntil = 0L
-                if (!shouldSuppress) {
-                    closeDetailsAndReturnToCatalog()
-                }
-            }
+            uiState.selectedSeriesDetails != null || uiState.isLoadingDetails -> closeDetailsAndReturnToCatalog()
             else -> onNavigateSideRail()
         }
     }
@@ -194,7 +184,7 @@ fun VodScreen(
                 .fillMaxSize()
                 .background(DarkBg),
         ) {
-            if (!hasDetailsSurface && uiState.playingEpisode == null) {
+            if (uiState.seriesList.isNotEmpty() || uiState.isLoadingSeries || uiState.seriesError != null) {
                 // Main VOD Catalog View
                 VodCatalogView(
                     viewModel = viewModel,

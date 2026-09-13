@@ -47,6 +47,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -107,9 +112,20 @@ fun VodSeriesDetailsView(
     onRegisterFocusRestorer: (((() -> Unit) -> Unit))? = null,
     modifier: Modifier = Modifier,
 ) {
+    val backAwareModifier = modifier.onPreviewKeyEvent { event ->
+        if (event.key == Key.Back) {
+            if (event.type == KeyEventType.KeyDown) {
+                onClose()
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     if (isLoading) {
         Box(
-            modifier = modifier
+            modifier = backAwareModifier
                 .fillMaxSize()
                 .background(DetailsBg),
             contentAlignment = Alignment.Center,
@@ -121,7 +137,7 @@ fun VodSeriesDetailsView(
 
     if (error != null) {
         Box(
-            modifier = modifier
+            modifier = backAwareModifier
                 .fillMaxSize()
                 .background(DetailsBg),
             contentAlignment = Alignment.Center,
@@ -434,7 +450,7 @@ fun VodSeriesDetailsView(
             heroPadding = PaddingValues(start = 32.dp, end = 32.dp, top = 32.dp),
             contentPadding = PaddingValues(start = 32.dp, end = 32.dp, bottom = 16.dp),
             spacerAfterHero = 10.dp,
-            modifier = modifier,
+            modifier = backAwareModifier,
         ) {
             // Requirement: Episodes + Seasons + Back always at the bottom of the page
             Spacer(modifier = Modifier.weight(1f))
