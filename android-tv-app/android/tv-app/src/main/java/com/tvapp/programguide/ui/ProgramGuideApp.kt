@@ -786,7 +786,13 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         applyPrimaryVideoProfile(PrimaryVideoProfile.MultiFocused)
     }
 
-    LaunchedEffect(multiPlayerActive, currentDestination, playbackState.isPlayerExpanded) {
+    LaunchedEffect(
+        multiPlayerActive,
+        currentDestination,
+        playbackState.isPlayerExpanded,
+        isVodPlaying,
+        isLocalSeriesPlaying,
+    ) {
         if (multiPlayerActive) {
             playerView.player = null
             homeInlinePlayerView.player = null
@@ -809,7 +815,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             if (guideInlinePlayerView.player !== player) {
                 guideInlinePlayerView.player = player
             }
-        } else if (currentDestination == AppDestination.VOD && !playbackState.isPlayerExpanded) {
+        } else if (currentDestination == AppDestination.VOD && !playbackState.isPlayerExpanded && !isVodPlaying) {
             playerView.player = null
             multiPlayerView.player = null
             homeInlinePlayerView.player = null
@@ -900,50 +906,55 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
             val vodStream = vodUiState.playingStreamUrl
             if (!vodStream.isNullOrBlank()) {
                 if (activeStreamUrl.value != vodStream) {
+                    val currentPlayerUri = player.currentMediaItem?.localConfiguration?.uri?.toString()
+                    val isAlreadyLoadedInPlayer = currentPlayerUri == vodStream &&
+                        player.playbackState != Player.STATE_IDLE &&
+                        player.playbackState != Player.STATE_ENDED
                     applyPrimaryVideoProfile(PrimaryVideoProfile.Full)
-                    val mediaItem = when {
-                        vodStream.contains(".mpd", ignoreCase = true) || vodStream.contains(".livx", ignoreCase = true) -> {
-                            MediaItem.Builder()
-                                .setUri(vodStream)
-                                .setMimeType(MimeTypes.APPLICATION_MPD)
-                                .build()
-                        }
-                        // Mako/Keshet HLS URLs can include ".mp4.csmil/index.m3u8"; prefer HLS when present.
-                        vodStream.contains(".m3u8", ignoreCase = true) -> {
-                            MediaItem.Builder()
-                                .setUri(vodStream)
-                                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                                .build()
-                        }
-                        vodStream.contains(".mp4", ignoreCase = true) -> {
-                            MediaItem.Builder()
-                                .setUri(vodStream)
-                                .setMimeType(MimeTypes.APPLICATION_MP4)
-                                .build()
-                        }
-                        else -> {
-                            // VOD usually arrives through /api/proxy?url=..., so URL sniffing is unreliable.
-                            MediaItem.Builder()
-                                .setUri(vodStream)
-                                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                                .build()
-                        }
-                    }
-                    val resumePos = savedVodPositionMs ?: vodUiState.resumePositionMs ?: 0L
-                    savedVodPositionMs = null
-                    if (resumePos > 0L) {
-                        renderedStreamUrl.value = null
-                        activeStreamUrl.value = null
-                        player.setMediaItem(mediaItem, resumePos)
-                        player.seekTo(resumePos)
+                    if (isAlreadyLoadedInPlayer) {
+                        activeStreamUrl.value = vodStream
                     } else {
+                        val mediaItem = when {
+                            vodStream.contains(".mpd", ignoreCase = true) || vodStream.contains(".livx", ignoreCase = true) -> {
+                                MediaItem.Builder()
+                                    .setUri(vodStream)
+                                    .setMimeType(MimeTypes.APPLICATION_MPD)
+                                    .build()
+                            }
+                            // Mako/Keshet HLS URLs can include ".mp4.csmil/index.m3u8"; prefer HLS when present.
+                            vodStream.contains(".m3u8", ignoreCase = true) -> {
+                                MediaItem.Builder()
+                                    .setUri(vodStream)
+                                    .setMimeType(MimeTypes.APPLICATION_M3U8)
+                                    .build()
+                            }
+                            vodStream.contains(".mp4", ignoreCase = true) -> {
+                                MediaItem.Builder()
+                                    .setUri(vodStream)
+                                    .setMimeType(MimeTypes.APPLICATION_MP4)
+                                    .build()
+                            }
+                            else -> {
+                                // VOD usually arrives through /api/proxy?url=..., so URL sniffing is unreliable.
+                                MediaItem.Builder()
+                                    .setUri(vodStream)
+                                    .setMimeType(MimeTypes.APPLICATION_M3U8)
+                                    .build()
+                            }
+                        }
+                        val resumePos = savedVodPositionMs ?: vodUiState.resumePositionMs ?: 0L
+                        savedVodPositionMs = null
                         renderedStreamUrl.value = null
                         activeStreamUrl.value = null
-                        player.setMediaItem(mediaItem, 0L)
-                        player.seekTo(0L)
+                        player.setMediaItem(mediaItem, resumePos.coerceAtLeast(0L))
+                        if (resumePos > 0L) {
+                            player.seekTo(resumePos)
+                        } else {
+                            player.seekTo(0L)
+                        }
+                        player.prepare()
+                        activeStreamUrl.value = vodStream
                     }
-                    player.prepare()
-                    activeStreamUrl.value = vodStream
                 }
                 player.play()
             }

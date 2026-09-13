@@ -39,7 +39,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +77,7 @@ import com.tvapp.programguide.ui.VodViewModel
 import com.tvapp.programguide.ui.components.TvScreenDarkBg
 import com.tvapp.programguide.ui.components.TvScreenLayout
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 private val DarkBg = Color(0xFF080A0C)
@@ -127,7 +127,7 @@ fun VodScreen(
     var catalogFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var detailsFocusRestorer by remember { mutableStateOf<(() -> Unit)?>(null) }
     var lastFocusedSeriesKey by remember { mutableStateOf<String?>(null) }
-    var catalogRestoreNonce by remember { mutableIntStateOf(0) }
+    var pendingCatalogRestoreKey by remember { mutableStateOf<String?>(null) }
 
     val latestUiState by rememberUpdatedState(uiState)
     val latestCatalogFocusRestorer by rememberUpdatedState(catalogFocusRestorer)
@@ -146,13 +146,14 @@ fun VodScreen(
 
     fun rememberSeriesForCatalog(series: VodSeries?) {
         if (series != null) {
-            lastFocusedSeriesKey = vodSeriesFocusKey(series)
+            val key = vodSeriesFocusKey(series)
+            lastFocusedSeriesKey = key
+            pendingCatalogRestoreKey = key
         }
     }
 
     fun closeDetailsAndReturnToCatalog() {
         rememberSeriesForCatalog(uiState.selectedSeriesDetails?.series ?: uiState.playingSeries)
-        catalogRestoreNonce++
         viewModel.closeSeriesDetails()
     }
 
@@ -160,15 +161,6 @@ fun VodScreen(
         rememberSeriesForCatalog(uiState.playingSeries ?: uiState.selectedSeriesDetails?.series)
         suppressDetailsBackCloseUntil = SystemClock.elapsedRealtime() + 900L
         viewModel.stopVodPlayback()
-    }
-
-    LaunchedEffect(isCatalogActive, catalogRestoreNonce) {
-        if (isCatalogActive && catalogRestoreNonce > 0) {
-            for (waitMs in listOf(80L, 180L, 360L, 620L)) {
-                delay(waitMs)
-                latestCatalogFocusRestorer?.invoke()
-            }
-        }
     }
 
     // Initial load: when entering VOD, load all channels (Requirement 2)
@@ -211,13 +203,20 @@ fun VodScreen(
                 player = player,
                 playerView = inlinePlayerView ?: playerView,
                 lastFocusedSeriesKey = lastFocusedSeriesKey,
-                restoreFocusNonce = catalogRestoreNonce,
+                pendingRestoreSeriesKey = uiState.catalogFocusSeriesKey ?: pendingCatalogRestoreKey,
                 onSeriesClicked = { series ->
-                    lastFocusedSeriesKey = vodSeriesFocusKey(series)
+                    val key = vodSeriesFocusKey(series)
+                    lastFocusedSeriesKey = key
+                    pendingCatalogRestoreKey = key
                     viewModel.openSeriesDetails(series)
                 },
                 onSeriesFocused = { series ->
-                    lastFocusedSeriesKey = vodSeriesFocusKey(series)
+                    if (latestUiState.selectedSeriesDetails == null &&
+                        !latestUiState.isLoadingDetails &&
+                        latestUiState.playingEpisode == null
+                    ) {
+                        lastFocusedSeriesKey = vodSeriesFocusKey(series)
+                    }
                 },
                 modifier = Modifier.focusProperties { canFocus = isCatalogActive },
                 onRegisterFocusRestorer = { catalogFocusRestorer = it },
@@ -288,7 +287,7 @@ private fun VodCatalogView(
     player: StablePlayer?,
     playerView: StablePlayerView?,
     lastFocusedSeriesKey: String?,
-    restoreFocusNonce: Int,
+    pendingRestoreSeriesKey: String?,
     onSeriesClicked: (VodSeries) -> Unit,
     onSeriesFocused: (VodSeries) -> Unit,
     modifier: Modifier = Modifier,
@@ -305,13 +304,14 @@ private fun VodCatalogView(
     var focusedSeries by remember { mutableStateOf<VodSeries?>(null) }
     var focusedCircleProvider by remember { mutableStateOf<VodProvider?>(null) }
     var isAllCircleFocused by remember { mutableStateOf(false) }
-    var previousDetailsVisible by remember { mutableStateOf(false) }
+    var previousCatalogActive by remember { mutableStateOf(false) }
 
     // Keep focusedSeries in sync with the first item or remembered item
     LaunchedEffect(uiState.seriesList) {
         if (uiState.seriesList.isNotEmpty()) {
             if (focusedSeries == null || uiState.seriesList.none { vodSeriesFocusKey(it) == focusedSeries?.let(::vodSeriesFocusKey) }) {
-                val target = lastFocusedSeriesKey?.let { key -> uiState.seriesList.firstOrNull { vodSeriesFocusKey(it) == key } }
+                val restoreKey = pendingRestoreSeriesKey ?: lastFocusedSeriesKey
+                val target = restoreKey?.let { key -> uiState.seriesList.firstOrNull { vodSeriesFocusKey(it) == key } }
                     ?: uiState.seriesList.firstOrNull()
                 focusedSeries = target
             }
@@ -320,64 +320,17 @@ private fun VodCatalogView(
         }
     }
 
-    // Restore focus when returning from Details (Requirement 9)
-    LaunchedEffect(uiState.selectedSeriesDetails, uiState.isLoadingDetails) {
-        val detailsVisible = uiState.selectedSeriesDetails != null || uiState.isLoadingDetails
-        if (previousDetailsVisible && !detailsVisible) {
-            val targetKey = lastFocusedSeriesKey
-            val targetIndex = if (targetKey != null) {
-                uiState.seriesList.indexOfFirst { vodSeriesFocusKey(it) == targetKey }
-            } else 0
-
-            if (targetIndex >= 0 && uiState.seriesList.isNotEmpty()) {
-                coroutineScope.launch {
-                    try {
-                        gridState.scrollToItem(targetIndex.coerceAtLeast(0))
-                    } catch (_: Exception) {}
-                    for (retryDelay in listOf(60L, 140L, 280L, 450L)) {
-                        delay(retryDelay)
-                        val requester = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
-                        try {
-                            requester.requestFocus()
-                            break
-                        } catch (_: Exception) {
-                            try { seriesFirstItemFocusRequester.requestFocus() } catch (_: Exception) {}
-                        }
-                    }
-                }
-            }
-        }
-        previousDetailsVisible = detailsVisible
-    }
-
     fun restoreFocus() {
-        val targetKey = lastFocusedSeriesKey
-        val targetIndex = if (targetKey != null) {
-            uiState.seriesList.indexOfFirst { vodSeriesFocusKey(it) == targetKey }
-        } else 0
-        val requester = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
-        try {
-            requester.requestFocus()
-        } catch (_: Exception) {
-            coroutineScope.launch {
-                try {
-                    gridState.scrollToItem(targetIndex.coerceAtLeast(0))
-                } catch (_: Exception) {}
-                delay(80)
-                try { requester.requestFocus() } catch (_: Exception) {}
-            }
-        }
-    }
+        val targetKey = pendingRestoreSeriesKey ?: lastFocusedSeriesKey
+        if (uiState.seriesList.isEmpty()) return
 
-    LaunchedEffect(uiState.seriesList, uiState.selectedProvider) {
-        if (
-            uiState.seriesList.isNotEmpty() &&
-            uiState.selectedSeriesDetails == null &&
-            !uiState.isLoadingDetails &&
-            uiState.playingEpisode == null
-        ) {
-            delay(240)
-            restoreFocus()
+        coroutineScope.launch {
+            delay(80L)
+            val requester = targetKey?.let { seriesFocusRequesters[it] }
+                ?: if (targetKey == null) seriesFirstItemFocusRequester else null
+            try {
+                requester?.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 
@@ -388,9 +341,9 @@ private fun VodCatalogView(
         onDispose {}
     }
 
-    LaunchedEffect(contentFocusNonce, restoreFocusNonce) {
+    LaunchedEffect(contentFocusNonce) {
         if (
-            (contentFocusNonce > 0 || restoreFocusNonce > 0) &&
+            contentFocusNonce > 0 &&
             uiState.selectedSeriesDetails == null &&
             !uiState.isLoadingDetails &&
             uiState.playingEpisode == null
@@ -399,13 +352,23 @@ private fun VodCatalogView(
         }
     }
 
+    LaunchedEffect(uiState.selectedSeriesDetails, uiState.isLoadingDetails, uiState.playingEpisode) {
+        val catalogActiveNow = uiState.selectedSeriesDetails == null &&
+            !uiState.isLoadingDetails &&
+            uiState.playingEpisode == null
+        if (catalogActiveNow && !previousCatalogActive) {
+            restoreFocus()
+        }
+        previousCatalogActive = catalogActiveNow
+    }
+
     // Pagination when scrolling
     LaunchedEffect(gridState) {
         snapshotFlow {
             val total = gridState.layoutInfo.totalItemsCount
             val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             total > 0 && lastVisible >= total - 6
-        }.collect { shouldLoadMore ->
+        }.distinctUntilChanged().collect { shouldLoadMore ->
             val state = viewModel.uiState.value
             if (shouldLoadMore && state.hasMoreSeries && !state.isLoadingMoreSeries && !state.isLoadingSeries) {
                 viewModel.loadMoreSeries()
@@ -472,7 +435,7 @@ private fun VodCatalogView(
             isAllCircleFocused = false
             focusedCircleProvider = null
             try {
-                val targetKey = lastFocusedSeriesKey
+                val targetKey = pendingRestoreSeriesKey ?: lastFocusedSeriesKey
                 val targetReq = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
                 targetReq.requestFocus()
             } catch (_: Exception) {}
@@ -498,7 +461,7 @@ private fun VodCatalogView(
                     isAllCircleFocused = false
                     focusedCircleProvider = null
                     try {
-                        val targetKey = lastFocusedSeriesKey
+                        val targetKey = pendingRestoreSeriesKey ?: lastFocusedSeriesKey
                         val targetReq = targetKey?.let { seriesFocusRequesters[it] } ?: seriesFirstItemFocusRequester
                         targetReq.requestFocus()
                     } catch (_: Exception) {}

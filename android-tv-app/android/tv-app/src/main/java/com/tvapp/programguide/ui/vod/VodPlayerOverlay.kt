@@ -255,6 +255,39 @@ fun VodPlayerOverlay(
         }
     }
 
+    LaunchedEffect(actualPlayerView, streamUrl, episode?.id) {
+        if (streamUrl.isNullOrBlank()) return@LaunchedEffect
+        hasRenderedFirstFrame = false
+        delay(120L)
+        try {
+            actualPlayer.playWhenReady = true
+            actualPlayer.play()
+        } catch (_: Exception) {}
+
+        var previousPosition = actualPlayer.currentPosition
+        for (waitMs in listOf(700L, 1200L, 1800L)) {
+            delay(waitMs)
+            val currentPosition = actualPlayer.currentPosition
+            val advanced = currentPosition > previousPosition + 250L
+            if (advanced) {
+                hasRenderedFirstFrame = true
+                break
+            }
+            if (
+                actualPlayer.playbackState == Player.STATE_READY ||
+                    actualPlayer.playbackState == Player.STATE_BUFFERING
+            ) {
+                try {
+                    actualPlayer.playWhenReady = true
+                    actualPlayer.play()
+                    val nudgePosition = (currentPosition + 120L).coerceAtLeast(0L)
+                    actualPlayer.seekTo(nudgePosition)
+                } catch (_: Exception) {}
+            }
+            previousPosition = currentPosition
+        }
+    }
+
     // Detach player view when overlay leaves composition
     DisposableEffect(actualPlayerView) {
         onDispose {

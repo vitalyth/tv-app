@@ -57,6 +57,7 @@ data class VodUiState(
     val watchedItems: List<VodRecentItem> = emptyList(),
     val resumePositionMs: Long? = null,
     val episodeFocusTarget: VodEpisodeFocusTarget? = null,
+    val catalogFocusSeriesKey: String? = null,
 )
 
 data class VodEpisodeFocusTarget(
@@ -477,6 +478,7 @@ class VodViewModel(
     fun openSeriesDetails(series: VodSeries) {
         loadDetailsJob?.cancel()
         val lastEpisodeId = progressManager.getLastPlayedEpisodeId(series.id)
+        val catalogFocusKey = "${series.provider.id}:${series.id}"
         loadDetailsJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -485,6 +487,7 @@ class VodViewModel(
                     selectedSeriesDetails = null,
                     selectedSeason = null,
                     lastPlayedEpisodeId = lastEpisodeId,
+                    catalogFocusSeriesKey = catalogFocusKey,
                 )
             }
             runCatching {
