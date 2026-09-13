@@ -531,8 +531,11 @@ private fun VodCatalogView(
 
                             SeriesCard(
                                 series = series,
+                                channelLogoUrl = viewModel.getProviderLogoUrl(series.provider),
                                 focusRequester = seriesRequester,
                                 onFocused = {
+                                    isAllCircleFocused = false
+                                    focusedCircleProvider = null
                                     focusedSeries = series
                                     onSeriesFocused(series)
                                 },
@@ -578,6 +581,8 @@ private fun ChannelCirclesRow(
     selectedProvider: VodProvider?,
     onSelectProvider: (VodProvider?) -> Unit,
     getLogoUrl: (VodProvider) -> String,
+    onAllFocused: () -> Unit = {},
+    onProviderFocused: (VodProvider) -> Unit = {},
     onNavigateSideRail: () -> Unit,
     onNavigateDown: () -> Unit,
     firstCircleFocusRequester: FocusRequester,
@@ -622,6 +627,9 @@ private fun ChannelCirclesRow(
                 .clip(CircleShape)
                 .background(allBg)
                 .border(allBorder, CircleShape)
+                .onFocusChanged {
+                    if (it.isFocused) onAllFocused()
+                }
                 .tvFocusableClickable(
                     onClick = { onSelectProvider(null) },
                     interactionSource = allInteractionSource,
@@ -668,6 +676,9 @@ private fun ChannelCirclesRow(
                     .clip(CircleShape)
                     .background(bg)
                     .border(border, CircleShape)
+                    .onFocusChanged {
+                        if (it.isFocused) onProviderFocused(provider)
+                    }
                     .tvFocusableClickable(
                         onClick = {
                             if (isSelected) {
