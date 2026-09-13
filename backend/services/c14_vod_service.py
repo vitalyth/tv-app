@@ -178,6 +178,7 @@ def _init_db(con: sqlite3.Connection) -> None:
             published_timestamp REAL,
             display_order INTEGER,
             source_type TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """
@@ -187,6 +188,14 @@ def _init_db(con: sqlite3.Connection) -> None:
     _add_column_if_missing(con, "c14_episodes", "published_timestamp", "REAL")
     _add_column_if_missing(con, "c14_episodes", "display_order", "INTEGER")
     _add_column_if_missing(con, "c14_episodes", "source_type", "TEXT")
+    _add_column_if_missing(con, "c14_episodes", "created_at", "TEXT")
+    con.execute(
+        """
+        UPDATE c14_episodes
+        SET created_at = COALESCE(NULLIF(updated_at, ''), CURRENT_TIMESTAMP)
+        WHERE created_at IS NULL OR TRIM(created_at) = ''
+        """
+    )
     con.executescript(
         """
         CREATE INDEX IF NOT EXISTS idx_c14_programs_title ON c14_programs(title);
@@ -195,6 +204,7 @@ def _init_db(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_c14_episodes_program_id ON c14_episodes(program_id);
         CREATE INDEX IF NOT EXISTS idx_c14_episodes_season_id ON c14_episodes(season_id);
         CREATE INDEX IF NOT EXISTS idx_c14_episodes_published ON c14_episodes(published_timestamp);
+        CREATE INDEX IF NOT EXISTS idx_c14_episodes_created_at ON c14_episodes(created_at);
         """
     )
     con.commit()
@@ -682,9 +692,10 @@ def _upsert_episode(con: sqlite3.Connection, episode: C14Episode) -> None:
         """
         INSERT INTO c14_episodes (
             id, program_id, season_id, title, description, url, image, play_url,
-            stream_url, published, published_timestamp, display_order, source_type, updated_at
+            stream_url, published, published_timestamp, display_order, source_type,
+            created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             program_id = excluded.program_id,
             season_id = excluded.season_id,
@@ -1247,6 +1258,7 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["seasonCount"] = int(item.pop("season_count", 0) or 0)
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["image"] = item.get("image") or C14_DEFAULT_IMAGE
+    item["latestEpisodeAddedAt"] = item.pop("latest_episode_added_at", None)
     item["latestEpisodePublished"] = item.get("latest_item_published")
     item["provider"] = "c14"
     return item
@@ -1359,6 +1371,7 @@ def get_c14_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN COALESCE(e.stream_url, '') != '' THEN e.id END) AS stream_count,
+                MAX(e.created_at) AS latest_episode_added_at,
                 MAX(e.published_timestamp) AS actual_latest_timestamp
             FROM c14_programs p
             LEFT JOIN c14_seasons s ON s.program_id = p.id
@@ -1368,6 +1381,8 @@ def get_c14_vod_series(
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
+                latest_episode_added_at IS NULL,
+                datetime(latest_episode_added_at) DESC,
                 COALESCE(actual_latest_timestamp, p.latest_item_timestamp) IS NULL,
                 COALESCE(actual_latest_timestamp, p.latest_item_timestamp) DESC,
                 p.title COLLATE NOCASE

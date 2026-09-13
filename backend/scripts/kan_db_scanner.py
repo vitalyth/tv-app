@@ -1276,6 +1276,7 @@ def init_db(db_path: str) -> None:
                 stream_url TEXT,
                 kaltura_entry_id TEXT,
                 published TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -1316,7 +1317,15 @@ def init_db(db_path: str) -> None:
         add_column_if_missing(con, "episodes", "kaltura_entry_id", "TEXT")
         add_column_if_missing(con, "episodes", "published", "TEXT")
         add_column_if_missing(con, "episodes", "display_order", "INTEGER")
+        add_column_if_missing(con, "episodes", "created_at", "TEXT")
         add_column_if_missing(con, "episodes", "updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP")
+        con.execute(
+            """
+            UPDATE episodes
+            SET created_at = COALESCE(NULLIF(updated_at, ''), CURRENT_TIMESTAMP)
+            WHERE created_at IS NULL OR TRIM(created_at) = ''
+            """
+        )
 
         # Indexes after migrations, so columns definitely exist.
         con.executescript(
@@ -1327,6 +1336,7 @@ def init_db(db_path: str) -> None:
             CREATE INDEX IF NOT EXISTS idx_episodes_program_id ON episodes(program_id);
             CREATE INDEX IF NOT EXISTS idx_episodes_season_id ON episodes(season_id);
             CREATE INDEX IF NOT EXISTS idx_episodes_title ON episodes(title);
+            CREATE INDEX IF NOT EXISTS idx_episodes_created_at ON episodes(created_at);
             """
         )
 
@@ -1457,9 +1467,9 @@ def upsert_episode(con: sqlite3.Connection, episode: Episode) -> None:
         """
         INSERT INTO episodes (
             id, program_id, season_id, title, description, url, image,
-            play_url, stream_url, kaltura_entry_id, published, display_order, updated_at
+            play_url, stream_url, kaltura_entry_id, published, display_order, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             program_id=excluded.program_id,
             season_id=excluded.season_id,

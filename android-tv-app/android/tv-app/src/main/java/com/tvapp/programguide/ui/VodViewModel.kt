@@ -213,22 +213,13 @@ class VodViewModel(
                 }
             }
 
-            val channelSeriesList = deferredResults.awaitAll()
-
-            // 1 program from each channel at index 0..4 (Requirement 2)
-            val firstOfEach = channelSeriesList.mapNotNull { it.firstOrNull() }
-            val remainingSeries = mutableListOf<VodSeries>()
-            var maxLen = 0
-            channelSeriesList.forEach { if (it.size > maxLen) maxLen = it.size }
-            for (i in 1 until maxLen) {
-                channelSeriesList.forEach { list ->
-                    if (i < list.size) {
-                        remainingSeries.add(list[i])
-                    }
-                }
-            }
-
-            val combined = (firstOfEach + remainingSeries).distinctBy { "${it.provider.id}:${it.id}" }
+            val combined = deferredResults.awaitAll()
+                .flatten()
+                .distinctBy { "${it.provider.id}:${it.id}" }
+                .sortedWith(
+                    compareByDescending<VodSeries> { it.latestEpisodeAddedAt.orEmpty() }
+                        .thenBy { it.title }
+                )
 
             _uiState.update {
                 it.copy(

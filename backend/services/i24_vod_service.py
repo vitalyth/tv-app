@@ -69,6 +69,20 @@ def _with_retries(action):
     raise RuntimeError("i24 VOD operation failed")
 
 
+def _table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:
+    return {row["name"] for row in con.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _add_column_if_missing(
+    con: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_def: str,
+) -> None:
+    if column_name not in _table_columns(con, table_name):
+        con.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+
+
 def _connect() -> sqlite3.Connection:
     parent = os.path.dirname(I24_VOD_DB_PATH)
     if parent:
@@ -122,6 +136,7 @@ def _init_db(con: sqlite3.Connection) -> None:
             published TEXT,
             published_timestamp REAL,
             display_order INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -132,6 +147,15 @@ def _init_db(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_i24_episodes_latest ON i24_episodes(published_timestamp);
         """
     )
+    _add_column_if_missing(con, "i24_episodes", "created_at", "TEXT")
+    con.execute(
+        """
+        UPDATE i24_episodes
+        SET created_at = COALESCE(NULLIF(updated_at, ''), CURRENT_TIMESTAMP)
+        WHERE created_at IS NULL OR TRIM(created_at) = ''
+        """
+    )
+    con.execute("CREATE INDEX IF NOT EXISTS idx_i24_episodes_created_at ON i24_episodes(created_at)")
     con.commit()
 
 
@@ -564,9 +588,10 @@ def _upsert_episode(con: sqlite3.Connection, episode: dict) -> None:
         """
         INSERT INTO i24_episodes (
             id, source_id, program_id, season_id, title, description, url, image,
-            play_url, stream_url, published, published_timestamp, display_order, updated_at
+            play_url, stream_url, published, published_timestamp, display_order,
+            created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             source_id=excluded.source_id,
             program_id=excluded.program_id,
@@ -912,7 +937,8 @@ def get_i24_vod_series(
 
         base_query = """
             SELECT p.*, COUNT(DISTINCT e.id) AS episodeCount, COUNT(DISTINCT s.season_id) AS seasonCount,
-                   COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount
+                   COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount,
+                   MAX(e.created_at) AS latestEpisodeAddedAt
             FROM i24_programs p
             LEFT JOIN i24_seasons s ON s.program_id = p.id
             LEFT JOIN i24_episodes e ON e.program_id = p.id
@@ -928,7 +954,11 @@ def get_i24_vod_series(
             SELECT *
             FROM ({base_query}) p
             {sql_where}
-            ORDER BY COALESCE(latest_episode_timestamp, 0) DESC, title COLLATE NOCASE
+            ORDER BY
+                latestEpisodeAddedAt IS NULL,
+                datetime(latestEpisodeAddedAt) DESC,
+                COALESCE(latest_episode_timestamp, 0) DESC,
+                title COLLATE NOCASE
             LIMIT ? OFFSET ?
             """,
             [*params, limit, offset],
@@ -964,6 +994,7 @@ def _row_to_program(row: sqlite3.Row) -> dict:
         "episodeCount": int(row["episodeCount"] or 0),
         "seasonCount": int(row["seasonCount"] or 0),
         "streamCount": int(row["streamCount"] or 0),
+        "latestEpisodeAddedAt": row["latestEpisodeAddedAt"],
         "latestEpisodePublished": row["latest_episode_published"],
         "provider": "i24",
     }
@@ -1019,7 +1050,8 @@ def get_i24_vod_series_details(
         program = con.execute(
             """
             SELECT p.*, COUNT(DISTINCT e.id) AS episodeCount, COUNT(DISTINCT s.season_id) AS seasonCount,
-                   COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount
+                   COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount,
+                   MAX(e.created_at) AS latestEpisodeAddedAt
             FROM i24_programs p
             LEFT JOIN i24_seasons s ON s.program_id = p.id
             LEFT JOIN i24_episodes e ON e.program_id = p.id

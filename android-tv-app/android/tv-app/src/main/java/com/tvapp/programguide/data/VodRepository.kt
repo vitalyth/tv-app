@@ -101,6 +101,9 @@ class VodRepository(
             val image = resolveImageUrl(item.optString("image").trim().takeIf { it.isNotEmpty() }, isBackdrop = true)
             val episodeCount = item.optInt("episodeCount", 0)
             val seasonCount = item.optInt("seasonCount", 0)
+            val latestEpisodeAddedAt = item.optString("latestEpisodeAddedAt")
+                .takeIf { it.isNotBlank() }
+                ?: item.optString("latest_episode_added_at").takeIf { it.isNotBlank() }
             val genre = item.optString("program_genre").trim().takeIf { it.isNotEmpty() }
                 ?: item.optString("program_format").trim().takeIf { it.isNotEmpty() }
 
@@ -114,6 +117,7 @@ class VodRepository(
                     seasonCount = seasonCount,
                     genre = genre,
                     provider = provider,
+                    latestEpisodeAddedAt = latestEpisodeAddedAt,
                 )
             )
         }
@@ -159,6 +163,9 @@ class VodRepository(
             seasonCount = seasonCount,
             genre = genre,
             provider = provider,
+            latestEpisodeAddedAt = response.optString("latestEpisodeAddedAt")
+                .takeIf { it.isNotBlank() }
+                ?: response.optString("latest_episode_added_at").takeIf { it.isNotBlank() },
         )
 
         val seasonsList = mutableListOf<VodSeason>()

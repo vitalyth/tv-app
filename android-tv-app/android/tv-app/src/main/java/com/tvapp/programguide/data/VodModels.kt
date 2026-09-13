@@ -61,6 +61,7 @@ data class VodSeries(
     val seasonCount: Int,
     val genre: String?,
     val provider: VodProvider,
+    val latestEpisodeAddedAt: String? = null,
 )
 
 @Immutable

@@ -178,12 +178,21 @@ def _init_db(con: sqlite3.Connection) -> None:
             published TEXT,
             published_timestamp REAL,
             display_order INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         """
     )
     _add_column_if_missing(con, "keshet_episodes", "display_order", "INTEGER")
     _add_column_if_missing(con, "keshet_episodes", "published_timestamp", "REAL")
+    _add_column_if_missing(con, "keshet_episodes", "created_at", "TEXT")
+    con.execute(
+        """
+        UPDATE keshet_episodes
+        SET created_at = COALESCE(NULLIF(updated_at, ''), CURRENT_TIMESTAMP)
+        WHERE created_at IS NULL OR TRIM(created_at) = ''
+        """
+    )
     con.executescript(
         """
         CREATE INDEX IF NOT EXISTS idx_keshet_programs_title ON keshet_programs(title);
@@ -192,6 +201,7 @@ def _init_db(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_keshet_episodes_season_id ON keshet_episodes(season_id);
         CREATE INDEX IF NOT EXISTS idx_keshet_episodes_title ON keshet_episodes(title);
         CREATE INDEX IF NOT EXISTS idx_keshet_episodes_published ON keshet_episodes(published_timestamp);
+        CREATE INDEX IF NOT EXISTS idx_keshet_episodes_created_at ON keshet_episodes(created_at);
         """
     )
     con.commit()
@@ -600,9 +610,10 @@ def _upsert_episode(con: sqlite3.Connection, episode: KeshetEpisode) -> None:
         """
         INSERT INTO keshet_episodes (
             id, program_id, season_id, title, description, url, image, play_url,
-            stream_url, kaltura_entry_id, published, published_timestamp, display_order, updated_at
+            stream_url, kaltura_entry_id, published, published_timestamp, display_order,
+            created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
             program_id = excluded.program_id,
             season_id = excluded.season_id,
@@ -681,6 +692,7 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
             p.program_genre,
             p.program_format,
             NULLIF(p.image, '') AS image,
+            MAX(e.created_at) AS latest_episode_added_at,
             COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
             MAX(e.published_timestamp) AS latest_episode_timestamp,
             MAX(NULLIF(e.published, '')) AS latest_episode_published
@@ -690,6 +702,8 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
            OR TRIM(COALESCE(p.program_format, '')) != ''
         GROUP BY p.id
         ORDER BY
+            latest_episode_added_at IS NULL,
+            datetime(latest_episode_added_at) DESC,
             latest_episode_sort_key DESC,
             latest_episode_published IS NULL,
             latest_episode_published DESC,
@@ -796,6 +810,7 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["seasonCount"] = int(item.pop("season_count", 0) or 0)
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["latestKanEpisodeId"] = 0
+    item["latestEpisodeAddedAt"] = item.pop("latest_episode_added_at", None)
     item.pop("latest_episode_sort_key", None)
     item.pop("latest_episode_timestamp", None)
     item["latestEpisodePublished"] = item.pop("latest_episode_published", None)
@@ -1131,6 +1146,7 @@ def get_keshet_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
+                MAX(e.created_at) AS latest_episode_added_at,
                 COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
                 MAX(e.published_timestamp) AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published
@@ -1141,6 +1157,8 @@ def get_keshet_vod_series(
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
+                latest_episode_added_at IS NULL,
+                datetime(latest_episode_added_at) DESC,
                 latest_episode_sort_key DESC,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,

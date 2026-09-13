@@ -49,6 +49,7 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["seasonCount"] = int(item.pop("season_count", 0) or 0)
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["latestKanEpisodeId"] = int(item.pop("latest_kan_episode_id", 0) or 0)
+    item["latestEpisodeAddedAt"] = item.pop("latest_episode_added_at", None)
     item["latestEpisodePublished"] = item.pop("latest_episode_published", None)
     return item
 
@@ -278,6 +279,7 @@ def get_kan_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
+                MAX(e.created_at) AS latest_episode_added_at,
                 NULL AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published,
                 MAX(CAST(e.id AS INTEGER)) AS latest_kan_episode_id
@@ -288,6 +290,8 @@ def get_kan_vod_series(
             GROUP BY p.id
             ORDER BY
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
+                latest_episode_added_at IS NULL,
+                datetime(latest_episode_added_at) DESC,
                 latest_episode_timestamp IS NULL,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,
