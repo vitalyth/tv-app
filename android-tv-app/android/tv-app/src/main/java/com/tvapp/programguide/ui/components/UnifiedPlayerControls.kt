@@ -66,6 +66,7 @@ fun UnifiedPlayerControlsOverlay(
     previewImageUrl: String? = null,
     headerChannelText: String? = null,
     showMetadataPanel: Boolean = true,
+    updateIntervalMs: Long = if (isLive) 1_500L else 500L,
     onInteraction: () -> Unit = {},
 ) {
     var positionMs by remember { mutableStateOf(0L) }
@@ -106,7 +107,7 @@ fun UnifiedPlayerControlsOverlay(
         val window = Timeline.Window()
         while (true) {
             updatePlayerSnapshot(window)
-            delay(if (actualIsLive) 1_500 else 500)
+            delay(updateIntervalMs)
         }
     }
 

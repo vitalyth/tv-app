@@ -56,8 +56,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
@@ -101,6 +99,8 @@ fun VodSeriesDetailsView(
     onSeasonSelected: (VodSeason) -> Unit,
     onPlayEpisode: (VodEpisode, VodSeries) -> Unit,
     onEpisodeFocusRestored: (Int) -> Unit = {},
+    onPreviewStreamResolved: (episodeId: String, streamUrl: String, resumePositionMs: Long, muted: Boolean) -> Unit = { _, _, _, _ -> },
+    onPreviewStreamCleared: () -> Unit = {},
     onClose: () -> Unit,
     onNavigateSideRail: () -> Unit,
     contentFocusNonce: Int = 0,
@@ -211,8 +211,6 @@ fun VodSeriesDetailsView(
     var focusedEpisodeId by remember(series.id) { mutableStateOf<String?>(null) }
     var pendingEpisodeFocusTarget by remember(series.id) { mutableStateOf<VodEpisodeFocusTarget?>(null) }
     var isBackgroundEpisodePlaying by remember { mutableStateOf(false) }
-    var backgroundPreviewEpisodeId by remember { mutableStateOf<String?>(null) }
-    var backgroundPreviewStreamUrl by remember { mutableStateOf<String?>(null) }
     var isMuted by remember { mutableStateOf(false) }
 
     fun rememberedEpisodeId(): String? {
@@ -232,8 +230,10 @@ fun VodSeriesDetailsView(
             try {
                 episodesListState.scrollToItem(targetIndex.coerceAtLeast(0))
             } catch (_: Exception) {}
-            for (retryDelay in listOf(50L, 120L, 250L, 400L)) {
-                delay(retryDelay)
+            for (retryDelay in listOf(0L, 40L, 90L, 160L, 260L)) {
+                if (retryDelay > 0L) {
+                    delay(retryDelay)
+                }
                 try {
                     primaryReq?.requestFocus()
                     break
@@ -289,7 +289,6 @@ fun VodSeriesDetailsView(
         if (currentSeasonEpisodes.none { it.id == target.episodeId }) return@LaunchedEffect
 
         focusedEpisodeId = target.episodeId
-        delay(110)
         requestEpisodeFocus(target.episodeId)
         pendingEpisodeFocusTarget = null
         onEpisodeFocusRestored(target.nonce)
@@ -323,18 +322,12 @@ fun VodSeriesDetailsView(
     // Requirement 8: 2-second debounced background preview playback
     LaunchedEffect(focusedEpisodeId, series.id, isPlayerActive) {
         isBackgroundEpisodePlaying = false
+        onPreviewStreamCleared()
         if (isPlayerActive) return@LaunchedEffect
-
-        backgroundPreviewEpisodeId = null
-        backgroundPreviewStreamUrl = null
-        try {
-            player?.value?.stop()
-            player?.value?.clearMediaItems()
-        } catch (_: Exception) {}
 
         val epId = focusedEpisodeId ?: return@LaunchedEffect
         val targetEp = currentSeasonEpisodes.firstOrNull { it.id == epId } ?: return@LaunchedEffect
-        if (viewModel == null || player == null) return@LaunchedEffect
+        if (viewModel == null) return@LaunchedEffect
 
         delay(2000L) // Wait 2 seconds of focus on the episode!
 
@@ -342,48 +335,8 @@ fun VodSeriesDetailsView(
 
         val streamUrl = viewModel.resolveEpisodePreviewStream(targetEp, series)
         if (!streamUrl.isNullOrBlank() && focusedEpisodeId == epId && !isPlayerActive) {
-            try {
-                val mediaItem = when {
-                    streamUrl.contains(".mpd", ignoreCase = true) || streamUrl.contains(".livx", ignoreCase = true) -> {
-                        MediaItem.Builder()
-                            .setUri(streamUrl)
-                            .setMimeType(MimeTypes.APPLICATION_MPD)
-                            .build()
-                    }
-                    streamUrl.contains(".m3u8", ignoreCase = true) -> {
-                        MediaItem.Builder()
-                            .setUri(streamUrl)
-                            .setMimeType(MimeTypes.APPLICATION_M3U8)
-                            .build()
-                    }
-                    streamUrl.contains(".mp4", ignoreCase = true) -> {
-                        MediaItem.Builder()
-                            .setUri(streamUrl)
-                            .setMimeType(MimeTypes.APPLICATION_MP4)
-                            .build()
-                    }
-                    else -> {
-                        MediaItem.Builder()
-                            .setUri(streamUrl)
-                            .setMimeType(MimeTypes.APPLICATION_M3U8)
-                            .build()
-                    }
-                }
-                player.value.stop()
-                player.value.clearMediaItems()
-                val resumePos = viewModel.getResumePosition(targetEp.id)
-                if (resumePos > 2000L) {
-                    player.value.setMediaItem(mediaItem, resumePos)
-                    player.value.seekTo(resumePos)
-                } else {
-                    player.value.setMediaItem(mediaItem, 0L)
-                }
-                player.value.volume = if (isMuted) 0f else 1f
-                player.value.prepare()
-                player.value.playWhenReady = true
-                backgroundPreviewEpisodeId = epId
-                backgroundPreviewStreamUrl = streamUrl
-            } catch (_: Exception) {}
+            val resumePos = viewModel.getResumePosition(targetEp.id).takeIf { it > 2000L } ?: 0L
+            onPreviewStreamResolved(epId, streamUrl, resumePos, isMuted)
         }
     }
 
@@ -391,17 +344,11 @@ fun VodSeriesDetailsView(
         val actualPlayer = player?.value
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
-                val currentUri = actualPlayer?.currentMediaItem?.localConfiguration?.uri?.toString()
-                if (!isPlayerActive &&
-                    backgroundPreviewStreamUrl != null &&
-                    currentUri == backgroundPreviewStreamUrl
-                ) {
-                    isBackgroundEpisodePlaying = true
-                }
+                isBackgroundEpisodePlaying = true
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
-                    isBackgroundEpisodePlaying = false
+                if (playbackState == Player.STATE_READY) {
+                    isBackgroundEpisodePlaying = true
                 }
             }
             override fun onPlayerError(error: PlaybackException) {
@@ -411,9 +358,8 @@ fun VodSeriesDetailsView(
         actualPlayer?.addListener(listener)
         onDispose {
             actualPlayer?.removeListener(listener)
-            actualPlayer?.stop()
-            actualPlayer?.clearMediaItems()
             isBackgroundEpisodePlaying = false
+            onPreviewStreamCleared()
         }
     }
 
@@ -446,35 +392,8 @@ fun VodSeriesDetailsView(
         focusedEpisode?.imageUrl ?: series.imageUrl
     }
 
-    LaunchedEffect(isPlayerActive) {
-        if (!isPlayerActive) {
-            val targetEpisodeId = lastPlayedEpisodeId ?: focusedEpisodeId ?: currentSeasonEpisodes.firstOrNull()?.id
-            if (targetEpisodeId != null) {
-                for (waitMs in listOf(60L, 140L, 280L)) {
-                    delay(waitMs)
-                    requestEpisodeFocus(targetEpisodeId)
-                }
-            }
-        }
-    }
-
     val channelLogoUrl = remember(series.provider, viewModel) {
         viewModel?.getProviderLogoUrl(series.provider)
-    }
-
-    fun openFullscreenEpisode(episode: VodEpisode) {
-        val previewUrl = backgroundPreviewStreamUrl
-            ?.takeIf { backgroundPreviewEpisodeId == episode.id && it.isNotBlank() }
-        if (previewUrl != null && viewModel != null && player != null) {
-            viewModel.playResolvedEpisode(
-                episode = episode,
-                series = series,
-                resolvedStreamUrl = previewUrl,
-                currentPositionMs = player.value.currentPosition,
-            )
-        } else {
-            onPlayEpisode(episode, series)
-        }
     }
 
     val effectiveInlinePlayerView = inlinePlayerView ?: playerView
@@ -500,7 +419,7 @@ fun VodSeriesDetailsView(
             },
             muteFocusRequester = muteFocusRequester,
             onOpenFullScreen = {
-                focusedEpisode?.let(::openFullscreenEpisode)
+                focusedEpisode?.let { ep -> onPlayEpisode(ep, series) }
             },
             fullScreenFocusRequester = fullScreenFocusRequester,
             onNavigateLeft = onNavigateSideRail,
@@ -634,7 +553,7 @@ fun VodSeriesDetailsView(
                             focusRequester = fr,
                             isLastPlayed = (episode.id == lastPlayedEpisodeId),
                             progress = progress,
-                            onPlay = { openFullscreenEpisode(episode) },
+                            onPlay = { onPlayEpisode(episode, series) },
                             onFocused = { focusedEpisodeId = episode.id },
                             onNavigateLeft = if (index == 0) onNavigateSideRail else null,
                             onNavigateUp = {

@@ -47,9 +47,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.PlaybackException
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -65,6 +65,7 @@ import kotlinx.coroutines.delay
 
 private val PlayerAccentColor = Color(0xFFF2F4F7)
 private val PlayerTextDark = Color(0xFF0A0E14)
+private const val ProgressSaveIntervalMs = 10_000L
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -115,54 +116,63 @@ fun VodPlayerOverlay(
         }
     }
 
-    // When stream changes, reset errors and show controls
+    fun mediaItemFor(url: String): MediaItem = when {
+        url.contains(".mpd", ignoreCase = true) || url.contains(".livx", ignoreCase = true) -> {
+            MediaItem.Builder()
+                .setUri(url)
+                .setMimeType(MimeTypes.APPLICATION_MPD)
+                .build()
+        }
+        url.contains(".m3u8", ignoreCase = true) -> {
+            MediaItem.Builder()
+                .setUri(url)
+                .setMimeType(MimeTypes.APPLICATION_M3U8)
+                .build()
+        }
+        url.contains(".mp4", ignoreCase = true) -> {
+            MediaItem.Builder()
+                .setUri(url)
+                .setMimeType(MimeTypes.APPLICATION_MP4)
+                .build()
+        }
+        else -> {
+            MediaItem.Builder()
+                .setUri(url)
+                .setMimeType(MimeTypes.APPLICATION_M3U8)
+                .build()
+        }
+    }
+
+    // ProgramGuideApp owns normal playback preparation. The overlay also has a guarded
+    // fallback so fullscreen never stays attached to an idle/stale media item.
     LaunchedEffect(streamUrl, episode?.id) {
         if (!streamUrl.isNullOrBlank()) {
             playbackError = null
-            hasRenderedFirstFrame = false
-            isControlsVisible = true
-            lastInteractionNonce++
             val currentUri = actualPlayer.currentMediaItem?.localConfiguration?.uri?.toString()
             val isAlreadyLoaded = currentUri == streamUrl &&
                 actualPlayer.playbackState != Player.STATE_IDLE &&
                 actualPlayer.playbackState != Player.STATE_ENDED
+            hasRenderedFirstFrame = isAlreadyLoaded &&
+                (actualPlayer.isPlaying || actualPlayer.playbackState == Player.STATE_READY || actualPlayer.currentPosition > 0L)
             hasAppliedResumeSeek = isAlreadyLoaded
+            isControlsVisible = true
+            lastInteractionNonce++
             try {
-                if (isAlreadyLoaded) {
-                    actualPlayer.playWhenReady = true
-                    actualPlayer.play()
-                } else {
-                    val mediaItem = when {
-                        streamUrl.contains(".mpd", ignoreCase = true) || streamUrl.contains(".livx", ignoreCase = true) -> {
-                            MediaItem.Builder()
-                                .setUri(streamUrl)
-                                .setMimeType(MimeTypes.APPLICATION_MPD)
-                                .build()
-                        }
-                        streamUrl.contains(".m3u8", ignoreCase = true) -> {
-                            MediaItem.Builder()
-                                .setUri(streamUrl)
-                                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                                .build()
-                        }
-                        streamUrl.contains(".mp4", ignoreCase = true) -> {
-                            MediaItem.Builder()
-                                .setUri(streamUrl)
-                                .setMimeType(MimeTypes.APPLICATION_MP4)
-                                .build()
-                        }
-                        else -> {
-                            MediaItem.Builder()
-                                .setUri(streamUrl)
-                                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                                .build()
-                        }
+                actualPlayer.playWhenReady = true
+                actualPlayer.play()
+                if (!isAlreadyLoaded && !isResolvingStream) {
+                    delay(450L)
+                    val uriAfterAppPreparation = actualPlayer.currentMediaItem?.localConfiguration?.uri?.toString()
+                    val appDidNotPrepareStream = uriAfterAppPreparation != streamUrl ||
+                        actualPlayer.playbackState == Player.STATE_IDLE ||
+                        actualPlayer.playbackState == Player.STATE_ENDED
+                    if (appDidNotPrepareStream) {
+                        val targetPos = resumePositionMs?.takeIf { it > 2000L } ?: 0L
+                        actualPlayer.setMediaItem(mediaItemFor(streamUrl), targetPos)
+                        actualPlayer.prepare()
+                        actualPlayer.playWhenReady = true
+                        actualPlayer.play()
                     }
-                    actualPlayer.stop()
-                    actualPlayer.clearMediaItems()
-                    actualPlayer.setMediaItem(mediaItem, resumePositionMs?.takeIf { it > 2000L } ?: 0L)
-                    actualPlayer.prepare()
-                    actualPlayer.playWhenReady = true
                 }
             } catch (_: Exception) {
                 playbackError = "שגיאה בטעינת הפרק"
@@ -188,10 +198,11 @@ fun VodPlayerOverlay(
         }
     }
 
-    // Periodic progress saver while playing
+    // Periodic progress saver while playing. Keep this sparse so fullscreen playback
+    // does not trigger frequent VOD list recompositions behind the player.
     LaunchedEffect(actualPlayer, episode?.id) {
         while (true) {
-            delay(2000L)
+            delay(ProgressSaveIntervalMs)
             if (actualPlayer.isPlaying) {
                 saveCurrentProgress()
             }
@@ -226,6 +237,7 @@ fun VodPlayerOverlay(
                         saveCurrentProgress(forceCompleted = true)
                     }
                     Player.STATE_READY -> {
+                        hasRenderedFirstFrame = true
                         val target = resumePositionMs ?: 0L
                         if (!hasAppliedResumeSeek && target > 1000L && kotlin.math.abs(actualPlayer.currentPosition - target) > 2000L) {
                             actualPlayer.seekTo(target)
@@ -257,7 +269,6 @@ fun VodPlayerOverlay(
 
     LaunchedEffect(actualPlayerView, streamUrl, episode?.id) {
         if (streamUrl.isNullOrBlank()) return@LaunchedEffect
-        hasRenderedFirstFrame = false
         delay(120L)
         try {
             actualPlayer.playWhenReady = true
@@ -280,8 +291,6 @@ fun VodPlayerOverlay(
                 try {
                     actualPlayer.playWhenReady = true
                     actualPlayer.play()
-                    val nudgePosition = (currentPosition + 120L).coerceAtLeast(0L)
-                    actualPlayer.seekTo(nudgePosition)
                 } catch (_: Exception) {}
             }
             previousPosition = currentPosition
@@ -299,7 +308,7 @@ fun VodPlayerOverlay(
     // Auto-hide controls after 4 seconds of inactivity
     LaunchedEffect(lastInteractionNonce, isControlsVisible) {
         if (isControlsVisible) {
-            delay(4000)
+            delay(1800)
             isControlsVisible = false
         }
     }
@@ -431,7 +440,7 @@ fun VodPlayerOverlay(
             factory = {
                 (actualPlayerView.parent as? ViewGroup)?.removeView(actualPlayerView)
                 actualPlayerView.player = actualPlayer
-                actualPlayerView.alpha = if (hasRenderedFirstFrame) 1f else 0f
+                actualPlayerView.alpha = 1f
                 actualPlayerView.visibility = android.view.View.VISIBLE
                 actualPlayerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 actualPlayerView.useController = false
@@ -446,7 +455,7 @@ fun VodPlayerOverlay(
                 if (it.player !== actualPlayer) {
                     it.player = actualPlayer
                 }
-                it.alpha = if (hasRenderedFirstFrame) 1f else 0f
+                it.alpha = 1f
                 it.visibility = android.view.View.VISIBLE
                 it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 it.useController = false
@@ -545,6 +554,7 @@ fun VodPlayerOverlay(
                 previewImageUrl = episode?.imageUrl ?: series?.imageUrl,
                 headerChannelText = headerText,
                 showMetadataPanel = true,
+                updateIntervalMs = 1_500L,
                 onInteraction = {
                     lastInteractionNonce++
                     isControlsVisible = true

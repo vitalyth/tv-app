@@ -184,10 +184,10 @@ private const val MAX_MULTI_PLAYER_CHANNELS = 4
 private const val MULTI_PLAYER_MAX_WIDTH = 320
 private const val MULTI_PLAYER_MAX_HEIGHT = 180
 private const val MULTI_PLAYER_MAX_VIDEO_BITRATE = 260_000
-private const val PRIMARY_PLAYER_MIN_BUFFER_MS = 4_000
-private const val PRIMARY_PLAYER_MAX_BUFFER_MS = 12_000
-private const val PRIMARY_PLAYER_PLAYBACK_BUFFER_MS = 750
-private const val PRIMARY_PLAYER_REBUFFER_MS = 1_500
+private const val PRIMARY_PLAYER_MIN_BUFFER_MS = 8_000
+private const val PRIMARY_PLAYER_MAX_BUFFER_MS = 30_000
+private const val PRIMARY_PLAYER_PLAYBACK_BUFFER_MS = 1_500
+private const val PRIMARY_PLAYER_REBUFFER_MS = 3_000
 private const val MULTI_PLAYER_MIN_BUFFER_MS = 2_500
 private const val MULTI_PLAYER_MAX_BUFFER_MS = 8_000
 private const val MULTI_PLAYER_PLAYBACK_BUFFER_MS = 750
@@ -213,6 +213,7 @@ private class StableProgramList(val value: List<TvProgram>)
 private enum class PrimaryVideoProfile {
     Mini,
     HomeBackground,
+    VodPreview,
     Full,
     MultiFocused,
     MultiBackground,
@@ -434,6 +435,10 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
     var homeVodPreviewStreamUrl by remember { mutableStateOf<String?>(null) }
     var homeVodPreviewSeekReadyEpisodeId by remember { mutableStateOf<String?>(null) }
     var homeVodPreviewLoadToken by remember { mutableIntStateOf(0) }
+    var vodPreviewEpisodeId by remember { mutableStateOf<String?>(null) }
+    var vodPreviewStreamUrl by remember { mutableStateOf<String?>(null) }
+    var vodPreviewResumePositionMs by remember { mutableStateOf(0L) }
+    var vodPreviewMuted by remember { mutableStateOf(false) }
     var homeBackgroundChannelId by remember { mutableStateOf<String?>(null) }
     var homeIsMuted by remember { mutableStateOf(false) }
 
@@ -726,6 +731,7 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         player.volume = when (profile) {
             PrimaryVideoProfile.MultiBackground -> 0f
             PrimaryVideoProfile.HomeBackground -> if (homeIsMuted) 0f else 1f
+            PrimaryVideoProfile.VodPreview -> if (vodPreviewMuted) 0f else 1f
             PrimaryVideoProfile.Mini -> if (currentDestination == AppDestination.LIVE_TV && liveTvIsMuted) 0f else 1f
             else -> 1f
         }
@@ -740,6 +746,13 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                     }
                     PrimaryVideoProfile.HomeBackground -> {
+                        setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                        setMaxVideoBitrate(Int.MAX_VALUE)
+                        setForceLowestBitrate(false)
+                        setExceedVideoConstraintsIfNecessary(true)
+                        setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    }
+                    PrimaryVideoProfile.VodPreview -> {
                         setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
                         setMaxVideoBitrate(Int.MAX_VALUE)
                         setForceLowestBitrate(false)
@@ -816,12 +829,24 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                 guideInlinePlayerView.player = player
             }
         } else if (currentDestination == AppDestination.VOD && !playbackState.isPlayerExpanded && !isVodPlaying) {
-            playerView.player = null
             multiPlayerView.player = null
             homeInlinePlayerView.player = null
             guideInlinePlayerView.player = null
-            if (vodInlinePlayerView.player !== player) {
+            if (playerView.player === player) {
+                PlayerView.switchTargetView(player, playerView, vodInlinePlayerView)
+            } else if (vodInlinePlayerView.player !== player) {
                 vodInlinePlayerView.player = player
+            }
+        } else if (currentDestination == AppDestination.VOD && isVodPlaying) {
+            multiPlayerView.player = null
+            homeInlinePlayerView.player = null
+            guideInlinePlayerView.player = null
+            if (playerView.player !== player) {
+                if (vodInlinePlayerView.player === player) {
+                    PlayerView.switchTargetView(player, vodInlinePlayerView, playerView)
+                } else {
+                    playerView.player = player
+                }
             }
         } else {
             multiPlayerView.player = null
@@ -861,6 +886,9 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         playbackState.selectedStreamSourceIds,
         isVodPlaying,
         vodUiState.playingStreamUrl,
+        vodPreviewStreamUrl,
+        vodPreviewResumePositionMs,
+        vodPreviewMuted,
         homeVodPreviewStreamUrl,
         isLocalSeriesPlaying,
         localSeriesUiState.playingEpisode?.streamUrl,
@@ -905,12 +933,12 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
         if (isVodPlaying) {
             val vodStream = vodUiState.playingStreamUrl
             if (!vodStream.isNullOrBlank()) {
+                applyPrimaryVideoProfile(PrimaryVideoProfile.Full)
                 if (activeStreamUrl.value != vodStream) {
                     val currentPlayerUri = player.currentMediaItem?.localConfiguration?.uri?.toString()
                     val isAlreadyLoadedInPlayer = currentPlayerUri == vodStream &&
                         player.playbackState != Player.STATE_IDLE &&
                         player.playbackState != Player.STATE_ENDED
-                    applyPrimaryVideoProfile(PrimaryVideoProfile.Full)
                     if (isAlreadyLoadedInPlayer) {
                         activeStreamUrl.value = vodStream
                     } else {
@@ -956,8 +984,53 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                         activeStreamUrl.value = vodStream
                     }
                 }
+                player.volume = 1f
                 player.play()
             }
+            return@LaunchedEffect
+        }
+
+        if (currentDestination == AppDestination.VOD && !vodPreviewStreamUrl.isNullOrBlank()) {
+            val previewStream = vodPreviewStreamUrl ?: return@LaunchedEffect
+            if (activeStreamUrl.value != previewStream) {
+                applyPrimaryVideoProfile(PrimaryVideoProfile.VodPreview)
+                val mediaItem = when {
+                    previewStream.contains(".mpd", ignoreCase = true) || previewStream.contains(".livx", ignoreCase = true) -> {
+                        MediaItem.Builder()
+                            .setUri(previewStream)
+                            .setMimeType(MimeTypes.APPLICATION_MPD)
+                            .build()
+                    }
+                    previewStream.contains(".m3u8", ignoreCase = true) -> {
+                        MediaItem.Builder()
+                            .setUri(previewStream)
+                            .setMimeType(MimeTypes.APPLICATION_M3U8)
+                            .build()
+                    }
+                    previewStream.contains(".mp4", ignoreCase = true) -> {
+                        MediaItem.Builder()
+                            .setUri(previewStream)
+                            .setMimeType(MimeTypes.APPLICATION_MP4)
+                            .build()
+                    }
+                    else -> {
+                        MediaItem.Builder()
+                            .setUri(previewStream)
+                            .setMimeType(MimeTypes.APPLICATION_M3U8)
+                            .build()
+                    }
+                }
+                renderedStreamUrl.value = null
+                activeStreamUrl.value = null
+                player.setMediaItem(mediaItem, vodPreviewResumePositionMs.coerceAtLeast(0L))
+                if (vodPreviewResumePositionMs > 0L) {
+                    player.seekTo(vodPreviewResumePositionMs)
+                }
+                player.prepare()
+                activeStreamUrl.value = previewStream
+            }
+            player.volume = if (vodPreviewMuted) 0f else 1f
+            player.play()
             return@LaunchedEffect
         }
 
@@ -1325,6 +1398,19 @@ fun ProgramGuideApp(viewModel: GuideViewModel = viewModel()) {
                                 player = stablePlayer,
                                 inlinePlayerView = stableVodInlinePlayerView,
                                 playerView = stablePlayerView,
+                                onPreviewStreamResolved = { episodeId, streamUrl, resumePositionMs, muted ->
+                                    vodPreviewEpisodeId = episodeId
+                                    vodPreviewStreamUrl = streamUrl
+                                    vodPreviewResumePositionMs = resumePositionMs
+                                    vodPreviewMuted = muted
+                                },
+                                onPreviewStreamCleared = {
+                                    if (!isVodPlaying) {
+                                        vodPreviewEpisodeId = null
+                                        vodPreviewStreamUrl = null
+                                        vodPreviewResumePositionMs = 0L
+                                    }
+                                },
                                 onRegisterFocusRestorer = { restorer ->
                                     vodFocusRestorer = restorer
                                 },
