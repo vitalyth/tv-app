@@ -1599,16 +1599,41 @@ def _get_media_playlist(vcmid: str, video_channel_id: str) -> list[dict]:
     return data.get("media") or []
 
 
-def _pick_media_link(media: list[dict], cdn_order: tuple[str, ...] = ("AWS", "AKAMAI")) -> tuple[str, str] | None:
-    sorted_media = sorted(media, key=lambda item: int(item.get("cdnLB") or 0), reverse=True)
-    for wanted_cdn in cdn_order:
-        for item in sorted_media:
-            if str(item.get("cdn") or "").upper() == wanted_cdn and item.get("url"):
-                return str(item["url"]), wanted_cdn
-    for item in sorted_media:
-        if item.get("url"):
-            return str(item["url"]), str(item.get("cdn") or "AWS").upper()
-    return None
+def _media_cdn_weight(item: dict) -> int:
+    try:
+        return int(float(str(item.get("cdnLB") or "0")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _media_link_score(item: dict) -> tuple[int, int, int, int]:
+    url = str(item.get("url") or "")
+    cdn = str(item.get("cdn") or "").upper()
+    format_name = str(item.get("format") or "").upper()
+    normalized_url = url.split("?", 1)[0].lower()
+
+    is_hls = normalized_url.endswith(".m3u8") or "HLS" in format_name
+    is_master = normalized_url.endswith("/master.m3u8") or normalized_url.endswith("master.m3u8")
+
+    return (
+        _media_cdn_weight(item),
+        1 if is_hls else 0,
+        1 if is_master else 0,
+        1 if cdn == "AKAMAI" else 0,
+    )
+
+
+def _pick_media_link(media: list[dict]) -> tuple[str, str] | None:
+    sorted_media = sorted(
+        (item for item in media if item.get("url")),
+        key=_media_link_score,
+        reverse=True,
+    )
+    if not sorted_media:
+        return None
+
+    item = sorted_media[0]
+    return str(item["url"]), str(item.get("cdn") or "AWS").upper()
 
 
 def resolve_keshet_vod_stream(play_url: str) -> str | None:

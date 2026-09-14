@@ -92,6 +92,48 @@ class KeshetVodServiceTests(unittest.TestCase):
             "https://www.mako.co.il/VodPlaylist?vcmid=episode-1&videoChannelId=channel-1",
         )
 
+    def test_pick_media_link_prefers_provider_weight_over_aws_default(self):
+        media = [
+            {
+                "cdn": "AWS",
+                "cdnLB": "20",
+                "format": "AWS_HLS",
+                "url": "https://cdn.example/aws/index.m3u8",
+            },
+            {
+                "cdn": "AKAMAI",
+                "cdnLB": "80",
+                "format": "AKAMAI_HLS",
+                "url": "https://cdn.example/akamai/master.m3u8",
+            },
+        ]
+
+        self.assertEqual(
+            self.module._pick_media_link(media),
+            ("https://cdn.example/akamai/master.m3u8", "AKAMAI"),
+        )
+
+    def test_pick_media_link_prefers_master_playlist_when_weight_ties(self):
+        media = [
+            {
+                "cdn": "AWS",
+                "cdnLB": "80",
+                "format": "AWS_HLS",
+                "url": "https://cdn.example/aws/index.m3u8",
+            },
+            {
+                "cdn": "AKAMAI",
+                "cdnLB": "80",
+                "format": "AKAMAI_HLS",
+                "url": "https://cdn.example/akamai/master.m3u8",
+            },
+        ]
+
+        self.assertEqual(
+            self.module._pick_media_link(media),
+            ("https://cdn.example/akamai/master.m3u8", "AKAMAI"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
