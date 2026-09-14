@@ -10,25 +10,29 @@ from urllib.parse import quote, urljoin
 
 import requests
 
+from services.vod_database import ensure_unified_schema, get_vod_db_path, get_vod_env, prepare_vod_db_path
 
-KESHT_VOD_DB_PATH = os.getenv(
-    "KESHET_VOD_DB_PATH",
-    os.getenv("KESHT_VOD_DB_PATH", os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")),
+
+KESHT_VOD_DB_PATH = get_vod_db_path("KESHET_VOD_DB_PATH", "KESHT_VOD_DB_PATH")
+KESHT_VOD_RETRIES = int(
+    get_vod_env("KESHET_VOD_RETRIES", "KESHT_VOD_RETRIES", "VOD_RETRIES", "KAN_VOD_RETRIES", default="3")
 )
-KESHT_VOD_RETRIES = int(os.getenv(
-    "KESHET_VOD_RETRIES",
-    os.getenv("KESHT_VOD_RETRIES", os.getenv("KAN_VOD_RETRIES", "3")),
-))
 KESHT_VOD_RETRY_DELAY_SECONDS = float(
-    os.getenv(
+    get_vod_env(
         "KESHET_VOD_RETRY_DELAY_SECONDS",
-        os.getenv("KESHT_VOD_RETRY_DELAY_SECONDS", os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1")),
+        "KESHT_VOD_RETRY_DELAY_SECONDS",
+        "VOD_RETRY_DELAY_SECONDS",
+        "KAN_VOD_RETRY_DELAY_SECONDS",
+        default="1",
     )
 )
 KESHT_VOD_STREAM_BATCH_SIZE = int(
-    os.getenv(
+    get_vod_env(
         "KESHET_VOD_STREAM_BATCH_SIZE",
-        os.getenv("KESHT_VOD_STREAM_BATCH_SIZE", os.getenv("KAN_VOD_STREAM_BATCH_SIZE", "20")),
+        "KESHT_VOD_STREAM_BATCH_SIZE",
+        "VOD_STREAM_BATCH_SIZE",
+        "KAN_VOD_STREAM_BATCH_SIZE",
+        default="20",
     )
 )
 
@@ -114,10 +118,11 @@ def _with_retries(action):
 
 
 def _connect() -> sqlite3.Connection:
-    parent = os.path.dirname(KESHT_VOD_DB_PATH)
+    db_path = prepare_vod_db_path(KESHT_VOD_DB_PATH)
+    parent = os.path.dirname(db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(KESHT_VOD_DB_PATH)
+    con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
     _init_db(con)
     return con
@@ -204,6 +209,7 @@ def _init_db(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_keshet_episodes_created_at ON keshet_episodes(created_at);
         """
     )
+    ensure_unified_schema(con, providers=("keshet",))
     con.commit()
 
 

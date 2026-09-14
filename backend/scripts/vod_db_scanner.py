@@ -12,8 +12,13 @@ BACKEND_DIR = SCRIPT_DIR.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from services.vod_database import get_vod_db_path, prepare_vod_db_path
+
 
 def _run_kan_scan(args: argparse.Namespace) -> dict:
+    os.environ["VOD_DB_PATH"] = args.db
+    os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
+
     command = [
         sys.executable,
         str(SCRIPT_DIR / "kan_db_scanner.py"),
@@ -51,7 +56,7 @@ def _run_kan_scan(args: argparse.Namespace) -> dict:
 
 
 def _kan_programs_without_episodes(db_path: str, limit: int = 0) -> list[dict]:
-    con = sqlite3.connect(db_path)
+    con = sqlite3.connect(prepare_vod_db_path(db_path))
     con.row_factory = sqlite3.Row
     try:
         query = """
@@ -107,6 +112,7 @@ def _ensure_kan_programs_have_episodes(args: argparse.Namespace) -> dict:
 
 
 def _run_keshet_scan(args: argparse.Namespace) -> dict:
+    os.environ["VOD_DB_PATH"] = args.db
     os.environ["KESHET_VOD_DB_PATH"] = args.db
     os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
 
@@ -142,6 +148,7 @@ def _run_keshet_scan(args: argparse.Namespace) -> dict:
 
 
 def _run_reshet_scan(args: argparse.Namespace) -> dict:
+    os.environ["VOD_DB_PATH"] = args.db
     os.environ["RESHET_VOD_DB_PATH"] = args.db
     os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
 
@@ -177,6 +184,7 @@ def _run_reshet_scan(args: argparse.Namespace) -> dict:
 
 
 def _run_c14_scan(args: argparse.Namespace) -> dict:
+    os.environ["VOD_DB_PATH"] = args.db
     os.environ["C14_VOD_DB_PATH"] = args.db
     os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
 
@@ -212,6 +220,7 @@ def _run_c14_scan(args: argparse.Namespace) -> dict:
 
 
 def _run_i24_scan(args: argparse.Namespace) -> dict:
+    os.environ["VOD_DB_PATH"] = args.db
     os.environ["I24_VOD_DB_PATH"] = args.db
     os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
 
@@ -285,7 +294,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument(
         "--db",
-        default=os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db"),
+        default=get_vod_db_path(),
         help="SQLite DB path shared by VOD providers.",
     )
     scan.add_argument("--incremental", action="store_true", help="Use incremental mode where supported")

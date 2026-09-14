@@ -44,6 +44,8 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup
 
+from services.vod_database import ensure_unified_schema, prepare_vod_db_path
+
 try:
     import cloudscraper
 except ImportError:
@@ -1232,6 +1234,7 @@ def add_column_if_missing(
 
 
 def init_db(db_path: str) -> None:
+    db_path = prepare_vod_db_path(db_path)
     con = connect_db(db_path)
     try:
         ensure_compatible_schema(con)
@@ -1339,6 +1342,7 @@ def init_db(db_path: str) -> None:
             CREATE INDEX IF NOT EXISTS idx_episodes_created_at ON episodes(created_at);
             """
         )
+        ensure_unified_schema(con, providers=("kan",))
 
         con.commit()
     finally:
@@ -5085,7 +5089,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--program-mainid", action="append", help="Filter by program mainid")
 
     scan = sub.add_parser("scan", help="Scan programs/seasons/episodes into SQLite")
-    scan.add_argument("--db", default="kan_vod.db")
+    scan.add_argument("--db", default="db/vod.db")
     add_program_filters(scan)
     scan.add_argument("--limit-programs", type=int)
     scan.add_argument("--limit-episodes", type=int)
@@ -5159,29 +5163,29 @@ def build_parser() -> argparse.ArgumentParser:
     debug_stream.set_defaults(func=command_debug_stream)
 
     missing_desc = sub.add_parser("missing-descriptions", help="Show episodes missing description")
-    missing_desc.add_argument("--db", default="kan_vod.db")
+    missing_desc.add_argument("--db", default="db/vod.db")
     missing_desc.add_argument("--limit", type=int, default=100)
     missing_desc.set_defaults(func=command_missing_descriptions)
 
     status = sub.add_parser("stream-status", help="Show stream completion status by program")
-    status.add_argument("--db", default="kan_vod.db")
+    status.add_argument("--db", default="db/vod.db")
     status.add_argument("--only-missing", action="store_true")
     status.set_defaults(func=command_stream_status)
 
     search = sub.add_parser("search", help="Search inside SQLite DB")
-    search.add_argument("--db", default="kan_vod.db")
+    search.add_argument("--db", default="db/vod.db")
     search.add_argument("--query", required=True)
     search.add_argument("--limit", type=int, default=50)
     search.set_defaults(func=command_search)
 
     get_episode = sub.add_parser("get-episode", help="Get one episode from SQLite DB")
-    get_episode.add_argument("--db", default="kan_vod.db")
+    get_episode.add_argument("--db", default="db/vod.db")
     get_episode.add_argument("--episode-id", required=True)
     get_episode.add_argument("--resolve", action="store_true")
     get_episode.set_defaults(func=command_get_episode)
 
     resolve_missing = sub.add_parser("resolve-missing-streams", help="Resolve missing streams in DB")
-    resolve_missing.add_argument("--db", default="kan_vod.db")
+    resolve_missing.add_argument("--db", default="db/vod.db")
     resolve_missing.add_argument("--limit", type=int, default=50)
     resolve_missing.set_defaults(func=command_resolve_missing_streams)
 

@@ -5,12 +5,18 @@ import time
 from urllib.parse import quote
 
 from scripts import kan_db_scanner
+from services.vod_database import get_vod_db_path, get_vod_env
 
 
-KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
-KAN_VOD_RETRIES = int(os.getenv("KAN_VOD_RETRIES", "3"))
-KAN_VOD_RETRY_DELAY_SECONDS = float(os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1"))
-KAN_VOD_STREAM_BATCH_SIZE = int(os.getenv("KAN_VOD_STREAM_BATCH_SIZE", "20"))
+VOD_DB_PATH = get_vod_db_path()
+KAN_VOD_DB_PATH = VOD_DB_PATH
+KAN_VOD_RETRIES = int(get_vod_env("VOD_RETRIES", "KAN_VOD_RETRIES", default="3"))
+KAN_VOD_RETRY_DELAY_SECONDS = float(
+    get_vod_env("VOD_RETRY_DELAY_SECONDS", "KAN_VOD_RETRY_DELAY_SECONDS", default="1")
+)
+KAN_VOD_STREAM_BATCH_SIZE = int(
+    get_vod_env("VOD_STREAM_BATCH_SIZE", "KAN_VOD_STREAM_BATCH_SIZE", default="20")
+)
 CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[,;|/•·،]+)\s*")
 
 

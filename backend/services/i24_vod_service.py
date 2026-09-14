@@ -7,11 +7,15 @@ from urllib.parse import quote
 
 import requests
 
+from services.vod_database import ensure_unified_schema, get_vod_db_path, get_vod_env, prepare_vod_db_path
 
-I24_VOD_DB_PATH = os.getenv("I24_VOD_DB_PATH", os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db"))
-I24_VOD_RETRIES = int(os.getenv("I24_VOD_RETRIES", os.getenv("KAN_VOD_RETRIES", "3")))
+
+I24_VOD_DB_PATH = get_vod_db_path("I24_VOD_DB_PATH")
+I24_VOD_RETRIES = int(
+    get_vod_env("I24_VOD_RETRIES", "VOD_RETRIES", "KAN_VOD_RETRIES", default="3")
+)
 I24_VOD_RETRY_DELAY_SECONDS = float(
-    os.getenv("I24_VOD_RETRY_DELAY_SECONDS", os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1"))
+    get_vod_env("I24_VOD_RETRY_DELAY_SECONDS", "VOD_RETRY_DELAY_SECONDS", "KAN_VOD_RETRY_DELAY_SECONDS", default="1")
 )
 I24_VOD_VIDEO_LIMIT = int(os.getenv("I24_VOD_VIDEO_LIMIT", "200"))
 I24_VOD_SCAN_LOCALES = tuple(
@@ -84,10 +88,11 @@ def _add_column_if_missing(
 
 
 def _connect() -> sqlite3.Connection:
-    parent = os.path.dirname(I24_VOD_DB_PATH)
+    db_path = prepare_vod_db_path(I24_VOD_DB_PATH)
+    parent = os.path.dirname(db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(I24_VOD_DB_PATH)
+    con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
     _init_db(con)
     return con
@@ -156,6 +161,7 @@ def _init_db(con: sqlite3.Connection) -> None:
         """
     )
     con.execute("CREATE INDEX IF NOT EXISTS idx_i24_episodes_created_at ON i24_episodes(created_at)")
+    ensure_unified_schema(con, providers=("i24",))
     con.commit()
 
 

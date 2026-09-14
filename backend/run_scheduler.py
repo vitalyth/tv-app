@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config import CACHE_DIR
+from services.vod_database import get_vod_db_path, prepare_vod_db_path
 
 BASE_DIR = Path(__file__).resolve().parent
-KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
+VOD_DB_PATH = get_vod_db_path()
 KESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("KESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 RESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("RESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 C14_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("C14_VOD_SCAN_LIMIT_PROGRAMS", "40")
@@ -38,6 +39,23 @@ def read_interval(env_name: str, default_seconds: int) -> int:
     return max(interval, 60)
 
 
+def read_interval_any(env_names: tuple[str, ...], default_seconds: int) -> int:
+    for env_name in env_names:
+        raw_value = os.getenv(env_name, "").strip()
+        if not raw_value:
+            continue
+
+        try:
+            interval = int(raw_value)
+        except ValueError:
+            print(f"Invalid {env_name}={raw_value!r}; using {default_seconds}s", flush=True)
+            return default_seconds
+
+        return max(interval, 60)
+
+    return default_seconds
+
+
 def run_job(job: ScheduledJob) -> None:
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{started_at}] Starting {job.name}: {' '.join(job.command)}", flush=True)
@@ -64,11 +82,12 @@ def log_cache_file_status() -> None:
         updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
         print(f"Cache file {cache_file} updated {updated_at}, {stat.st_size} bytes", flush=True)
 
-    db_path = BASE_DIR / KAN_VOD_DB_PATH if not os.path.isabs(KAN_VOD_DB_PATH) else Path(KAN_VOD_DB_PATH)
+    db_path = BASE_DIR / VOD_DB_PATH if not os.path.isabs(VOD_DB_PATH) else Path(VOD_DB_PATH)
+    db_path = Path(prepare_vod_db_path(str(db_path)))
     if db_path.exists():
         stat = db_path.stat()
         updated_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
-        print(f"Kan VOD DB {db_path} updated {updated_at}, {stat.st_size} bytes", flush=True)
+        print(f"VOD DB {db_path} updated {updated_at}, {stat.st_size} bytes", flush=True)
 
 
 def main() -> int:
@@ -83,6 +102,10 @@ def main() -> int:
     signal.signal(signal.SIGINT, request_stop)
 
     python = sys.executable
+    vod_scan_interval_seconds = read_interval_any(
+        ("VOD_SCAN_INTERVAL_SECONDS", "KAN_VOD_SCAN_INTERVAL_SECONDS"),
+        8 * 60 * 60,
+    )
     jobs = [
         ScheduledJob(
             name="epg",
@@ -98,11 +121,11 @@ def main() -> int:
                 "--provider",
                 "kan",
                 "--db",
-                KAN_VOD_DB_PATH,
+                VOD_DB_PATH,
                 "--incremental",
                 "--verbose",
             ],
-            interval_seconds=read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+            interval_seconds=vod_scan_interval_seconds,
         ),
         ScheduledJob(
             name="keshet_vod_scan",
@@ -113,7 +136,7 @@ def main() -> int:
                 "--provider",
                 "keshet",
                 "--db",
-                KAN_VOD_DB_PATH,
+                VOD_DB_PATH,
                 "--limit-programs",
                 KESHET_VOD_SCAN_LIMIT_PROGRAMS,
                 "--incremental",
@@ -121,7 +144,7 @@ def main() -> int:
             ],
             interval_seconds=read_interval(
                 "KESHET_VOD_SCAN_INTERVAL_SECONDS",
-                read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+                vod_scan_interval_seconds,
             ),
         ),
         ScheduledJob(
@@ -133,7 +156,7 @@ def main() -> int:
                 "--provider",
                 "reshet",
                 "--db",
-                KAN_VOD_DB_PATH,
+                VOD_DB_PATH,
                 "--limit-programs",
                 RESHET_VOD_SCAN_LIMIT_PROGRAMS,
                 "--incremental",
@@ -141,7 +164,7 @@ def main() -> int:
             ],
             interval_seconds=read_interval(
                 "RESHET_VOD_SCAN_INTERVAL_SECONDS",
-                read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+                vod_scan_interval_seconds,
             ),
         ),
         ScheduledJob(
@@ -153,7 +176,7 @@ def main() -> int:
                 "--provider",
                 "c14",
                 "--db",
-                KAN_VOD_DB_PATH,
+                VOD_DB_PATH,
                 "--limit-programs",
                 C14_VOD_SCAN_LIMIT_PROGRAMS,
                 "--incremental",
@@ -161,7 +184,7 @@ def main() -> int:
             ],
             interval_seconds=read_interval(
                 "C14_VOD_SCAN_INTERVAL_SECONDS",
-                read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+                vod_scan_interval_seconds,
             ),
         ),
         ScheduledJob(
@@ -173,7 +196,7 @@ def main() -> int:
                 "--provider",
                 "i24",
                 "--db",
-                KAN_VOD_DB_PATH,
+                VOD_DB_PATH,
                 "--limit-programs",
                 I24_VOD_SCAN_LIMIT_PROGRAMS,
                 "--incremental",
@@ -181,7 +204,7 @@ def main() -> int:
             ],
             interval_seconds=read_interval(
                 "I24_VOD_SCAN_INTERVAL_SECONDS",
-                read_interval("KAN_VOD_SCAN_INTERVAL_SECONDS", 8 * 60 * 60),
+                vod_scan_interval_seconds,
             ),
         ),
         ScheduledJob(

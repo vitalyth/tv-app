@@ -38,7 +38,7 @@ pip install requests beautifulsoup4 cloudscraper lxml
 Default database path:
 
 ```bash
-db/kan_vod.db
+db/vod.db
 ```
 
 The scanner creates these tables:
@@ -93,14 +93,14 @@ The scanner creates these tables:
 ### Full metadata scan
 
 ```bash
-python scripts/kan_db_scanner.py scan --db db/kan_vod.db
+python scripts/kan_db_scanner.py scan --db db/vod.db
 ```
 
 ### Full scan with streams
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --with-streams
 ```
 
@@ -108,7 +108,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --with-streams \
   --verbose
 ```
@@ -121,7 +121,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --program-title "לא לריב" \
   --with-streams
 ```
@@ -130,7 +130,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --program-mainid 5460 \
   --with-streams
 ```
@@ -141,7 +141,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --program-mainid 5460 \
   --with-streams
 ```
@@ -150,7 +150,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --program-mainid 5464 \
   --with-streams
 ```
@@ -159,7 +159,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --program-title "טהרן" \
   --with-streams
 ```
@@ -168,7 +168,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --program-title "כאן ספיישלים" \
   --with-streams \
   --verbose
@@ -182,7 +182,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --with-streams \
   --skip-complete-episodes
 ```
@@ -191,7 +191,7 @@ python scripts/kan_db_scanner.py scan \
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --with-streams \
   --skip-programs-with-streams
 ```
@@ -206,14 +206,14 @@ This is usually faster than rescanning everything:
 
 ```bash
 python scripts/kan_db_scanner.py resolve-missing-streams \
-  --db db/kan_vod.db
+  --db db/vod.db
 ```
 
 Limit the batch size:
 
 ```bash
 python scripts/kan_db_scanner.py resolve-missing-streams \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --limit 500
 ```
 
@@ -274,7 +274,7 @@ python scripts/kan_db_scanner.py list-episodes \
 
 ```bash
 python scripts/kan_db_scanner.py search \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --query "טהרן"
 ```
 
@@ -284,7 +284,7 @@ python scripts/kan_db_scanner.py search \
 
 ```bash
 python scripts/kan_db_scanner.py get-episode \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --episode-id 1033208
 ```
 
@@ -292,7 +292,7 @@ Resolve stream if missing:
 
 ```bash
 python scripts/kan_db_scanner.py get-episode \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --episode-id 1033208 \
   --resolve
 ```
@@ -322,7 +322,7 @@ Show programs missing streams:
 
 ```bash
 python scripts/kan_db_scanner.py stream-status \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --only-missing
 ```
 
@@ -332,7 +332,7 @@ python scripts/kan_db_scanner.py stream-status \
 
 ```bash
 python scripts/kan_db_scanner.py missing-descriptions \
-  --db db/kan_vod.db
+  --db db/vod.db
 ```
 
 ---
@@ -342,20 +342,20 @@ python scripts/kan_db_scanner.py missing-descriptions \
 ### 1. Initial metadata scan
 
 ```bash
-python scripts/kan_db_scanner.py scan --db db/kan_vod.db
+python scripts/kan_db_scanner.py scan --db db/vod.db
 ```
 
 ### 2. Resolve streams separately
 
 ```bash
-python scripts/kan_db_scanner.py resolve-missing-streams --db db/kan_vod.db
+python scripts/kan_db_scanner.py resolve-missing-streams --db db/vod.db
 ```
 
 ### 3. Resume safely later
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --with-streams \
   --skip-programs-with-streams
 ```
@@ -369,7 +369,7 @@ python scripts/kan_db_scanner.py scan \
 Use `resolve-missing-streams` instead of rescanning all programs.
 
 ```bash
-python scripts/kan_db_scanner.py resolve-missing-streams --db db/kan_vod.db
+python scripts/kan_db_scanner.py resolve-missing-streams --db db/vod.db
 ```
 
 ### Cloudflare / network issues
@@ -382,7 +382,7 @@ The DB keeps already saved rows. Resume with:
 
 ```bash
 python scripts/kan_db_scanner.py scan \
-  --db db/kan_vod.db \
+  --db db/vod.db \
   --with-streams \
   --skip-programs-with-streams
 ```
@@ -392,8 +392,8 @@ python scripts/kan_db_scanner.py scan \
 If you used older test versions and the schema is broken, delete the DB and rebuild:
 
 ```bash
-rm -f db/kan_vod.db
-python scripts/kan_db_scanner.py scan --db db/kan_vod.db
+rm -f db/vod.db
+python scripts/kan_db_scanner.py scan --db db/vod.db
 ```
 
 ---

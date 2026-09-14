@@ -13,7 +13,8 @@ services:
       - LOCAL_SERIES_WATCH_INTERVAL_SECONDS=60
     volumes: !override
       - ./backend/cache:/app/cache
-      - kan-vod-db-dev:/app/db
+      - vod-db-dev:/app/db
+      - kan-vod-db-dev:/app/legacy-vod-db:ro
       - local-tv-smb:/app/media:ro
 
   backend-vpn:
@@ -21,10 +22,12 @@ services:
       - LOCAL_VOD_TV_DIR=/app/media/tv
     volumes: !override
       - ./backend/cache:/app/cache
-      - kan-vod-db-dev:/app/db
+      - vod-db-dev:/app/db
+      - kan-vod-db-dev:/app/legacy-vod-db:ro
       - local-tv-smb:/app/media:ro
 
 volumes:
+  kan-vod-db-dev:
   local-tv-smb:
     driver: local
     driver_opts:

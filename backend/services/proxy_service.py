@@ -10,6 +10,7 @@ import re
 import html
 import json
 from services.radio_metadata_service import update_radio_now_playing
+from services.vod_database import get_vod_env
 
 try:
     from curl_cffi import requests as curl_requests
@@ -27,8 +28,8 @@ session = create_session()
 PROXY_CONNECT_TIMEOUT_SECONDS = float(os.getenv("PROXY_CONNECT_TIMEOUT_SECONDS", "10"))
 PROXY_READ_TIMEOUT_SECONDS = float(os.getenv("PROXY_READ_TIMEOUT_SECONDS", "60"))
 PROXY_REQUEST_TIMEOUT = (PROXY_CONNECT_TIMEOUT_SECONDS, PROXY_READ_TIMEOUT_SECONDS)
-KAN_VOD_PROXY_MAX_BITRATE = int(os.getenv("KAN_VOD_PROXY_MAX_BITRATE", "0"))
-KAN_VOD_SEGMENT_RETRIES = max(0, int(os.getenv("KAN_VOD_SEGMENT_RETRIES", "2")))
+KAN_VOD_PROXY_MAX_BITRATE = int(get_vod_env("VOD_PROXY_MAX_BITRATE", "KAN_VOD_PROXY_MAX_BITRATE", default="0"))
+KAN_VOD_SEGMENT_RETRIES = max(0, int(get_vod_env("VOD_SEGMENT_RETRIES", "KAN_VOD_SEGMENT_RETRIES", default="2")))
 PLUTO_SEGMENT_RETRIES = max(0, int(os.getenv("PLUTO_SEGMENT_RETRIES", "2")))
 
 IMAGE_PROXY_ALLOWED_HOSTS = {

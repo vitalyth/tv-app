@@ -33,18 +33,20 @@ services:
     environment:
       - ROOT_PATH=/api
       - BACKEND_CACHE_DIR=/app/cache
-      - KAN_VOD_DB_PATH=/app/db/kan_vod.db
+      - VOD_DB_PATH=/app/db/vod.db
+      - LEGACY_VOD_DB_PATH=/app/legacy-vod-db/kan_vod.db
       - LOCAL_SERIES_DB_PATH=/app/db/local_series.db
       - LOCAL_SERIES_WATCHER_ENABLED=${LOCAL_SERIES_WATCHER_ENABLED:-true}
       - LOCAL_SERIES_WATCH_INTERVAL_SECONDS=${LOCAL_SERIES_WATCH_INTERVAL_SECONDS:-2}
-      - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
-      - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
+      - VOD_RETRIES=${VOD_RETRIES:-3}
+      - VOD_STREAM_BATCH_SIZE=${VOD_STREAM_BATCH_SIZE:-20}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
-      - ${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/db
+      - ${VOD_DB_DIR:-${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/vod-db}}:/app/db
+      - ${LEGACY_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/legacy-vod-db:ro
       - ${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:ro
     restart: unless-stopped
     networks:
@@ -57,16 +59,18 @@ services:
     environment:
       - ROOT_PATH=/api
       - BACKEND_CACHE_DIR=/app/cache
-      - KAN_VOD_DB_PATH=/app/db/kan_vod.db
+      - VOD_DB_PATH=/app/db/vod.db
+      - LEGACY_VOD_DB_PATH=/app/legacy-vod-db/kan_vod.db
       - LOCAL_SERIES_DB_PATH=/app/db/local_series.db
-      - KAN_VOD_RETRIES=${KAN_VOD_RETRIES:-3}
-      - KAN_VOD_STREAM_BATCH_SIZE=${KAN_VOD_STREAM_BATCH_SIZE:-20}
+      - VOD_RETRIES=${VOD_RETRIES:-3}
+      - VOD_STREAM_BATCH_SIZE=${VOD_STREAM_BATCH_SIZE:-20}
       - LOCAL_VOD_TV_DIR=${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - TMDB_LANGUAGE=${TMDB_LANGUAGE:-he-IL}
     volumes:
       - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
-      - ${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/db
+      - ${VOD_DB_DIR:-${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/vod-db}}:/app/db
+      - ${LEGACY_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/legacy-vod-db:ro
       - ${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:${LOCAL_VOD_TV_DIR:-/srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv}:ro
     network_mode: "service:gluetun"
     restart: unless-stopped
@@ -80,12 +84,14 @@ services:
     environment:
       - EPG_INTERVAL_SECONDS=${EPG_INTERVAL_SECONDS:-86400}
       - VOD_RECENT_INTERVAL_SECONDS=${VOD_RECENT_INTERVAL_SECONDS:-43200}
-      - KAN_VOD_SCAN_INTERVAL_SECONDS=${KAN_VOD_SCAN_INTERVAL_SECONDS:-28800}
+      - VOD_SCAN_INTERVAL_SECONDS=${VOD_SCAN_INTERVAL_SECONDS:-28800}
       - BACKEND_CACHE_DIR=/app/cache
-      - KAN_VOD_DB_PATH=/app/db/kan_vod.db
+      - VOD_DB_PATH=/app/db/vod.db
+      - LEGACY_VOD_DB_PATH=/app/legacy-vod-db/kan_vod.db
     volumes:
       - ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}:/app/cache
-      - ${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/db
+      - ${VOD_DB_DIR:-${KAN_VOD_DB_DIR:-/DATA/AppData/tv-app/vod-db}}:/app/db
+      - ${LEGACY_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}:/app/legacy-vod-db:ro
     restart: unless-stopped
     depends_on:
       - backend
