@@ -65,6 +65,7 @@ services:
       ROOT_PATH: /api
       BACKEND_CACHE_DIR: /app/cache
       VOD_DB_PATH: /app/db/vod.db
+      LEGACY_VOD_DB_PATH: /app/legacy-vod-db/kan_vod.db
       LOCAL_SERIES_DB_PATH: /app/db/local_series.db
       LOCAL_SERIES_WATCHER_ENABLED: ${LOCAL_SERIES_WATCHER_ENABLED:-true}
       LOCAL_SERIES_WATCH_INTERVAL_SECONDS: ${LOCAL_SERIES_WATCH_INTERVAL_SECONDS:-60}
@@ -94,11 +95,15 @@ services:
     restart: unless-stopped
     volumes:
       - type: bind
-        source: /DATA/AppData/tv-app/backend-cache
+        source: ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}
         target: /app/cache
       - type: bind
-        source: /DATA/AppData/tv-app/db
+        source: ${VOD_DB_DIR:-/DATA/AppData/tv-app/vod-db}
         target: /app/db
+      - type: bind
+        source: ${LEGACY_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}
+        target: /app/legacy-vod-db
+        read_only: true
       - type: bind
         source: /srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv
         target: /app/media/tv
@@ -122,6 +127,7 @@ services:
       ROOT_PATH: /api
       BACKEND_CACHE_DIR: /app/cache
       VOD_DB_PATH: /app/db/vod.db
+      LEGACY_VOD_DB_PATH: /app/legacy-vod-db/kan_vod.db
       LOCAL_SERIES_DB_PATH: /app/db/local_series.db
       LOCAL_SERIES_WATCHER_ENABLED: "false"
       VOD_RETRIES: ${VOD_RETRIES:-3}
@@ -147,11 +153,15 @@ services:
     restart: unless-stopped
     volumes:
       - type: bind
-        source: /DATA/AppData/tv-app/backend-cache
+        source: ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}
         target: /app/cache
       - type: bind
-        source: /DATA/AppData/tv-app/db
+        source: ${VOD_DB_DIR:-/DATA/AppData/tv-app/vod-db}
         target: /app/db
+      - type: bind
+        source: ${LEGACY_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}
+        target: /app/legacy-vod-db
+        read_only: true
       - type: bind
         source: /srv/dev-disk-by-uuid-820981dd-db0e-493c-8606-126a8cd10e8f/data/tv
         target: /app/media/tv
@@ -170,6 +180,7 @@ services:
     environment:
       BACKEND_CACHE_DIR: /app/cache
       VOD_DB_PATH: /app/db/vod.db
+      LEGACY_VOD_DB_PATH: /app/legacy-vod-db/kan_vod.db
       EPG_INTERVAL_SECONDS: ${EPG_INTERVAL_SECONDS:-86400}
       VOD_RECENT_INTERVAL_SECONDS: ${VOD_RECENT_INTERVAL_SECONDS:-43200}
       VOD_SCAN_INTERVAL_SECONDS: ${VOD_SCAN_INTERVAL_SECONDS:-28800}
@@ -189,11 +200,15 @@ services:
     restart: unless-stopped
     volumes:
       - type: bind
-        source: /DATA/AppData/tv-app/backend-cache
+        source: ${BACKEND_CACHE_DIR:-/DATA/AppData/tv-app/backend-cache}
         target: /app/cache
       - type: bind
-        source: /DATA/AppData/tv-app/db
+        source: ${VOD_DB_DIR:-/DATA/AppData/tv-app/vod-db}
         target: /app/db
+      - type: bind
+        source: ${LEGACY_VOD_DB_DIR:-/DATA/AppData/tv-app/kan-vod-db}
+        target: /app/legacy-vod-db
+        read_only: true
 
   nginx:
     cpu_shares: 90
@@ -228,7 +243,7 @@ services:
     restart: unless-stopped
     volumes:
       - type: bind
-        source: /DATA/AppData/tv-app/nginx-cache
+        source: ${NGINX_CACHE_DIR:-/DATA/AppData/tv-app/nginx-cache}
         target: /var/cache/nginx
 
   cloudflared:
