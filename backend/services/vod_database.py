@@ -10,6 +10,7 @@ from typing import Any, Callable
 DEFAULT_VOD_DB_PATH = "db/vod.db"
 LEGACY_KAN_VOD_DB_PATH = "db/kan_vod.db"
 UNIFIED_SCHEMA_VERSION = "3"
+_ENSURED_SCHEMA_KEYS: set[tuple[str, tuple[str, ...], str]] = set()
 
 
 def get_vod_db_path(*provider_env_names: str) -> str:
@@ -332,15 +333,39 @@ def ensure_unified_schema(
     providers: tuple[str, ...] | None = None,
 ) -> None:
     """Create and keep canonical VOD tables in sync with provider tables."""
+    selected = providers or tuple(PROVIDER_TABLES.keys())
+    cache_key = _schema_cache_key(con, selected)
+    if cache_key in _ENSURED_SCHEMA_KEYS:
+        return
+
     _rebuild_unified_tables_if_needed(con)
     _create_unified_tables(con)
-    selected = providers or tuple(PROVIDER_TABLES.keys())
     for provider in selected:
         tables = PROVIDER_TABLES[provider]
         _sync_programs(con, provider, tables["programs"])
         _sync_seasons(con, provider, tables["seasons"])
         _sync_episodes(con, provider, tables["episodes"])
     _set_unified_schema_version(con)
+    _ENSURED_SCHEMA_KEYS.add(cache_key)
+
+
+def _schema_cache_key(
+    con: sqlite3.Connection,
+    providers: tuple[str, ...],
+) -> tuple[str, tuple[str, ...], str]:
+    rows = con.execute("PRAGMA database_list").fetchall()
+    main_path = ""
+    for row in rows:
+        if row[1] == "main":
+            main_path = str(row[2] or "")
+            break
+
+    if main_path:
+        db_key = os.path.realpath(main_path)
+    else:
+        db_key = f":memory:{id(con)}"
+
+    return db_key, tuple(sorted(providers)), UNIFIED_SCHEMA_VERSION
 
 
 def _create_unified_tables(con: sqlite3.Connection) -> None:

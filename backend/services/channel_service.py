@@ -199,6 +199,7 @@ VOD_RECENT_CACHE_FILE = VOD_RECENT_CACHE_DIR / "vod_recent.json"
 _vod_recent_cache_lock = threading.Lock()
 _vod_recent_cache: list[dict] | None = None
 _vod_recent_cache_updated = 0.0
+_vod_recent_cache_mtime = 0.0
 
 
 def _vod_items_cache_key(module: str, mode: int, url: str, name: str, iconimage: str, more_data: str) -> str:
@@ -1748,13 +1749,28 @@ def _ensure_vod_recent_cache_dir() -> None:
 
 
 def _read_vod_recent_cache_file() -> list[dict] | None:
+    global _vod_recent_cache, _vod_recent_cache_mtime, _vod_recent_cache_updated
+
     if not VOD_RECENT_CACHE_FILE.exists():
         return None
+
+    try:
+        file_mtime = VOD_RECENT_CACHE_FILE.stat().st_mtime
+    except OSError:
+        return None
+
+    with _vod_recent_cache_lock:
+        if _vod_recent_cache is not None and _vod_recent_cache_mtime == file_mtime:
+            return list(_vod_recent_cache)
 
     try:
         with VOD_RECENT_CACHE_FILE.open("r", encoding="utf-8") as cache_file:
             data = json.load(cache_file)
         if isinstance(data, list):
+            with _vod_recent_cache_lock:
+                _vod_recent_cache = data
+                _vod_recent_cache_mtime = file_mtime
+                _vod_recent_cache_updated = time.time()
             return data
     except Exception as ex:
         print(f"Failed reading VOD recent cache file {VOD_RECENT_CACHE_FILE}: {ex}", flush=True)
@@ -1959,7 +1975,7 @@ def refresh_vod_recent_cache(
     preserve_source_order: bool = True,
     allow_internal_fallback: bool = False,
 ) -> list[dict]:
-    global _vod_recent_cache, _vod_recent_cache_updated
+    global _vod_recent_cache, _vod_recent_cache_mtime, _vod_recent_cache_updated
 
     recent_items = _build_vod_recent_items(
         max_per_channel=max_per_channel,
@@ -1972,9 +1988,15 @@ def refresh_vod_recent_cache(
     _write_vod_recent_cache_file(recent_items)
 
     now = time.time()
+    try:
+        file_mtime = VOD_RECENT_CACHE_FILE.stat().st_mtime
+    except OSError:
+        file_mtime = now
+
     with _vod_recent_cache_lock:
         _vod_recent_cache = recent_items
         _vod_recent_cache_updated = now
+        _vod_recent_cache_mtime = file_mtime
 
     return recent_items
 

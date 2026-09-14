@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
-from urllib.parse import quote, urlencode, urljoin
+from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 import requests
 
@@ -64,6 +64,10 @@ C14_DEFAULT_IMAGE = "/ch/14tv.png"
 C14_TAHKIR_IMAGE = "https://r.il.cdn-redge.media/file/oil/now14/static/C14-placeholder.jpg"
 TITLE_NORMALIZE_RE = re.compile(r"[^\w\u0590-\u05ff]+", re.UNICODE)
 EPISODE_TITLE_RE = re.compile(r"(.+?)(?:\s*[:|–-]\s*)?פרק\s*\d+", re.IGNORECASE)
+HLS_STREAM_INF_RE = re.compile(r"#EXT-X-STREAM-INF:([^\r\n]*)[\r\n]+([^\r\n]+)", re.IGNORECASE)
+HLS_BANDWIDTH_RE = re.compile(r"(?:^|,)BANDWIDTH=(\d+)", re.IGNORECASE)
+HLS_AVERAGE_BANDWIDTH_RE = re.compile(r"(?:^|,)AVERAGE-BANDWIDTH=(\d+)", re.IGNORECASE)
+HLS_RESOLUTION_RE = re.compile(r"(?:^|,)RESOLUTION=(\d+)x(\d+)", re.IGNORECASE)
 
 
 @dataclass
@@ -1539,6 +1543,95 @@ def _is_playable_stream_url(url: str) -> bool:
     )
 
 
+def _hls_attr_int(pattern: re.Pattern[str], value: str) -> int:
+    match = pattern.search(value)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _hls_variant_score(attrs: str) -> tuple[int, int]:
+    resolution = HLS_RESOLUTION_RE.search(attrs)
+    pixels = 0
+    if resolution:
+        try:
+            pixels = int(resolution.group(1)) * int(resolution.group(2))
+        except (TypeError, ValueError):
+            pixels = 0
+
+    bandwidth = _hls_attr_int(HLS_AVERAGE_BANDWIDTH_RE, attrs) or _hls_attr_int(HLS_BANDWIDTH_RE, attrs)
+    return pixels, bandwidth
+
+
+def _hls_master_base_url(url: str) -> str:
+    parsed = urlsplit(url)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rsplit('/', 1)[0]}/"
+
+
+def _best_hls_variant_from_manifest(master_url: str, manifest: str) -> str | None:
+    variants = [
+        (attrs, uri.strip())
+        for attrs, uri in HLS_STREAM_INF_RE.findall(manifest or "")
+        if uri.strip() and not uri.strip().startswith("#")
+    ]
+    if not variants:
+        return None
+
+    attrs, uri = max(variants, key=lambda item: _hls_variant_score(item[0]))
+    variant_url = urljoin(_hls_master_base_url(master_url), uri)
+    master_query = urlsplit(master_url).query
+    if master_query and not urlsplit(variant_url).query:
+        variant_url = f"{variant_url}?{master_query}"
+    return variant_url
+
+
+def _prefer_best_hls_variant(url: str) -> str:
+    normalized_url = _absolute_stream_url(url)
+    if not normalized_url:
+        return ""
+
+    parsed = urlsplit(normalized_url)
+    if not parsed.path.lower().endswith(".m3u8"):
+        return normalized_url
+    if "bitrate=" in parsed.query.lower():
+        return normalized_url
+
+    try:
+        response = requests.get(normalized_url, headers=C14_HEADERS, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException:
+        return normalized_url
+
+    return _best_hls_variant_from_manifest(normalized_url, response.text) or normalized_url
+
+
+def _cached_stream_url(row: sqlite3.Row | None) -> str:
+    if not row:
+        return ""
+
+    cached = row["stream_url"] or row["play_url"] or ""
+    if not _is_playable_stream_url(cached):
+        return ""
+    if _is_hls_master_playlist_url(cached):
+        return ""
+
+    if row["source_type"] == C14_SOURCE_CATCHUP:
+        return cached
+
+    if row["source_type"] == C14_SOURCE_VOD:
+        return cached
+
+    return cached
+
+
+def _is_hls_master_playlist_url(url: str) -> bool:
+    parsed = urlsplit(str(url or ""))
+    return parsed.path.lower().endswith(".m3u8") and "bitrate=" not in parsed.query.lower()
+
+
 def _find_stream_url(value: object) -> str | None:
     if isinstance(value, str):
         url = _absolute_stream_url(value)
@@ -1570,9 +1663,10 @@ def resolve_c14_vod_stream(episode_id: str) -> str | None:
     playlist = _fetch_json_or_none(_playlist_url(episode_id))
     stream_url = _find_stream_url(playlist)
     if stream_url:
-        return stream_url
+        return _prefer_best_hls_variant(stream_url)
     config = _fetch_json_or_none(_player_config_url(episode_id))
-    return _find_stream_url(config)
+    stream_url = _find_stream_url(config)
+    return _prefer_best_hls_variant(stream_url) if stream_url else None
 
 
 def _resolve_catchup_stream(episode_id: str) -> str | None:
@@ -1584,7 +1678,7 @@ def _resolve_catchup_stream(episode_id: str) -> str | None:
 
 def get_c14_vod_stream(episode_id: str) -> str | None:
     if episode_id.startswith(("http://", "https://")):
-        return episode_id if _is_playable_stream_url(episode_id) else None
+        return _prefer_best_hls_variant(episode_id) if _is_playable_stream_url(episode_id) else None
 
     con = _connect()
     try:
@@ -1592,6 +1686,9 @@ def get_c14_vod_stream(episode_id: str) -> str | None:
             "SELECT stream_url, play_url, source_type FROM c14_episodes WHERE id = ?",
             (episode_id,),
         ).fetchone()
+        cached = _cached_stream_url(row)
+        if cached:
+            return cached
 
         stream_url = _with_retries(lambda: resolve_c14_vod_stream(episode_id))
         if stream_url:

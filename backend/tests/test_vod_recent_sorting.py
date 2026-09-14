@@ -1,6 +1,8 @@
+import tempfile
 import unittest
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 
 DEBUG_DIR = Path(__file__).resolve().parents[1] / "debug"
@@ -69,6 +71,34 @@ class VodRecentSortingTests(unittest.TestCase):
             "vod_i24news",
             [channel["id"] for channel in channel_service._get_vod_channels_for_recent(True)],
         )
+
+    def test_vod_recent_file_cache_uses_memory_until_file_changes(self):
+        original_cache_file = channel_service.VOD_RECENT_CACHE_FILE
+        original_cache = channel_service._vod_recent_cache
+        original_mtime = channel_service._vod_recent_cache_mtime
+        original_updated = channel_service._vod_recent_cache_updated
+
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                cache_file = Path(temp_dir) / "vod_recent.json"
+                cache_file.write_text('[{"id": "item-1", "vodChannelId": "vod_kan11"}]', encoding="utf-8")
+                channel_service.VOD_RECENT_CACHE_FILE = cache_file
+                channel_service._vod_recent_cache = None
+                channel_service._vod_recent_cache_mtime = 0.0
+                channel_service._vod_recent_cache_updated = 0.0
+
+                with patch.object(channel_service.json, "load", wraps=channel_service.json.load) as json_load:
+                    first = channel_service._read_vod_recent_cache_file()
+                    second = channel_service._read_vod_recent_cache_file()
+
+                self.assertEqual(first, [{"id": "item-1", "vodChannelId": "vod_kan11"}])
+                self.assertEqual(second, first)
+                self.assertEqual(json_load.call_count, 1)
+        finally:
+            channel_service.VOD_RECENT_CACHE_FILE = original_cache_file
+            channel_service._vod_recent_cache = original_cache
+            channel_service._vod_recent_cache_mtime = original_mtime
+            channel_service._vod_recent_cache_updated = original_updated
 
 
 if __name__ == "__main__":

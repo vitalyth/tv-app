@@ -1,6 +1,9 @@
 import sqlite3
+import tempfile
 import unittest
+from unittest.mock import patch
 
+import services.vod_database as vod_database
 from services.vod_database import (
     UNIFIED_SCHEMA_VERSION,
     ensure_unified_schema,
@@ -215,6 +218,45 @@ class VodDatabaseTests(unittest.TestCase):
             self.assertEqual([row["program_id"] for row in dated_rows], ["newer-date", "older-date"])
         finally:
             con.close()
+
+    def test_unified_schema_sync_runs_once_per_db_provider_in_process(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            con = sqlite3.connect(f"{temp_dir}/vod.db")
+            con.row_factory = sqlite3.Row
+            try:
+                con.executescript(
+                    """
+                    CREATE TABLE programs (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        updated_at TEXT
+                    );
+                    CREATE TABLE seasons (
+                        season_id TEXT PRIMARY KEY,
+                        program_id TEXT NOT NULL,
+                        title TEXT,
+                        updated_at TEXT
+                    );
+                    CREATE TABLE episodes (
+                        id TEXT PRIMARY KEY,
+                        program_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        updated_at TEXT
+                    );
+                    """
+                )
+
+                with patch.object(
+                    vod_database,
+                    "_sync_episodes",
+                    wraps=vod_database._sync_episodes,
+                ) as sync_episodes:
+                    ensure_unified_schema(con, providers=("kan",))
+                    ensure_unified_schema(con, providers=("kan",))
+
+                self.assertEqual(sync_episodes.call_count, 1)
+            finally:
+                con.close()
 
 
 if __name__ == "__main__":
