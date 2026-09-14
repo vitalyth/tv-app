@@ -7,6 +7,7 @@ import sqlite3
 
 DEFAULT_VOD_DB_PATH = "db/vod.db"
 LEGACY_KAN_VOD_DB_PATH = "db/kan_vod.db"
+UNIFIED_SCHEMA_VERSION = "2"
 
 
 def get_vod_db_path(*provider_env_names: str) -> str:
@@ -138,6 +139,7 @@ def ensure_unified_schema(
     providers: tuple[str, ...] | None = None,
 ) -> None:
     """Create and keep canonical VOD tables in sync with provider tables."""
+    _rebuild_unified_tables_if_needed(con)
     _create_unified_tables(con)
     selected = providers or tuple(PROVIDER_TABLES.keys())
     for provider in selected:
@@ -145,11 +147,17 @@ def ensure_unified_schema(
         _sync_programs(con, provider, tables["programs"])
         _sync_seasons(con, provider, tables["seasons"])
         _sync_episodes(con, provider, tables["episodes"])
+    _set_unified_schema_version(con)
 
 
 def _create_unified_tables(con: sqlite3.Connection) -> None:
     con.executescript(
         """
+        CREATE TABLE IF NOT EXISTS vod_schema_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS vod_programs (
             provider TEXT NOT NULL,
             id TEXT NOT NULL,
@@ -224,6 +232,60 @@ def _create_unified_tables(con: sqlite3.Connection) -> None:
             ON vod_episodes(provider, published_timestamp);
         """
     )
+
+
+def _rebuild_unified_tables_if_needed(con: sqlite3.Connection) -> None:
+    if _get_unified_schema_version(con) == UNIFIED_SCHEMA_VERSION:
+        return
+
+    if not any(_has_table(con, table) for table in ("vod_programs", "vod_seasons", "vod_episodes")):
+        return
+
+    _drop_sync_triggers(con)
+    con.executescript(
+        """
+        DROP TABLE IF EXISTS vod_episodes;
+        DROP TABLE IF EXISTS vod_seasons;
+        DROP TABLE IF EXISTS vod_programs;
+        """
+    )
+
+
+def _get_unified_schema_version(con: sqlite3.Connection) -> str | None:
+    if not _has_table(con, "vod_schema_meta"):
+        return None
+
+    row = con.execute(
+        "SELECT value FROM vod_schema_meta WHERE key = 'unified_schema_version'"
+    ).fetchone()
+    return str(row[0]) if row else None
+
+
+def _set_unified_schema_version(con: sqlite3.Connection) -> None:
+    con.execute(
+        """
+        INSERT INTO vod_schema_meta (key, value)
+        VALUES ('unified_schema_version', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (UNIFIED_SCHEMA_VERSION,),
+    )
+
+
+def _drop_sync_triggers(con: sqlite3.Connection) -> None:
+    trigger_names = [
+        row[0]
+        for row in con.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name LIKE 'sync_%_vod_%'
+            """
+        ).fetchall()
+    ]
+    for trigger_name in trigger_names:
+        con.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
 
 
 def _sync_programs(con: sqlite3.Connection, provider: str, table: str) -> None:
@@ -303,6 +365,7 @@ def _sync_episodes(con: sqlite3.Connection, provider: str, table: str) -> None:
         return
     columns = _table_columns(con, table)
     _create_episode_triggers(con, provider, table, columns)
+    _repair_episode_created_at(con, provider, table, columns)
     if not _needs_table_sync(con, provider, table, "vod_episodes"):
         return
     select_values = [
@@ -322,8 +385,12 @@ def _sync_episodes(con: sqlite3.Connection, provider: str, table: str) -> None:
         _select_expr(columns, "published_timestamp"),
         _select_expr(columns, "display_order"),
         _select_expr(columns, "source_type"),
-        f"COALESCE({_select_expr(columns, 'created_at')}, {_select_expr(columns, 'updated_at')}, CURRENT_TIMESTAMP)",
-        _select_expr(columns, "updated_at", "CURRENT_TIMESTAMP"),
+        _coalesce_non_empty(
+            _select_expr(columns, "created_at"),
+            _select_expr(columns, "updated_at"),
+            "CURRENT_TIMESTAMP",
+        ),
+        _coalesce_non_empty(_select_expr(columns, "updated_at"), "CURRENT_TIMESTAMP"),
     ]
     update_assignments = _update_assignments(
         EPISODE_COLUMNS,
@@ -442,8 +509,12 @@ def _create_episode_triggers(
         _new_expr(columns, "published_timestamp"),
         _new_expr(columns, "display_order"),
         _new_expr(columns, "source_type"),
-        f"COALESCE({_new_expr(columns, 'created_at')}, {_new_expr(columns, 'updated_at')}, CURRENT_TIMESTAMP)",
-        _new_expr(columns, "updated_at", "CURRENT_TIMESTAMP"),
+        _coalesce_non_empty(
+            _new_expr(columns, "created_at"),
+            _new_expr(columns, "updated_at"),
+            "CURRENT_TIMESTAMP",
+        ),
+        _coalesce_non_empty(_new_expr(columns, "updated_at"), "CURRENT_TIMESTAMP"),
     ]
     upsert = _trigger_upsert("vod_episodes", EPISODE_COLUMNS, values, ("provider", "id"), preserve={"created_at"})
     for suffix, timing in (("ai", "AFTER INSERT"), ("au", "AFTER UPDATE")):
@@ -454,6 +525,44 @@ def _create_episode_triggers(
         table,
         "AFTER DELETE",
         f"DELETE FROM vod_episodes WHERE provider = {_literal(provider)} AND id = OLD.id;",
+    )
+
+
+def _repair_episode_created_at(
+    con: sqlite3.Connection,
+    provider: str,
+    table: str,
+    columns: set[str],
+) -> None:
+    if "id" not in columns or not ({"created_at", "updated_at"} & columns):
+        return
+
+    source_created_at = _coalesce_non_empty(
+        _qualified_expr(columns, "src", "created_at"),
+        _qualified_expr(columns, "src", "updated_at"),
+        "NULL",
+    )
+    con.execute(
+        f"""
+        UPDATE vod_episodes
+        SET created_at = (
+            SELECT {source_created_at}
+            FROM {table} AS src
+            WHERE src.id = vod_episodes.id
+              AND TRIM(COALESCE(src.id, '')) != ''
+            LIMIT 1
+        )
+        WHERE provider = ?
+          AND (created_at IS NULL OR TRIM(created_at) = '')
+          AND EXISTS (
+              SELECT 1
+              FROM {table} AS src
+              WHERE src.id = vod_episodes.id
+                AND TRIM(COALESCE(src.id, '')) != ''
+                AND {source_created_at} IS NOT NULL
+          )
+        """,
+        (provider,),
     )
 
 
@@ -480,16 +589,7 @@ def _replace_trigger(
     timing: str,
     body: str,
 ) -> None:
-    exists = con.execute(
-        """
-        SELECT 1
-        FROM sqlite_master
-        WHERE type = 'trigger' AND name = ?
-        """,
-        (trigger_name,),
-    ).fetchone()
-    if exists:
-        return
+    con.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
     con.executescript(
         f"""
         CREATE TRIGGER {trigger_name}
@@ -516,7 +616,9 @@ def _update_assignments(
         if column in skip:
             continue
         if column in preserve:
-            assignments.append(f"{column} = COALESCE({prefix}{column}, excluded.{column})")
+            assignments.append(
+                f"{column} = COALESCE({_non_empty_text_expr(prefix + column)}, excluded.{column})"
+            )
         else:
             assignments.append(f"{column} = excluded.{column}")
     return ",\n            ".join(assignments)
@@ -586,6 +688,21 @@ def _select_expr(columns: set[str], column: str, default: str = "NULL") -> str:
 
 def _new_expr(columns: set[str], column: str, default: str = "NULL") -> str:
     return f"NEW.{column}" if column in columns else default
+
+
+def _qualified_expr(columns: set[str], qualifier: str, column: str, default: str = "NULL") -> str:
+    return f"{qualifier}.{column}" if column in columns else default
+
+
+def _coalesce_non_empty(*exprs: str) -> str:
+    if not exprs:
+        return "NULL"
+    normalized = [_non_empty_text_expr(expr) for expr in exprs[:-1]]
+    return f"COALESCE({', '.join(normalized + [exprs[-1]])})"
+
+
+def _non_empty_text_expr(expr: str) -> str:
+    return f"NULLIF(TRIM(CAST({expr} AS TEXT)), '')"
 
 
 def _literal(value: str) -> str:
