@@ -370,6 +370,26 @@ def _extract_next_data(html: str) -> dict | None:
     return None
 
 
+def _next_page_data(data: dict | None) -> dict | None:
+    if not isinstance(data, dict):
+        return None
+
+    page_data = data.get("props", {}).get("pageProps", {}).get("data")
+    return page_data if isinstance(page_data, dict) else None
+
+
+def _is_mako_episode_page_url(url: str) -> bool:
+    return any(marker in url for marker in ("/VOD-", "/Video-", "/Playlist-"))
+
+
+def _fetch_embedded_page_data(page_url: str) -> dict | None:
+    try:
+        html = _fetch_text(page_url)
+    except Exception:
+        return None
+    return _next_page_data(_extract_next_data(html))
+
+
 def _get_build_id(page_url: str) -> str | None:
     try:
         html = _fetch_text(page_url)
@@ -399,7 +419,13 @@ def _program_next_data_url(page_url: str) -> str | None:
 
 
 def _fetch_program_page_data(page_url: str) -> dict | None:
-    next_data_url = _program_next_data_url(page_url)
+    normalized_url = _normalize_url(page_url)
+    if _is_mako_episode_page_url(normalized_url):
+        page_data = _fetch_embedded_page_data(normalized_url)
+        if page_data:
+            return page_data
+
+    next_data_url = _program_next_data_url(normalized_url)
     if next_data_url:
         try:
             data = _fetch_json(next_data_url)
@@ -410,7 +436,7 @@ def _fetch_program_page_data(page_url: str) -> dict | None:
             pass
 
     try:
-        data = _fetch_json(f"{page_url}{'&' if '?' in page_url else '?'}platform=responsive")
+        data = _fetch_json(f"{normalized_url}{'&' if '?' in normalized_url else '?'}platform=responsive")
         page_data = data.get("pageProps", {}).get("data")
         if isinstance(page_data, dict):
             return page_data
@@ -892,6 +918,129 @@ def _extract_program_page_url_from_playlist_url(playlist_url: str) -> str:
     return playlist_url
 
 
+def _first_text(*values: object) -> str:
+    for value in values:
+        text = _clean_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _dict_value(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _first_image_url(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str):
+            image = _normalize_image_url(value)
+            if image:
+                return image
+            continue
+
+        if isinstance(value, dict):
+            image = _first_image_url(
+                value.get("picUrl"),
+                value.get("image"),
+                value.get("url"),
+                value.get("thumbnailUrl"),
+            )
+            if image:
+                return image
+            continue
+
+        if isinstance(value, list):
+            for item in value:
+                image = _first_image_url(item)
+                if image:
+                    return image
+
+    return None
+
+
+def _episode_page_url_from_vod(vod: dict) -> str:
+    domo_click = _dict_value(vod.get("domoClick"))
+    page_url = _first_text(vod.get("pageUrl"), domo_click.get("clicked_item_url"))
+    return _normalize_url(page_url) if page_url else ""
+
+
+def _episode_metadata_from_page_data(data: dict | None) -> dict:
+    if not isinstance(data, dict):
+        return {}
+
+    vod = _dict_value(data.get("vod"))
+    hero = _dict_value(data.get("hero"))
+    history = _dict_value(data.get("historyObject"))
+    history_hero = _dict_value(history.get("hero"))
+    seo = _dict_value(data.get("seo"))
+    schema = _dict_value(seo.get("schema"))
+    video = _dict_value(schema.get("video"))
+
+    title = _first_text(
+        vod.get("extraInfo"),
+        history_hero.get("extraInfo"),
+        hero.get("subtitle"),
+        schema.get("name"),
+        video.get("name"),
+        vod.get("subtitle"),
+        vod.get("title"),
+    )
+    description = _first_text(
+        vod.get("description"),
+        vod.get("shortDescription"),
+        vod.get("brief"),
+        history_hero.get("subtitle"),
+        hero.get("description"),
+        schema.get("description"),
+        video.get("description"),
+    )
+    published = _first_text(
+        vod.get("date"),
+        vod.get("created"),
+        vod.get("airDate"),
+        vod.get("publishDate"),
+        history_hero.get("extraInfo"),
+        hero.get("subtitle"),
+        schema.get("datePublished"),
+        video.get("uploadDate"),
+        schema.get("name"),
+    )
+    image = _first_image_url(
+        history.get("picUrl"),
+        schema.get("image"),
+        video.get("thumbnailUrl"),
+        seo.get("image"),
+        hero.get("pics"),
+        hero.get("mobilePics"),
+        history_hero.get("picUrl"),
+        vod.get("pics"),
+    )
+    page_url = _first_text(history.get("pageUrl"), vod.get("pageUrl"), seo.get("canonical"))
+
+    metadata = {
+        "id": _first_text(
+            vod.get("itemVcmId"),
+            _dict_value(history.get("domoClick")).get("clicked_item_id"),
+            _dict_value(data.get("domoPageView")).get("item_id"),
+        ),
+        "title": title,
+        "description": description,
+        "published": published,
+        "published_timestamp": (
+            _parse_published_timestamp(published)
+            or _parse_published_timestamp(video.get("uploadDate"))
+            or _parse_published_timestamp(schema.get("uploadDate"))
+        ),
+        "image": image,
+        "page_url": _normalize_url(page_url) if page_url else "",
+    }
+    return {key: value for key, value in metadata.items() if value}
+
+
+def _fetch_episode_page_metadata(page_url: str) -> dict:
+    return _episode_metadata_from_page_data(_fetch_program_page_data(page_url))
+
+
 def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) -> list[KeshetEpisode]:
     video_channel_id = data.get("channelId") or data.get("videoChannelId") or ""
     episodes: list[KeshetEpisode] = []
@@ -913,20 +1062,35 @@ def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) ->
         if not vcmid or not video_channel_id:
             continue
 
-        title = _clean_text(vod.get("extraInfo") or vod.get("subtitle") or vod.get("title")) or f"פרק {vcmid}"
+        page_url = _episode_page_url_from_vod(vod)
+        source_title = _clean_text(vod.get("extraInfo") or vod.get("subtitle") or vod.get("title"))
         subtitle = _clean_text(vod.get("title") or vod.get("subtitle"))
         description = _clean_text(vod.get("description") or vod.get("shortDescription") or vod.get("brief"))
+        published = _clean_text(vod.get("date") or vod.get("created") or vod.get("airDate") or vod.get("publishDate"))
+
+        metadata = _episode_metadata_from_page_data(data)
+        if metadata.get("id") != vcmid:
+            metadata = {}
+        if page_url and (not source_title or not description or not published):
+            metadata = metadata or _fetch_episode_page_metadata(page_url)
+
+        title = source_title or metadata.get("title") or f"פרק {vcmid}"
         if subtitle and subtitle != title and not description:
             description = subtitle
+        description = description or metadata.get("description") or ""
 
         pics = vod.get("pics") or []
         image = None
         if pics and isinstance(pics[0], dict):
             image = _normalize_image_url(pics[0].get("picUrl"))
-        image = image or program.image
+        image = metadata.get("image") or image or program.image
 
-        published = _clean_text(vod.get("date") or vod.get("created") or vod.get("airDate") or vod.get("publishDate"))
-        published_timestamp = _parse_published_timestamp(published) or _parse_published_timestamp(title)
+        published = published or metadata.get("published") or ""
+        published_timestamp = (
+            _parse_published_timestamp(published)
+            or metadata.get("published_timestamp")
+            or _parse_published_timestamp(title)
+        )
         play_url = f"{MAKO_BASE_URL}/VodPlaylist?vcmid={quote(vcmid)}&videoChannelId={quote(str(video_channel_id))}"
         episodes.append(
             KeshetEpisode(
@@ -935,7 +1099,7 @@ def _parse_episodes(program: KeshetProgram, season: KeshetSeason, data: dict) ->
                 season_id=season.season_id,
                 title=title,
                 description=description,
-                url=_extract_program_page_url_from_playlist_url(play_url),
+                url=metadata.get("page_url") or page_url or _extract_program_page_url_from_playlist_url(play_url),
                 image=image,
                 play_url=play_url,
                 published=published,
