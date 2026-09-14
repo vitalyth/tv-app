@@ -15,6 +15,8 @@ from services.vod_database import (
     prepare_vod_db_path,
     select_vod_programs_for_detail_scan,
     vod_episode_activity_subquery,
+    vod_episode_source_sort_kind_expr,
+    vod_episode_source_sort_key_expr,
 )
 
 
@@ -1199,16 +1201,28 @@ def get_i24_vod_next_episode(episode_id: str, api_prefix: str = "") -> dict | No
 
 def get_i24_vod_recent_episodes(limit: int = 10) -> list[dict]:
     with _connect() as con:
+        episode_columns = _table_columns(con, "i24_episodes")
+        source_sort_expr = vod_episode_source_sort_key_expr(
+            episode_columns,
+            "e",
+        )
+        source_sort_kind_expr = vod_episode_source_sort_kind_expr(episode_columns, "e")
         return [
             dict(row)
             for row in con.execute(
-                """
+                f"""
                 SELECT e.*, p.title AS program_title, p.description AS program_description,
-                       p.image AS program_image, s.title AS season_title
+                       p.image AS program_image, s.title AS season_title,
+                       {source_sort_expr} AS source_sort_key,
+                       {source_sort_kind_expr} AS source_sort_kind
                 FROM i24_episodes e
                 JOIN i24_programs p ON p.id = e.program_id
                 LEFT JOIN i24_seasons s ON s.season_id = e.season_id
-                ORDER BY COALESCE(e.published_timestamp, 0) DESC, e.display_order ASC
+                ORDER BY
+                    CASE WHEN source_sort_kind = 'id' THEN 0 ELSE 1 END,
+                    source_sort_key DESC,
+                    COALESCE(e.published_timestamp, 0) DESC,
+                    e.display_order ASC
                 LIMIT ?
                 """,
                 (limit,),

@@ -5,7 +5,13 @@ import time
 from urllib.parse import quote
 
 from scripts import kan_db_scanner
-from services.vod_database import get_vod_db_path, get_vod_env, vod_episode_activity_subquery
+from services.vod_database import (
+    get_vod_db_path,
+    get_vod_env,
+    vod_episode_activity_subquery,
+    vod_episode_source_sort_kind_expr,
+    vod_episode_source_sort_key_expr,
+)
 
 
 VOD_DB_PATH = get_vod_db_path()
@@ -445,19 +451,26 @@ def get_kan_vod_series_details(
 def get_kan_vod_recent_episodes(limit: int = 10) -> list[dict]:
     con = _connect()
     try:
+        episode_columns = {row[1] for row in con.execute("PRAGMA table_info(episodes)").fetchall()}
+        source_sort_expr = vod_episode_source_sort_key_expr(episode_columns, "e")
+        source_sort_kind_expr = vod_episode_source_sort_kind_expr(episode_columns, "e")
         rows = con.execute(
-            """
+            f"""
             SELECT
                 e.*,
                 p.title AS program_title,
                 p.description AS program_description,
                 p.image AS program_image,
                 s.title AS season_title,
-                s.season_number AS season_number
+                s.season_number AS season_number,
+                {source_sort_expr} AS source_sort_key,
+                {source_sort_kind_expr} AS source_sort_kind
             FROM episodes e
             JOIN programs p ON p.id = e.program_id
             LEFT JOIN seasons s ON s.season_id = e.season_id
             ORDER BY
+                CASE WHEN source_sort_kind = 'id' THEN 0 ELSE 1 END,
+                source_sort_key DESC,
                 CASE WHEN e.published IS NULL OR e.published = '' THEN 1 ELSE 0 END,
                 e.published DESC,
                 CAST(e.id AS INTEGER) DESC

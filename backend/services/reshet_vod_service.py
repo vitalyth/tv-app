@@ -17,6 +17,8 @@ from services.vod_database import (
     prepare_vod_db_path,
     select_vod_programs_for_detail_scan,
     vod_episode_activity_subquery,
+    vod_episode_source_sort_kind_expr,
+    vod_episode_source_sort_key_expr,
 )
 
 
@@ -1229,19 +1231,29 @@ def get_reshet_vod_next_episode(episode_id: str, api_prefix: str = "") -> dict |
 def get_reshet_vod_recent_episodes(limit: int = 10) -> list[dict]:
     con = _connect()
     try:
+        episode_columns = _table_columns(con, "reshet_episodes")
+        source_sort_expr = vod_episode_source_sort_key_expr(
+            episode_columns,
+            "e",
+        )
+        source_sort_kind_expr = vod_episode_source_sort_kind_expr(episode_columns, "e")
         rows = con.execute(
-            """
+            f"""
             SELECT
                 e.*,
                 p.title AS program_title,
                 p.description AS program_description,
                 p.image AS program_image,
                 s.title AS season_title,
-                s.season_number AS season_number
+                s.season_number AS season_number,
+                {source_sort_expr} AS source_sort_key,
+                {source_sort_kind_expr} AS source_sort_kind
             FROM reshet_episodes e
             JOIN reshet_programs p ON p.id = e.program_id
             LEFT JOIN reshet_seasons s ON s.season_id = e.season_id
             ORDER BY
+                CASE WHEN source_sort_kind = 'id' THEN 0 ELSE 1 END,
+                source_sort_key DESC,
                 e.published_timestamp IS NULL,
                 e.published_timestamp DESC,
                 e.updated_at DESC,

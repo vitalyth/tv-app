@@ -70,7 +70,7 @@ def vod_episode_activity_subquery(provider: str) -> str:
             ) AS latest_episode_source_sort_key,
             MAX(
                 COALESCE(
-                    published_timestamp,
+                    NULLIF(published_timestamp, 0),
                     CAST(strftime('%s', created_at) AS REAL),
                     0
                 )
@@ -78,6 +78,55 @@ def vod_episode_activity_subquery(provider: str) -> str:
         FROM vod_episodes
         WHERE provider = {provider_sql}
         GROUP BY program_id
+    """
+
+
+def vod_episode_source_sort_key_expr(
+    columns: set[str],
+    table_alias: str = "e",
+) -> str:
+    """Rank episodes by provider numeric id when present, otherwise by episode date."""
+    expressions = []
+    if "id" in columns:
+        expressions.append(_numeric_text_expr(f"{table_alias}.id"))
+    if "source_id" in columns:
+        expressions.append(_numeric_text_expr(f"{table_alias}.source_id"))
+    if "published_timestamp" in columns:
+        expressions.append(f"NULLIF({table_alias}.published_timestamp, 0)")
+    if "created_at" in columns:
+        expressions.append(f"CAST(strftime('%s', {table_alias}.created_at) AS REAL)")
+    if "updated_at" in columns:
+        expressions.append(f"CAST(strftime('%s', {table_alias}.updated_at) AS REAL)")
+    expressions.append("0")
+    return f"COALESCE({', '.join(expressions)})"
+
+
+def vod_episode_source_sort_kind_expr(
+    columns: set[str],
+    table_alias: str = "e",
+) -> str:
+    numeric_conditions = []
+    if "id" in columns:
+        numeric_conditions.append(_numeric_text_condition(f"{table_alias}.id"))
+    if "source_id" in columns:
+        numeric_conditions.append(_numeric_text_condition(f"{table_alias}.source_id"))
+
+    date_conditions = []
+    if "published_timestamp" in columns:
+        date_conditions.append(f"NULLIF({table_alias}.published_timestamp, 0) IS NOT NULL")
+    if "created_at" in columns:
+        date_conditions.append(f"TRIM(COALESCE({table_alias}.created_at, '')) != ''")
+    if "updated_at" in columns:
+        date_conditions.append(f"TRIM(COALESCE({table_alias}.updated_at, '')) != ''")
+
+    numeric_sql = " OR ".join(numeric_conditions) or "0"
+    date_sql = " OR ".join(date_conditions) or "0"
+    return f"""
+        CASE
+            WHEN {numeric_sql} THEN 'id'
+            WHEN {date_sql} THEN 'date'
+            ELSE ''
+        END
     """
 
 
@@ -932,6 +981,21 @@ def _coalesce_non_empty(*exprs: str) -> str:
 
 def _non_empty_text_expr(expr: str) -> str:
     return f"NULLIF(TRIM(CAST({expr} AS TEXT)), '')"
+
+
+def _numeric_text_expr(expr: str) -> str:
+    return f"""
+        CASE
+            WHEN {_numeric_text_condition(expr)}
+            THEN CAST({expr} AS INTEGER)
+            ELSE NULL
+        END
+    """
+
+
+def _numeric_text_condition(expr: str) -> str:
+    text_expr = f"TRIM(COALESCE({expr}, ''))"
+    return f"{text_expr} != '' AND {text_expr} NOT GLOB '*[^0-9]*'"
 
 
 def _literal(value: str) -> str:

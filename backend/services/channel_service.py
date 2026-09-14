@@ -174,13 +174,19 @@ IDANPLUS_VOD_CHANNELS = [
     },
 ]
 
-VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_kan11", "vod_keshet12", "vod_reshet13", "vod_14tv"]
+VOD_RECENT_PRIORITY_CHANNEL_IDS = ["vod_kan11", "vod_keshet12", "vod_reshet13", "vod_14tv", "vod_i24news"]
 VOD_RECENT_LOOKBACK_DAYS = 3
 VOD_RECENT_TOTAL_LIMIT = 40
 VOD_SOURCE_CACHE_TTL_HOURS = 24
 VOD_ITEMS_CACHE_TTL_SECONDS = int(os.getenv("VOD_ITEMS_CACHE_TTL_SECONDS", str(7 * 24 * 60 * 60)))
 VOD_ITEMS_CACHE_DIR = CACHE_DIR / "vod_items"
-VOD_RECENT_DIRECT_CHANNEL_IDS = {"vod_kan11", "vod_keshet12", "vod_reshet13", "vod_14tv"}
+VOD_RECENT_DIRECT_CHANNEL_IDS = {
+    "vod_kan11",
+    "vod_keshet12",
+    "vod_reshet13",
+    "vod_14tv",
+    "vod_i24news",
+}
 _original_addon_cache_get = addon_cache.get
 _original_addon_cache_clear = addon_cache.clear
 _original_addon_cache_database = addon_cache.database
@@ -1181,11 +1187,17 @@ def _is_vod_recent_placeholder_item(item: dict) -> bool:
 
 def _prefer_today_or_yesterday_items(items: list[dict]) -> list[dict]:
     items = [item for item in items if not _is_vod_recent_placeholder_item(item)]
+    if any(_vod_recent_sort_kind(item) == "id" for item in items):
+        return items
+
     fresh_items = [item for item in items if _item_matches_today_or_yesterday(item)]
     return fresh_items or items
 
 
 def _vod_recent_item_matches_channel_window(item: dict) -> bool:
+    if _vod_recent_sort_kind(item) == "id":
+        return True
+
     timestamp = _item_timestamp_from_fields(item)
     channel_id = item.get("vodChannelId")
 
@@ -1231,8 +1243,7 @@ def _item_timestamp_from_fields(item: dict) -> float:
 def _sort_vod_items_by_recent(items: list[dict]) -> list[dict]:
     return sorted(
         items,
-        key=_vod_recent_timestamp,
-        reverse=True,
+        key=_vod_recent_sort_tuple,
     )
 
 
@@ -1242,24 +1253,10 @@ def _select_vod_recent_items(items: list[dict], max_items: int, preserve_source_
     if not preserve_source_order:
         return _sort_vod_items_by_recent(items)[:max_items]
 
-    indexed_items = [
-        (item, _vod_recent_timestamp(item))
-        for item in items
-    ]
-    if not any(aired_timestamp for _, aired_timestamp in indexed_items):
+    if not any(_vod_recent_sort_key(item) for item in items):
         return items[:max_items]
 
-    return [
-        item
-        for item, _ in sorted(
-            indexed_items,
-            key=lambda indexed_item: (
-                0 if indexed_item[1] else 1,
-                -indexed_item[1],
-                indexed_item[0].get("sourceOrder", 0),
-            ),
-        )[:max_items]
-    ]
+    return sorted(items, key=_vod_recent_sort_tuple)[:max_items]
 
 
 def _sort_vod_recent_cache_items(items: list[dict]) -> list[dict]:
@@ -1276,10 +1273,7 @@ def _sort_vod_recent_cache_items(items: list[dict]) -> list[dict]:
     for channel_items in grouped_items.values():
         channel_items[:] = _prefer_today_or_yesterday_items(channel_items)
         channel_items.sort(
-            key=lambda item: (
-                -_vod_recent_timestamp(item),
-                item.get("sourceOrder", 0),
-            )
+            key=_vod_recent_sort_tuple
         )
 
     channel_order = sorted(
@@ -1315,6 +1309,63 @@ def _vod_recent_timestamp(item: dict) -> float:
     return _parse_aired_timestamp(item.get("aired", "") or "")
 
 
+def _vod_recent_float(value: object) -> float:
+    if value is None or value == "":
+        return 0.0
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _vod_recent_sort_key(item: dict) -> float:
+    return _vod_recent_float(item.get("sourceSortKey")) or _vod_recent_timestamp(item)
+
+
+def _vod_recent_sort_kind(item: dict) -> str:
+    return str(item.get("sourceSortKind") or "").strip().lower()
+
+
+def _vod_recent_sort_kind_rank(item: dict) -> int:
+    kind = _vod_recent_sort_kind(item)
+    if kind == "id":
+        return 0
+    if kind == "date":
+        return 1
+    return 1
+
+
+def _vod_recent_source_order(item: dict) -> int:
+    try:
+        return int(item.get("sourceOrder") or 0)
+    except Exception:
+        return 0
+
+
+def _vod_recent_sort_tuple(item: dict) -> tuple[int, int, float, float, int]:
+    sort_key = _vod_recent_sort_key(item)
+    timestamp = _vod_recent_timestamp(item)
+    return (
+        0 if sort_key else 1,
+        _vod_recent_sort_kind_rank(item),
+        -sort_key,
+        -timestamp,
+        _vod_recent_source_order(item),
+    )
+
+
+def _vod_recent_episode_sort_key(episode: dict, fallback: object = 0.0) -> float:
+    return (
+        _vod_recent_float(episode.get("source_sort_key"))
+        or _vod_recent_float(episode.get("sourceSortKey"))
+        or _vod_recent_float(fallback)
+    )
+
+
+def _vod_recent_episode_sort_kind(episode: dict) -> str:
+    return str(episode.get("source_sort_kind") or episode.get("sourceSortKind") or "").strip().lower()
+
+
 def _fetch_kan_vod_recent_items(limit: int) -> list[dict]:
     recent_items: list[dict] = []
 
@@ -1330,6 +1381,8 @@ def _fetch_kan_vod_recent_items(limit: int) -> list[dict]:
         season_title = clean_kodi_label(episode.get("season_title") or "")
         published = episode.get("published") or ""
         source_timestamp = _parse_aired_timestamp(published)
+        source_sort_key = _vod_recent_episode_sort_key(episode, source_timestamp)
+        source_sort_kind = _vod_recent_episode_sort_kind(episode)
         episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
         program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
         recent_item = {
@@ -1362,6 +1415,8 @@ def _fetch_kan_vod_recent_items(limit: int) -> list[dict]:
             "isFolder": False,
             "isPlayable": True,
             "sourceTimestamp": source_timestamp,
+            "sourceSortKey": source_sort_key,
+            "sourceSortKind": source_sort_kind,
             "sourceOrder": index,
         }
 
@@ -1388,6 +1443,8 @@ def _fetch_keshet_vod_recent_items(limit: int) -> list[dict]:
         season_title = clean_kodi_label(episode.get("season_title") or "")
         published = episode.get("published") or ""
         source_timestamp = _parse_aired_timestamp(published)
+        source_sort_key = _vod_recent_episode_sort_key(episode, source_timestamp)
+        source_sort_kind = _vod_recent_episode_sort_kind(episode)
         episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
         program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
         recent_item = {
@@ -1420,6 +1477,8 @@ def _fetch_keshet_vod_recent_items(limit: int) -> list[dict]:
             "isFolder": False,
             "isPlayable": True,
             "sourceTimestamp": source_timestamp,
+            "sourceSortKey": source_sort_key,
+            "sourceSortKind": source_sort_kind,
             "sourceOrder": index,
         }
 
@@ -1446,6 +1505,8 @@ def _fetch_reshet_vod_recent_items(limit: int) -> list[dict]:
         season_title = clean_kodi_label(episode.get("season_title") or "")
         published = episode.get("published") or ""
         source_timestamp = episode.get("published_timestamp") or _parse_aired_timestamp(published)
+        source_sort_key = _vod_recent_episode_sort_key(episode, source_timestamp)
+        source_sort_kind = _vod_recent_episode_sort_kind(episode)
         episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
         program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
         recent_item = {
@@ -1478,6 +1539,8 @@ def _fetch_reshet_vod_recent_items(limit: int) -> list[dict]:
             "isFolder": False,
             "isPlayable": True,
             "sourceTimestamp": source_timestamp,
+            "sourceSortKey": source_sort_key,
+            "sourceSortKind": source_sort_kind,
             "sourceOrder": index,
         }
 
@@ -1504,6 +1567,8 @@ def _fetch_c14_vod_recent_items(limit: int) -> list[dict]:
         season_title = clean_kodi_label(episode.get("season_title") or "")
         published = episode.get("published") or ""
         source_timestamp = episode.get("published_timestamp") or _parse_aired_timestamp(published)
+        source_sort_key = _vod_recent_episode_sort_key(episode, source_timestamp)
+        source_sort_kind = _vod_recent_episode_sort_kind(episode)
         episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
         program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
         recent_item = {
@@ -1536,6 +1601,8 @@ def _fetch_c14_vod_recent_items(limit: int) -> list[dict]:
             "isFolder": False,
             "isPlayable": True,
             "sourceTimestamp": source_timestamp,
+            "sourceSortKey": source_sort_key,
+            "sourceSortKind": source_sort_kind,
             "sourceOrder": index,
         }
 
@@ -1562,6 +1629,8 @@ def _fetch_i24_vod_recent_items(limit: int) -> list[dict]:
         season_title = clean_kodi_label(episode.get("season_title") or "")
         published = episode.get("published") or ""
         source_timestamp = episode.get("published_timestamp") or _parse_aired_timestamp(published)
+        source_sort_key = _vod_recent_episode_sort_key(episode, source_timestamp)
+        source_sort_kind = _vod_recent_episode_sort_kind(episode)
         episode_image = normalize_vod_image(episode.get("image") or episode.get("program_image") or "")
         program_image = normalize_vod_image(episode.get("program_image") or episode.get("image") or "")
         recent_item = {
@@ -1594,6 +1663,8 @@ def _fetch_i24_vod_recent_items(limit: int) -> list[dict]:
             "isFolder": False,
             "isPlayable": True,
             "sourceTimestamp": source_timestamp,
+            "sourceSortKey": source_sort_key,
+            "sourceSortKind": source_sort_kind,
             "sourceOrder": index,
         }
 
