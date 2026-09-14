@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import sqlite3
+import time
+from typing import Any, Callable
 
 
 DEFAULT_VOD_DB_PATH = "db/vod.db"
@@ -31,6 +33,148 @@ def get_vod_env(*env_names: str, default: str) -> str:
         if value is not None and value != "":
             return value
     return default
+
+
+def parse_vod_sqlite_timestamp(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    normalized = text.replace("T", " ")[:19]
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return time.mktime(time.strptime(normalized, fmt))
+        except ValueError:
+            continue
+
+    return None
+
+
+def vod_episode_activity_subquery(provider: str) -> str:
+    """Return the shared latest-episode sort source used by provider series APIs."""
+    provider_sql = _literal(provider)
+    return f"""
+        SELECT
+            program_id,
+            MAX(created_at) AS latest_episode_added_at,
+            MAX(
+                CASE
+                    WHEN TRIM(COALESCE(id, '')) != ''
+                     AND id NOT GLOB '*[^0-9]*'
+                    THEN CAST(id AS INTEGER)
+                    WHEN TRIM(COALESCE(source_id, '')) != ''
+                     AND source_id NOT GLOB '*[^0-9]*'
+                    THEN CAST(source_id AS INTEGER)
+                    ELSE NULL
+                END
+            ) AS latest_episode_source_sort_key,
+            MAX(
+                COALESCE(
+                    published_timestamp,
+                    CAST(strftime('%s', created_at) AS REAL),
+                    0
+                )
+            ) AS latest_episode_date_sort_key
+        FROM vod_episodes
+        WHERE provider = {provider_sql}
+        GROUP BY program_id
+    """
+
+
+def select_vod_programs_for_detail_scan(
+    con: sqlite3.Connection,
+    programs: list[Any],
+    *,
+    program_table: str,
+    episode_table: str,
+    program_id_getter: Callable[[Any], Any],
+    incremental: bool,
+    limit_programs: int | None,
+    full_scan_interval_hours: int,
+    with_streams: bool = False,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Choose provider programs for detail scans with one policy for all VOD providers."""
+    entries = [
+        (str(program_id_getter(program) or "").strip(), program)
+        for program in programs
+    ]
+    entries = [(program_id, program) for program_id, program in entries if program_id]
+    limit = max(0, int(limit_programs or 0))
+    summary: dict[str, Any] = {
+        "mode": "incremental" if incremental else "full",
+        "totalPrograms": len(entries),
+        "limitPrograms": limit,
+        "selectedPrograms": 0,
+        "skippedPrograms": 0,
+        "reasons": {},
+    }
+
+    if not entries:
+        return [], summary
+
+    if not incremental:
+        selected = [program for _, program in entries[:limit or None]]
+        summary["selectedPrograms"] = len(selected)
+        summary["skippedPrograms"] = len(entries) - len(selected)
+        summary["reasons"] = {"full": len(selected)}
+        return selected, summary
+
+    stats = _vod_program_scan_stats(
+        con,
+        program_table=program_table,
+        episode_table=episode_table,
+        with_streams=with_streams,
+    )
+
+    candidates: list[tuple[str, Any, str]] = []
+    candidate_reasons: dict[str, int] = {}
+    for program_id, program in entries:
+        stat = stats.get(program_id, {})
+        reason = _vod_program_scan_reason(
+            stat,
+            full_scan_interval_hours=full_scan_interval_hours,
+            with_streams=with_streams,
+        )
+        if not reason:
+            continue
+        candidates.append((program_id, program, reason))
+        candidate_reasons[reason] = candidate_reasons.get(reason, 0) + 1
+
+    selected_candidates = candidates[:limit or None]
+    selected_reasons: dict[str, int] = {}
+    for _, _, reason in selected_candidates:
+        selected_reasons[reason] = selected_reasons.get(reason, 0) + 1
+
+    selected = [program for _, program, _ in selected_candidates]
+    summary["candidatePrograms"] = len(candidates)
+    summary["selectedPrograms"] = len(selected)
+    summary["skippedPrograms"] = len(entries) - len(selected)
+    summary["reasons"] = selected_reasons
+    if len(candidates) != len(selected_candidates):
+        summary["candidateReasons"] = candidate_reasons
+    return selected, summary
+
+
+def mark_vod_program_detail_scan(
+    con: sqlite3.Connection,
+    program_table: str,
+    program_id: str,
+) -> None:
+    columns = _table_columns(con, program_table)
+    assignments = []
+    if "last_full_scan_at" in columns:
+        assignments.append("last_full_scan_at = CURRENT_TIMESTAMP")
+    if "last_incremental_scan_at" in columns:
+        assignments.append("last_incremental_scan_at = CURRENT_TIMESTAMP")
+    if "updated_at" in columns:
+        assignments.append("updated_at = CURRENT_TIMESTAMP")
+    if not assignments:
+        return
+
+    con.execute(
+        f"UPDATE {_sql_identifier(program_table)} SET {', '.join(assignments)} WHERE id = ?",
+        (program_id,),
+    )
 
 
 def prepare_vod_db_path(db_path: str) -> str:
@@ -638,8 +782,91 @@ def _has_table(con: sqlite3.Connection, table: str) -> bool:
     return row is not None
 
 
+def _vod_program_scan_stats(
+    con: sqlite3.Connection,
+    *,
+    program_table: str,
+    episode_table: str,
+    with_streams: bool,
+) -> dict[str, dict[str, Any]]:
+    if not _has_table(con, program_table) or not _has_table(con, episode_table):
+        return {}
+
+    program_columns = _table_columns(con, program_table)
+    episode_columns = _table_columns(con, episode_table)
+    program_table_sql = _sql_identifier(program_table)
+    episode_table_sql = _sql_identifier(episode_table)
+    last_full_expr = "p.last_full_scan_at" if "last_full_scan_at" in program_columns else "NULL"
+    last_incremental_expr = "p.last_incremental_scan_at" if "last_incremental_scan_at" in program_columns else "NULL"
+    stream_count_expr = "0"
+    if with_streams and "stream_url" in episode_columns:
+        stream_count_expr = """
+            COUNT(
+                DISTINCT CASE
+                    WHEN TRIM(COALESCE(e.stream_url, '')) != ''
+                    THEN e.id
+                END
+            )
+        """
+
+    rows = con.execute(
+        f"""
+        SELECT
+            p.id AS id,
+            {last_full_expr} AS last_full_scan_at,
+            {last_incremental_expr} AS last_incremental_scan_at,
+            COUNT(DISTINCT e.id) AS episode_count,
+            {stream_count_expr} AS stream_count
+        FROM {program_table_sql} p
+        LEFT JOIN {episode_table_sql} e ON e.program_id = p.id
+        GROUP BY p.id
+        """
+    ).fetchall()
+
+    return {
+        str(row["id"]): {
+            "last_full_scan_at": row["last_full_scan_at"],
+            "last_incremental_scan_at": row["last_incremental_scan_at"],
+            "episode_count": int(row["episode_count"] or 0),
+            "stream_count": int(row["stream_count"] or 0),
+        }
+        for row in rows
+    }
+
+
+def _vod_program_scan_reason(
+    stat: dict[str, Any],
+    *,
+    full_scan_interval_hours: int,
+    with_streams: bool,
+) -> str | None:
+    episode_count = int(stat.get("episode_count") or 0)
+    stream_count = int(stat.get("stream_count") or 0)
+    last_full_scan_at = stat.get("last_full_scan_at")
+
+    if episode_count <= 0:
+        return "missing-episodes"
+    if with_streams and stream_count < episode_count:
+        return "missing-streams"
+    if not last_full_scan_at:
+        return "never-scanned"
+    if int(full_scan_interval_hours or 0) > 0:
+        last_full_scan = parse_vod_sqlite_timestamp(last_full_scan_at)
+        if last_full_scan is None:
+            return "never-scanned"
+        if time.time() - last_full_scan >= int(full_scan_interval_hours) * 60 * 60:
+            return "scheduled-full"
+    return None
+
+
 def _table_columns(con: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _sql_identifier(identifier: str) -> str:
+    if not identifier or not identifier.replace("_", "").isalnum():
+        raise ValueError(f"Unsafe SQL identifier: {identifier!r}")
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 def _legacy_db_candidates(db_path: str) -> list[str]:

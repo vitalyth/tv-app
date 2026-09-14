@@ -7,7 +7,15 @@ from urllib.parse import quote
 
 import requests
 
-from services.vod_database import ensure_unified_schema, get_vod_db_path, get_vod_env, prepare_vod_db_path
+from services.vod_database import (
+    ensure_unified_schema,
+    get_vod_db_path,
+    get_vod_env,
+    mark_vod_program_detail_scan,
+    prepare_vod_db_path,
+    select_vod_programs_for_detail_scan,
+    vod_episode_activity_subquery,
+)
 
 
 I24_VOD_DB_PATH = get_vod_db_path("I24_VOD_DB_PATH")
@@ -113,6 +121,8 @@ def _init_db(con: sqlite3.Connection) -> None:
             program_genre TEXT,
             latest_episode_published TEXT,
             latest_episode_timestamp REAL,
+            last_full_scan_at TEXT,
+            last_incremental_scan_at TEXT,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -152,6 +162,8 @@ def _init_db(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_i24_episodes_latest ON i24_episodes(published_timestamp);
         """
     )
+    _add_column_if_missing(con, "i24_programs", "last_full_scan_at", "TEXT")
+    _add_column_if_missing(con, "i24_programs", "last_incremental_scan_at", "TEXT")
     _add_column_if_missing(con, "i24_episodes", "created_at", "TEXT")
     con.execute(
         """
@@ -679,13 +691,17 @@ def refresh_i24_vod_catalog(
     with_details: bool = True,
     limit_programs: int | None = None,
     with_streams: bool = False,
+    incremental: bool = False,
+    full_scan_interval_hours: int = 168,
     verbose: bool = False,
 ) -> dict:
     programs_scanned = 0
     episodes_scanned = 0
     errors: list[str] = []
+    scan_summary = None
 
     with _connect() as con:
+        program_entries: list[dict] = []
         for locale in I24_VOD_SCAN_LOCALES:
             page_programs: list[dict] = []
             if locale in I24_PAGE_IDS_BY_LOCALE:
@@ -705,12 +721,6 @@ def refresh_i24_vod_catalog(
 
             items = page_programs if page_programs else shows
 
-            if limit_programs:
-                remaining = max(limit_programs - programs_scanned, 0)
-                if remaining <= 0:
-                    break
-                items = items[:remaining]
-
             for item in items:
                 if page_programs and "episodes" in item:
                     program = {
@@ -724,45 +734,14 @@ def refresh_i24_vod_catalog(
                         "program_format": item.get("program_format", "VOD"),
                         "program_genre": item.get("program_genre", I24_LOCALE_LABELS.get(locale, "i24NEWS")),
                     }
-                    _upsert_program(con, program)
-                    con.execute("DELETE FROM i24_seasons WHERE program_id = ?", (program["id"],))
-                    programs_scanned += 1
-
-                    if verbose:
-                        print(f"i24 program: {program['title']} ({program['id']})", flush=True)
-
-                    if not with_details:
-                        continue
-
-                    seen_episode_ids: set[str] = set()
-                    seasons_by_id: dict[str, dict] = {}
-                    for index, episode_data in enumerate(item.get("episodes", [])):
-                        episode_id = episode_data.get("id") or f"{locale}:{item['source_id']}:{index}"
-                        if episode_id in seen_episode_ids:
-                            continue
-                        seen_episode_ids.add(episode_id)
-
-                        season_info = _season_info_for_episode(locale, program["id"], episode_data, index)
-                        seasons_by_id.setdefault(season_info["season_id"], season_info)
-
-                        episode = {
-                            **episode_data,
-                            "program_id": program["id"],
-                            "season_id": season_info["season_id"],
+                    program_entries.append(
+                        {
+                            "source": "page",
+                            "locale": locale,
+                            "item": item,
+                            "program": program,
                         }
-                        _upsert_episode(con, episode)
-                        episodes_scanned += 1
-
-                    for season_info in seasons_by_id.values():
-                        season = {
-                            "season_id": season_info["season_id"],
-                            "program_id": program["id"],
-                            "title": season_info["title"],
-                            "url": program["url"],
-                            "season_number": season_info["season_number"],
-                        }
-                        _upsert_season(con, season)
-                        _update_latest(con, program["id"], season_info["season_id"])
+                    )
                     continue
 
                 source_id = str(item.get("id") or "").strip()
@@ -770,38 +749,62 @@ def refresh_i24_vod_catalog(
                     continue
 
                 program = _program_from_show(locale, item)
-                _upsert_program(con, program)
-                con.execute("DELETE FROM i24_seasons WHERE program_id = ?", (program["id"],))
-                programs_scanned += 1
+                program_entries.append(
+                    {
+                        "source": "show",
+                        "locale": locale,
+                        "item": item,
+                        "program": program,
+                        "source_id": source_id,
+                    }
+                )
 
-                if verbose:
-                    print(f"i24 program: {program['title']} ({program['id']})", flush=True)
+        for entry in program_entries:
+            _upsert_program(con, entry["program"])
+        con.commit()
 
-                if not with_details:
-                    continue
+        selected_entries: list[dict] = []
+        if with_details:
+            selected_entries, scan_summary = select_vod_programs_for_detail_scan(
+                con,
+                program_entries,
+                program_table="i24_programs",
+                episode_table="i24_episodes",
+                program_id_getter=lambda entry: entry["program"]["id"],
+                incremental=incremental,
+                limit_programs=limit_programs,
+                full_scan_interval_hours=full_scan_interval_hours,
+                with_streams=with_streams,
+            )
+            if verbose:
+                print(f"i24 scan summary: {scan_summary}", flush=True)
 
-                try:
-                    videos = _fetch_i24_videos(locale, source_id)
-                except Exception as ex:
-                    errors.append(f"{program['id']}: {ex}")
-                    continue
+        for entry in selected_entries:
+            program = entry["program"]
+            locale = entry["locale"]
+            con.execute("DELETE FROM i24_seasons WHERE program_id = ?", (program["id"],))
+            programs_scanned += 1
 
+            if verbose:
+                print(f"i24 program: {program['title']} ({program['id']})", flush=True)
+
+            if entry["source"] == "page":
                 seen_episode_ids: set[str] = set()
                 seasons_by_id: dict[str, dict] = {}
-                for index, video in enumerate(videos):
-                    episode_source_id = str(video.get("id") or "").strip()
-                    if not episode_source_id:
-                        continue
-                    episode_id = f"{locale}:{episode_source_id}"
+                for index, episode_data in enumerate(entry["item"].get("episodes", [])):
+                    episode_id = episode_data.get("id") or f"{locale}:{entry['item']['source_id']}:{index}"
                     if episode_id in seen_episode_ids:
                         continue
                     seen_episode_ids.add(episode_id)
 
-                    season_info = _season_info_for_episode(locale, program["id"], video, index)
+                    season_info = _season_info_for_episode(locale, program["id"], episode_data, index)
                     seasons_by_id.setdefault(season_info["season_id"], season_info)
 
-                    episode = _episode_from_video(locale, program["id"], season_info["season_id"], video, index)
-                    episode["season_id"] = season_info["season_id"]
+                    episode = {
+                        **episode_data,
+                        "program_id": program["id"],
+                        "season_id": season_info["season_id"],
+                    }
                     _upsert_episode(con, episode)
                     episodes_scanned += 1
 
@@ -815,13 +818,54 @@ def refresh_i24_vod_catalog(
                     }
                     _upsert_season(con, season)
                     _update_latest(con, program["id"], season_info["season_id"])
+                mark_vod_program_detail_scan(con, "i24_programs", program["id"])
+                continue
+
+            try:
+                videos = _fetch_i24_videos(locale, entry["source_id"])
+            except Exception as ex:
+                errors.append(f"{program['id']}: {ex}")
+                continue
+
+            seen_episode_ids: set[str] = set()
+            seasons_by_id: dict[str, dict] = {}
+            for index, video in enumerate(videos):
+                episode_source_id = str(video.get("id") or "").strip()
+                if not episode_source_id:
+                    continue
+                episode_id = f"{locale}:{episode_source_id}"
+                if episode_id in seen_episode_ids:
+                    continue
+                seen_episode_ids.add(episode_id)
+
+                season_info = _season_info_for_episode(locale, program["id"], video, index)
+                seasons_by_id.setdefault(season_info["season_id"], season_info)
+
+                episode = _episode_from_video(locale, program["id"], season_info["season_id"], video, index)
+                episode["season_id"] = season_info["season_id"]
+                _upsert_episode(con, episode)
+                episodes_scanned += 1
+
+            for season_info in seasons_by_id.values():
+                season = {
+                    "season_id": season_info["season_id"],
+                    "program_id": program["id"],
+                    "title": season_info["title"],
+                    "url": program["url"],
+                    "season_number": season_info["season_number"],
+                }
+                _upsert_season(con, season)
+                _update_latest(con, program["id"], season_info["season_id"])
+            mark_vod_program_detail_scan(con, "i24_programs", program["id"])
 
         con.commit()
 
     return {
+        "programs": len(program_entries),
         "programsScanned": programs_scanned,
         "episodesScanned": episodes_scanned,
         "errors": errors,
+        "scanSummary": scan_summary,
         "returnCode": 0 if not errors else 1,
     }
 
@@ -941,19 +985,16 @@ def get_i24_vod_series(
             ).fetchall()
         ]
 
-        base_query = """
+        base_query = f"""
             SELECT p.*, COUNT(DISTINCT e.id) AS episodeCount, COUNT(DISTINCT s.season_id) AS seasonCount,
                    COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount,
-                   MAX(ve.latestEpisodeAddedAt) AS latestEpisodeAddedAt
+                   MAX(ve.latest_episode_added_at) AS latestEpisodeAddedAt,
+                   MAX(ve.latest_episode_source_sort_key) AS latestEpisodeSourceSortKey,
+                   MAX(ve.latest_episode_date_sort_key) AS latestEpisodeDateSortKey
             FROM i24_programs p
             LEFT JOIN i24_seasons s ON s.program_id = p.id
             LEFT JOIN i24_episodes e ON e.program_id = p.id
-            LEFT JOIN (
-                SELECT program_id, MAX(created_at) AS latestEpisodeAddedAt
-                FROM vod_episodes
-                WHERE provider = 'i24'
-                GROUP BY program_id
-            ) ve ON ve.program_id = p.id
+            LEFT JOIN ({vod_episode_activity_subquery("i24")}) ve ON ve.program_id = p.id
             GROUP BY p.id
         """
         total = con.execute(
@@ -967,8 +1008,8 @@ def get_i24_vod_series(
             FROM ({base_query}) p
             {sql_where}
             ORDER BY
-                latestEpisodeAddedAt IS NULL,
-                datetime(latestEpisodeAddedAt) DESC,
+                latestEpisodeSourceSortKey IS NULL,
+                COALESCE(latestEpisodeSourceSortKey, latestEpisodeDateSortKey, latest_episode_timestamp, 0) DESC,
                 COALESCE(latest_episode_timestamp, 0) DESC,
                 title COLLATE NOCASE
             LIMIT ? OFFSET ?
@@ -1060,19 +1101,14 @@ def get_i24_vod_series_details(
 
     with _connect() as con:
         program = con.execute(
-            """
+            f"""
             SELECT p.*, COUNT(DISTINCT e.id) AS episodeCount, COUNT(DISTINCT s.season_id) AS seasonCount,
                    COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount,
-                   MAX(ve.latestEpisodeAddedAt) AS latestEpisodeAddedAt
+                   MAX(ve.latest_episode_added_at) AS latestEpisodeAddedAt
             FROM i24_programs p
             LEFT JOIN i24_seasons s ON s.program_id = p.id
             LEFT JOIN i24_episodes e ON e.program_id = p.id
-            LEFT JOIN (
-                SELECT program_id, MAX(created_at) AS latestEpisodeAddedAt
-                FROM vod_episodes
-                WHERE provider = 'i24'
-                GROUP BY program_id
-            ) ve ON ve.program_id = p.id
+            LEFT JOIN ({vod_episode_activity_subquery("i24")}) ve ON ve.program_id = p.id
             WHERE p.id = ?
             GROUP BY p.id
             """,

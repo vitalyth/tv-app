@@ -15,6 +15,12 @@ if str(BACKEND_DIR) not in sys.path:
 from services.vod_database import get_vod_db_path, prepare_vod_db_path
 
 
+def _should_run_ensure_pass(args: argparse.Namespace) -> bool:
+    if not args.ensure_episodes or args.catalog_only:
+        return False
+    return not args.incremental or bool(args.ensure_episodes_limit)
+
+
 def _run_kan_scan(args: argparse.Namespace) -> dict:
     os.environ["VOD_DB_PATH"] = args.db
     os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
@@ -46,7 +52,7 @@ def _run_kan_scan(args: argparse.Namespace) -> dict:
         "returnCode": result.returncode,
     }
 
-    if result.returncode == 0 and args.ensure_episodes and not args.catalog_only:
+    if result.returncode == 0 and _should_run_ensure_pass(args):
         ensure_result = _ensure_kan_programs_have_episodes(args)
         response["ensureEpisodes"] = ensure_result
         if ensure_result.get("returnCode") != 0:
@@ -125,12 +131,14 @@ def _run_keshet_scan(args: argparse.Namespace) -> dict:
         with_details=not args.catalog_only,
         limit_programs=args.limit_programs or None,
         with_streams=args.with_streams,
+        incremental=args.incremental,
+        full_scan_interval_hours=args.full_scan_interval_hours,
         verbose=args.verbose,
     )
     ensure_result = None
-    if args.ensure_episodes and not args.catalog_only:
+    if _should_run_ensure_pass(args):
         ensure_result = scan_keshet_vod_programs_without_episodes(
-            limit=args.ensure_episodes_limit,
+            limit=args.ensure_episodes_limit or args.limit_programs,
             with_streams=args.with_streams,
             verbose=args.verbose,
         )
@@ -161,12 +169,14 @@ def _run_reshet_scan(args: argparse.Namespace) -> dict:
         with_details=not args.catalog_only,
         limit_programs=args.limit_programs or None,
         with_streams=args.with_streams,
+        incremental=args.incremental,
+        full_scan_interval_hours=args.full_scan_interval_hours,
         verbose=args.verbose,
     )
     ensure_result = None
-    if args.ensure_episodes and not args.catalog_only:
+    if _should_run_ensure_pass(args):
         ensure_result = scan_reshet_vod_programs_without_episodes(
-            limit=args.ensure_episodes_limit,
+            limit=args.ensure_episodes_limit or args.limit_programs,
             with_streams=args.with_streams,
             verbose=args.verbose,
         )
@@ -197,12 +207,14 @@ def _run_c14_scan(args: argparse.Namespace) -> dict:
         with_details=not args.catalog_only,
         limit_programs=args.limit_programs or None,
         with_streams=args.with_streams,
+        incremental=args.incremental,
+        full_scan_interval_hours=args.full_scan_interval_hours,
         verbose=args.verbose,
     )
     ensure_result = None
-    if args.ensure_episodes and not args.catalog_only:
+    if _should_run_ensure_pass(args):
         ensure_result = scan_c14_vod_programs_without_episodes(
-            limit=args.ensure_episodes_limit,
+            limit=args.ensure_episodes_limit or args.limit_programs,
             with_streams=args.with_streams,
             verbose=args.verbose,
         )
@@ -233,12 +245,14 @@ def _run_i24_scan(args: argparse.Namespace) -> dict:
         with_details=not args.catalog_only,
         limit_programs=args.limit_programs or None,
         with_streams=args.with_streams,
+        incremental=args.incremental,
+        full_scan_interval_hours=args.full_scan_interval_hours,
         verbose=args.verbose,
     )
     ensure_result = None
-    if args.ensure_episodes and not args.catalog_only:
+    if _should_run_ensure_pass(args):
         ensure_result = scan_i24_vod_programs_without_episodes(
-            limit=args.ensure_episodes_limit,
+            limit=args.ensure_episodes_limit or args.limit_programs,
             with_streams=args.with_streams,
             verbose=args.verbose,
         )
@@ -297,12 +311,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=get_vod_db_path(),
         help="SQLite DB path shared by VOD providers.",
     )
-    scan.add_argument("--incremental", action="store_true", help="Use incremental mode where supported")
+    scan.add_argument("--incremental", action="store_true", help="Use incremental detail-scan selection")
     scan.add_argument(
         "--full-scan-interval-hours",
         type=int,
         default=168,
-        help="When --incremental is set for Kan, force a full program scan after this many hours.",
+        help="When --incremental is set, force a full program detail scan after this many hours.",
     )
     scan.add_argument("--with-streams", action="store_true", help="Resolve stream URLs during scan")
     scan.add_argument("--limit-programs", type=int, default=0, help="Limit scanned programs")
@@ -317,7 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--ensure-episodes-limit",
         type=int,
         default=0,
-        help="Limit the provider post-pass for programs that still have no episodes. Default: no limit.",
+        help="Limit the provider post-pass for programs that still have no episodes. In incremental mode this also enables the post-pass.",
     )
     scan.add_argument(
         "--catalog-only",

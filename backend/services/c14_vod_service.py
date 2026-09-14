@@ -9,7 +9,15 @@ from urllib.parse import quote, urlencode, urljoin
 
 import requests
 
-from services.vod_database import ensure_unified_schema, get_vod_db_path, get_vod_env, prepare_vod_db_path
+from services.vod_database import (
+    ensure_unified_schema,
+    get_vod_db_path,
+    get_vod_env,
+    mark_vod_program_detail_scan,
+    prepare_vod_db_path,
+    select_vod_programs_for_detail_scan,
+    vod_episode_activity_subquery,
+)
 
 
 C14_VOD_DB_PATH = get_vod_db_path("C14_VOD_DB_PATH")
@@ -154,6 +162,7 @@ def _init_db(con: sqlite3.Connection) -> None:
             latest_item_published TEXT,
             latest_item_timestamp REAL,
             last_full_scan_at TEXT,
+            last_incremental_scan_at TEXT,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -187,6 +196,7 @@ def _init_db(con: sqlite3.Connection) -> None:
     )
     _add_column_if_missing(con, "c14_programs", "latest_item_published", "TEXT")
     _add_column_if_missing(con, "c14_programs", "latest_item_timestamp", "REAL")
+    _add_column_if_missing(con, "c14_programs", "last_incremental_scan_at", "TEXT")
     _add_column_if_missing(con, "c14_episodes", "published_timestamp", "REAL")
     _add_column_if_missing(con, "c14_episodes", "display_order", "INTEGER")
     _add_column_if_missing(con, "c14_episodes", "source_type", "TEXT")
@@ -1153,12 +1163,12 @@ def _scan_program(
         UPDATE c14_programs
         SET latest_item_timestamp = COALESCE(NULLIF(?, 0), latest_item_timestamp),
             latest_item_published = COALESCE(NULLIF(?, ''), latest_item_published),
-            last_full_scan_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
         (latest, _timestamp_to_date(latest), program.id),
     )
+    mark_vod_program_detail_scan(con, "c14_programs", program.id)
     if verbose:
         print(f"Scanned C14 {program.title} ({program.id}): {len(episodes)} episodes")
     return len(episodes)
@@ -1170,6 +1180,8 @@ def refresh_c14_vod_catalog(
     limit_programs: int | None = None,
     with_streams: bool = False,
     stream_limit: int = C14_VOD_STREAM_BATCH_SIZE,
+    incremental: bool = False,
+    full_scan_interval_hours: int = 168,
     verbose: bool = False,
 ) -> dict:
     con = _connect()
@@ -1185,8 +1197,21 @@ def refresh_c14_vod_catalog(
         con.commit()
 
         scanned = 0
+        scan_summary = None
         if with_details:
-            selected = programs[: max(0, int(limit_programs))] if limit_programs else programs
+            selected, scan_summary = select_vod_programs_for_detail_scan(
+                con,
+                programs,
+                program_table="c14_programs",
+                episode_table="c14_episodes",
+                program_id_getter=lambda program: program.id,
+                incremental=incremental,
+                limit_programs=limit_programs,
+                full_scan_interval_hours=full_scan_interval_hours,
+                with_streams=with_streams,
+            )
+            if verbose:
+                print(f"C14 scan summary: {scan_summary}", flush=True)
             for program in selected:
                 scanned += _scan_program(
                     con,
@@ -1205,6 +1230,7 @@ def refresh_c14_vod_catalog(
             "removedLegacyPrograms": removed_invalid + removed_grouped + removed_duplicates,
             "removedBadCatchupStreams": removed_bad_streams,
             "db": C14_VOD_DB_PATH,
+            "scanSummary": scan_summary,
         }
     finally:
         con.close()
@@ -1262,6 +1288,8 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["image"] = item.get("image") or C14_DEFAULT_IMAGE
     item["latestEpisodeAddedAt"] = item.pop("latest_episode_added_at", None)
+    item.pop("latest_episode_source_sort_key", None)
+    item.pop("latest_episode_date_sort_key", None)
     item["latestEpisodePublished"] = item.get("latest_item_published")
     item["provider"] = "c14"
     return item
@@ -1375,23 +1403,20 @@ def get_c14_vod_series(
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN COALESCE(e.stream_url, '') != '' THEN e.id END) AS stream_count,
                 MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
+                MAX(ve.latest_episode_source_sort_key) AS latest_episode_source_sort_key,
+                MAX(ve.latest_episode_date_sort_key) AS latest_episode_date_sort_key,
                 MAX(e.published_timestamp) AS actual_latest_timestamp
             FROM c14_programs p
             LEFT JOIN c14_seasons s ON s.program_id = p.id
             JOIN c14_episodes e ON e.program_id = p.id
-            LEFT JOIN (
-                SELECT program_id, MAX(created_at) AS latest_episode_added_at
-                FROM vod_episodes
-                WHERE provider = 'c14'
-                GROUP BY program_id
-            ) ve ON ve.program_id = p.id
+            LEFT JOIN ({vod_episode_activity_subquery("c14")}) ve ON ve.program_id = p.id
             WHERE {where_sql}
               AND p.title NOT IN ({placeholders})
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
-                latest_episode_added_at IS NULL,
-                datetime(latest_episode_added_at) DESC,
+                latest_episode_source_sort_key IS NULL,
+                COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, actual_latest_timestamp, p.latest_item_timestamp, 0) DESC,
                 COALESCE(actual_latest_timestamp, p.latest_item_timestamp) IS NULL,
                 COALESCE(actual_latest_timestamp, p.latest_item_timestamp) DESC,
                 p.title COLLATE NOCASE

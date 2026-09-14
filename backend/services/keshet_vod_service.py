@@ -10,7 +10,15 @@ from urllib.parse import quote, urljoin
 
 import requests
 
-from services.vod_database import ensure_unified_schema, get_vod_db_path, get_vod_env, prepare_vod_db_path
+from services.vod_database import (
+    ensure_unified_schema,
+    get_vod_db_path,
+    get_vod_env,
+    mark_vod_program_detail_scan,
+    prepare_vod_db_path,
+    select_vod_programs_for_detail_scan,
+    vod_episode_activity_subquery,
+)
 
 
 KESHT_VOD_DB_PATH = get_vod_db_path("KESHET_VOD_DB_PATH", "KESHT_VOD_DB_PATH")
@@ -693,29 +701,26 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
         return []
 
     rows = con.execute(
-        """
+        f"""
         SELECT
             p.program_genre,
             p.program_format,
             NULLIF(p.image, '') AS image,
             MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
+            MAX(ve.latest_episode_source_sort_key) AS latest_episode_source_sort_key,
+            MAX(ve.latest_episode_date_sort_key) AS latest_episode_date_sort_key,
             COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
             MAX(e.published_timestamp) AS latest_episode_timestamp,
             MAX(NULLIF(e.published, '')) AS latest_episode_published
         FROM keshet_programs p
         LEFT JOIN keshet_episodes e ON e.program_id = p.id
-        LEFT JOIN (
-            SELECT program_id, MAX(created_at) AS latest_episode_added_at
-            FROM vod_episodes
-            WHERE provider = 'keshet'
-            GROUP BY program_id
-        ) ve ON ve.program_id = p.id
+        LEFT JOIN ({vod_episode_activity_subquery("keshet")}) ve ON ve.program_id = p.id
         WHERE TRIM(COALESCE(p.program_genre, '')) != ''
            OR TRIM(COALESCE(p.program_format, '')) != ''
         GROUP BY p.id
         ORDER BY
-            latest_episode_added_at IS NULL,
-            datetime(latest_episode_added_at) DESC,
+            latest_episode_source_sort_key IS NULL,
+            COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, latest_episode_sort_key, 0) DESC,
             latest_episode_sort_key DESC,
             latest_episode_published IS NULL,
             latest_episode_published DESC,
@@ -823,6 +828,8 @@ def _program_to_dict(row: sqlite3.Row) -> dict:
     item["streamCount"] = int(item.pop("stream_count", 0) or 0)
     item["latestKanEpisodeId"] = 0
     item["latestEpisodeAddedAt"] = item.pop("latest_episode_added_at", None)
+    item.pop("latest_episode_source_sort_key", None)
+    item.pop("latest_episode_date_sort_key", None)
     item.pop("latest_episode_sort_key", None)
     item.pop("latest_episode_timestamp", None)
     item["latestEpisodePublished"] = item.pop("latest_episode_published", None)
@@ -961,6 +968,8 @@ def refresh_keshet_vod_catalog(
     with_details: bool = False,
     limit_programs: int | None = None,
     with_streams: bool = False,
+    incremental: bool = False,
+    full_scan_interval_hours: int = 168,
     verbose: bool = False,
 ) -> dict:
     if verbose:
@@ -978,8 +987,21 @@ def refresh_keshet_vod_catalog(
             _upsert_program(con, program)
         con.commit()
 
+        scan_summary = None
         if with_details:
-            selected_programs = programs[:limit_programs] if limit_programs else programs
+            selected_programs, scan_summary = select_vod_programs_for_detail_scan(
+                con,
+                programs,
+                program_table="keshet_programs",
+                episode_table="keshet_episodes",
+                program_id_getter=lambda program: program.id,
+                incremental=incremental,
+                limit_programs=limit_programs,
+                full_scan_interval_hours=full_scan_interval_hours,
+                with_streams=with_streams,
+            )
+            if verbose:
+                print(f"Keshet scan summary: {scan_summary}", flush=True)
             for index, program in enumerate(selected_programs, start=1):
                 if verbose:
                     print(
@@ -999,6 +1021,7 @@ def refresh_keshet_vod_catalog(
             "programs": len(programs),
             "scanned": scanned,
             "errors": errors,
+            "scanSummary": scan_summary,
         }
     finally:
         con.close()
@@ -1090,10 +1113,7 @@ def _scan_program(
                 resolved_streams += 1 if episode.stream_url else 0
             _upsert_episode(con, episode)
 
-    con.execute(
-        "UPDATE keshet_programs SET last_full_scan_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (program_id,),
-    )
+    mark_vod_program_detail_scan(con, "keshet_programs", program_id)
     con.commit()
 
 
@@ -1159,24 +1179,21 @@ def get_keshet_vod_series(
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
                 MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
+                MAX(ve.latest_episode_source_sort_key) AS latest_episode_source_sort_key,
+                MAX(ve.latest_episode_date_sort_key) AS latest_episode_date_sort_key,
                 COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
                 MAX(e.published_timestamp) AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published
             FROM keshet_programs p
             LEFT JOIN keshet_seasons s ON s.program_id = p.id
             LEFT JOIN keshet_episodes e ON e.program_id = p.id
-            LEFT JOIN (
-                SELECT program_id, MAX(created_at) AS latest_episode_added_at
-                FROM vod_episodes
-                WHERE provider = 'keshet'
-                GROUP BY program_id
-            ) ve ON ve.program_id = p.id
+            LEFT JOIN ({vod_episode_activity_subquery("keshet")}) ve ON ve.program_id = p.id
             {where_sql}
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
-                latest_episode_added_at IS NULL,
-                datetime(latest_episode_added_at) DESC,
+                latest_episode_source_sort_key IS NULL,
+                COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, latest_episode_sort_key, 0) DESC,
                 latest_episode_sort_key DESC,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,
