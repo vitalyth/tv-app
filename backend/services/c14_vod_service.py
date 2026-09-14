@@ -1374,11 +1374,17 @@ def get_c14_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN COALESCE(e.stream_url, '') != '' THEN e.id END) AS stream_count,
-                MAX(e.created_at) AS latest_episode_added_at,
+                MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
                 MAX(e.published_timestamp) AS actual_latest_timestamp
             FROM c14_programs p
             LEFT JOIN c14_seasons s ON s.program_id = p.id
             JOIN c14_episodes e ON e.program_id = p.id
+            LEFT JOIN (
+                SELECT program_id, MAX(created_at) AS latest_episode_added_at
+                FROM vod_episodes
+                WHERE provider = 'c14'
+                GROUP BY program_id
+            ) ve ON ve.program_id = p.id
             WHERE {where_sql}
               AND p.title NOT IN ({placeholders})
             GROUP BY p.id

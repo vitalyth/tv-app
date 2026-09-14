@@ -698,12 +698,18 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
             p.program_genre,
             p.program_format,
             NULLIF(p.image, '') AS image,
-            MAX(e.created_at) AS latest_episode_added_at,
+            MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
             COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
             MAX(e.published_timestamp) AS latest_episode_timestamp,
             MAX(NULLIF(e.published, '')) AS latest_episode_published
         FROM keshet_programs p
         LEFT JOIN keshet_episodes e ON e.program_id = p.id
+        LEFT JOIN (
+            SELECT program_id, MAX(created_at) AS latest_episode_added_at
+            FROM vod_episodes
+            WHERE provider = 'keshet'
+            GROUP BY program_id
+        ) ve ON ve.program_id = p.id
         WHERE TRIM(COALESCE(p.program_genre, '')) != ''
            OR TRIM(COALESCE(p.program_format, '')) != ''
         GROUP BY p.id
@@ -1152,13 +1158,19 @@ def get_keshet_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
-                MAX(e.created_at) AS latest_episode_added_at,
+                MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
                 COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
                 MAX(e.published_timestamp) AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published
             FROM keshet_programs p
             LEFT JOIN keshet_seasons s ON s.program_id = p.id
             LEFT JOIN keshet_episodes e ON e.program_id = p.id
+            LEFT JOIN (
+                SELECT program_id, MAX(created_at) AS latest_episode_added_at
+                FROM vod_episodes
+                WHERE provider = 'keshet'
+                GROUP BY program_id
+            ) ve ON ve.program_id = p.id
             {where_sql}
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0

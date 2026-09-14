@@ -1002,13 +1002,19 @@ def get_reshet_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
-                MAX(e.created_at) AS latest_episode_added_at,
+                MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
                 COALESCE(MAX(e.published_timestamp), 0) AS latest_episode_sort_key,
                 MAX(e.published_timestamp) AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published
             FROM reshet_programs p
             LEFT JOIN reshet_seasons s ON s.program_id = p.id
             LEFT JOIN reshet_episodes e ON e.program_id = p.id
+            LEFT JOIN (
+                SELECT program_id, MAX(created_at) AS latest_episode_added_at
+                FROM vod_episodes
+                WHERE provider = 'reshet'
+                GROUP BY program_id
+            ) ve ON ve.program_id = p.id
             {where_sql}
             GROUP BY p.id
             ORDER BY

@@ -944,10 +944,16 @@ def get_i24_vod_series(
         base_query = """
             SELECT p.*, COUNT(DISTINCT e.id) AS episodeCount, COUNT(DISTINCT s.season_id) AS seasonCount,
                    COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount,
-                   MAX(e.created_at) AS latestEpisodeAddedAt
+                   MAX(ve.latestEpisodeAddedAt) AS latestEpisodeAddedAt
             FROM i24_programs p
             LEFT JOIN i24_seasons s ON s.program_id = p.id
             LEFT JOIN i24_episodes e ON e.program_id = p.id
+            LEFT JOIN (
+                SELECT program_id, MAX(created_at) AS latestEpisodeAddedAt
+                FROM vod_episodes
+                WHERE provider = 'i24'
+                GROUP BY program_id
+            ) ve ON ve.program_id = p.id
             GROUP BY p.id
         """
         total = con.execute(
@@ -1057,10 +1063,16 @@ def get_i24_vod_series_details(
             """
             SELECT p.*, COUNT(DISTINCT e.id) AS episodeCount, COUNT(DISTINCT s.season_id) AS seasonCount,
                    COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND TRIM(e.stream_url) != '' THEN e.id END) AS streamCount,
-                   MAX(e.created_at) AS latestEpisodeAddedAt
+                   MAX(ve.latestEpisodeAddedAt) AS latestEpisodeAddedAt
             FROM i24_programs p
             LEFT JOIN i24_seasons s ON s.program_id = p.id
             LEFT JOIN i24_episodes e ON e.program_id = p.id
+            LEFT JOIN (
+                SELECT program_id, MAX(created_at) AS latestEpisodeAddedAt
+                FROM vod_episodes
+                WHERE provider = 'i24'
+                GROUP BY program_id
+            ) ve ON ve.program_id = p.id
             WHERE p.id = ?
             GROUP BY p.id
             """,

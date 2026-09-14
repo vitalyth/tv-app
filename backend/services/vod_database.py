@@ -7,7 +7,7 @@ import sqlite3
 
 DEFAULT_VOD_DB_PATH = "db/vod.db"
 LEGACY_KAN_VOD_DB_PATH = "db/kan_vod.db"
-UNIFIED_SCHEMA_VERSION = "2"
+UNIFIED_SCHEMA_VERSION = "3"
 
 
 def get_vod_db_path(*provider_env_names: str) -> str:
@@ -224,6 +224,8 @@ def _create_unified_tables(con: sqlite3.Connection) -> None:
             ON vod_seasons(provider, program_id);
         CREATE INDEX IF NOT EXISTS idx_vod_episodes_provider_program
             ON vod_episodes(provider, program_id);
+        CREATE INDEX IF NOT EXISTS idx_vod_episodes_provider_program_created
+            ON vod_episodes(provider, program_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_vod_episodes_provider_season
             ON vod_episodes(provider, season_id);
         CREATE INDEX IF NOT EXISTS idx_vod_episodes_provider_created
@@ -386,8 +388,8 @@ def _sync_episodes(con: sqlite3.Connection, provider: str, table: str) -> None:
         _select_expr(columns, "display_order"),
         _select_expr(columns, "source_type"),
         _coalesce_non_empty(
-            _select_expr(columns, "created_at"),
             _select_expr(columns, "updated_at"),
+            _select_expr(columns, "created_at"),
             "CURRENT_TIMESTAMP",
         ),
         _coalesce_non_empty(_select_expr(columns, "updated_at"), "CURRENT_TIMESTAMP"),
@@ -510,8 +512,8 @@ def _create_episode_triggers(
         _new_expr(columns, "display_order"),
         _new_expr(columns, "source_type"),
         _coalesce_non_empty(
-            _new_expr(columns, "created_at"),
             _new_expr(columns, "updated_at"),
+            _new_expr(columns, "created_at"),
             "CURRENT_TIMESTAMP",
         ),
         _coalesce_non_empty(_new_expr(columns, "updated_at"), "CURRENT_TIMESTAMP"),
@@ -538,8 +540,8 @@ def _repair_episode_created_at(
         return
 
     source_created_at = _coalesce_non_empty(
-        _qualified_expr(columns, "src", "created_at"),
         _qualified_expr(columns, "src", "updated_at"),
+        _qualified_expr(columns, "src", "created_at"),
         "NULL",
     )
     con.execute(

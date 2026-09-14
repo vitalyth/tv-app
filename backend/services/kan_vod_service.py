@@ -285,13 +285,19 @@ def get_kan_vod_series(
                 COUNT(DISTINCT s.season_id) AS season_count,
                 COUNT(DISTINCT e.id) AS episode_count,
                 COUNT(DISTINCT CASE WHEN e.stream_url IS NOT NULL AND e.stream_url != '' THEN e.id END) AS stream_count,
-                MAX(e.created_at) AS latest_episode_added_at,
+                MAX(ve.latest_episode_added_at) AS latest_episode_added_at,
                 NULL AS latest_episode_timestamp,
                 MAX(NULLIF(e.published, '')) AS latest_episode_published,
                 MAX(CAST(e.id AS INTEGER)) AS latest_kan_episode_id
             FROM programs p
             LEFT JOIN seasons s ON s.program_id = p.id
             LEFT JOIN episodes e ON e.program_id = p.id
+            LEFT JOIN (
+                SELECT program_id, MAX(created_at) AS latest_episode_added_at
+                FROM vod_episodes
+                WHERE provider = 'kan'
+                GROUP BY program_id
+            ) ve ON ve.program_id = p.id
             {where_sql}
             GROUP BY p.id
             ORDER BY
