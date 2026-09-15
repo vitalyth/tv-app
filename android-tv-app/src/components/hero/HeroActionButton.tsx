@@ -8,6 +8,14 @@ interface HeroActionButtonProps {
   onPress: () => void;
   label?: string;
   testID?: string;
+  hasTVPreferredFocus?: boolean;
+  focusNonce?: number;
+  lockUp?: boolean;
+  lockDown?: boolean;
+  lockLeft?: boolean;
+  lockRight?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }
 
 export const HeroActionButton: React.FC<HeroActionButtonProps> = React.memo(({
@@ -15,10 +23,26 @@ export const HeroActionButton: React.FC<HeroActionButtonProps> = React.memo(({
   onPress,
   label,
   testID,
+  hasTVPreferredFocus = false,
+  focusNonce = 0,
+  lockUp,
+  lockDown,
+  lockLeft,
+  lockRight,
+  onFocus,
+  onBlur,
 }) => {
   return (
     <TvFocusable
       onPress={onPress}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      focusNonce={focusNonce}
+      lockUp={lockUp}
+      lockDown={lockDown}
+      lockLeft={lockLeft}
+      lockRight={lockRight}
       testID={testID}
       scaleOnFocus={false}
       style={styles.button}

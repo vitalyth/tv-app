@@ -100,6 +100,29 @@ export const vodProgressService = {
       return false;
     }
   },
+
+  setFocusBoundaries: async (
+    viewTag: number,
+    boundaries: {
+      lockUp?: boolean;
+      lockDown?: boolean;
+      lockLeft?: boolean;
+      lockRight?: boolean;
+    }
+  ): Promise<boolean> => {
+    if (!VodProgressModule?.setFocusBoundaries || !viewTag) return false;
+    try {
+      return await VodProgressModule.setFocusBoundaries(
+        viewTag,
+        !!boundaries.lockUp,
+        !!boundaries.lockDown,
+        !!boundaries.lockLeft,
+        !!boundaries.lockRight
+      );
+    } catch {
+      return false;
+    }
+  },
 };
 
 export default vodProgressService;

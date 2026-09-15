@@ -11,6 +11,9 @@ interface ShortcutCardProps {
   onFocus?: () => void;
   hasPreferredFocus?: boolean;
   hasTVPreferredFocus?: boolean;
+  focusNonce?: number;
+  isFirstCard?: boolean;
+  isLastCard?: boolean;
 }
 
 export const ShortcutCard: React.FC<ShortcutCardProps> = React.memo(({
@@ -21,12 +24,20 @@ export const ShortcutCard: React.FC<ShortcutCardProps> = React.memo(({
   onFocus,
   hasPreferredFocus = false,
   hasTVPreferredFocus = false,
+  focusNonce = 0,
+  isFirstCard = false,
+  isLastCard = false,
 }) => {
   return (
     <TvFocusable
       onPress={onPress}
       onFocus={onFocus}
       hasTVPreferredFocus={hasTVPreferredFocus || hasPreferredFocus}
+      focusNonce={focusNonce}
+      lockUp={true}
+      lockDown={true}
+      lockLeft={isFirstCard}
+      lockRight={isLastCard}
       scaleOnFocus={false}
       style={styles.card}
       focusedStyle={styles.cardFocused}

@@ -44,6 +44,24 @@ export default function App() {
   const [isBuffering, setIsBuffering] = useState(false);
   const [vodDuration, setVodDuration] = useState(0);
   const [vodCurrentTime, setVodCurrentTime] = useState(0);
+  const [sideNavFocusTarget, setSideNavFocusTarget] = useState<{
+    destination: AppDestination;
+    nonce: number;
+  } | null>(null);
+
+  const handleRequestSideNavFocus = useCallback((dest: AppDestination) => {
+    setSideNavFocusTarget({
+      destination: dest,
+      nonce: Date.now(),
+    });
+    setTimeout(() => {
+      setSideNavFocusTarget(null);
+    }, 150);
+  }, []);
+
+  const handleReturnFocusToScreen = useCallback(() => {
+    setFocusNonce(Date.now());
+  }, []);
 
   useEffect(() => {
     api.getLiveChannels().then((res) => setChannels(res)).catch(() => {});
@@ -318,6 +336,7 @@ export default function App() {
               onPlayChannel={handlePlayChannel}
               onPlayRecentVod={handlePlayRecentVod}
               onNavigateDestination={handleDestinationSelected}
+              onRequestSideNavFocus={handleRequestSideNavFocus}
               recentChannelIds={recentChannelIds}
               activeStreamUrl={activeStreamUrl}
               isVideoReady={isVideoReady}
@@ -326,6 +345,7 @@ export default function App() {
               onMediaChange={handleMediaChangeFromHome}
               focusNonce={focusNonce}
               activeChannelId={activeChannelId}
+              isPlayerActive={!!fullscreenPlayer}
             />
           )}
           {currentDestination === 'LIVE_TV' && (
@@ -343,6 +363,9 @@ export default function App() {
               currentDestination={currentDestination}
               onDestinationSelected={handleDestinationSelected}
               onExpandedChanged={setIsRailExpanded}
+              onReturnFocusToScreen={handleReturnFocusToScreen}
+              focusDestination={sideNavFocusTarget?.destination}
+              focusNonce={sideNavFocusTarget?.nonce}
             />
           </View>
         )}

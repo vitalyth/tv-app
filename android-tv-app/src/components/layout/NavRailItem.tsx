@@ -11,6 +11,7 @@ interface NavRailItemProps {
   isSelected: boolean;
   isRailExpanded: boolean;
   hasTVPreferredFocus?: boolean;
+  focusNonce?: number;
   onSelect: () => void;
   onFocus: () => void;
   onBlur: () => void;
@@ -22,6 +23,7 @@ export const NavRailItem: React.FC<NavRailItemProps> = React.memo(({
   isSelected,
   isRailExpanded,
   hasTVPreferredFocus = false,
+  focusNonce = 0,
   onSelect,
   onFocus,
   onBlur,
@@ -32,6 +34,9 @@ export const NavRailItem: React.FC<NavRailItemProps> = React.memo(({
       onFocus={onFocus}
       onBlur={onBlur}
       hasTVPreferredFocus={hasTVPreferredFocus}
+      focusNonce={focusNonce}
+      lockLeft={true}
+      lockRight={true}
       scaleOnFocus={false}
       style={[
         styles.item,

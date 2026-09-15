@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { TvIcon } from '../common/TvIcon';
+import { TvFocusable } from '../common/TvFocusable';
 
 interface BackToCatalogButtonProps {
   onPress: () => void;
@@ -11,28 +12,25 @@ export const BackToCatalogButton: React.FC<BackToCatalogButtonProps> = React.mem
   onPress,
   hasPreferredFocus = false,
 }) => {
-  const [isFocused, setIsFocused] = useState(false);
-
-  const fgColor = isFocused ? '#0A0E14' : '#F2F4F7';
-
   return (
-    <Pressable
+    <TvFocusable
       hasTVPreferredFocus={hasPreferredFocus}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
       onPress={onPress}
-      style={[
-        styles.button,
-        isFocused ? styles.buttonFocused : styles.buttonNormal,
-      ]}
+      style={styles.buttonNormal}
+      focusedStyle={styles.buttonFocused}
     >
-      <View style={styles.contentRow}>
-        <TvIcon name="back" size={14} color={fgColor} />
-        <Text style={[styles.text, { color: fgColor }]}>
-          חזרה
-        </Text>
-      </View>
-    </Pressable>
+      {({ focused }) => {
+        const fgColor = focused ? '#0A0E14' : '#F2F4F7';
+        return (
+          <View style={styles.contentRow}>
+            <TvIcon name="back" size={14} color={fgColor} />
+            <Text style={[styles.text, { color: fgColor }]}>
+              חזרה
+            </Text>
+          </View>
+        );
+      }}
+    </TvFocusable>
   );
 });
 

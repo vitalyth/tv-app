@@ -12,6 +12,8 @@ interface HomeLiveCardProps {
   hasTVPreferredFocus?: boolean;
   hasPreferredFocus?: boolean;
   focusNonce?: number;
+  isFirstCard?: boolean;
+  isLastCard?: boolean;
   onPress: () => void;
   onFocus: () => void;
 }
@@ -22,6 +24,8 @@ export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
   hasTVPreferredFocus = false,
   hasPreferredFocus = false,
   focusNonce = 0,
+  isFirstCard = false,
+  isLastCard = false,
   onPress,
   onFocus,
 }) => {
@@ -33,6 +37,10 @@ export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
       onFocus={onFocus}
       hasTVPreferredFocus={hasTVPreferredFocus || hasPreferredFocus}
       focusNonce={focusNonce}
+      lockUp={true}
+      lockDown={true}
+      lockLeft={isFirstCard}
+      lockRight={isLastCard}
       scaleOnFocus={false}
       style={styles.card}
       focusedStyle={styles.cardFocused}

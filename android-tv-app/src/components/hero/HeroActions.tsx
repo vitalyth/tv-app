@@ -8,6 +8,10 @@ interface HeroActionsProps {
   onToggleMute?: () => void;
   onOpenFullScreen?: () => void;
   customActions?: ReactNode;
+  focusTargetButton?: 'fullscreen' | 'mute' | null;
+  focusNonce?: number;
+  onFocusAction?: (button: 'fullscreen' | 'mute') => void;
+  onBlurAction?: () => void;
 }
 
 export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
@@ -16,6 +20,10 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
   onToggleMute,
   onOpenFullScreen,
   customActions,
+  focusTargetButton,
+  focusNonce = 0,
+  onFocusAction,
+  onBlurAction,
 }) => {
   if (customActions) {
     return <View style={styles.container}>{customActions}</View>;
@@ -32,6 +40,14 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
           iconName="fullscreen"
           onPress={onOpenFullScreen}
           label="מסך מלא"
+          hasTVPreferredFocus={focusTargetButton === 'fullscreen'}
+          focusNonce={focusNonce}
+          lockUp={true}
+          lockDown={true}
+          lockLeft={true}
+          lockRight={false}
+          onFocus={() => onFocusAction?.('fullscreen')}
+          onBlur={onBlurAction}
         />
       )}
       {onToggleMute && (
@@ -39,6 +55,14 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
           iconName={isMuted ? 'volume-off' : 'volume-up'}
           onPress={onToggleMute}
           label={isMuted ? 'הפעל קול' : 'השתק'}
+          hasTVPreferredFocus={focusTargetButton === 'mute'}
+          focusNonce={focusNonce}
+          lockUp={true}
+          lockDown={true}
+          lockLeft={false}
+          lockRight={true}
+          onFocus={() => onFocusAction?.('mute')}
+          onBlur={onBlurAction}
         />
       )}
     </View>

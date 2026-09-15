@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator, Text } from 'react-native';
+import { View, StyleSheet, ScrollView, ActivityIndicator, Text, DeviceEventEmitter } from 'react-native';
 import { AppDestination, TvChannel, TvProgram } from '../types/guide';
 import { VodRecentItem } from '../types/vod';
 import { api, resolveImageUrl } from '../services/api';
@@ -15,6 +15,7 @@ interface HomeScreenProps {
   onPlayChannel: (channel: TvChannel, program?: TvProgram | null) => void;
   onPlayRecentVod?: (item: VodRecentItem) => void;
   onNavigateDestination?: (destination: AppDestination) => void;
+  onRequestSideNavFocus?: (destination: AppDestination) => void;
   recentChannelIds?: string[];
   activeStreamUrl?: string | null;
   isVideoReady?: boolean;
@@ -23,12 +24,14 @@ interface HomeScreenProps {
   onMediaChange?: (streamUrl: string | null, channelId?: string | null) => void;
   focusNonce?: number;
   activeChannelId?: string | null;
+  isPlayerActive?: boolean;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   onPlayChannel,
   onPlayRecentVod,
   onNavigateDestination,
+  onRequestSideNavFocus,
   recentChannelIds = [],
   activeStreamUrl,
   isVideoReady = false,
@@ -37,6 +40,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   onMediaChange,
   focusNonce = 0,
   activeChannelId,
+  isPlayerActive = false,
 }) => {
   const [channels, setChannels] = useState<TvChannel[]>([]);
   const [continueWatchingItems, setContinueWatchingItems] = useState<ContinueWatchingItem[]>([]);
@@ -57,7 +61,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   const [focusedNewVodId, setFocusedNewVodId] = useState<string | null>(null);
   const [focusedShortcutIndex, setFocusedShortcutIndex] = useState(0);
 
-  const [restoringFocusTarget, setRestoringFocusTarget] = useState<{ row: number; id: string } | null>(null);
+  // Hero Actions focus state (Fullscreen vs Mute button)
+  const [heroFocusButton, setHeroFocusButton] = useState<'fullscreen' | 'mute' | null>(null);
+  const [heroFocusNonce, setHeroFocusNonce] = useState(0);
+  const isHeroFocusedRef = useRef(false);
+
+  // Card programmatic focus target for D-pad navigation
+  const [cardFocusTarget, setCardFocusTarget] = useState<{ row: number; index: number; nonce: number } | null>(null);
+  const focusedIndicesRef = useRef({ row0: 0, row1: 0, row2: 0, row3: 0 });
   const prevFocusNonceRef = useRef(focusNonce);
 
   const initialRecentIdsRef = useRef<string[] | null>(null);
@@ -115,51 +126,36 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   useEffect(() => {
     if (focusNonce > 0 && focusNonce !== prevFocusNonceRef.current) {
       prevFocusNonceRef.current = focusNonce;
-      let targetRow = focusedRowRef.current;
-      let targetId = '';
+      const targetRow = focusedRowRef.current;
+      let targetIdx = 0;
 
-      if (activeChannelId) {
-        // Active live channel is playing - restore focus to Row 0 on that channel
-        targetRow = 0;
-        targetId = activeChannelId;
-        focusedRowRef.current = 0;
-      } else if (targetRow === 0) {
-        targetId = focusedChannelId || displayLiveChannels[0]?.id || '';
-      } else if (targetRow === 1) {
-        targetId = focusedContinueId || '';
-      } else if (targetRow === 2) {
-        targetId = focusedNewVodId || '';
-      }
-
-      if (targetRow === 0 && targetId) {
-        const liveIdx = displayLiveChannels.findIndex((c) => c.id === targetId);
-        if (liveIdx !== -1) {
-          setFocusedLiveIndex(liveIdx);
-          setFocusedChannelId(targetId);
-          setFocusedChannel(displayLiveChannels[liveIdx]);
-          setFocusedRecent(null);
+      if (targetRow === 0) {
+        targetIdx = Math.min(focusedIndicesRef.current.row0, displayLiveChannels.length - 1);
+        if (displayLiveChannels[targetIdx]) {
+          setFocusedChannel(displayLiveChannels[targetIdx]);
+          setFocusedChannelId(displayLiveChannels[targetIdx].id);
         }
+      } else if (targetRow === 1) {
+        targetIdx = Math.min(focusedIndicesRef.current.row1, continueWatchingItems.length - 1);
+      } else if (targetRow === 2) {
+        targetIdx = Math.min(focusedIndicesRef.current.row2, displayNewVodItems.length - 1);
+      } else {
+        targetIdx = Math.min(focusedIndicesRef.current.row3, 6);
       }
 
-      if (isVideoReady && activeStreamUrl) {
-        setShowArtwork(false);
-      }
-
+      setCardFocusTarget({
+        row: targetRow,
+        index: Math.max(0, targetIdx),
+        nonce: Date.now(),
+      });
       scrollToRow(targetRow);
-
-      setRestoringFocusTarget({ row: targetRow, id: targetId });
-      const timer = setTimeout(() => {
-        setRestoringFocusTarget(null);
-      }, 400);
-      return () => clearTimeout(timer);
     }
   }, [
     focusNonce,
-    activeChannelId,
-    focusedChannelId,
-    focusedContinueId,
-    focusedNewVodId,
     displayLiveChannels,
+    continueWatchingItems.length,
+    displayNewVodItems.length,
+    scrollToRow,
   ]);
 
   const loadData = useCallback(async () => {
@@ -288,7 +284,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   // Channel focus handler: instant artwork, 2000ms timer before video plays
   const handleChannelFocus = useCallback((channel: TvChannel, index: number) => {
     setHasHadInitialFocus(true);
+    isHeroFocusedRef.current = false;
+    setHeroFocusButton(null);
     setFocusedLiveIndex(index);
+    focusedIndicesRef.current.row0 = index;
     setFocusedChannelId(channel.id);
 
     if (focusedRowRef.current !== 0) {
@@ -325,7 +324,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   // Continue Watching focus handler
   const handleContinueFocus = useCallback((item: ContinueWatchingItem, index: number) => {
     setHasHadInitialFocus(true);
+    isHeroFocusedRef.current = false;
+    setHeroFocusButton(null);
     setFocusedContinueIndex(index);
+    focusedIndicesRef.current.row1 = index;
     setFocusedContinueId(item.episodeId);
 
     if (focusedRowRef.current !== 1) {
@@ -347,9 +349,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   // New VOD focus handler
   const handleNewVodFocus = useCallback((item: VodRecentItem, index: number) => {
     setHasHadInitialFocus(true);
+    isHeroFocusedRef.current = false;
+    setHeroFocusButton(null);
     setFocusedNewVodIndex(index);
-    setFocusedNewVodId(item.episodeId);
     const newVodRow = continueWatchingItems.length > 0 ? 2 : 1;
+    focusedIndicesRef.current.row2 = index;
+    setFocusedNewVodId(item.episodeId);
 
     if (focusedRowRef.current !== newVodRow) {
       scrollToRow(newVodRow);
@@ -370,9 +375,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   // Shortcuts focus handler
   const handleShortcutFocus = useCallback((index: number) => {
     setHasHadInitialFocus(true);
+    isHeroFocusedRef.current = false;
+    setHeroFocusButton(null);
     setFocusedShortcutIndex(index);
-    setFocusedChannelId(null);
     const shortcutRow = continueWatchingItems.length > 0 ? 3 : 2;
+    focusedIndicesRef.current.row3 = index;
+    setFocusedChannelId(null);
 
     if (focusedRowRef.current !== shortcutRow) {
       scrollToRow(shortcutRow);
@@ -382,6 +390,180 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     onMediaChange?.(null, null);
     setShowArtwork(true);
   }, [continueWatchingItems.length, onMediaChange, scrollToRow]);
+
+  // TV remote key listener for D-pad navigation
+  useEffect(() => {
+    if (isPlayerActive) return;
+
+    const sub = DeviceEventEmitter.addListener(
+      'onTvRemoteKey',
+      ({ keyCode }: { keyCode: number }) => {
+        if (isPlayerActive) return;
+        console.log('[DPAD]', keyCode, 'row:', focusedRowRef.current, 'isHero:', isHeroFocusedRef.current);
+
+        // DPAD_UP = 19
+        if (keyCode === 19) {
+          if (isHeroFocusedRef.current) {
+            // Boundary at top: remain on Hero buttons
+            return;
+          }
+
+          const currentRow = focusedRowRef.current;
+          if (currentRow === 0) {
+            // Requirement 1: Moving UP from Row 0 moves UP to Fullscreen icon
+            isHeroFocusedRef.current = true;
+            setHeroFocusButton('fullscreen');
+            setHeroFocusNonce(Date.now());
+          } else {
+            // Requirement 3: Moving UP between sections
+            let targetRow = 0;
+            if (currentRow === 1) {
+              targetRow = 0;
+            } else if (currentRow === 2) {
+              targetRow = continueWatchingItems.length > 0 ? 1 : 0;
+            } else if (currentRow === 3) {
+              if (displayNewVodItems.length > 0) {
+                targetRow = continueWatchingItems.length > 0 ? 2 : 1;
+              } else if (continueWatchingItems.length > 0) {
+                targetRow = 1;
+              } else {
+                targetRow = 0;
+              }
+            }
+
+            focusedRowRef.current = targetRow;
+            const targetIdx =
+              targetRow === 0
+                ? Math.min(focusedIndicesRef.current.row0, displayLiveChannels.length - 1)
+                : targetRow === 1
+                ? Math.min(focusedIndicesRef.current.row1, continueWatchingItems.length - 1)
+                : targetRow === 2
+                ? Math.min(focusedIndicesRef.current.row2, displayNewVodItems.length - 1)
+                : Math.min(focusedIndicesRef.current.row3, 6);
+
+            setCardFocusTarget({
+              row: targetRow,
+              index: Math.max(0, targetIdx),
+              nonce: Date.now(),
+            });
+            scrollToRow(targetRow);
+          }
+        }
+        // DPAD_DOWN = 20
+        else if (keyCode === 20) {
+          if (isHeroFocusedRef.current) {
+            // From Hero buttons, move DOWN back to Row 0
+            isHeroFocusedRef.current = false;
+            setHeroFocusButton(null);
+            focusedRowRef.current = 0;
+            const targetIdx = Math.min(
+              focusedIndicesRef.current.row0,
+              displayLiveChannels.length - 1
+            );
+            setCardFocusTarget({
+              row: 0,
+              index: Math.max(0, targetIdx),
+              nonce: Date.now(),
+            });
+            scrollToRow(0);
+            return;
+          }
+
+          // Moving DOWN between sections
+          const currentRow = focusedRowRef.current;
+          const totalRows = continueWatchingItems.length > 0 ? 4 : 3;
+          const maxRowIndex = totalRows - 1;
+
+          if (currentRow >= maxRowIndex) {
+            // Bottom boundary: stay on current row/card, do not jump
+            setCardFocusTarget({
+              row: currentRow,
+              index: focusedIndicesRef.current.row3,
+              nonce: Date.now(),
+            });
+            return;
+          }
+
+          let targetRow = currentRow + 1;
+          focusedRowRef.current = targetRow;
+
+          const targetIdx =
+            targetRow === 1
+              ? Math.min(focusedIndicesRef.current.row1, continueWatchingItems.length - 1)
+              : targetRow === 2
+              ? Math.min(focusedIndicesRef.current.row2, displayNewVodItems.length - 1)
+              : Math.min(focusedIndicesRef.current.row3, 6);
+
+          setCardFocusTarget({
+            row: targetRow,
+            index: Math.max(0, targetIdx),
+            nonce: Date.now(),
+          });
+          scrollToRow(targetRow);
+        }
+        // DPAD_RIGHT = 22
+        else if (keyCode === 22) {
+          if (isHeroFocusedRef.current) {
+            if (heroFocusButton === 'fullscreen' && onToggleMute) {
+              setHeroFocusButton('mute');
+              setHeroFocusNonce(Date.now());
+            }
+            return;
+          }
+          // Native Android handles rightward navigation within the row.
+          // At the last card, lockRight keeps focus securely on that card.
+        }
+        // DPAD_LEFT = 21
+        else if (keyCode === 21) {
+          if (isHeroFocusedRef.current) {
+            if (heroFocusButton === 'mute') {
+              setHeroFocusButton('fullscreen');
+              setHeroFocusNonce(Date.now());
+            } else if (heroFocusButton === 'fullscreen') {
+              // Left from fullscreen hero button moves to side navigation rail
+              onRequestSideNavFocus?.(AppDestination.HOME);
+            }
+            return;
+          }
+
+          // Requirement 4: שמאלה עד הסוף צריך לעבור לתפריט בראשי לפרק שמסומן
+          const currentRow = focusedRowRef.current;
+          let isAtStart = false;
+
+          if (currentRow === 0) {
+            isAtStart = focusedLiveIndex === 0;
+          } else if (currentRow === 1 && continueWatchingItems.length > 0) {
+            isAtStart = focusedContinueIndex === 0;
+          } else if (currentRow === (continueWatchingItems.length > 0 ? 2 : 1)) {
+            isAtStart = focusedNewVodIndex === 0;
+          } else {
+            isAtStart = focusedShortcutIndex === 0;
+          }
+
+          if (isAtStart) {
+            onRequestSideNavFocus?.(AppDestination.HOME);
+          }
+        }
+      }
+    );
+
+    return () => {
+      sub.remove();
+    };
+  }, [
+    isPlayerActive,
+    displayLiveChannels.length,
+    continueWatchingItems.length,
+    displayNewVodItems.length,
+    focusedLiveIndex,
+    focusedContinueIndex,
+    focusedNewVodIndex,
+    focusedShortcutIndex,
+    heroFocusButton,
+    onToggleMute,
+    onRequestSideNavFocus,
+    scrollToRow,
+  ]);
 
   // Active item for Hero & Artwork
   const isRecentFocused = !!focusedRecent;
@@ -447,6 +629,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
           onOpenFullScreen={handleOpenFullScreen}
           onToggleMute={onToggleMute}
           isMuted={isMuted}
+          focusTargetButton={heroFocusButton}
+          focusNonce={heroFocusNonce}
+          onFocusAction={(btn) => {
+            isHeroFocusedRef.current = true;
+            setHeroFocusButton(btn);
+          }}
+          onBlurAction={() => {
+            isHeroFocusedRef.current = false;
+          }}
         />
       }
     >
@@ -475,9 +666,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
               }}
             >
               {displayLiveChannels.map((channel, index) => {
-                const isCurrentlyFocusedLiveCard =
-                  focusedRowRef.current === 0 &&
-                  channel.id === (focusedChannelId || activeChannelId);
+                const isTargeted = cardFocusTarget?.row === 0 && cardFocusTarget?.index === index;
 
                 return (
                   <HomeLiveCard
@@ -486,12 +675,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
                     program={channel.currentProgram}
                     onPress={() => handlePlayLiveCard(channel)}
                     onFocus={() => handleChannelFocus(channel, index)}
-                    focusNonce={focusNonce}
+                    focusNonce={isTargeted ? cardFocusTarget!.nonce : 0}
+                    isFirstCard={index === 0}
+                    isLastCard={index === displayLiveChannels.length - 1}
                     hasPreferredFocus={
-                      (!hasHadInitialFocus && index === 0) ||
-                      (restoringFocusTarget?.row === 0
-                        ? (restoringFocusTarget.id ? channel.id === restoringFocusTarget.id : index === focusedLiveIndex)
-                        : isCurrentlyFocusedLiveCard)
+                      isTargeted || (!hasHadInitialFocus && index === 0)
                     }
                   />
                 );
@@ -508,9 +696,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
               }}
             >
               {continueWatchingItems.map((item, index) => {
-                const isCurrentlyFocusedContinue =
-                  focusedRowRef.current === 1 &&
-                  (item.episodeId === focusedContinueId || index === focusedContinueIndex);
+                const isTargeted = cardFocusTarget?.row === 1 && cardFocusTarget?.index === index;
 
                 return (
                   <HomeContinueCard
@@ -518,12 +704,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
                     item={item}
                     onPress={() => handlePlayVodCard(item)}
                     onFocus={() => handleContinueFocus(item, index)}
-                    focusNonce={focusNonce}
-                    hasPreferredFocus={
-                      restoringFocusTarget?.row === 1
-                        ? (restoringFocusTarget.id ? item.episodeId === restoringFocusTarget.id : index === focusedContinueIndex)
-                        : isCurrentlyFocusedContinue
-                    }
+                    focusNonce={isTargeted ? cardFocusTarget!.nonce : 0}
+                    isFirstCard={index === 0}
+                    isLastCard={index === continueWatchingItems.length - 1}
+                    hasPreferredFocus={isTargeted}
                   />
                 );
               })}
@@ -541,9 +725,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             >
               {displayNewVodItems.map((item, index) => {
                 const newVodRow = continueWatchingItems.length > 0 ? 2 : 1;
-                const isCurrentlyFocusedNewVod =
-                  focusedRowRef.current === newVodRow &&
-                  (item.episodeId === focusedNewVodId || index === focusedNewVodIndex);
+                const isTargeted = cardFocusTarget?.row === newVodRow && cardFocusTarget?.index === index;
 
                 return (
                   <HomeContinueCard
@@ -551,12 +733,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
                     item={item}
                     onPress={() => handlePlayVodCard(item)}
                     onFocus={() => handleNewVodFocus(item, index)}
-                    focusNonce={focusNonce}
-                    hasPreferredFocus={
-                      restoringFocusTarget?.row === newVodRow
-                        ? (restoringFocusTarget.id ? item.episodeId === restoringFocusTarget.id : index === focusedNewVodIndex)
-                        : isCurrentlyFocusedNewVod
-                    }
+                    focusNonce={isTargeted ? cardFocusTarget!.nonce : 0}
+                    isFirstCard={index === 0}
+                    isLastCard={index === displayNewVodItems.length - 1}
+                    hasPreferredFocus={isTargeted}
                   />
                 );
               })}
@@ -571,63 +751,94 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
               rowYPositions.current[shortcutRow] = e.nativeEvent.layout.y;
             }}
           >
-            <ShortcutCard
-              title="Live TV"
-              subtitle="כל הערוצים החיים"
-              iconName="live"
-              onPress={() => onNavigateDestination?.(AppDestination.LIVE_TV)}
-              onFocus={() => handleShortcutFocus(0)}
-              hasPreferredFocus={
-                restoringFocusTarget?.row === (continueWatchingItems.length > 0 ? 3 : 2) &&
-                focusedShortcutIndex === 0
-              }
-            />
-            <ShortcutCard
-              title="VOD"
-              subtitle="ספריות הערוצים"
-              iconName="vod"
-              onPress={() => onNavigateDestination?.(AppDestination.VOD)}
-              onFocus={() => handleShortcutFocus(1)}
-              hasPreferredFocus={
-                restoringFocusTarget?.row === (continueWatchingItems.length > 0 ? 3 : 2) &&
-                focusedShortcutIndex === 1
-              }
-            />
-            <ShortcutCard
-              title="כאן 11"
-              subtitle="VOD 11"
-              iconName="vod"
-              onPress={() => onNavigateDestination?.(AppDestination.VOD)}
-              onFocus={() => handleShortcutFocus(2)}
-            />
-            <ShortcutCard
-              title="קשת 12"
-              subtitle="VOD 12"
-              iconName="vod"
-              onPress={() => onNavigateDestination?.(AppDestination.VOD)}
-              onFocus={() => handleShortcutFocus(3)}
-            />
-            <ShortcutCard
-              title="רשת 13"
-              subtitle="VOD 13"
-              iconName="vod"
-              onPress={() => onNavigateDestination?.(AppDestination.VOD)}
-              onFocus={() => handleShortcutFocus(4)}
-            />
-            <ShortcutCard
-              title="עכשיו 14"
-              subtitle="VOD 14"
-              iconName="vod"
-              onPress={() => onNavigateDestination?.(AppDestination.VOD)}
-              onFocus={() => handleShortcutFocus(5)}
-            />
-            <ShortcutCard
-              title="i24NEWS"
-              subtitle="VOD 15"
-              iconName="vod"
-              onPress={() => onNavigateDestination?.(AppDestination.VOD)}
-              onFocus={() => handleShortcutFocus(6)}
-            />
+            {(() => {
+              const shortcutRow = continueWatchingItems.length > 0 ? 3 : 2;
+              const isTargeted = (idx: number) => cardFocusTarget?.row === shortcutRow && cardFocusTarget?.index === idx;
+              const getNonce = (idx: number) => isTargeted(idx) ? cardFocusTarget!.nonce : 0;
+              const isPref = (idx: number) => isTargeted(idx);
+
+              return (
+                <>
+                  <ShortcutCard
+                    title="Live TV"
+                    subtitle="כל הערוצים החיים"
+                    iconName="live"
+                    onPress={() => onNavigateDestination?.(AppDestination.LIVE_TV)}
+                    onFocus={() => handleShortcutFocus(0)}
+                    focusNonce={getNonce(0)}
+                    isFirstCard={true}
+                    isLastCard={false}
+                    hasPreferredFocus={isPref(0)}
+                  />
+                  <ShortcutCard
+                    title="VOD"
+                    subtitle="ספריות הערוצים"
+                    iconName="vod"
+                    onPress={() => onNavigateDestination?.(AppDestination.VOD)}
+                    onFocus={() => handleShortcutFocus(1)}
+                    focusNonce={getNonce(1)}
+                    isFirstCard={false}
+                    isLastCard={false}
+                    hasPreferredFocus={isPref(1)}
+                  />
+                  <ShortcutCard
+                    title="כאן 11"
+                    subtitle="VOD 11"
+                    iconName="vod"
+                    onPress={() => onNavigateDestination?.(AppDestination.VOD)}
+                    onFocus={() => handleShortcutFocus(2)}
+                    focusNonce={getNonce(2)}
+                    isFirstCard={false}
+                    isLastCard={false}
+                    hasPreferredFocus={isPref(2)}
+                  />
+                  <ShortcutCard
+                    title="קשת 12"
+                    subtitle="VOD 12"
+                    iconName="vod"
+                    onPress={() => onNavigateDestination?.(AppDestination.VOD)}
+                    onFocus={() => handleShortcutFocus(3)}
+                    focusNonce={getNonce(3)}
+                    isFirstCard={false}
+                    isLastCard={false}
+                    hasPreferredFocus={isPref(3)}
+                  />
+                  <ShortcutCard
+                    title="רשת 13"
+                    subtitle="VOD 13"
+                    iconName="vod"
+                    onPress={() => onNavigateDestination?.(AppDestination.VOD)}
+                    onFocus={() => handleShortcutFocus(4)}
+                    focusNonce={getNonce(4)}
+                    isFirstCard={false}
+                    isLastCard={false}
+                    hasPreferredFocus={isPref(4)}
+                  />
+                  <ShortcutCard
+                    title="עכשיו 14"
+                    subtitle="VOD 14"
+                    iconName="vod"
+                    onPress={() => onNavigateDestination?.(AppDestination.VOD)}
+                    onFocus={() => handleShortcutFocus(5)}
+                    focusNonce={getNonce(5)}
+                    isFirstCard={false}
+                    isLastCard={false}
+                    hasPreferredFocus={isPref(5)}
+                  />
+                  <ShortcutCard
+                    title="i24NEWS"
+                    subtitle="VOD 15"
+                    iconName="vod"
+                    onPress={() => onNavigateDestination?.(AppDestination.VOD)}
+                    onFocus={() => handleShortcutFocus(6)}
+                    focusNonce={getNonce(6)}
+                    isFirstCard={false}
+                    isLastCard={true}
+                    hasPreferredFocus={isPref(6)}
+                  />
+                </>
+              );
+            })()}
           </HomeRow>
         </ScrollView>
       )}

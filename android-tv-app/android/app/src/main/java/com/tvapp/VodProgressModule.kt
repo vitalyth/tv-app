@@ -201,18 +201,71 @@ class VodProgressModule(private val reactContext: ReactApplicationContext) :
     fun requestViewFocus(tag: Double, promise: Promise) {
         reactContext.runOnUiQueueThread {
             try {
-                val activity = reactContext.currentActivity
-                val view = activity?.findViewById<android.view.View>(tag.toInt())
+                val tagInt = tag.toInt()
+                var view: android.view.View? = null
+                try {
+                    val uiManager = com.facebook.react.uimanager.UIManagerHelper.getUIManagerForReactTag(reactContext, tagInt)
+                    view = uiManager?.resolveView(tagInt)
+                } catch (_: Exception) {}
+
+                if (view == null) {
+                    val activity = reactContext.currentActivity
+                    view = activity?.findViewById<android.view.View>(tagInt)
+                }
+
                 if (view != null) {
                     view.isFocusable = true
                     view.isFocusableInTouchMode = true
                     val success = view.requestFocus()
+                    android.util.Log.d("VodProgress", "requestViewFocus tag=$tagInt, success=$success")
                     promise.resolve(success)
                 } else {
+                    android.util.Log.w("VodProgress", "requestViewFocus: view not found for tag=$tagInt")
                     promise.resolve(false)
                 }
             } catch (e: Exception) {
                 promise.reject("FOCUS_ERR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun setFocusBoundaries(
+        tag: Double,
+        lockUp: Boolean,
+        lockDown: Boolean,
+        lockLeft: Boolean,
+        lockRight: Boolean,
+        promise: Promise
+    ) {
+        reactContext.runOnUiQueueThread {
+            try {
+                val tagInt = tag.toInt()
+                var view: android.view.View? = null
+                try {
+                    val uiManager = com.facebook.react.uimanager.UIManagerHelper.getUIManagerForReactTag(reactContext, tagInt)
+                    view = uiManager?.resolveView(tagInt)
+                } catch (_: Exception) {}
+
+                if (view == null) {
+                    val activity = reactContext.currentActivity
+                    view = activity?.findViewById<android.view.View>(tagInt)
+                }
+
+                if (view != null) {
+                    if (view.id == android.view.View.NO_ID) {
+                        view.id = tagInt
+                    }
+                    view.nextFocusUpId = if (lockUp) view.id else android.view.View.NO_ID
+                    view.nextFocusDownId = if (lockDown) view.id else android.view.View.NO_ID
+                    view.nextFocusLeftId = if (lockLeft) view.id else android.view.View.NO_ID
+                    view.nextFocusRightId = if (lockRight) view.id else android.view.View.NO_ID
+                    promise.resolve(true)
+                } else {
+                    promise.resolve(false)
+                }
+            } catch (e: Exception) {
+                promise.reject("BOUNDARIES_ERR", e.message)
             }
         }
     }

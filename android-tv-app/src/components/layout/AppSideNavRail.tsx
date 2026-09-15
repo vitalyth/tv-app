@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, DeviceEventEmitter } from 'react-native';
 import { NavRailItem } from './NavRailItem';
 import { AppDestination } from '../../types/guide';
 
@@ -7,31 +7,72 @@ interface AppSideNavRailProps {
   currentDestination: AppDestination;
   onDestinationSelected: (destination: AppDestination) => void;
   onExpandedChanged?: (expanded: boolean) => void;
+  onReturnFocusToScreen?: () => void;
+  focusDestination?: AppDestination | null;
+  focusNonce?: number;
 }
 
 export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
   currentDestination,
   onDestinationSelected,
   onExpandedChanged,
+  onReturnFocusToScreen,
+  focusDestination,
+  focusNonce = 0,
 }) => {
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const [forceCollapsed, setForceCollapsed] = useState(false);
+  const blurTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const isExpanded = focusedKey !== null && !forceCollapsed;
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current) {
+        clearTimeout(blurTimerRef.current);
+      }
+    };
+  }, []);
+
+  // When rail is focused, pressing RIGHT returns focus to the screen content
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('onTvRemoteKey', ({ keyCode }: { keyCode: number }) => {
+      if (keyCode === 22 && focusedKey !== null) {
+        if (blurTimerRef.current) {
+          clearTimeout(blurTimerRef.current);
+          blurTimerRef.current = null;
+        }
+        setFocusedKey(null);
+        onExpandedChanged?.(false);
+        onReturnFocusToScreen?.();
+      }
+    });
+    return () => sub.remove();
+  }, [focusedKey, onExpandedChanged, onReturnFocusToScreen]);
 
   const handleFocus = (key: string) => {
     if (forceCollapsed) return;
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
     setFocusedKey(key);
     onExpandedChanged?.(true);
   };
 
   const handleBlur = (key: string) => {
-    setFocusedKey((prev) => (prev === key ? null : prev));
-    setTimeout(() => {
-      setFocusedKey((latest) => {
-        if (!latest) onExpandedChanged?.(false);
-        return latest;
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current);
+    }
+    blurTimerRef.current = setTimeout(() => {
+      setFocusedKey((prev) => {
+        if (prev === key) {
+          return null;
+        }
+        return prev;
       });
-    }, 50);
+      onExpandedChanged?.(false);
+    }, 80);
   };
 
   const handleSelect = (dest: AppDestination) => {
@@ -58,7 +99,8 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="Home"
           isSelected={currentDestination === AppDestination.HOME}
           isRailExpanded={isExpanded}
-          hasTVPreferredFocus={false}
+          hasTVPreferredFocus={focusDestination === AppDestination.HOME}
+          focusNonce={focusDestination === AppDestination.HOME ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.HOME)}
           onFocus={() => handleFocus('home')}
           onBlur={() => handleBlur('home')}
@@ -70,7 +112,8 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="Live"
           isSelected={currentDestination === AppDestination.LIVE_TV}
           isRailExpanded={isExpanded}
-          hasTVPreferredFocus={false}
+          hasTVPreferredFocus={focusDestination === AppDestination.LIVE_TV}
+          focusNonce={focusDestination === AppDestination.LIVE_TV ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.LIVE_TV)}
           onFocus={() => handleFocus('live')}
           onBlur={() => handleBlur('live')}
@@ -82,7 +125,8 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="VOD"
           isSelected={currentDestination === AppDestination.VOD}
           isRailExpanded={isExpanded}
-          hasTVPreferredFocus={false}
+          hasTVPreferredFocus={focusDestination === AppDestination.VOD}
+          focusNonce={focusDestination === AppDestination.VOD ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.VOD)}
           onFocus={() => handleFocus('vod')}
           onBlur={() => handleBlur('vod')}
