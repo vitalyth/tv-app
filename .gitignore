@@ -57,3 +57,5 @@ android-tv/local.properties
 
 .python-version
 .envrc.local
+generated/
+react-native-tv-app/
