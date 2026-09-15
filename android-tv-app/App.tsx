@@ -169,90 +169,69 @@ export default function App() {
     }
     resumePositionMs = resumePositionMs || 0;
 
-    let stream = isDirect ? item.playUrl : null;
-    if (stream && activeStreamUrl !== stream) {
-      setActiveStreamUrl(stream);
-      setIsVideoReady(false);
-    }
     setIsPaused(false);
-
     setFullscreenPlayer({
-      streamUrl: stream,
+      streamUrl: null,
       title: item.title,
       recentItem: item,
       resumePositionMs,
-      isResolving: !isDirect,
+      isResolving: true,
     });
 
-    if (!stream) {
-      const resolved = await api.getVodEpisodeStream(item);
-      if (resolved) {
-        setActiveStreamUrl(resolved);
-        setIsVideoReady(false);
-        setFullscreenPlayer((prev) => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            streamUrl: resolved,
-            isResolving: false,
-          };
-        });
-      }
+    const resolved = await api.getVodEpisodeStream(item);
+    if (resolved) {
+      setActiveStreamUrl(resolved);
+      setIsVideoReady(false);
+      setFullscreenPlayer((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          streamUrl: resolved,
+          isResolving: false,
+        };
+      });
+    } else {
+      setFullscreenPlayer((prev) => (prev ? { ...prev, isResolving: false } : null));
     }
-  }, [activeStreamUrl]);
+  }, []);
 
   const handlePlayEpisode = useCallback(async (episode: VodEpisode, series: VodSeries) => {
-    const isDirect =
-      !!episode.playUrl &&
-      (episode.playUrl.includes('.m3u8') ||
-        episode.playUrl.includes('.mpd') ||
-        episode.playUrl.includes('.livx') ||
-        episode.playUrl.includes('.mp4'));
-
     const savedProgress = await vodProgressService.getProgress(episode.id);
     const resumePositionMs = savedProgress?.positionMs || 0;
 
-    let stream = isDirect ? episode.playUrl : null;
-    if (stream && activeStreamUrl !== stream) {
-      setActiveStreamUrl(stream);
-      setIsVideoReady(false);
-    }
     setIsPaused(false);
-
     setFullscreenPlayer({
-      streamUrl: stream,
+      streamUrl: null,
       title: episode.title,
       episode,
       series,
       resumePositionMs,
-      isResolving: !isDirect,
+      isResolving: true,
     });
 
-    if (!stream) {
-      const resolved = await api.getVodEpisodeStream({
-        episodeId: episode.id,
-        seriesId: series.id,
-        title: episode.title,
-        seriesTitle: series.title,
-        imageUrl: episode.imageUrl,
-        playUrl: episode.playUrl,
-        channelName: series.provider,
-        rawItem: { ...episode, provider: series.provider },
+    const providerKey = series.provider || (series.providerId as any) || 'kan-vod';
+    const resolved = await api.resolveEpisodeStream(
+      episode.streamEndpoint,
+      providerKey,
+      episode.playUrl,
+      episode.id
+    );
+
+    if (resolved) {
+      setActiveStreamUrl(resolved);
+      setIsVideoReady(false);
+      setFullscreenPlayer((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          streamUrl: resolved,
+          isResolving: false,
+        };
       });
-      if (resolved) {
-        setActiveStreamUrl(resolved);
-        setIsVideoReady(false);
-        setFullscreenPlayer((prev) => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            streamUrl: resolved,
-            isResolving: false,
-          };
-        });
-      }
+    } else {
+      setFullscreenPlayer((prev) => (prev ? { ...prev, isResolving: false } : null));
     }
-  }, [activeStreamUrl]);
+  }, []);
 
   const handleClosePlayer = useCallback(() => {
     setFullscreenPlayer(null);
