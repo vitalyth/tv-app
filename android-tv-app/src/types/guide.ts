@@ -12,6 +12,7 @@ export interface TvProgram {
   title: string;
   description: string;
   imageUrl?: string | null;
+  backdropUrl?: string | null;
   startSeconds: number;
   endSeconds: number;
   timeRange?: string;

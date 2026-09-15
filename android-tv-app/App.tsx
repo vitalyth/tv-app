@@ -81,7 +81,7 @@ export default function App() {
 
       if (!isAlreadyPlaying) {
         setIsVideoReady(false);
-        if (channel.rawChannel) {
+        if (!stream && channel.rawChannel) {
           const resolved = await api.getLiveChannelStream(channel.rawChannel);
           if (resolved) stream = resolved;
         }
@@ -106,7 +106,7 @@ export default function App() {
       setActiveChannelId(channel.id);
       let stream = channel.streamUrl;
       setIsVideoReady(false);
-      if (channel.rawChannel) {
+      if (!stream && channel.rawChannel) {
         const resolved = await api.getLiveChannelStream(channel.rawChannel);
         if (resolved) stream = resolved;
       }
@@ -240,6 +240,7 @@ export default function App() {
 
   const handleMediaChangeFromHome = useCallback(
     (streamUrl: string | null, channelId?: string | null) => {
+      if (fullscreenPlayer) return;
       if (channelId !== undefined) {
         setActiveChannelId(channelId);
       }
@@ -248,7 +249,7 @@ export default function App() {
         setIsVideoReady(false);
       }
     },
-    [activeStreamUrl]
+    [fullscreenPlayer, activeStreamUrl]
   );
 
   const handleDestinationSelected = useCallback((dest: AppDestination) => {

@@ -141,31 +141,54 @@ export const resolveImageUrl = (image?: string | null, isBackdrop = false): stri
     ? image
     : `${webBase}/${image.replace(/^\/+/, '')}`;
 
-  const targetWidth = isBackdrop ? 1280 : 480;
-  const targetHeight = isBackdrop ? 720 : 270;
-  const targetQuality = isBackdrop ? 85 : 78;
+  const targetWidth = isBackdrop ? 1920 : 480;
+  const targetHeight = isBackdrop ? 1080 : 270;
+  const targetQuality = isBackdrop ? 90 : 78;
 
   try {
     if (fullUrl.includes('images.frp1.ott.kaltura.com')) {
-      fullUrl = fullUrl
+      const hasQuality = /\/quality\/\d+/i.test(fullUrl);
+      let cleaned = fullUrl
         .replace(/\/width\/\d+/gi, `/width/${targetWidth}`)
         .replace(/\/height\/\d+/gi, `/height/${targetHeight}`)
         .replace(/\/quality\/\d+/gi, `/quality/${targetQuality}`);
-      if (!fullUrl.includes('/width/')) {
-        fullUrl = `${fullUrl.replace(/\/+$/, '')}/width/${targetWidth}/height/${targetHeight}/quality/${targetQuality}`;
+      if (!cleaned.includes('/width/')) {
+        cleaned = `${cleaned.replace(/\/+$/, '')}/width/${targetWidth}/height/${targetHeight}/quality/${targetQuality}`;
+      } else if (!hasQuality) {
+        cleaned = `${cleaned.replace(/\/+$/, '')}/quality/${targetQuality}`;
       }
-      return fullUrl;
+      return cleaned;
     }
-    if (fullUrl.includes('media3.reshet.tv/image/upload/')) {
+
+    if (fullUrl.includes('/image/upload/')) {
       const marker = '/image/upload/';
       const idx = fullUrl.indexOf(marker);
       if (idx !== -1) {
         const prefix = fullUrl.substring(0, idx + marker.length);
         const suffix = fullUrl.substring(idx + marker.length);
-        if (!suffix.startsWith('c_') && !suffix.startsWith('w_')) {
-          return `${prefix}c_fill,g_auto,w_${targetWidth},h_${targetHeight},q_${targetQuality},f_auto/${suffix}`;
+        const parts = suffix.split('/');
+        const versionIdx = parts.findIndex((p) => /^v\d+$/.test(p));
+        const rest = versionIdx >= 0 ? parts.slice(versionIdx).join('/') : parts.slice(1).join('/');
+        if (rest) {
+          return `${prefix}c_fill,g_auto,w_${targetWidth},h_${targetHeight},q_${targetQuality},f_auto/${rest}`;
         }
       }
+    }
+
+    if (fullUrl.includes('?') && (fullUrl.includes('width=') || fullUrl.includes('w=') || fullUrl.includes('height=') || fullUrl.includes('h='))) {
+      fullUrl = fullUrl
+        .replace(/([?&])w(?:idth)?=\d+/gi, `$1w=${targetWidth}`)
+        .replace(/([?&])h(?:eight)?=\d+/gi, `$1h=${targetHeight}`)
+        .replace(/([?&])q(?:uality)?=\d+/gi, `$1q=${targetQuality}`);
+      return fullUrl;
+    }
+
+    if (/[,\/]w_\d+/.test(fullUrl)) {
+      fullUrl = fullUrl
+        .replace(/w_\d+/gi, `w_${targetWidth}`)
+        .replace(/h_\d+/gi, `h_${targetHeight}`)
+        .replace(/q_\d+/gi, `q_${targetQuality}`);
+      return fullUrl;
     }
   } catch {
     return fullUrl;
@@ -285,7 +308,8 @@ export const api = {
               channelId: id,
               title: p.name || '',
               description: p.description || '',
-              imageUrl: resolveImageUrl(p.image),
+              imageUrl: resolveImageUrl(p.image, false),
+              backdropUrl: resolveImageUrl(p.image, true),
               startSeconds: startSec,
               endSeconds: endSec,
               timeRange,
@@ -370,7 +394,8 @@ export const api = {
             channelId: ch.id,
             title: p.name || p.title || '',
             description: p.description || '',
-            imageUrl: resolveImageUrl(p.image),
+            imageUrl: resolveImageUrl(p.image, false),
+            backdropUrl: resolveImageUrl(p.image, true),
             startSeconds: Number(p.start) || 0,
             endSeconds: Number(p.end) || 0,
           }));
@@ -741,8 +766,16 @@ export const api = {
       if (!res.ok) return null;
       const data = await res.json();
       let stream = data?.stream || null;
-      if (stream && isKanLive && !stream.includes('vpn=true')) {
-        stream += stream.includes('?') ? '&vpn=true' : '?vpn=true';
+      if (stream) {
+        if (
+          stream.includes('cdn-redge') ||
+          stream.includes('redge.media') ||
+          stream.includes('kancdn')
+        ) {
+          stream = api.buildPlaybackStreamUrl(stream, 'kan-vod');
+        } else if (isKanLive && !stream.includes('vpn=true')) {
+          stream += stream.includes('?') ? '&vpn=true' : '?vpn=true';
+        }
       }
       return stream;
     } catch (err) {

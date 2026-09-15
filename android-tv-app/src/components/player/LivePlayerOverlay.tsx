@@ -85,6 +85,13 @@ export const LivePlayerOverlay: React.FC<LivePlayerOverlayProps> = ({
     let isMounted = true;
     setIsBuffering(true);
 
+    const stream = selectedSource.url || channel.streamUrl;
+    if (stream) {
+      setResolvedStreamUrl(stream);
+      setIsBuffering(false);
+      return;
+    }
+
     const raw =
       selectedSource.rawChannel ||
       (selectedSource.url === channel.sources[0]?.url ? channel.rawChannel : null);
@@ -97,16 +104,16 @@ export const LivePlayerOverlay: React.FC<LivePlayerOverlayProps> = ({
           if (liveUrl) {
             setResolvedStreamUrl(liveUrl);
           } else {
-            setResolvedStreamUrl(selectedSource.url || channel.streamUrl);
+            setResolvedStreamUrl(channel.streamUrl);
           }
         })
         .catch(() => {
           if (isMounted) {
-            setResolvedStreamUrl(selectedSource.url || channel.streamUrl);
+            setResolvedStreamUrl(channel.streamUrl);
           }
         });
     } else {
-      setResolvedStreamUrl(selectedSource.url || channel.streamUrl);
+      setResolvedStreamUrl(channel.streamUrl);
     }
 
     return () => {

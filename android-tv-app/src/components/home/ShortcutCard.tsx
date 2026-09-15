@@ -9,6 +9,8 @@ interface ShortcutCardProps {
   iconName: TvIconType;
   onPress: () => void;
   onFocus?: () => void;
+  hasPreferredFocus?: boolean;
+  hasTVPreferredFocus?: boolean;
 }
 
 export const ShortcutCard: React.FC<ShortcutCardProps> = React.memo(({
@@ -17,11 +19,14 @@ export const ShortcutCard: React.FC<ShortcutCardProps> = React.memo(({
   iconName,
   onPress,
   onFocus,
+  hasPreferredFocus = false,
+  hasTVPreferredFocus = false,
 }) => {
   return (
     <TvFocusable
       onPress={onPress}
       onFocus={onFocus}
+      hasTVPreferredFocus={hasTVPreferredFocus || hasPreferredFocus}
       scaleOnFocus={false}
       style={styles.card}
       focusedStyle={styles.cardFocused}

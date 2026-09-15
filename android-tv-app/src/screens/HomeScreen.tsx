@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { View, StyleSheet, ScrollView, ActivityIndicator, Text } from 'react-native';
 import { AppDestination, TvChannel, TvProgram } from '../types/guide';
 import { VodRecentItem } from '../types/vod';
-import { api } from '../services/api';
+import { api, resolveImageUrl } from '../services/api';
 import { vodProgressService, ContinueWatchingItem } from '../services/vodProgress';
 import TvScreenLayout from '../components/layout/TvScreenLayout';
 import HeroActions from '../components/hero/HeroActions';
@@ -46,7 +46,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
 
   const [focusedChannel, setFocusedChannel] = useState<TvChannel | null>(null);
   const [focusedRecent, setFocusedRecent] = useState<VodRecentItem | null>(null);
-  const [showArtwork, setShowArtwork] = useState(true);
+  const [showArtwork, setShowArtwork] = useState(!isVideoReady || !activeStreamUrl);
   const [hasHadInitialFocus, setHasHadInitialFocus] = useState(false);
 
   const [focusedLiveIndex, setFocusedLiveIndex] = useState(0);
@@ -65,35 +65,101 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     initialRecentIdsRef.current = recentChannelIds;
   }
 
+  // Prioritize Live Channels: 10 total:
+  // 1) Recently watched channels (frozen from session start so order is stable)
+  // 2) Remaining channels in their natural guide order
+  const displayLiveChannels = useMemo(() => {
+    if (channels.length === 0) return [];
+    const byId = new Map(channels.map((ch) => [ch.id, ch]));
+    const effectiveRecent = initialRecentIdsRef.current || recentChannelIds;
+    const recent = effectiveRecent
+      .map((id) => byId.get(id))
+      .filter((ch): ch is TvChannel => !!ch);
+
+    const recentSet = new Set(recent.map((c) => c.id));
+    const nonRecent = channels.filter((ch) => !recentSet.has(ch.id));
+
+    const list = [...recent, ...nonRecent];
+    if (activeChannelId && byId.has(activeChannelId)) {
+      const activeCh = byId.get(activeChannelId)!;
+      const idx = list.findIndex((c) => c.id === activeChannelId);
+      if (idx > 9) {
+        list.splice(idx, 1);
+        list.splice(9, 0, activeCh);
+      }
+    }
+
+    return list.slice(0, 10);
+  }, [channels, recentChannelIds, activeChannelId]);
+
+  // Limit New VOD to 10 latest items
+  const displayNewVodItems = useMemo(() => {
+    return newVodItems.slice(0, 10);
+  }, [newVodItems]);
+
   const verticalScrollRef = useRef<ScrollView>(null);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedRowRef = useRef(0);
+  const rowYPositions = useRef<Record<number, number>>({});
+
+  const scrollToRow = useCallback((rowIndex: number) => {
+    focusedRowRef.current = rowIndex;
+    const fallbackY = rowIndex === 0 ? 0 : rowIndex === 1 ? 242 : rowIndex === 2 ? 494 : 746;
+    const targetY = rowYPositions.current[rowIndex] ?? fallbackY;
+
+    // Smoothly snap to section title directly below hero area in ONE single continuous motion
+    verticalScrollRef.current?.scrollTo({ y: Math.max(0, targetY), animated: true });
+  }, []);
 
   // Restore focus to exact card when returning from fullscreen
   useEffect(() => {
     if (focusNonce > 0 && focusNonce !== prevFocusNonceRef.current) {
       prevFocusNonceRef.current = focusNonce;
-      const targetRow = focusedRowRef.current;
+      let targetRow = focusedRowRef.current;
       let targetId = '';
-      if (targetRow === 0) {
-        targetId = focusedChannelId || activeChannelId || '';
+
+      if (activeChannelId) {
+        // Active live channel is playing - restore focus to Row 0 on that channel
+        targetRow = 0;
+        targetId = activeChannelId;
+        focusedRowRef.current = 0;
+      } else if (targetRow === 0) {
+        targetId = focusedChannelId || displayLiveChannels[0]?.id || '';
       } else if (targetRow === 1) {
         targetId = focusedContinueId || '';
       } else if (targetRow === 2) {
         targetId = focusedNewVodId || '';
       }
+
+      if (targetRow === 0 && targetId) {
+        const liveIdx = displayLiveChannels.findIndex((c) => c.id === targetId);
+        if (liveIdx !== -1) {
+          setFocusedLiveIndex(liveIdx);
+          setFocusedChannelId(targetId);
+          setFocusedChannel(displayLiveChannels[liveIdx]);
+          setFocusedRecent(null);
+        }
+      }
+
+      if (isVideoReady && activeStreamUrl) {
+        setShowArtwork(false);
+      }
+
+      scrollToRow(targetRow);
+
       setRestoringFocusTarget({ row: targetRow, id: targetId });
       const timer = setTimeout(() => {
         setRestoringFocusTarget(null);
-      }, 300);
+      }, 400);
       return () => clearTimeout(timer);
     }
   }, [
     focusNonce,
-    focusedChannelId,
     activeChannelId,
+    focusedChannelId,
     focusedContinueId,
     focusedNewVodId,
+    displayLiveChannels,
   ]);
 
   const loadData = useCallback(async () => {
@@ -154,101 +220,117 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     };
   }, []);
 
-  // Prioritize Live Channels: 10 total:
-  // 1) Recently watched channels (frozen from session start so order is stable)
-  // 2) Remaining channels in their natural guide order
-  const displayLiveChannels = useMemo(() => {
-    if (channels.length === 0) return [];
-    const byId = new Map(channels.map((ch) => [ch.id, ch]));
-    const effectiveRecent = initialRecentIdsRef.current || recentChannelIds;
-    const recent = effectiveRecent
-      .map((id) => byId.get(id))
-      .filter((ch): ch is TvChannel => !!ch);
 
-    const recentSet = new Set(recent.map((c) => c.id));
-    const nonRecent = channels.filter((ch) => !recentSet.has(ch.id));
-
-    return [...recent, ...nonRecent].slice(0, 10);
-  }, [channels]);
-
-  // Limit New VOD to 10 latest items
-  const displayNewVodItems = useMemo(() => {
-    return newVodItems.slice(0, 10);
-  }, [newVodItems]);
-
-  // Once video is ready from the root player, hide artwork
+  // Once video is ready from the root player, hide artwork; otherwise keep artwork visible
   useEffect(() => {
     if (isVideoReady && activeStreamUrl) {
       setShowArtwork(false);
+    } else {
+      setShowArtwork(true);
     }
   }, [isVideoReady, activeStreamUrl]);
 
-  // Set initial focus & preview on first channel after data loads
+  // Synchronize focusedChannel with fresh guide data when channels update
   useEffect(() => {
-    if (displayLiveChannels.length > 0 && !focusedChannel && !focusedRecent) {
-      const firstCh = displayLiveChannels[0];
-      setFocusedChannel(firstCh);
-      setFocusedChannelId(firstCh.id);
+    if (channels.length > 0) {
+      const currentTargetId = focusedChannelId || activeChannelId;
+      if (currentTargetId) {
+        const fresh = channels.find((c) => c.id === currentTargetId);
+        if (fresh) {
+          setFocusedChannel(fresh);
+        }
+      }
+    }
+  }, [channels, focusedChannelId, activeChannelId]);
+
+  const initialFocusDoneRef = useRef(false);
+
+  // Set initial focus & preview on first channel after data loads (ONCE)
+  useEffect(() => {
+    if (initialFocusDoneRef.current) return;
+    if (displayLiveChannels.length > 0) {
+      initialFocusDoneRef.current = true;
+      const initialChannel =
+        (activeChannelId && displayLiveChannels.find((c) => c.id === activeChannelId)) ||
+        displayLiveChannels[0];
+
+      setFocusedChannel(initialChannel);
+      setFocusedChannelId(initialChannel.id);
+      const initialIdx = displayLiveChannels.findIndex((c) => c.id === initialChannel.id);
+      if (initialIdx !== -1) {
+        setFocusedLiveIndex(initialIdx);
+      }
+
       const isAlreadyPlaying =
-        (activeChannelId === firstCh.id || !activeChannelId) &&
-        !!activeStreamUrl &&
+        (activeChannelId === initialChannel.id ||
+          (activeStreamUrl && initialChannel.sources.some((s) => s.url === activeStreamUrl)) ||
+          (activeStreamUrl && initialChannel.streamUrl === activeStreamUrl)) &&
         isVideoReady;
 
       if (!isAlreadyPlaying) {
         setShowArtwork(true);
         if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
         previewTimerRef.current = setTimeout(async () => {
-          let stream = firstCh.streamUrl;
-          if (firstCh.rawChannel) {
-            const resolved = await api.getLiveChannelStream(firstCh.rawChannel);
+          let stream = initialChannel.streamUrl;
+          if (!stream && initialChannel.rawChannel) {
+            const resolved = await api.getLiveChannelStream(initialChannel.rawChannel);
             if (resolved) stream = resolved;
           }
-          onMediaChange?.(stream, firstCh.id);
+          onMediaChange?.(stream, initialChannel.id);
         }, 2000);
       } else {
+        if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
         setShowArtwork(false);
       }
     }
-  }, [displayLiveChannels, focusedChannel, focusedRecent, activeChannelId, activeStreamUrl, isVideoReady, onMediaChange]);
+  }, [displayLiveChannels, activeChannelId, activeStreamUrl, isVideoReady, onMediaChange]);
 
   // Channel focus handler: instant artwork, 2000ms timer before video plays
   const handleChannelFocus = useCallback((channel: TvChannel, index: number) => {
     setHasHadInitialFocus(true);
     setFocusedLiveIndex(index);
     setFocusedChannelId(channel.id);
-    focusedRowRef.current = 0;
+
+    if (focusedRowRef.current !== 0) {
+      scrollToRow(0);
+    }
 
     setFocusedRecent(null);
     setFocusedChannel(channel);
 
     const isAlreadyPlaying =
-      (activeChannelId === channel.id || (activeChannel?.id === channel.id)) &&
-      !!activeStreamUrl &&
+      (activeChannelId === channel.id ||
+        (activeStreamUrl && channel.sources.some((s) => s.url === activeStreamUrl)) ||
+        (activeStreamUrl && channel.streamUrl === activeStreamUrl)) &&
       isVideoReady;
 
     if (!isAlreadyPlaying) {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
       onMediaChange?.(null, null);
       setShowArtwork(true);
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
       previewTimerRef.current = setTimeout(async () => {
         let stream = channel.streamUrl;
-        if (channel.rawChannel) {
+        if (!stream && channel.rawChannel) {
           const resolved = await api.getLiveChannelStream(channel.rawChannel);
           if (resolved) stream = resolved;
         }
         onMediaChange?.(stream, channel.id);
       }, 2000);
     } else {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
       setShowArtwork(false);
     }
-  }, [activeChannelId, activeChannel?.id, activeStreamUrl, isVideoReady, onMediaChange]);
+  }, [activeChannelId, activeStreamUrl, isVideoReady, onMediaChange, scrollToRow]);
 
   // Continue Watching focus handler
   const handleContinueFocus = useCallback((item: ContinueWatchingItem, index: number) => {
     setHasHadInitialFocus(true);
     setFocusedContinueIndex(index);
     setFocusedContinueId(item.episodeId);
-    focusedRowRef.current = 1;
+
+    if (focusedRowRef.current !== 1) {
+      scrollToRow(1);
+    }
 
     setFocusedRecent(item);
     setFocusedChannelId(null);
@@ -260,14 +342,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
       const resolved = await api.getVodEpisodeStream(item);
       onMediaChange?.(resolved || null);
     }, 2000);
-  }, [onMediaChange]);
+  }, [onMediaChange, scrollToRow]);
 
   // New VOD focus handler
   const handleNewVodFocus = useCallback((item: VodRecentItem, index: number) => {
     setHasHadInitialFocus(true);
     setFocusedNewVodIndex(index);
     setFocusedNewVodId(item.episodeId);
-    focusedRowRef.current = continueWatchingItems.length > 0 ? 2 : 1;
+    const newVodRow = continueWatchingItems.length > 0 ? 2 : 1;
+
+    if (focusedRowRef.current !== newVodRow) {
+      scrollToRow(newVodRow);
+    }
 
     setFocusedRecent(item);
     setFocusedChannelId(null);
@@ -279,19 +365,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
       const resolved = await api.getVodEpisodeStream(item);
       onMediaChange?.(resolved || null);
     }, 2000);
-  }, [continueWatchingItems.length, onMediaChange]);
+  }, [continueWatchingItems.length, onMediaChange, scrollToRow]);
 
   // Shortcuts focus handler
   const handleShortcutFocus = useCallback((index: number) => {
     setHasHadInitialFocus(true);
     setFocusedShortcutIndex(index);
     setFocusedChannelId(null);
-    focusedRowRef.current = continueWatchingItems.length > 0 ? 3 : 2;
+    const shortcutRow = continueWatchingItems.length > 0 ? 3 : 2;
+
+    if (focusedRowRef.current !== shortcutRow) {
+      scrollToRow(shortcutRow);
+    }
 
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     onMediaChange?.(null, null);
     setShowArtwork(true);
-  }, [continueWatchingItems.length, onMediaChange]);
+  }, [continueWatchingItems.length, onMediaChange, scrollToRow]);
 
   // Active item for Hero & Artwork
   const isRecentFocused = !!focusedRecent;
@@ -317,8 +407,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     : activeChannel?.logoUrl;
 
   const backgroundImageUrl = isRecentFocused
-    ? focusedRecent.imageUrl
-    : activeProgram?.imageUrl || activeChannel?.logoUrl;
+    ? (focusedRecent.imageUrl ? resolveImageUrl(focusedRecent.imageUrl, true) : null)
+    : activeProgram?.backdropUrl || (activeProgram?.imageUrl ? resolveImageUrl(activeProgram.imageUrl, true) : activeChannel?.logoUrl);
 
   const handleOpenFullScreen = useCallback(() => {
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
@@ -373,76 +463,120 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
           ref={verticalScrollRef}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
+          scrollsChildToFocus={false}
           contentContainerStyle={styles.rowsContent}
         >
           {/* Row 1: ערוצים חיים (Exactly 10 items, prioritized) */}
           {displayLiveChannels.length > 0 && (
-            <HomeRow title="ערוצים חיים">
-              {displayLiveChannels.map((channel, index) => (
-                <HomeLiveCard
-                  key={channel.id}
-                  channel={channel}
-                  program={channel.currentProgram}
-                  onPress={() => handlePlayLiveCard(channel)}
-                  onFocus={() => handleChannelFocus(channel, index)}
-                  focusNonce={focusNonce}
-                  hasPreferredFocus={
-                    (!hasHadInitialFocus && index === 0) ||
-                    (restoringFocusTarget?.row === 0 &&
-                      (restoringFocusTarget.id ? channel.id === restoringFocusTarget.id : index === focusedLiveIndex))
-                  }
-                />
-              ))}
+            <HomeRow
+              title="ערוצים חיים"
+              onLayout={(e) => {
+                rowYPositions.current[0] = e.nativeEvent.layout.y;
+              }}
+            >
+              {displayLiveChannels.map((channel, index) => {
+                const isCurrentlyFocusedLiveCard =
+                  focusedRowRef.current === 0 &&
+                  channel.id === (focusedChannelId || activeChannelId);
+
+                return (
+                  <HomeLiveCard
+                    key={channel.id}
+                    channel={channel}
+                    program={channel.currentProgram}
+                    onPress={() => handlePlayLiveCard(channel)}
+                    onFocus={() => handleChannelFocus(channel, index)}
+                    focusNonce={focusNonce}
+                    hasPreferredFocus={
+                      (!hasHadInitialFocus && index === 0) ||
+                      (restoringFocusTarget?.row === 0
+                        ? (restoringFocusTarget.id ? channel.id === restoringFocusTarget.id : index === focusedLiveIndex)
+                        : isCurrentlyFocusedLiveCard)
+                    }
+                  />
+                );
+              })}
             </HomeRow>
           )}
 
           {/* Row 2: המשך צפייה (Watched & unfinished only) */}
           {continueWatchingItems.length > 0 && (
-            <HomeRow title="המשך צפייה">
-              {continueWatchingItems.map((item, index) => (
-                <HomeContinueCard
-                  key={`continue_${item.episodeId}`}
-                  item={item}
-                  onPress={() => handlePlayVodCard(item)}
-                  onFocus={() => handleContinueFocus(item, index)}
-                  focusNonce={focusNonce}
-                  hasPreferredFocus={
-                    restoringFocusTarget?.row === 1 &&
-                    (restoringFocusTarget.id ? item.episodeId === restoringFocusTarget.id : index === focusedContinueIndex)
-                  }
-                />
-              ))}
+            <HomeRow
+              title="המשך צפייה"
+              onLayout={(e) => {
+                rowYPositions.current[1] = e.nativeEvent.layout.y;
+              }}
+            >
+              {continueWatchingItems.map((item, index) => {
+                const isCurrentlyFocusedContinue =
+                  focusedRowRef.current === 1 &&
+                  (item.episodeId === focusedContinueId || index === focusedContinueIndex);
+
+                return (
+                  <HomeContinueCard
+                    key={`continue_${item.episodeId}`}
+                    item={item}
+                    onPress={() => handlePlayVodCard(item)}
+                    onFocus={() => handleContinueFocus(item, index)}
+                    focusNonce={focusNonce}
+                    hasPreferredFocus={
+                      restoringFocusTarget?.row === 1
+                        ? (restoringFocusTarget.id ? item.episodeId === restoringFocusTarget.id : index === focusedContinueIndex)
+                        : isCurrentlyFocusedContinue
+                    }
+                  />
+                );
+              })}
             </HomeRow>
           )}
 
           {/* Row 3: תכני VOD חדשים (Top 10 latest) */}
           {displayNewVodItems.length > 0 && (
-            <HomeRow title="תכני VOD חדשים">
-              {displayNewVodItems.map((item, index) => (
-                <HomeContinueCard
-                  key={`new_vod_${item.episodeId}_${index}`}
-                  item={item}
-                  onPress={() => handlePlayVodCard(item)}
-                  onFocus={() => handleNewVodFocus(item, index)}
-                  focusNonce={focusNonce}
-                  hasPreferredFocus={
-                    restoringFocusTarget?.row === (continueWatchingItems.length > 0 ? 2 : 1) &&
-                    (restoringFocusTarget.id ? item.episodeId === restoringFocusTarget.id : index === focusedNewVodIndex)
-                  }
-                />
-              ))}
+            <HomeRow
+              title="תכני VOD חדשים"
+              onLayout={(e) => {
+                const newVodRow = continueWatchingItems.length > 0 ? 2 : 1;
+                rowYPositions.current[newVodRow] = e.nativeEvent.layout.y;
+              }}
+            >
+              {displayNewVodItems.map((item, index) => {
+                const newVodRow = continueWatchingItems.length > 0 ? 2 : 1;
+                const isCurrentlyFocusedNewVod =
+                  focusedRowRef.current === newVodRow &&
+                  (item.episodeId === focusedNewVodId || index === focusedNewVodIndex);
+
+                return (
+                  <HomeContinueCard
+                    key={`new_vod_${item.episodeId}_${index}`}
+                    item={item}
+                    onPress={() => handlePlayVodCard(item)}
+                    onFocus={() => handleNewVodFocus(item, index)}
+                    focusNonce={focusNonce}
+                    hasPreferredFocus={
+                      restoringFocusTarget?.row === newVodRow
+                        ? (restoringFocusTarget.id ? item.episodeId === restoringFocusTarget.id : index === focusedNewVodIndex)
+                        : isCurrentlyFocusedNewVod
+                    }
+                  />
+                );
+              })}
             </HomeRow>
           )}
 
           {/* Row 4: עוד לצפות (Shortcuts & Providers) */}
-          <HomeRow title="עוד לצפות">
+          <HomeRow
+            title="עוד לצפות"
+            onLayout={(e) => {
+              const shortcutRow = continueWatchingItems.length > 0 ? 3 : 2;
+              rowYPositions.current[shortcutRow] = e.nativeEvent.layout.y;
+            }}
+          >
             <ShortcutCard
               title="Live TV"
               subtitle="כל הערוצים החיים"
               iconName="live"
               onPress={() => onNavigateDestination?.(AppDestination.LIVE_TV)}
               onFocus={() => handleShortcutFocus(0)}
-              focusNonce={focusNonce}
               hasPreferredFocus={
                 restoringFocusTarget?.row === (continueWatchingItems.length > 0 ? 3 : 2) &&
                 focusedShortcutIndex === 0
@@ -454,7 +588,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
               iconName="vod"
               onPress={() => onNavigateDestination?.(AppDestination.VOD)}
               onFocus={() => handleShortcutFocus(1)}
-              focusNonce={focusNonce}
               hasPreferredFocus={
                 restoringFocusTarget?.row === (continueWatchingItems.length > 0 ? 3 : 2) &&
                 focusedShortcutIndex === 1

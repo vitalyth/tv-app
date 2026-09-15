@@ -1,19 +1,21 @@
 import React, { ReactNode } from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, LayoutChangeEvent } from 'react-native';
 
 interface HomeRowProps {
   title: string;
   children: ReactNode;
   focusedIndex?: number;
   cardWidth?: number;
+  onLayout?: (event: LayoutChangeEvent) => void;
 }
 
 export const HomeRow: React.FC<HomeRowProps> = React.memo(({
   title,
   children,
+  onLayout,
 }) => {
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={onLayout}>
       <Text style={styles.title}>{title}</Text>
       <ScrollView
         horizontal
