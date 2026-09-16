@@ -5,8 +5,6 @@ import { TvBadge } from '../common/TvBadge';
 import { ProgressBar } from '../common/ProgressBar';
 import { VodRecentItem } from '../../types/vod';
 
-const cardScrimSource = require('../../assets/card_scrim.png');
-
 interface HomeContinueCardProps {
   item: VodRecentItem;
   hasTVPreferredFocus?: boolean;
@@ -51,13 +49,6 @@ export const HomeContinueCard: React.FC<HomeContinueCardProps> = React.memo(({
           />
         ) : null}
 
-        {/* Card Gradient Scrim - Smooth hardware fade, NO horizontal stripe lines */}
-        <Image
-          source={cardScrimSource}
-          style={StyleSheet.absoluteFill}
-          resizeMode="stretch"
-        />
-
         <View style={styles.badgeRow}>
           <TvBadge type="vod" />
           {item.channelLogo && (
@@ -82,11 +73,20 @@ export const HomeContinueCard: React.FC<HomeContinueCardProps> = React.memo(({
           ) : null}
         </View>
 
-        {item.progressPercentage !== undefined && item.progressPercentage > 0 ? (
-          <View style={styles.progressWrapper}>
-            <ProgressBar progress={item.progressPercentage} height={5} />
-          </View>
-        ) : null}
+        {(() => {
+          const rawItem = item as any;
+          const pos = rawItem.positionMs;
+          const dur = rawItem.durationMs;
+          const pct = rawItem.progressPercentage;
+          const hasProgress = (pct !== undefined && pct > 0) || (Boolean(pos) && pos > 1000);
+          if (!hasProgress) return null;
+          const progressVal = (pct !== undefined && pct > 0) ? pct : (dur && dur > 0 ? pos / dur : 0.1);
+          return (
+            <View style={styles.progressWrapper}>
+              <ProgressBar progress={progressVal} height={5} />
+            </View>
+          );
+        })()}
       </View>
     </TvFocusable>
   );
@@ -138,9 +138,12 @@ const styles = StyleSheet.create({
   },
   infoContainer: {
     position: 'absolute',
-    bottom: 12,
-    left: 12,
-    right: 12,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    backgroundColor: 'transparent',
     zIndex: 2,
     gap: 2,
   },
@@ -149,18 +152,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
   seriesTitle: {
-    color: '#B8C1CC',
+    color: '#CBD5E1',
     fontSize: 12,
-    fontWeight: '400',
+    fontWeight: '500',
     textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
   },
   progressWrapper: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
+    zIndex: 10,
+    overflow: 'hidden',
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
   },
 });
 

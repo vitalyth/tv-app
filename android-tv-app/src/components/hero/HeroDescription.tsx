@@ -1,4 +1,3 @@
-import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
 interface HeroDescriptionProps {
@@ -6,14 +5,15 @@ interface HeroDescriptionProps {
 }
 
 export const HeroDescription: React.FC<HeroDescriptionProps> = ({ description }) => {
-  if (!description || !description.trim()) {
+  const trimmed = description?.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') {
     return null;
   }
 
   return (
     <View style={styles.container}>
       <Text style={styles.text} numberOfLines={3} ellipsizeMode="tail">
-        {description.trim()}
+        {trimmed}
       </Text>
     </View>
   );
@@ -22,7 +22,7 @@ export const HeroDescription: React.FC<HeroDescriptionProps> = ({ description })
 const styles = StyleSheet.create({
   container: {
     maxWidth: '74%',
-    height: 64,
+    maxHeight: 64,
     marginTop: 4,
     overflow: 'hidden',
   },
@@ -32,8 +32,8 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: '400',
     textAlign: 'left',
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
-    textShadowOffset: { width: 1, height: 1 },
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
 });

@@ -9,10 +9,11 @@ interface ProgressBarProps {
 
 export const ProgressBar: React.FC<ProgressBarProps> = React.memo(({
   progress,
-  color = '#FF2B44',
-  height = 5,
+  color = '#25D4DE',
+  height = 4,
 }) => {
-  const clamped = Math.max(0.04, Math.min(1, progress));
+  const norm = progress > 1 ? progress / 100 : (progress || 0);
+  const clamped = Math.max(0.04, Math.min(1, norm));
 
   return (
     <View style={[styles.track, { height }]}>
@@ -29,7 +30,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = React.memo(({
 const styles = StyleSheet.create({
   track: {
     width: '100%',
-    backgroundColor: 'rgba(35, 42, 56, 0.6)',
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     overflow: 'hidden',
   },
   fill: {

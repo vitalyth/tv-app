@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, Image, StyleSheet, Pressable } from 'react-native';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { TvChannel } from '../../types/guide';
+import { TvFocusable } from '../common/TvFocusable';
 
 interface EpgChannelCardProps {
   channel: TvChannel;
@@ -9,6 +10,9 @@ interface EpgChannelCardProps {
   onPress: (channel: TvChannel) => void;
   onFocus?: (channel: TvChannel) => void;
   hasPreferredFocus?: boolean;
+  focusNonce?: number;
+  lockLeft?: boolean;
+  lockRight?: boolean;
 }
 
 export const EpgChannelCard: React.FC<EpgChannelCardProps> = ({
@@ -18,6 +22,9 @@ export const EpgChannelCard: React.FC<EpgChannelCardProps> = ({
   onPress,
   onFocus,
   hasPreferredFocus = false,
+  focusNonce = 0,
+  lockLeft = true,
+  lockRight = false,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
 
@@ -27,11 +34,15 @@ export const EpgChannelCard: React.FC<EpgChannelCardProps> = ({
   };
 
   return (
-    <Pressable
+    <TvFocusable
       hasTVPreferredFocus={hasPreferredFocus}
+      focusNonce={focusNonce}
+      lockLeft={lockLeft}
+      lockRight={lockRight}
       onFocus={handleFocus}
       onBlur={() => setIsFocused(false)}
       onPress={() => onPress(channel)}
+      scaleOnFocus={false}
       style={[
         styles.container,
         isSelected && styles.containerSelected,
@@ -71,7 +82,7 @@ export const EpgChannelCard: React.FC<EpgChannelCardProps> = ({
 
       {/* Playing dot indicator */}
       {isPlaying && <View style={styles.playingIndicator} />}
-    </Pressable>
+    </TvFocusable>
   );
 };
 

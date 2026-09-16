@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, Image, StyleSheet, Pressable } from 'react-native';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { VodSeries, VOD_PROVIDERS, VodProvider } from '../../types/vod';
+import { TvFocusable } from '../common/TvFocusable';
 
 interface VodSeriesCardProps {
   series: VodSeries;
   onPress: (series: VodSeries) => void;
   onFocus?: (series: VodSeries) => void;
   hasPreferredFocus?: boolean;
+  focusNonce?: number;
+  lockLeft?: boolean;
+  lockRight?: boolean;
 }
 
 export const VodSeriesCard: React.FC<VodSeriesCardProps> = React.memo(({
@@ -14,6 +18,9 @@ export const VodSeriesCard: React.FC<VodSeriesCardProps> = React.memo(({
   onPress,
   onFocus,
   hasPreferredFocus = false,
+  focusNonce = 0,
+  lockLeft = false,
+  lockRight = false,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
 
@@ -30,11 +37,15 @@ export const VodSeriesCard: React.FC<VodSeriesCardProps> = React.memo(({
   const providerInfo = series.providerId ? VOD_PROVIDERS[series.providerId as VodProvider] : null;
 
   return (
-    <Pressable
+    <TvFocusable
       hasTVPreferredFocus={hasPreferredFocus}
+      focusNonce={focusNonce}
+      lockLeft={lockLeft}
+      lockRight={lockRight}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onPress={() => onPress(series)}
+      scaleOnFocus={false}
       style={[
         styles.card,
         isFocused && styles.cardFocused,
@@ -74,7 +85,7 @@ export const VodSeriesCard: React.FC<VodSeriesCardProps> = React.memo(({
           {series.title}
         </Text>
       </View>
-    </Pressable>
+    </TvFocusable>
   );
 });
 

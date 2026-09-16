@@ -41,13 +41,12 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
           onPress={onOpenFullScreen}
           label="מסך מלא"
           hasTVPreferredFocus={focusTargetButton === 'fullscreen'}
-          focusNonce={focusNonce}
+          focusNonce={focusTargetButton === 'fullscreen' ? focusNonce : 0}
           lockUp={true}
           lockDown={true}
           lockLeft={true}
           lockRight={false}
           onFocus={() => onFocusAction?.('fullscreen')}
-          onBlur={onBlurAction}
         />
       )}
       {onToggleMute && (
@@ -56,13 +55,12 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
           onPress={onToggleMute}
           label={isMuted ? 'הפעל קול' : 'השתק'}
           hasTVPreferredFocus={focusTargetButton === 'mute'}
-          focusNonce={focusNonce}
+          focusNonce={focusTargetButton === 'mute' ? focusNonce : 0}
           lockUp={true}
           lockDown={true}
           lockLeft={false}
           lockRight={true}
           onFocus={() => onFocusAction?.('mute')}
-          onBlur={onBlurAction}
         />
       )}
     </View>

@@ -10,8 +10,9 @@ import LiveTvScreen from './src/screens/LiveTvScreen';
 import VodScreen from './src/screens/VodScreen';
 import LivePlayerOverlay from './src/components/player/LivePlayerOverlay';
 import VodPlayerOverlay from './src/components/player/VodPlayerOverlay';
+import AppSplashScreen from './src/components/common/AppSplashScreen';
 import { api } from './src/services/api';
-import { vodProgressService } from './src/services/vodProgress';
+import { vodProgressService, ContinueWatchingItem } from './src/services/vodProgress';
 import { getStreamType } from './src/utils/stream';
 
 interface FullscreenPlayerState {
@@ -30,8 +31,11 @@ export default function App() {
   const [currentDestination, setCurrentDestination] = useState<AppDestination>(AppDestination.HOME);
   const [fullscreenPlayer, setFullscreenPlayer] = useState<FullscreenPlayerState | null>(null);
   const [channels, setChannels] = useState<TvChannel[]>([]);
+  const [continueWatchingItems, setContinueWatchingItems] = useState<ContinueWatchingItem[]>([]);
+  const [newVodItems, setNewVodItems] = useState<VodRecentItem[]>([]);
   const [recentChannelIds, setRecentChannelIds] = useState<string[]>([]);
   const [isRailExpanded, setIsRailExpanded] = useState(false);
+  const [isAppBootLoading, setIsAppBootLoading] = useState(true);
 
   // Single persistent Video player state (1:1 with native primaryPlayer)
   const globalVideoRef = useRef<VideoRef>(null);
@@ -44,12 +48,17 @@ export default function App() {
   const [isBuffering, setIsBuffering] = useState(false);
   const [vodDuration, setVodDuration] = useState(0);
   const [vodCurrentTime, setVodCurrentTime] = useState(0);
+  const vodDurationRef = useRef<number>(0);
+  const vodCurrentTimeRef = useRef<number>(0);
+  const hasResumedSeekRef = useRef<boolean>(false);
+  const lastProgressSaveRef = useRef<number>(0);
   const [sideNavFocusTarget, setSideNavFocusTarget] = useState<{
     destination: AppDestination;
     nonce: number;
   } | null>(null);
 
   const handleRequestSideNavFocus = useCallback((dest: AppDestination) => {
+    setIsRailExpanded(true);
     setSideNavFocusTarget({
       destination: dest,
       nonce: Date.now(),
@@ -60,17 +69,25 @@ export default function App() {
   }, []);
 
   const handleReturnFocusToScreen = useCallback(() => {
+    setIsRailExpanded(false);
     setFocusNonce(Date.now());
   }, []);
 
   useEffect(() => {
-    api.getLiveChannels().then((res) => setChannels(res)).catch(() => {});
-    vodProgressService.getRecentChannels().then((ids) => setRecentChannelIds(ids)).catch(() => {});
-    vodProgressService.getMutePreference().then((saved) => {
-      if (typeof saved === 'boolean') {
-        setIsMuted(saved);
-      }
-    }).catch(() => {});
+    Promise.allSettled([
+      api.getLiveChannels().then((res) => setChannels(res)),
+      vodProgressService.getContinueWatching().then((res) => setContinueWatchingItems(res)),
+      vodProgressService.getRecentChannels().then((ids) => setRecentChannelIds(ids)),
+      vodProgressService.getMutePreference().then((saved) => {
+        if (typeof saved === 'boolean') {
+          setIsMuted(saved);
+        }
+      }),
+      api.getNewVodContent().then((res) => setNewVodItems(res)),
+      api.getGuideData().catch(() => {}),
+    ]).finally(() => {
+      setIsAppBootLoading(false);
+    });
   }, []);
 
   const handleToggleMute = useCallback(() => {
@@ -171,21 +188,27 @@ export default function App() {
   );
 
   const handlePlayRecentVod = useCallback(async (item: VodRecentItem) => {
-    const isDirect =
-      !!item.playUrl &&
-      (item.playUrl.includes('.m3u8') ||
-        item.playUrl.includes('.mpd') ||
-        item.playUrl.includes('.livx') ||
-        item.playUrl.includes('.mp4'));
+    hasResumedSeekRef.current = false;
+    vodCurrentTimeRef.current = 0;
+    vodDurationRef.current = 0;
+    setActiveChannelId(null);
 
-    let resumePositionMs = (item as any).positionMs;
-    if (resumePositionMs === undefined && item.episodeId) {
-      const saved = await vodProgressService.getProgress(item.episodeId);
-      if (saved && !saved.isCompleted) {
-        resumePositionMs = saved.positionMs;
-      }
+    let resumePositionMs = 0;
+    let saved = null;
+    if (item.episodeId) {
+      saved = await vodProgressService.getProgress(item.episodeId);
     }
-    resumePositionMs = resumePositionMs || 0;
+    const pos = saved?.positionMs ?? (item as any).positionMs ?? 0;
+    const dur = saved?.durationMs ?? (item as any).durationMs ?? 0;
+    const isCompleted = saved?.isCompleted ?? (item as any).isCompleted ?? false;
+    const ratio = dur > 0 ? pos / dur : 0;
+
+    // Resume if not completed, watched at least 1s, and more than 25s remaining
+    if (!isCompleted && pos > 1000 && (dur === 0 || dur - pos > 25000)) {
+      resumePositionMs = pos;
+    } else {
+      resumePositionMs = 0;
+    }
 
     setIsPaused(false);
     setFullscreenPlayer({
@@ -214,8 +237,20 @@ export default function App() {
   }, []);
 
   const handlePlayEpisode = useCallback(async (episode: VodEpisode, series: VodSeries) => {
+    hasResumedSeekRef.current = false;
+    vodCurrentTimeRef.current = 0;
+    vodDurationRef.current = 0;
+    setActiveChannelId(null);
+
     const savedProgress = await vodProgressService.getProgress(episode.id);
-    const resumePositionMs = savedProgress?.positionMs || 0;
+    let resumePositionMs = 0;
+    if (savedProgress) {
+      const pos = savedProgress.positionMs || 0;
+      const dur = savedProgress.durationMs || 0;
+      if (!savedProgress.isCompleted && pos > 1000 && (dur === 0 || dur - pos > 25000)) {
+        resumePositionMs = pos;
+      }
+    }
 
     setIsPaused(false);
     setFullscreenPlayer({
@@ -252,9 +287,59 @@ export default function App() {
   }, []);
 
   const handleClosePlayer = useCallback(() => {
+    if (fullscreenPlayer && !fullscreenPlayer.channel) {
+      const episodeId =
+        fullscreenPlayer.episode?.id ||
+        fullscreenPlayer.recentItem?.episodeId ||
+        (fullscreenPlayer.recentItem as any)?.id;
+      const currentPos = vodCurrentTimeRef.current;
+      const currentDur = vodDurationRef.current;
+      if (episodeId && currentPos > 1) {
+        const seriesId =
+          fullscreenPlayer.series?.id || fullscreenPlayer.recentItem?.seriesId;
+        const posMs = Math.floor(currentPos * 1000);
+        const durMs = Math.floor(currentDur * 1000);
+        const itemToSave =
+          fullscreenPlayer.recentItem
+            ? {
+                ...fullscreenPlayer.recentItem,
+                playUrl: fullscreenPlayer.streamUrl || fullscreenPlayer.recentItem.playUrl,
+              }
+            : (fullscreenPlayer.episode
+            ? {
+                id: fullscreenPlayer.episode.id,
+                episodeId: fullscreenPlayer.episode.id,
+                seriesId: fullscreenPlayer.series?.id || null,
+                title: fullscreenPlayer.episode.title,
+                seriesTitle: fullscreenPlayer.series?.title || null,
+                description: fullscreenPlayer.episode.description || null,
+                imageUrl:
+                  fullscreenPlayer.episode.imageUrl ||
+                  fullscreenPlayer.series?.imageUrl ||
+                  null,
+                playUrl:
+                  fullscreenPlayer.streamUrl ||
+                  fullscreenPlayer.episode.playUrl ||
+                  null,
+                channelLogo: null,
+                channelName:
+                  fullscreenPlayer.series?.provider ||
+                  (fullscreenPlayer.series as any)?.providerId ||
+                  null,
+              }
+            : null);
+        vodProgressService.saveProgress(
+          episodeId,
+          seriesId,
+          posMs,
+          durMs,
+          itemToSave
+        );
+      }
+    }
     setFullscreenPlayer(null);
     setFocusNonce((n) => n + 1);
-  }, []);
+  }, [fullscreenPlayer]);
 
   const handleMediaChangeFromHome = useCallback(
     (streamUrl: string | null, channelId?: string | null) => {
@@ -265,6 +350,10 @@ export default function App() {
       if (streamUrl !== activeStreamUrl) {
         setActiveStreamUrl(streamUrl);
         setIsVideoReady(false);
+        vodCurrentTimeRef.current = 0;
+        vodDurationRef.current = 0;
+        setVodCurrentTime(0);
+        setVodDuration(0);
       }
     },
     [fullscreenPlayer, activeStreamUrl]
@@ -273,7 +362,12 @@ export default function App() {
   const handleDestinationSelected = useCallback((dest: AppDestination) => {
     setCurrentDestination(dest);
     setIsRailExpanded(false);
+    setFocusNonce(Date.now());
   }, []);
+
+  if (isAppBootLoading) {
+    return <AppSplashScreen />;
+  }
 
   return (
     <TvNavContext.Provider
@@ -305,11 +399,103 @@ export default function App() {
             ignoreSilentSwitch="ignore"
             shutterColor="transparent"
             onLoad={(e) => {
-              setVodDuration(e.duration);
+              if (!activeChannelId) {
+                const dur = e.duration > 0 ? e.duration : ((e as any).seekableDuration || 0);
+                if (dur > 0) {
+                  vodDurationRef.current = dur;
+                  setVodDuration(dur);
+                }
+              }
+              if (
+                fullscreenPlayer &&
+                !fullscreenPlayer.channel &&
+                fullscreenPlayer.resumePositionMs &&
+                fullscreenPlayer.resumePositionMs > 1000 &&
+                !hasResumedSeekRef.current
+              ) {
+                hasResumedSeekRef.current = true;
+                globalVideoRef.current?.seek(fullscreenPlayer.resumePositionMs / 1000);
+              }
             }}
             onProgress={(e) => {
-              setVodCurrentTime(e.currentTime);
+              if (!activeChannelId) {
+                vodCurrentTimeRef.current = e.currentTime;
+                setVodCurrentTime(e.currentTime);
+                if (e.seekableDuration > 0 && e.seekableDuration > vodDurationRef.current) {
+                  vodDurationRef.current = e.seekableDuration;
+                  setVodDuration(e.seekableDuration);
+                }
+              }
               setIsBuffering(false);
+
+              // Failsafe seek if onLoad / onReadyForDisplay didn't catch the seek target
+              if (
+                !hasResumedSeekRef.current &&
+                fullscreenPlayer &&
+                !fullscreenPlayer.channel &&
+                fullscreenPlayer.resumePositionMs &&
+                fullscreenPlayer.resumePositionMs > 2000 &&
+                e.currentTime < 1.5
+              ) {
+                hasResumedSeekRef.current = true;
+                globalVideoRef.current?.seek(fullscreenPlayer.resumePositionMs / 1000);
+              }
+
+              const now = Date.now();
+              if (
+                fullscreenPlayer &&
+                !fullscreenPlayer.channel &&
+                e.currentTime > 1 &&
+                now - lastProgressSaveRef.current > 4000
+              ) {
+                lastProgressSaveRef.current = now;
+                const episodeId =
+                  fullscreenPlayer.episode?.id ||
+                  fullscreenPlayer.recentItem?.episodeId ||
+                  (fullscreenPlayer.recentItem as any)?.id;
+                if (episodeId) {
+                  const seriesId =
+                    fullscreenPlayer.series?.id || fullscreenPlayer.recentItem?.seriesId;
+                  const posMs = Math.floor(e.currentTime * 1000);
+                  const durMs = Math.floor(vodDurationRef.current * 1000);
+                  const itemToSave =
+                    fullscreenPlayer.recentItem
+                      ? {
+                          ...fullscreenPlayer.recentItem,
+                          playUrl: fullscreenPlayer.streamUrl || fullscreenPlayer.recentItem.playUrl,
+                        }
+                      : (fullscreenPlayer.episode
+                      ? {
+                          id: fullscreenPlayer.episode.id,
+                          episodeId: fullscreenPlayer.episode.id,
+                          seriesId: fullscreenPlayer.series?.id || null,
+                          title: fullscreenPlayer.episode.title,
+                          seriesTitle: fullscreenPlayer.series?.title || null,
+                          description: fullscreenPlayer.episode.description || null,
+                          imageUrl:
+                            fullscreenPlayer.episode.imageUrl ||
+                            fullscreenPlayer.series?.imageUrl ||
+                            null,
+                          playUrl:
+                            fullscreenPlayer.streamUrl ||
+                            fullscreenPlayer.episode.playUrl ||
+                            null,
+                          channelLogo: null,
+                          channelName:
+                            fullscreenPlayer.series?.provider ||
+                            (fullscreenPlayer.series as any)?.providerId ||
+                            null,
+                        }
+                      : null);
+                  vodProgressService.saveProgress(
+                    episodeId,
+                    seriesId,
+                    posMs,
+                    durMs,
+                    itemToSave
+                  );
+                }
+              }
             }}
             onBuffer={(e) => {
               setIsBuffering(e.isBuffering);
@@ -317,6 +503,16 @@ export default function App() {
             onReadyForDisplay={() => {
               setIsVideoReady(true);
               setIsBuffering(false);
+              if (
+                fullscreenPlayer &&
+                !fullscreenPlayer.channel &&
+                fullscreenPlayer.resumePositionMs &&
+                fullscreenPlayer.resumePositionMs > 1000 &&
+                (!hasResumedSeekRef.current || vodCurrentTimeRef.current < 2)
+              ) {
+                hasResumedSeekRef.current = true;
+                globalVideoRef.current?.seek(fullscreenPlayer.resumePositionMs / 1000);
+              }
             }}
             onError={(err) => {
               console.log('[Root Video Error]', err);
@@ -326,13 +522,16 @@ export default function App() {
           />
         )}
 
-        {/* Main Content Area (Hidden via opacity: 0 when fullscreen to preserve tree & focus) */}
+        {/* Main Content Area (Preserved in tree with display: none/flex for instant zero-delay transitions) */}
         <View
           style={[styles.contentContainer, !!fullscreenPlayer && styles.contentHidden]}
           pointerEvents={fullscreenPlayer ? 'none' : 'auto'}
         >
           {currentDestination === 'HOME' && (
             <HomeScreen
+              initialChannels={channels}
+              initialContinueWatching={continueWatchingItems}
+              initialNewVod={newVodItems}
               onPlayChannel={handlePlayChannel}
               onPlayRecentVod={handlePlayRecentVod}
               onNavigateDestination={handleDestinationSelected}
@@ -346,13 +545,25 @@ export default function App() {
               focusNonce={focusNonce}
               activeChannelId={activeChannelId}
               isPlayerActive={!!fullscreenPlayer}
+              isSideNavActive={isRailExpanded}
             />
           )}
           {currentDestination === 'LIVE_TV' && (
-            <LiveTvScreen onPlayFullscreen={handlePlayChannel} />
+            <LiveTvScreen
+              onPlayFullscreen={handlePlayChannel}
+              focusNonce={focusNonce}
+              onRequestSideNavFocus={handleRequestSideNavFocus}
+              isSideNavActive={isRailExpanded}
+              activeChannelId={activeChannelId}
+            />
           )}
           {currentDestination === 'VOD' && (
-            <VodScreen onPlayEpisode={handlePlayEpisode} />
+            <VodScreen
+              onPlayEpisode={handlePlayEpisode}
+              focusNonce={focusNonce}
+              onRequestSideNavFocus={handleRequestSideNavFocus}
+              isSideNavActive={isRailExpanded}
+            />
           )}
         </View>
 
@@ -397,8 +608,13 @@ export default function App() {
             externalDuration={vodDuration}
             externalIsBuffering={isBuffering}
             onExternalTogglePlay={() => setIsPaused((p) => !p)}
-            onExternalSeek={(secs) => {
-              globalVideoRef.current?.seek(secs);
+            onExternalSeek={(deltaSeconds) => {
+              const current = vodCurrentTimeRef.current;
+              const maxDur = vodDurationRef.current > 0 ? vodDurationRef.current : 999999;
+              const target = Math.max(0, Math.min(maxDur, current + deltaSeconds));
+              vodCurrentTimeRef.current = target;
+              setVodCurrentTime(target);
+              globalVideoRef.current?.seek(target);
             }}
             onClose={handleClosePlayer}
             onSaveProgress={handleSaveProgress}
@@ -419,6 +635,12 @@ const styles = StyleSheet.create({
   },
   contentHidden: {
     opacity: 0,
+  },
+  screenWrapper: {
+    ...StyleSheet.absoluteFill,
+  },
+  screenHidden: {
+    display: 'none',
   },
   navRailWrapper: {
     position: 'absolute',

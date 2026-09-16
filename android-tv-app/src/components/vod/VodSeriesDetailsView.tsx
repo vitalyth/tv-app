@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import {
   VodProvider,
   VodSeries,
@@ -57,6 +57,14 @@ export const VodSeriesDetailsView: React.FC<VodSeriesDetailsViewProps> = React.m
   const heroDescription = focusedEpisode?.description || series.description;
   const backgroundImageUrl = focusedEpisode?.imageUrl || series.imageUrl || series.backdropUrl;
 
+  if (!details) {
+    return (
+      <View style={styles.fullScreenLoading}>
+        <ActivityIndicator size="large" color="#25D4DE" />
+      </View>
+    );
+  }
+
   return (
     <TvScreenLayout
       backgroundImageUrl={backgroundImageUrl}
@@ -105,6 +113,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     paddingBottom: 8,
+  },
+  fullScreenLoading: {
+    flex: 1,
+    backgroundColor: '#080A0C',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerRow: {
     flexDirection: 'row',

@@ -10,10 +10,14 @@ import HomeRow from '../components/home/HomeRow';
 import HomeLiveCard from '../components/home/HomeLiveCard';
 import HomeContinueCard from '../components/home/HomeContinueCard';
 import ShortcutCard from '../components/home/ShortcutCard';
+import { TvFocusable } from '../components/common/TvFocusable';
 
 interface HomeScreenProps {
+  initialChannels?: TvChannel[];
+  initialContinueWatching?: ContinueWatchingItem[];
+  initialNewVod?: VodRecentItem[];
   onPlayChannel: (channel: TvChannel, program?: TvProgram | null) => void;
-  onPlayRecentVod?: (item: VodRecentItem) => void;
+  onPlayRecentVod: (item: VodRecentItem) => void;
   onNavigateDestination?: (destination: AppDestination) => void;
   onRequestSideNavFocus?: (destination: AppDestination) => void;
   recentChannelIds?: string[];
@@ -25,9 +29,13 @@ interface HomeScreenProps {
   focusNonce?: number;
   activeChannelId?: string | null;
   isPlayerActive?: boolean;
+  isSideNavActive?: boolean;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
+  initialChannels = [],
+  initialContinueWatching = [],
+  initialNewVod = [],
   onPlayChannel,
   onPlayRecentVod,
   onNavigateDestination,
@@ -41,20 +49,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   focusNonce = 0,
   activeChannelId,
   isPlayerActive = false,
+  isSideNavActive = false,
 }) => {
-  const [channels, setChannels] = useState<TvChannel[]>([]);
-  const [continueWatchingItems, setContinueWatchingItems] = useState<ContinueWatchingItem[]>([]);
-  const [newVodItems, setNewVodItems] = useState<VodRecentItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [channels, setChannels] = useState<TvChannel[]>(initialChannels);
+  const [continueWatchingItems, setContinueWatchingItems] = useState<ContinueWatchingItem[]>(initialContinueWatching);
+  const [newVodItems, setNewVodItems] = useState<VodRecentItem[]>(initialNewVod);
+  const [loading, setLoading] = useState(initialChannels.length === 0);
   const [error, setError] = useState<string | null>(null);
 
-  const [focusedChannel, setFocusedChannel] = useState<TvChannel | null>(null);
+  const [focusedChannel, setFocusedChannel] = useState<TvChannel | null>(
+    (initialChannels && initialChannels[0]) || null
+  );
   const [focusedRecent, setFocusedRecent] = useState<VodRecentItem | null>(null);
   const [showArtwork, setShowArtwork] = useState(!isVideoReady || !activeStreamUrl);
   const [hasHadInitialFocus, setHasHadInitialFocus] = useState(false);
 
   const [focusedLiveIndex, setFocusedLiveIndex] = useState(0);
-  const [focusedChannelId, setFocusedChannelId] = useState<string | null>(null);
+  const [focusedChannelId, setFocusedChannelId] = useState<string | null>(
+    (initialChannels && initialChannels[0]?.id) || null
+  );
   const [focusedContinueIndex, setFocusedContinueIndex] = useState(0);
   const [focusedContinueId, setFocusedContinueId] = useState<string | null>(null);
   const [focusedNewVodIndex, setFocusedNewVodIndex] = useState(0);
@@ -65,11 +78,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   const [heroFocusButton, setHeroFocusButton] = useState<'fullscreen' | 'mute' | null>(null);
   const [heroFocusNonce, setHeroFocusNonce] = useState(0);
   const isHeroFocusedRef = useRef(false);
+  const initialFocusDoneRef = useRef(false);
 
-  // Card programmatic focus target for D-pad navigation
-  const [cardFocusTarget, setCardFocusTarget] = useState<{ row: number; index: number; nonce: number } | null>(null);
+  // Card programmatic focus target for D-pad navigation - targeted at Card 0 initially
+  const [cardFocusTarget, setCardFocusTarget] = useState<{ row: number; index: number; nonce: number } | null>({
+    row: 0,
+    index: 0,
+    nonce: 1,
+  });
   const focusedIndicesRef = useRef({ row0: 0, row1: 0, row2: 0, row3: 0 });
   const prevFocusNonceRef = useRef(focusNonce);
+  const lastVerticalNavTimeRef = useRef(0);
+  const isSideNavActiveRef = useRef(isSideNavActive);
+  isSideNavActiveRef.current = isSideNavActive;
 
   const initialRecentIdsRef = useRef<string[] | null>(null);
   if (initialRecentIdsRef.current === null && recentChannelIds.length > 0) {
@@ -115,17 +136,48 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
 
   const scrollToRow = useCallback((rowIndex: number) => {
     focusedRowRef.current = rowIndex;
-    const fallbackY = rowIndex === 0 ? 0 : rowIndex === 1 ? 242 : rowIndex === 2 ? 494 : 746;
+    const fallbackY = rowIndex === 0 ? 0 : rowIndex === 1 ? 205 : rowIndex === 2 ? 415 : 625;
     const targetY = rowYPositions.current[rowIndex] ?? fallbackY;
 
     // Smoothly snap to section title directly below hero area in ONE single continuous motion
     verticalScrollRef.current?.scrollTo({ y: Math.max(0, targetY), animated: true });
   }, []);
 
-  // Restore focus to exact card when returning from fullscreen
+  // Restore focus to exact card and refresh continue watching when returning from fullscreen
   useEffect(() => {
     if (focusNonce > 0 && focusNonce !== prevFocusNonceRef.current) {
       prevFocusNonceRef.current = focusNonce;
+
+      // Immediately refresh continue watching items with updated progress
+      vodProgressService.getContinueWatching().then((items) => {
+        if (items) {
+          setContinueWatchingItems(items);
+        }
+      });
+
+      // If returning with an active channel (e.g., switched channel in fullscreen player),
+      // restore focus directly to that channel card in Row 0
+      if (activeChannelId) {
+        const activeIdx = displayLiveChannels.findIndex((c) => c.id === activeChannelId);
+        if (activeIdx !== -1) {
+          focusedRowRef.current = 0;
+          focusedIndicesRef.current.row0 = activeIdx;
+          setFocusedLiveIndex(activeIdx);
+          const ch = displayLiveChannels[activeIdx];
+          setFocusedChannel(ch);
+          setFocusedChannelId(ch.id);
+          setFocusedRecent(null);
+
+          setCardFocusTarget({
+            row: 0,
+            index: activeIdx,
+            nonce: Date.now(),
+          });
+          scrollToRow(0);
+          return;
+        }
+      }
+
       const targetRow = focusedRowRef.current;
       let targetIdx = 0;
 
@@ -135,9 +187,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
           setFocusedChannel(displayLiveChannels[targetIdx]);
           setFocusedChannelId(displayLiveChannels[targetIdx].id);
         }
-      } else if (targetRow === 1) {
+      } else if (targetRow === 1 && continueWatchingItems.length > 0) {
         targetIdx = Math.min(focusedIndicesRef.current.row1, continueWatchingItems.length - 1);
-      } else if (targetRow === 2) {
+      } else if (targetRow === (continueWatchingItems.length > 0 ? 2 : 1)) {
         targetIdx = Math.min(focusedIndicesRef.current.row2, displayNewVodItems.length - 1);
       } else {
         targetIdx = Math.min(focusedIndicesRef.current.row3, 6);
@@ -152,6 +204,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     }
   }, [
     focusNonce,
+    activeChannelId,
     displayLiveChannels,
     continueWatchingItems.length,
     displayNewVodItems.length,
@@ -159,7 +212,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   ]);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    setChannels((curr) => {
+      if (curr.length === 0) {
+        setLoading(true);
+      }
+      return curr;
+    });
     setError(null);
     try {
       const [channelsRes, continueRes, newVodRes] = await Promise.allSettled([
@@ -169,11 +227,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
       ]);
       const liveChannels = channelsRes.status === 'fulfilled' ? channelsRes.value : [];
       const continueList = continueRes.status === 'fulfilled' ? continueRes.value : [];
-      const newVod = newVodRes.status === 'fulfilled' ? newVodRes.value : [];
+      const newVodList = newVodRes.status === 'fulfilled' ? newVodRes.value : [];
 
-      setChannels(liveChannels);
+      if (liveChannels.length > 0) {
+        setChannels(liveChannels);
+        setFocusedChannelId((prev) => prev || liveChannels[0].id);
+        setFocusedChannel((prev) => prev || liveChannels[0]);
+      }
       setContinueWatchingItems(continueList);
-      setNewVodItems(newVod);
+      if (newVodList.length > 0) {
+        setNewVodItems(newVodList);
+      }
 
       if (liveChannels.length === 0 && channelsRes.status === 'rejected') {
         setError(channelsRes.reason?.message || 'שגיאה בטעינת נתונים');
@@ -181,7 +245,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     } catch (err: any) {
       setError(err?.message || 'שגיאה בטעינת נתונים');
     } finally {
-      setLoading(false);
+      setTimeout(() => {
+        setLoading(false);
+        if (!initialFocusDoneRef.current) {
+          setCardFocusTarget({ row: 0, index: 0, nonce: Date.now() });
+        }
+      }, 150);
     }
   }, []);
 
@@ -239,49 +308,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     }
   }, [channels, focusedChannelId, activeChannelId]);
 
-  const initialFocusDoneRef = useRef(false);
-
-  // Set initial focus & preview on first channel after data loads (ONCE)
-  useEffect(() => {
-    if (initialFocusDoneRef.current) return;
-    if (displayLiveChannels.length > 0) {
-      initialFocusDoneRef.current = true;
-      const initialChannel =
-        (activeChannelId && displayLiveChannels.find((c) => c.id === activeChannelId)) ||
-        displayLiveChannels[0];
-
-      setFocusedChannel(initialChannel);
-      setFocusedChannelId(initialChannel.id);
-      const initialIdx = displayLiveChannels.findIndex((c) => c.id === initialChannel.id);
-      if (initialIdx !== -1) {
-        setFocusedLiveIndex(initialIdx);
-      }
-
-      const isAlreadyPlaying =
-        (activeChannelId === initialChannel.id ||
-          (activeStreamUrl && initialChannel.sources.some((s) => s.url === activeStreamUrl)) ||
-          (activeStreamUrl && initialChannel.streamUrl === activeStreamUrl)) &&
-        isVideoReady;
-
-      if (!isAlreadyPlaying) {
-        setShowArtwork(true);
-        if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-        previewTimerRef.current = setTimeout(async () => {
-          let stream = initialChannel.streamUrl;
-          if (!stream && initialChannel.rawChannel) {
-            const resolved = await api.getLiveChannelStream(initialChannel.rawChannel);
-            if (resolved) stream = resolved;
-          }
-          onMediaChange?.(stream, initialChannel.id);
-        }, 2000);
-      } else {
-        if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-        setShowArtwork(false);
-      }
-    }
-  }, [displayLiveChannels, activeChannelId, activeStreamUrl, isVideoReady, onMediaChange]);
-
-  // Channel focus handler: instant artwork, 2000ms timer before video plays
+  // Channel focus handler: instant artwork, instant player teardown, preview timer before video plays
   const handleChannelFocus = useCallback((channel: TvChannel, index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
@@ -297,31 +324,64 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     setFocusedRecent(null);
     setFocusedChannel(channel);
 
-    const isAlreadyPlaying =
-      (activeChannelId === channel.id ||
-        (activeStreamUrl && channel.sources.some((s) => s.url === activeStreamUrl)) ||
-        (activeStreamUrl && channel.streamUrl === activeStreamUrl)) &&
-      isVideoReady;
+    const isCurrentChannel =
+      (focusedChannelId === channel.id || activeChannelId === channel.id) &&
+      (Boolean(activeStreamUrl) || previewTimerRef.current !== null);
 
-    if (!isAlreadyPlaying) {
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-      onMediaChange?.(null, null);
-      setShowArtwork(true);
-      previewTimerRef.current = setTimeout(async () => {
-        let stream = channel.streamUrl;
-        if (!stream && channel.rawChannel) {
-          const resolved = await api.getLiveChannelStream(channel.rawChannel);
-          if (resolved) stream = resolved;
-        }
-        onMediaChange?.(stream, channel.id);
-      }, 2000);
-    } else {
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-      setShowArtwork(false);
+    if (isCurrentChannel) {
+      if (isVideoReady) {
+        setShowArtwork(false);
+      }
+      return;
     }
+
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+
+    // Immediately stop previous audio and video surface so no previous stream leaks
+    onMediaChange?.(null, null);
+    setShowArtwork(true);
+    previewTimerRef.current = setTimeout(async () => {
+      let stream = channel.streamUrl;
+      if (!stream && channel.rawChannel) {
+        const resolved = await api.getLiveChannelStream(channel.rawChannel);
+        if (resolved) stream = resolved;
+      }
+      onMediaChange?.(stream, channel.id);
+    }, 1500);
   }, [activeChannelId, activeStreamUrl, isVideoReady, onMediaChange, scrollToRow]);
 
-  // Continue Watching focus handler
+  // Set initial focus & preview on first channel after data loads (ONCE)
+  useEffect(() => {
+    if (displayLiveChannels.length > 0 && !initialFocusDoneRef.current) {
+      initialFocusDoneRef.current = true;
+      const initialChannel =
+        (activeChannelId && displayLiveChannels.find((c) => c.id === activeChannelId)) ||
+        displayLiveChannels[0];
+
+      const initialIdx = displayLiveChannels.findIndex((c) => c.id === initialChannel.id);
+      const effectiveIdx = initialIdx !== -1 ? initialIdx : 0;
+
+      setFocusedChannel(initialChannel);
+      setFocusedChannelId(initialChannel.id);
+      setFocusedLiveIndex(effectiveIdx);
+
+      // Explicitly schedule card focus target with Date.now() nonce so Card 0 takes native Android focus
+      setTimeout(() => {
+        setCardFocusTarget({
+          row: 0,
+          index: effectiveIdx,
+          nonce: Date.now(),
+        });
+      }, 50);
+
+      handleChannelFocus(initialChannel, effectiveIdx);
+    }
+  }, [displayLiveChannels, activeChannelId, handleChannelFocus]);
+
+  // Continue Watching focus handler: instant artwork, immediate player teardown, preview playback
   const handleContinueFocus = useCallback((item: ContinueWatchingItem, index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
@@ -335,18 +395,38 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     }
 
     setFocusedRecent(item);
+    setFocusedChannel(null);
     setFocusedChannelId(null);
-    setShowArtwork(true);
+
+    const isCurrentVod =
+      !activeChannelId &&
+      (focusedContinueId === item.episodeId || focusedRecent?.episodeId === item.episodeId) &&
+      (Boolean(activeStreamUrl) || previewTimerRef.current !== null);
+
+    if (isCurrentVod) {
+      if (isVideoReady) {
+        setShowArtwork(false);
+      }
+      return;
+    }
+
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+
+    // Immediately stop previous audio and video surface so no previous stream leaks
     onMediaChange?.(null, null);
-
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    setShowArtwork(true);
     previewTimerRef.current = setTimeout(async () => {
-      const resolved = await api.getVodEpisodeStream(item);
-      onMediaChange?.(resolved || null);
-    }, 2000);
-  }, [onMediaChange, scrollToRow]);
+      const stream = await api.getVodEpisodeStream(item);
+      if (stream) {
+        onMediaChange?.(stream, null);
+      }
+    }, 1500);
+  }, [activeStreamUrl, isVideoReady, activeChannelId, focusedContinueId, focusedRecent?.episodeId, onMediaChange, scrollToRow]);
 
-  // New VOD focus handler
+  // New VOD focus handler: instant artwork, immediate player teardown, preview playback
   const handleNewVodFocus = useCallback((item: VodRecentItem, index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
@@ -361,18 +441,38 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     }
 
     setFocusedRecent(item);
+    setFocusedChannel(null);
     setFocusedChannelId(null);
-    setShowArtwork(true);
+
+    const isCurrentVod =
+      !activeChannelId &&
+      (focusedNewVodId === item.episodeId || focusedRecent?.episodeId === item.episodeId) &&
+      (Boolean(activeStreamUrl) || previewTimerRef.current !== null);
+
+    if (isCurrentVod) {
+      if (isVideoReady) {
+        setShowArtwork(false);
+      }
+      return;
+    }
+
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+
+    // Immediately stop previous audio and video surface so no previous stream leaks
     onMediaChange?.(null, null);
-
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    setShowArtwork(true);
     previewTimerRef.current = setTimeout(async () => {
-      const resolved = await api.getVodEpisodeStream(item);
-      onMediaChange?.(resolved || null);
-    }, 2000);
-  }, [continueWatchingItems.length, onMediaChange, scrollToRow]);
+      const stream = await api.getVodEpisodeStream(item);
+      if (stream) {
+        onMediaChange?.(stream, null);
+      }
+    }, 1500);
+  }, [continueWatchingItems.length, activeStreamUrl, isVideoReady, activeChannelId, focusedRecent?.episodeId, onMediaChange, scrollToRow]);
 
-  // Shortcuts focus handler
+  // Shortcuts focus handler: instant artwork, immediate player teardown
   const handleShortcutFocus = useCallback((index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
@@ -386,9 +486,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
       scrollToRow(shortcutRow);
     }
 
-    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    onMediaChange?.(null, null);
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+
     setShowArtwork(true);
+    onMediaChange?.(null, null);
   }, [continueWatchingItems.length, onMediaChange, scrollToRow]);
 
   // TV remote key listener for D-pad navigation
@@ -397,9 +501,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
 
     const sub = DeviceEventEmitter.addListener(
       'onTvRemoteKey',
-      ({ keyCode }: { keyCode: number }) => {
-        if (isPlayerActive) return;
-        console.log('[DPAD]', keyCode, 'row:', focusedRowRef.current, 'isHero:', isHeroFocusedRef.current);
+      ({ keyCode, repeatCount = 0 }: { keyCode: number; repeatCount?: number }) => {
+        if (isPlayerActive || isSideNavActiveRef.current) return;
+
+        const getCurrentColumn = (row: number): number => {
+          if (row === 0) return focusedLiveIndex;
+          if (continueWatchingItems.length > 0) {
+            if (row === 1) return focusedContinueIndex;
+            if (row === 2) return focusedNewVodIndex;
+            return focusedShortcutIndex;
+          } else {
+            if (row === 1) return focusedNewVodIndex;
+            return focusedShortcutIndex;
+          }
+        };
+
+        const getRowMaxIndex = (row: number): number => {
+          if (row === 0) return Math.max(0, displayLiveChannels.length - 1);
+          if (continueWatchingItems.length > 0) {
+            if (row === 1) return Math.max(0, continueWatchingItems.length - 1);
+            if (row === 2) return Math.max(0, displayNewVodItems.length - 1);
+            return 6;
+          } else {
+            if (row === 1) return Math.max(0, displayNewVodItems.length - 1);
+            return 6;
+          }
+        };
 
         // DPAD_UP = 19
         if (keyCode === 19) {
@@ -408,6 +535,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             return;
           }
 
+          const now = Date.now();
+          const timeSinceLastNav = now - lastVerticalNavTimeRef.current;
+          if (repeatCount > 0 && timeSinceLastNav < 220) return;
+          if (timeSinceLastNav < 140) return;
+          lastVerticalNavTimeRef.current = now;
+
           const currentRow = focusedRowRef.current;
           if (currentRow === 0) {
             // Requirement 1: Moving UP from Row 0 moves UP to Fullscreen icon
@@ -415,7 +548,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             setHeroFocusButton('fullscreen');
             setHeroFocusNonce(Date.now());
           } else {
-            // Requirement 3: Moving UP between sections
+            // Moving UP between sections: always stay in the same column directly above
             let targetRow = 0;
             if (currentRow === 1) {
               targetRow = 0;
@@ -432,14 +565,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             }
 
             focusedRowRef.current = targetRow;
-            const targetIdx =
-              targetRow === 0
-                ? Math.min(focusedIndicesRef.current.row0, displayLiveChannels.length - 1)
-                : targetRow === 1
-                ? Math.min(focusedIndicesRef.current.row1, continueWatchingItems.length - 1)
-                : targetRow === 2
-                ? Math.min(focusedIndicesRef.current.row2, displayNewVodItems.length - 1)
-                : Math.min(focusedIndicesRef.current.row3, 6);
+            const currentCol = getCurrentColumn(currentRow);
+            const targetIdx = Math.min(currentCol, getRowMaxIndex(targetRow));
 
             setCardFocusTarget({
               row: targetRow,
@@ -451,14 +578,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
         }
         // DPAD_DOWN = 20
         else if (keyCode === 20) {
+          const now = Date.now();
+          const timeSinceLastNav = now - lastVerticalNavTimeRef.current;
+          if (repeatCount > 0 && timeSinceLastNav < 220) return;
+          if (timeSinceLastNav < 140) return;
+          lastVerticalNavTimeRef.current = now;
+
           if (isHeroFocusedRef.current) {
-            // From Hero buttons, move DOWN back to Row 0
+            // From Hero buttons, move DOWN back to Row 0 directly below
             isHeroFocusedRef.current = false;
             setHeroFocusButton(null);
+            setHeroFocusNonce(0);
             focusedRowRef.current = 0;
             const targetIdx = Math.min(
-              focusedIndicesRef.current.row0,
-              displayLiveChannels.length - 1
+              focusedLiveIndex,
+              Math.max(0, displayLiveChannels.length - 1)
             );
             setCardFocusTarget({
               row: 0,
@@ -469,16 +603,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             return;
           }
 
-          // Moving DOWN between sections
+          // Moving DOWN between sections: always stay in the same column directly below
           const currentRow = focusedRowRef.current;
           const totalRows = continueWatchingItems.length > 0 ? 4 : 3;
           const maxRowIndex = totalRows - 1;
 
           if (currentRow >= maxRowIndex) {
             // Bottom boundary: stay on current row/card, do not jump
+            const currentShortcutsIdx = Math.min(focusedShortcutIndex, 6);
             setCardFocusTarget({
               row: currentRow,
-              index: focusedIndicesRef.current.row3,
+              index: currentShortcutsIdx,
               nonce: Date.now(),
             });
             return;
@@ -486,13 +621,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
 
           let targetRow = currentRow + 1;
           focusedRowRef.current = targetRow;
-
-          const targetIdx =
-            targetRow === 1
-              ? Math.min(focusedIndicesRef.current.row1, continueWatchingItems.length - 1)
-              : targetRow === 2
-              ? Math.min(focusedIndicesRef.current.row2, displayNewVodItems.length - 1)
-              : Math.min(focusedIndicesRef.current.row3, 6);
+          const currentCol = getCurrentColumn(currentRow);
+          const targetIdx = Math.min(currentCol, getRowMaxIndex(targetRow));
 
           setCardFocusTarget({
             row: targetRow,
@@ -503,23 +633,33 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
         }
         // DPAD_RIGHT = 22
         else if (keyCode === 22) {
-          if (isHeroFocusedRef.current) {
-            if (heroFocusButton === 'fullscreen' && onToggleMute) {
-              setHeroFocusButton('mute');
-              setHeroFocusNonce(Date.now());
-            }
+          // In hero buttons, native Android moves focus between Fullscreen and Mute naturally.
+          // In rows, lockRight stops at the end. Check right boundary to prevent state desync:
+          const currentRow = focusedRowRef.current;
+          let isAtEnd = false;
+          let maxIdx = 0;
+          if (currentRow === 0) {
+            maxIdx = displayLiveChannels.length - 1;
+            isAtEnd = focusedLiveIndex >= maxIdx;
+          } else if (currentRow === 1 && continueWatchingItems.length > 0) {
+            maxIdx = continueWatchingItems.length - 1;
+            isAtEnd = focusedContinueIndex >= maxIdx;
+          } else if (currentRow === (continueWatchingItems.length > 0 ? 2 : 1)) {
+            maxIdx = displayNewVodItems.length - 1;
+            isAtEnd = focusedNewVodIndex >= maxIdx;
+          } else {
+            maxIdx = 6;
+            isAtEnd = focusedShortcutIndex >= maxIdx;
+          }
+
+          if (isAtEnd) {
             return;
           }
-          // Native Android handles rightward navigation within the row.
-          // At the last card, lockRight keeps focus securely on that card.
         }
         // DPAD_LEFT = 21
         else if (keyCode === 21) {
           if (isHeroFocusedRef.current) {
-            if (heroFocusButton === 'mute') {
-              setHeroFocusButton('fullscreen');
-              setHeroFocusNonce(Date.now());
-            } else if (heroFocusButton === 'fullscreen') {
+            if (heroFocusButton === 'fullscreen') {
               // Left from fullscreen hero button moves to side navigation rail
               onRequestSideNavFocus?.(AppDestination.HOME);
             }
@@ -567,7 +707,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
 
   // Active item for Hero & Artwork
   const isRecentFocused = !!focusedRecent;
-  const activeChannel = focusedChannel || displayLiveChannels[0] || null;
+  const activeChannel = focusedChannel || (isRecentFocused ? null : displayLiveChannels[0]) || null;
   const activeProgram = activeChannel?.currentProgram;
 
   const heroTitle = isRecentFocused
@@ -575,7 +715,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     : activeProgram?.title || activeChannel?.name || 'טלוויזיה חיה';
 
   const heroSubtitle = isRecentFocused
-    ? focusedRecent.seriesTitle || focusedRecent.channelName || 'המשך צפייה'
+    ? focusedRecent.seriesTitle || focusedRecent.channelName || (focusedRowRef.current === 1 ? 'המשך צפייה' : 'VOD')
     : activeChannel?.name || 'שידור חי';
 
   const heroDescription = isRecentFocused
@@ -589,7 +729,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     : activeChannel?.logoUrl;
 
   const backgroundImageUrl = isRecentFocused
-    ? (focusedRecent.imageUrl ? resolveImageUrl(focusedRecent.imageUrl, true) : null)
+    ? (focusedRecent.imageUrl
+        ? resolveImageUrl(focusedRecent.imageUrl, true)
+        : focusedRecent.rawItem?.backdropUrl
+        ? resolveImageUrl(focusedRecent.rawItem.backdropUrl, true)
+        : null)
     : activeProgram?.backdropUrl || (activeProgram?.imageUrl ? resolveImageUrl(activeProgram.imageUrl, true) : activeChannel?.logoUrl);
 
   const handleOpenFullScreen = useCallback(() => {
@@ -610,6 +754,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     onPlayRecentVod?.(item);
   }, [onPlayRecentVod]);
+
+  if (loading || displayLiveChannels.length === 0) {
+    return (
+      <View style={styles.fullScreenLoading}>
+        <TvFocusable
+          hasTVPreferredFocus={true}
+          focusable={true}
+          scaleOnFocus={false}
+          style={styles.loadingFocusContainer}
+          focusedStyle={styles.loadingFocusContainer}
+        >
+          <ActivityIndicator size="large" color="#25D4DE" />
+        </TvFocusable>
+      </View>
+    );
+  }
+
+  if (error && displayLiveChannels.length === 0) {
+    return (
+      <View style={styles.fullScreenLoading}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <TvScreenLayout
@@ -635,28 +803,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             isHeroFocusedRef.current = true;
             setHeroFocusButton(btn);
           }}
-          onBlurAction={() => {
-            isHeroFocusedRef.current = false;
-          }}
         />
       }
     >
-      {loading && displayLiveChannels.length === 0 ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#E2E8F0" />
-        </View>
-      ) : error && displayLiveChannels.length === 0 ? (
-        <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : (
-        <ScrollView
-          ref={verticalScrollRef}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
-          scrollsChildToFocus={false}
-          contentContainerStyle={styles.rowsContent}
-        >
+      <ScrollView
+        ref={verticalScrollRef}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews={false}
+        scrollsChildToFocus={false}
+        contentContainerStyle={styles.rowsContent}
+      >
           {/* Row 1: ערוצים חיים (Exactly 10 items, prioritized) */}
           {displayLiveChannels.length > 0 && (
             <HomeRow
@@ -667,6 +823,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             >
               {displayLiveChannels.map((channel, index) => {
                 const isTargeted = cardFocusTarget?.row === 0 && cardFocusTarget?.index === index;
+                const isCard0 = index === 0;
 
                 return (
                   <HomeLiveCard
@@ -675,11 +832,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
                     program={channel.currentProgram}
                     onPress={() => handlePlayLiveCard(channel)}
                     onFocus={() => handleChannelFocus(channel, index)}
-                    focusNonce={isTargeted ? cardFocusTarget!.nonce : 0}
+                    focusNonce={isTargeted ? cardFocusTarget!.nonce : (!hasHadInitialFocus && isCard0 ? 1 : 0)}
                     isFirstCard={index === 0}
                     isLastCard={index === displayLiveChannels.length - 1}
                     hasPreferredFocus={
-                      isTargeted || (!hasHadInitialFocus && index === 0)
+                      isTargeted || (!hasHadInitialFocus && isCard0)
                     }
                   />
                 );
@@ -841,7 +998,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
             })()}
           </HomeRow>
         </ScrollView>
-      )}
     </TvScreenLayout>
   );
 });
@@ -860,6 +1016,19 @@ const styles = StyleSheet.create({
     color: '#F04438',
     fontSize: 16,
     textAlign: 'center',
+  },
+  fullScreenLoading: {
+    flex: 1,
+    backgroundColor: '#080A0C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingFocusContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
 });
 

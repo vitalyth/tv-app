@@ -23,6 +23,7 @@ interface TvFocusableProps {
   focusedStyle?: StyleProp<ViewStyle>;
   scaleOnFocus?: boolean;
   activeScale?: number;
+  focusable?: boolean;
   testID?: string;
 }
 
@@ -41,6 +42,7 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
   focusedStyle,
   scaleOnFocus = false,
   activeScale = 1.0,
+  focusable = true,
   testID,
 }) => {
   const [isFocused, setIsFocused] = React.useState(false);
@@ -85,14 +87,22 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
   useEffect(() => {
     if (!mountedRef.current) {
       mountedRef.current = true;
-      if (hasTVPreferredFocus && focusNonce === 0) {
-        const timer = setTimeout(() => {
+      if (hasTVPreferredFocus) {
+        const doFocus = () => {
           try {
             const handle = findNodeHandle(pressableRef.current);
             if (handle) vodProgressService.requestViewFocus(handle);
           } catch {}
-        }, 60);
-        return () => clearTimeout(timer);
+        };
+        doFocus();
+        const t1 = setTimeout(doFocus, 40);
+        const t2 = setTimeout(doFocus, 120);
+        const t3 = setTimeout(doFocus, 250);
+        return () => {
+          clearTimeout(t1);
+          clearTimeout(t2);
+          clearTimeout(t3);
+        };
       }
     }
 
@@ -108,7 +118,7 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
       };
 
       requestFocus();
-      const timer = setTimeout(requestFocus, 30);
+      const timer = setTimeout(requestFocus, 40);
       return () => clearTimeout(timer);
     }
   }, [hasTVPreferredFocus, focusNonce]);
@@ -116,10 +126,11 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
   return (
     <Pressable
       ref={pressableRef}
+      focusable={focusable}
       onPress={onPress}
       onFocus={handleFocus}
       onBlur={handleBlur}
-      hasTVPreferredFocus={false}
+      hasTVPreferredFocus={hasTVPreferredFocus}
       testID={testID}
       style={(state: any) => {
         const focused = isFocused || !!state.focused;

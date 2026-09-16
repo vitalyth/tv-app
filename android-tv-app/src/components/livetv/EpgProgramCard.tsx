@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { TvProgram } from '../../types/guide';
 import ProgressBar from '../common/ProgressBar';
+import { TvFocusable } from '../common/TvFocusable';
 
 interface EpgProgramCardProps {
   program: TvProgram;
@@ -10,6 +11,8 @@ interface EpgProgramCardProps {
   onPress: (program: TvProgram) => void;
   onFocus?: (program: TvProgram) => void;
   hasPreferredFocus?: boolean;
+  focusNonce?: number;
+  lockRight?: boolean;
 }
 
 export const EpgProgramCard: React.FC<EpgProgramCardProps> = React.memo(({
@@ -19,6 +22,8 @@ export const EpgProgramCard: React.FC<EpgProgramCardProps> = React.memo(({
   onPress,
   onFocus,
   hasPreferredFocus = false,
+  focusNonce = 0,
+  lockRight = false,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
 
@@ -30,11 +35,15 @@ export const EpgProgramCard: React.FC<EpgProgramCardProps> = React.memo(({
   const isLive = program.isLive;
 
   return (
-    <Pressable
+    <TvFocusable
       hasTVPreferredFocus={hasPreferredFocus}
+      focusNonce={focusNonce}
+      lockLeft={false}
+      lockRight={lockRight}
       onFocus={handleFocus}
       onBlur={() => setIsFocused(false)}
       onPress={() => onPress(program)}
+      scaleOnFocus={false}
       style={[
         styles.card,
         { width: Math.max(width, 100) },
@@ -70,7 +79,7 @@ export const EpgProgramCard: React.FC<EpgProgramCardProps> = React.memo(({
           <ProgressBar progress={program.progress} height={3} />
         </View>
       )}
-    </Pressable>
+    </TvFocusable>
   );
 });
 

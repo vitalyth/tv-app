@@ -28,7 +28,19 @@ class VodProgressModule(private val reactContext: ReactApplicationContext) :
                 return
             }
             val pos = positionMs.toLong()
-            val dur = durationMs.toLong()
+            var dur = durationMs.toLong()
+
+            // If incoming durationMs <= 0L, preserve previous valid durationMs if available
+            val existingJsonStr = prefs.getString("ep_$episodeId", null)
+            if (dur <= 0L && existingJsonStr != null) {
+                try {
+                    val prevDur = JSONObject(existingJsonStr).optLong("durationMs", 0L)
+                    if (prevDur > 0L) {
+                        dur = prevDur
+                    }
+                } catch (_: Exception) {}
+            }
+
             val ratio = if (dur > 0L) pos.toFloat() / dur.toFloat() else 0f
             val isCompleted = (dur > 0L && ratio >= 0.92f) || (dur > 0L && (dur - pos) <= 25_000L)
 

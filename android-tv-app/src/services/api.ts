@@ -2,6 +2,7 @@ import { GuideData, TvChannel, TvProgram, TvStreamSource } from '../types/guide'
 import {
   VOD_PROVIDERS,
   VOD_PROVIDER_LIST,
+  VodProviderInfo,
   VodEpisode,
   VodSeason,
   VodSeries,
@@ -209,9 +210,22 @@ export const getProviderLogoUrl = (logoPath: string): string => {
 
 // In-memory caching for zero-latency screen switching
 let cachedChannels: { data: TvChannel[]; timestamp: number } | null = null;
+let cachedGuideData: { data: GuideData; timestamp: number } | null = null;
 let cachedRecent: { data: VodRecentItem[]; timestamp: number } | null = null;
+let cachedNewVod: { data: VodRecentItem[]; timestamp: number } | null = null;
 const cachedSeries: Map<string, { data: VodSeries[]; timestamp: number }> = new Map();
 const CACHE_TTL_MS = 120_000; // 2 minutes
+
+const normalizeVodProvider = (providerId?: string): VodProviderInfo => {
+  if (!providerId) return VOD_PROVIDER_LIST[0];
+  const p = providerId.toLowerCase();
+  if (p.includes('kan') || p.includes('11')) return VOD_PROVIDERS['kan-vod'];
+  if (p.includes('keshet') || p.includes('mako') || p.includes('12')) return VOD_PROVIDERS['keshet-vod'];
+  if (p.includes('reshet') || p.includes('13')) return VOD_PROVIDERS['reshet-vod'];
+  if (p.includes('c14') || p.includes('14')) return VOD_PROVIDERS['c14-vod'];
+  if (p.includes('i24') || p.includes('15')) return VOD_PROVIDERS['i24-vod'];
+  return VOD_PROVIDER_LIST.find((item) => item.id === providerId) || VOD_PROVIDER_LIST[0];
+};
 
 export const api = {
   getLiveChannels: async (forceRefresh = false): Promise<TvChannel[]> => {
@@ -369,8 +383,17 @@ export const api = {
     return unifiedChannels;
   },
 
-  getGuideData: async (): Promise<GuideData> => {
-    const channels = await api.getLiveChannels();
+  getCachedGuideData: (): GuideData | null => {
+    return cachedGuideData?.data || null;
+  },
+
+  getGuideData: async (forceRefresh = false): Promise<GuideData> => {
+    const now = Date.now();
+    if (!forceRefresh && cachedGuideData && now - cachedGuideData.timestamp < CACHE_TTL_MS) {
+      return cachedGuideData.data;
+    }
+
+    const channels = await api.getLiveChannels(forceRefresh);
     const nowSec = Math.floor(Date.now() / 1000);
     const startSec = Math.floor((nowSec - 3600) / 1800) * 1800;
     const endSec = startSec + 18000; // 5 hour window
@@ -405,12 +428,14 @@ export const api = {
       // EPG fallback to inline channel programs
     }
 
-    return {
+    const result: GuideData = {
       channels,
       programsByChannel,
       guideStartSeconds: startSec,
       guideEndSeconds: endSec,
     };
+    cachedGuideData = { data: result, timestamp: now };
+    return result;
   },
 
   getVodSeries: async (providerId: string, category = 'הכל', query = '', forceRefresh = false): Promise<VodSeries[]> => {
@@ -421,7 +446,7 @@ export const api = {
       return cached.data;
     }
 
-    const provider = VOD_PROVIDER_LIST.find((p) => p.id === providerId) || VOD_PROVIDER_LIST[0];
+    const provider = normalizeVodProvider(providerId);
     const qParams: string[] = ['limit=60', 'offset=0'];
     if (query.trim()) qParams.push(`q=${encodeURIComponent(query.trim())}`);
     if (category && category !== 'הכל') qParams.push(`category=${encodeURIComponent(category.trim())}`);
@@ -444,7 +469,7 @@ export const api = {
   },
 
   getVodSeriesDetails: async (providerId: string, programId: string): Promise<VodSeriesDetails> => {
-    const provider = VOD_PROVIDER_LIST.find((p) => p.id === providerId) || VOD_PROVIDER_LIST[0];
+    const provider = normalizeVodProvider(providerId);
     const res = await fetchJson<any>(`/${provider.endpoint}/${encodeURIComponent(programId)}`);
 
     const rawSeries = res.series || {};
@@ -550,26 +575,22 @@ export const api = {
     const isC14 = p.includes('c14') || p.includes('14') || p.includes('עכשיו');
     const isI24 = p.includes('i24');
 
-    const requiresVpn =
-      isKan ||
-      isReshet ||
-      cleanUrl.includes('cdn-redge') ||
-      cleanUrl.includes('redge.media') ||
-      cleanUrl.includes('kancdn');
-
     let referer = 'https://www.kan.org.il/';
+    let useVpnProxy = false;
+
     if (isKeshet) {
       referer = 'https://www.mako.co.il/';
     } else if (isReshet) {
       referer = 'https://13tv.co.il/';
+      useVpnProxy = true;
     } else if (isC14) {
-      referer = 'https://www.c14.co.il/';
+      referer = 'https://tv.c14.co.il/';
     } else if (isI24) {
       referer = 'https://www.i24news.tv/';
     }
 
-    const proxyEndpoint = requiresVpn ? '/v/proxy' : '/proxy';
-    const vpnParam = requiresVpn ? '&vpn=true' : '';
+    const proxyEndpoint = useVpnProxy ? '/v/proxy' : '/proxy';
+    const vpnParam = useVpnProxy ? '&vpn=true' : '';
     const encodedUrl = encodeURIComponent(cleanUrl);
     const encodedReferer = encodeURIComponent(referer);
 
@@ -584,58 +605,19 @@ export const api = {
   ): Promise<string | null> => {
     let rawStream: string | null = null;
 
-    // 1. streamEndpoint
+    // 0. Direct stream URL fast-path (.m3u8, .mpd, .livx, .mp4)
     if (streamEndpoint && streamEndpoint.trim().length > 0) {
-      const cleanEndpoint = streamEndpoint.trim();
-      const url =
-        cleanEndpoint.startsWith('http://') || cleanEndpoint.startsWith('https://')
-          ? cleanEndpoint
-          : cleanEndpoint.startsWith('/api/')
-            ? `${activeBaseUrl}${cleanEndpoint.replace(/^\/api/, '')}`
-            : cleanEndpoint.startsWith('/')
-              ? `${activeBaseUrl}${cleanEndpoint}`
-              : `${activeBaseUrl}/${cleanEndpoint}`;
-
-      try {
-        const res = await fetchWithTimeout(url, {}, 7000);
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
-            rawStream = data.stream.trim();
-          }
-        }
-      } catch {}
-    }
-
-    // 2. Direct specialized stream endpoint if episodeId available
-    if (!rawStream && episodeId) {
-      const p = provider.toLowerCase();
-      if (p.includes('kan') || p.includes('11') || p.includes('כאן')) {
-        try {
-          const epUrl = `${activeBaseUrl}/kan-vod/stream?episode_id=${encodeURIComponent(episodeId)}`;
-          const res = await fetchWithTimeout(epUrl, {}, 7000);
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
-              rawStream = data.stream.trim();
-            }
-          }
-        } catch {}
-      } else if (p.includes('reshet') || p.includes('13')) {
-        try {
-          const epUrl = `${activeBaseUrl}/reshet-vod/stream?episode_id=${encodeURIComponent(episodeId)}`;
-          const res = await fetchWithTimeout(epUrl, {}, 7000);
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
-              rawStream = data.stream.trim();
-            }
-          }
-        } catch {}
+      const ep = streamEndpoint.trim();
+      if (
+        ep.includes('.m3u8') ||
+        ep.includes('.mpd') ||
+        ep.includes('.livx') ||
+        ep.includes('.mp4')
+      ) {
+        rawStream = ep;
       }
     }
 
-    // 3. Fallback direct stream URL
     if (!rawStream && fallbackPlayUrl && fallbackPlayUrl.trim().length > 0) {
       const fb = fallbackPlayUrl.trim();
       if (
@@ -648,17 +630,118 @@ export const api = {
       }
     }
 
-    // 4. Fallback /vod_stream POST
+    // 1. streamEndpoint as an API endpoint (only if NOT already a stream URL)
+    if (!rawStream && streamEndpoint && streamEndpoint.trim().length > 0) {
+      const cleanEndpoint = streamEndpoint.trim();
+      const url =
+        cleanEndpoint.startsWith('http://') || cleanEndpoint.startsWith('https://')
+          ? cleanEndpoint
+          : cleanEndpoint.startsWith('/api/')
+            ? `${activeBaseUrl}${cleanEndpoint.replace(/^\/api/, '')}`
+            : cleanEndpoint.startsWith('/')
+              ? `${activeBaseUrl}${cleanEndpoint}`
+              : `${activeBaseUrl}/${cleanEndpoint}`;
+
+      try {
+        const res = await fetchWithTimeout(url, {}, 8000);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
+            rawStream = data.stream.trim();
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Direct specialized stream endpoint if episodeId available
     if (!rawStream && episodeId) {
+      const cleanEpId = episodeId.replace(
+        /^(kan-vod:|keshet-vod:|reshet-vod:|c14-vod:|i24-vod:|kan_|mako_|keshet_|reshet_|c14_|i24_)/i,
+        ''
+      );
+      const effectiveEpId = cleanEpId || episodeId;
+      const p = (provider || '').toLowerCase();
+
+      if (p.includes('reshet') || p.includes('13') || p.includes('רשת')) {
+        try {
+          const epUrl = `${activeBaseUrl}/reshet-vod/stream?episode_id=${encodeURIComponent(effectiveEpId)}`;
+          const res = await fetchWithTimeout(epUrl, {}, 8000);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
+              rawStream = data.stream.trim();
+            }
+          }
+        } catch {}
+      } else if (p.includes('keshet') || p.includes('mako') || p.includes('12') || p.includes('קשת')) {
+        try {
+          const epUrl = `${activeBaseUrl}/keshet-vod/stream?episode_id=${encodeURIComponent(effectiveEpId)}`;
+          const res = await fetchWithTimeout(epUrl, {}, 8000);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
+              rawStream = data.stream.trim();
+            }
+          }
+        } catch {}
+      } else if (p.includes('c14') || p.includes('14') || p.includes('עכשיו')) {
+        try {
+          const epUrl = `${activeBaseUrl}/c14-vod/stream?episode_id=${encodeURIComponent(effectiveEpId)}`;
+          const res = await fetchWithTimeout(epUrl, {}, 8000);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
+              rawStream = data.stream.trim();
+            }
+          }
+        } catch {}
+      } else if (p.includes('i24') || p.includes('15')) {
+        try {
+          const epUrl = `${activeBaseUrl}/i24-vod/stream?episode_id=${encodeURIComponent(effectiveEpId)}`;
+          const res = await fetchWithTimeout(epUrl, {}, 8000);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
+              rawStream = data.stream.trim();
+            }
+          }
+        } catch {}
+      } else if (p.includes('kan') || p.includes('11') || p.includes('כאן')) {
+        try {
+          const epUrl = `${activeBaseUrl}/kan-vod/stream?episode_id=${encodeURIComponent(effectiveEpId)}`;
+          const res = await fetchWithTimeout(epUrl, {}, 8000);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
+              rawStream = data.stream.trim();
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 3. Fallback /vod_stream POST (matching Next.js channelService.getVodStream)
+    if (!rawStream && episodeId) {
+      const cleanEpId = episodeId.replace(
+        /^(kan-vod:|keshet-vod:|reshet-vod:|c14-vod:|i24-vod:|kan_|mako_|keshet_|reshet_|c14_|i24_)/i,
+        ''
+      );
+      const effectiveEpId = cleanEpId || episodeId;
       try {
         const res = await fetchWithTimeout(
           `${activeBaseUrl}/vod_stream`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: episodeId, episodeId, provider }),
+            body: JSON.stringify({
+              id: effectiveEpId,
+              episodeId: effectiveEpId,
+              module: provider,
+              url: fallbackPlayUrl || '',
+              streamUrl: fallbackPlayUrl || '',
+            }),
           },
-          7000
+          8000
         );
         if (res.ok) {
           const data = await res.json();
@@ -676,24 +759,187 @@ export const api = {
 
   getVodEpisodeStream: async (item: VodRecentItem): Promise<string | null> => {
     if (!item) return null;
-    const provider =
-      item.rawItem?.provider ||
-      item.channelName ||
-      item.seriesTitle ||
-      (item.rawItem?.module?.includes('kan') ? 'kan-vod' : 'kan-vod');
 
-    return api.resolveEpisodeStream(
-      item.rawItem?.streamEndpoint || item.rawItem?.streamUrl,
-      provider,
-      item.playUrl || item.rawItem?.streamUrl || item.rawItem?.url,
-      item.episodeId || item.rawItem?.id
+    const rawModule = (item.rawItem?.module || item.rawItem?.provider || (item as any)?.module || '').toLowerCase();
+    const rawChanName = (item.channelName || (item as any)?.channelName || '').toLowerCase();
+    const rawSeriesTitle = (item.seriesTitle || (item as any)?.seriesTitle || '').toLowerCase();
+    const rawId = String(item.episodeId || item.rawItem?.id || (item as any)?.id || '').trim();
+
+    // Determine provider key accurately
+    let providerKey = 'kan-vod';
+    if (
+      rawModule.includes('keshet') ||
+      rawModule.includes('mako') ||
+      rawChanName.includes('קשת') ||
+      rawChanName.includes('12') ||
+      rawSeriesTitle.includes('קשת') ||
+      rawId.startsWith('keshet') ||
+      rawId.startsWith('mako')
+    ) {
+      providerKey = 'keshet-vod';
+    } else if (
+      rawModule.includes('reshet') ||
+      rawChanName.includes('רשת') ||
+      rawChanName.includes('13') ||
+      rawSeriesTitle.includes('רשת') ||
+      rawId.startsWith('reshet')
+    ) {
+      providerKey = 'reshet-vod';
+    } else if (
+      rawModule.includes('c14') ||
+      rawChanName.includes('14') ||
+      rawChanName.includes('עכשיו') ||
+      rawId.startsWith('c14')
+    ) {
+      providerKey = 'c14-vod';
+    } else if (
+      rawModule.includes('i24') ||
+      rawChanName.includes('i24') ||
+      rawId.startsWith('i24')
+    ) {
+      providerKey = 'i24-vod';
+    }
+
+    // 0. Fast-path: Check if item already has a direct stream URL (.m3u8, .mpd, .mp4, .livx)
+    const candidateStream =
+      item.rawItem?.streamUrl ||
+      (item as any).streamUrl ||
+      (item as any).url ||
+      (item.rawItem?.url && typeof item.rawItem.url === 'string' && (item.rawItem.url.includes('.m3u8') || item.rawItem.url.includes('.mpd')) ? item.rawItem.url : null) ||
+      (item.playUrl && typeof item.playUrl === 'string' && (item.playUrl.includes('.m3u8') || item.playUrl.includes('.mpd')) ? item.playUrl : null);
+
+    if (
+      candidateStream &&
+      (candidateStream.includes('.m3u8') ||
+        candidateStream.includes('.mpd') ||
+        candidateStream.includes('.mp4') ||
+        candidateStream.includes('.livx'))
+    ) {
+      return api.buildPlaybackStreamUrl(candidateStream, providerKey);
+    }
+
+    // Clean provider prefixes from episode ID
+    const cleanEpisodeId = rawId.replace(
+      /^(kan-vod:|keshet-vod:|reshet-vod:|c14-vod:|i24-vod:|kan_|mako_|keshet_|reshet_|c14_|i24_)/i,
+      ''
     );
+
+    let stream: string | null = null;
+
+    // 1. Direct resolution using resolveEpisodeStream
+    if (cleanEpisodeId || rawId || item.rawItem?.streamEndpoint) {
+      stream = await api.resolveEpisodeStream(
+        item.rawItem?.streamEndpoint || item.rawItem?.streamUrl,
+        providerKey,
+        item.rawItem?.streamUrl || item.rawItem?.url || (item as any).url || item.playUrl,
+        cleanEpisodeId || rawId
+      );
+    }
+
+    // 2. If stream is still null, look up series details to find the episode or first episode
+    const targetSeriesId = item.seriesId || item.rawItem?.programId;
+    if (!stream && targetSeriesId) {
+      try {
+        const details = await api.getVodSeriesDetails(providerKey, targetSeriesId);
+        if (details && details.episodes && details.episodes.length > 0) {
+          const matchedEp = cleanEpisodeId
+            ? details.episodes.find((e) => e.id === cleanEpisodeId || e.id.endsWith(cleanEpisodeId)) || details.episodes[0]
+            : details.episodes[0];
+          if (matchedEp) {
+            stream = await api.resolveEpisodeStream(
+              matchedEp.streamEndpoint,
+              providerKey,
+              matchedEp.playUrl || (matchedEp as any).streamUrl,
+              matchedEp.id
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to resolve series episodes for stream:', err);
+      }
+    }
+
+    // 3. Fallback POST to /vod_stream with raw item payload (matching Next.js channelService.getVodStream)
+    if (!stream && (cleanEpisodeId || rawId)) {
+      try {
+        const payload = {
+          id: cleanEpisodeId || rawId,
+          episodeId: cleanEpisodeId || rawId,
+          module: providerKey,
+          provider: providerKey,
+          ...(item.rawItem || {}),
+        };
+        const res = await fetchWithTimeout(
+          `${activeBaseUrl}/vod_stream`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          },
+          8000
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.stream && typeof data.stream === 'string' && data.stream.trim().length > 0) {
+            stream = api.buildPlaybackStreamUrl(data.stream.trim(), providerKey);
+          }
+        }
+      } catch {}
+    }
+
+    return stream;
   },
 
-  getNewVodContent: async (): Promise<VodRecentItem[]> => {
+  getNewVodContent: async (forceRefresh = false): Promise<VodRecentItem[]> => {
+    const now = Date.now();
+    if (!forceRefresh && cachedNewVod && now - cachedNewVod.timestamp < CACHE_TTL_MS) {
+      return cachedNewVod.data;
+    }
+
     try {
-      const recent = await api.getVodRecent();
-      if (recent.length >= 10) return recent;
+      const recent = await api.getVodRecent(forceRefresh);
+
+      // Check if Reshet 13 is in the recent items; if not, add recent Reshet 13 episodes
+      const hasReshet = recent.some(
+        (it) =>
+          it.channelName?.includes('13') ||
+          it.channelName?.includes('רשת') ||
+          it.seriesTitle?.includes('13') ||
+          it.seriesTitle?.includes('רשת')
+      );
+      if (!hasReshet) {
+        try {
+          const reshetDetails = await api.getVodSeriesDetails('reshet-vod', '294');
+          if (reshetDetails && reshetDetails.episodes && reshetDetails.episodes.length > 0) {
+            const reshetItems: VodRecentItem[] = reshetDetails.episodes.slice(0, 3).map((ep) => ({
+              episodeId: ep.id,
+              seriesId: '294',
+              title: ep.title,
+              seriesTitle: 'רשת 13',
+              description: ep.description || reshetDetails.series.description || 'היום שהיה עם גיא לרר',
+              imageUrl: ep.imageUrl || reshetDetails.series.imageUrl,
+              playUrl: ep.playUrl,
+              channelLogo: resolveChannelLogoUrl('13.jpg'),
+              channelName: 'רשת 13',
+              progressPercentage: undefined,
+              rawItem: {
+                id: ep.id,
+                episodeId: ep.id,
+                streamEndpoint: ep.streamEndpoint,
+                streamUrl: ep.playUrl,
+                module: 'reshet-vod',
+                provider: 'reshet-vod',
+              },
+            }));
+            recent.splice(2, 0, ...reshetItems);
+          }
+        } catch {}
+      }
+
+      if (recent.length >= 10) {
+        cachedNewVod = { data: recent, timestamp: now };
+        return recent;
+      }
 
       const [kanSeries, makoSeries] = await Promise.allSettled([
         api.getVodSeries('kan11', 'הכל', '', false),
@@ -734,7 +980,9 @@ export const api = {
         });
       }
 
-      return [...recent, ...extraItems].slice(0, 14);
+      const combined = [...recent, ...extraItems].slice(0, 14);
+      cachedNewVod = { data: combined, timestamp: now };
+      return combined;
     } catch {
       return [];
     }

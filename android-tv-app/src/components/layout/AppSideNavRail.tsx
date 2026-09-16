@@ -22,7 +22,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
 }) => {
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const [forceCollapsed, setForceCollapsed] = useState(false);
-  const blurTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const isExpanded = focusedKey !== null && !forceCollapsed;
 
   // Cleanup timer on unmount
@@ -37,7 +37,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
   // When rail is focused, pressing RIGHT returns focus to the screen content
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('onTvRemoteKey', ({ keyCode }: { keyCode: number }) => {
-      if (keyCode === 22 && focusedKey !== null) {
+      if (keyCode === 22 && (focusedKey !== null || isExpanded)) {
         if (blurTimerRef.current) {
           clearTimeout(blurTimerRef.current);
           blurTimerRef.current = null;
@@ -48,7 +48,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
       }
     });
     return () => sub.remove();
-  }, [focusedKey, onExpandedChanged, onReturnFocusToScreen]);
+  }, [focusedKey, isExpanded, onExpandedChanged, onReturnFocusToScreen]);
 
   const handleFocus = (key: string) => {
     if (forceCollapsed) return;
@@ -84,10 +84,13 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
     // 2. Select destination
     onDestinationSelected(dest);
 
-    // 3. Reset force-collapse after navigation completes
+    // 3. Immediately return focus to the screen
+    onReturnFocusToScreen?.();
+
+    // 4. Reset force-collapse after navigation completes
     setTimeout(() => {
       setForceCollapsed(false);
-    }, 500);
+    }, 300);
   };
 
   return (
@@ -99,7 +102,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="Home"
           isSelected={currentDestination === AppDestination.HOME}
           isRailExpanded={isExpanded}
-          hasTVPreferredFocus={focusDestination === AppDestination.HOME}
+          hasTVPreferredFocus={focusDestination === AppDestination.HOME && focusNonce > 0}
           focusNonce={focusDestination === AppDestination.HOME ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.HOME)}
           onFocus={() => handleFocus('home')}
@@ -112,7 +115,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="Live"
           isSelected={currentDestination === AppDestination.LIVE_TV}
           isRailExpanded={isExpanded}
-          hasTVPreferredFocus={focusDestination === AppDestination.LIVE_TV}
+          hasTVPreferredFocus={focusDestination === AppDestination.LIVE_TV && focusNonce > 0}
           focusNonce={focusDestination === AppDestination.LIVE_TV ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.LIVE_TV)}
           onFocus={() => handleFocus('live')}
@@ -125,7 +128,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="VOD"
           isSelected={currentDestination === AppDestination.VOD}
           isRailExpanded={isExpanded}
-          hasTVPreferredFocus={focusDestination === AppDestination.VOD}
+          hasTVPreferredFocus={focusDestination === AppDestination.VOD && focusNonce > 0}
           focusNonce={focusDestination === AppDestination.VOD ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.VOD)}
           onFocus={() => handleFocus('vod')}
@@ -143,9 +146,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     zIndex: 100,
-    backgroundColor: 'rgba(8, 10, 13, 0.65)', // Soft translucent over background player
-    borderRightWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'rgba(8, 10, 13, 0.98)',
     paddingTop: 28,
     paddingBottom: 20,
     paddingHorizontal: 6,
@@ -156,7 +157,7 @@ const styles = StyleSheet.create({
   },
   railExpanded: {
     width: 176,
-    backgroundColor: 'rgba(10, 14, 23, 0.80)',
+    backgroundColor: 'rgba(10, 14, 23, 0.97)',
     shadowColor: '#000000',
     shadowOffset: { width: 6, height: 0 },
     shadowOpacity: 0.7,

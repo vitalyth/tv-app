@@ -30,6 +30,7 @@ export const NavRailItem: React.FC<NavRailItemProps> = React.memo(({
 }) => {
   return (
     <TvFocusable
+      focusable={isRailExpanded || hasTVPreferredFocus}
       onPress={onSelect}
       onFocus={onFocus}
       onBlur={onBlur}

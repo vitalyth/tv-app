@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, Image, StyleSheet, Pressable } from 'react-native';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { VodProvider, VOD_PROVIDERS } from '../../types/vod';
+import { TvFocusable } from '../common/TvFocusable';
 
 interface VodChannelBadgeProps {
   provider: VodProvider | null; // null represents "הכל" (All)
   isSelected: boolean;
   onSelect: (provider: VodProvider | null) => void;
   hasPreferredFocus?: boolean;
+  focusNonce?: number;
+  lockLeft?: boolean;
 }
 
 export const VodChannelBadge: React.FC<VodChannelBadgeProps> = ({
@@ -14,6 +17,8 @@ export const VodChannelBadge: React.FC<VodChannelBadgeProps> = ({
   isSelected,
   onSelect,
   hasPreferredFocus = false,
+  focusNonce = 0,
+  lockLeft = false,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
 
@@ -21,11 +26,14 @@ export const VodChannelBadge: React.FC<VodChannelBadgeProps> = ({
   const isAll = provider === null;
 
   return (
-    <Pressable
+    <TvFocusable
       hasTVPreferredFocus={hasPreferredFocus}
+      focusNonce={focusNonce}
+      lockLeft={lockLeft}
       onFocus={() => setIsFocused(true)}
       onBlur={() => setIsFocused(false)}
       onPress={() => onSelect(provider)}
+      scaleOnFocus={false}
       style={[
         styles.circle,
         isSelected && styles.circleSelected,
@@ -50,7 +58,7 @@ export const VodChannelBadge: React.FC<VodChannelBadgeProps> = ({
       ) : (
         <Text style={styles.fallbackText}>{providerInfo?.displayName ?? ''}</Text>
       )}
-    </Pressable>
+    </TvFocusable>
   );
 };
 

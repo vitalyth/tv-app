@@ -14,6 +14,7 @@ interface EpgRowProps {
   onProgramPress: (channel: TvChannel, program: TvProgram) => void;
   onProgramFocus?: (channel: TvChannel, program: TvProgram) => void;
   hasPreferredFocus?: boolean;
+  focusNonce?: number;
 }
 
 export const EpgRow: React.FC<EpgRowProps> = ({
@@ -26,6 +27,7 @@ export const EpgRow: React.FC<EpgRowProps> = ({
   onProgramPress,
   onProgramFocus,
   hasPreferredFocus = false,
+  focusNonce = 0,
 }) => {
   return (
     <View style={styles.row}>
@@ -37,6 +39,9 @@ export const EpgRow: React.FC<EpgRowProps> = ({
         onPress={onChannelPress}
         onFocus={onChannelFocus}
         hasPreferredFocus={hasPreferredFocus}
+        focusNonce={focusNonce}
+        lockLeft={true}
+        lockRight={false}
       />
 
       {/* Programs Timeline Strip */}
@@ -57,6 +62,7 @@ export const EpgRow: React.FC<EpgRowProps> = ({
               width={cardWidth}
               onPress={(p) => onProgramPress(channel, p)}
               onFocus={(p) => onProgramFocus?.(channel, p)}
+              lockRight={idx === programs.length - 1}
             />
           );
         })}

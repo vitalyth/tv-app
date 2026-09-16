@@ -4,8 +4,6 @@ import { VodEpisode } from '../../types/vod';
 import { TvBadge } from '../common/TvBadge';
 import ProgressBar from '../common/ProgressBar';
 
-const cardScrimSource = require('../../assets/card_scrim.png');
-
 interface EpisodeCardProps {
   episode: VodEpisode;
   onPress: (episode: VodEpisode) => void;
@@ -53,13 +51,6 @@ export const EpisodeCard: React.FC<EpisodeCardProps> = React.memo(({
           <Text style={styles.placeholderText}>▶</Text>
         </View>
       )}
-
-      {/* Scrim Overlay */}
-      <Image
-        source={cardScrimSource}
-        style={StyleSheet.absoluteFill}
-        resizeMode="stretch"
-      />
 
       {/* Top Vod Badge */}
       <View style={styles.badgeWrapper}>
@@ -116,14 +107,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: 'rgba(255, 255, 255, 0.4)',
   },
-  scrim: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '65%',
-    backgroundColor: 'rgba(8, 10, 12, 0.65)',
-  },
   badgeWrapper: {
     position: 'absolute',
     top: 9,
@@ -143,11 +126,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'left',
     color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
   subtitle: {
     fontSize: 11,
-    color: '#B8C1CC',
+    color: '#CBD5E1',
+    fontWeight: '500',
     textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
   },
   progressContainer: {
     position: 'absolute',

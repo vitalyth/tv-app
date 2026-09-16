@@ -17,9 +17,11 @@ interface EpgGridProps {
   selectedChannel: TvChannel | null;
   playingChannel: TvChannel | null;
   onChannelPress: (channel: TvChannel) => void;
-  onChannelFocus?: (channel: TvChannel) => void;
+  onChannelFocus?: (channel: TvChannel, index: number) => void;
   onProgramPress: (channel: TvChannel, program: TvProgram) => void;
   onProgramFocus?: (channel: TvChannel, program: TvProgram) => void;
+  targetFocusIndex?: number;
+  cardFocusNonce?: number;
 }
 
 export const EpgGrid: React.FC<EpgGridProps> = ({
@@ -32,6 +34,8 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
   onChannelFocus,
   onProgramPress,
   onProgramFocus,
+  targetFocusIndex = 0,
+  cardFocusNonce = 0,
 }) => {
   if (isLoading && (!data || data.channels.length === 0)) {
     return (
@@ -77,6 +81,7 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
         contentContainerStyle={styles.listContent}
         renderItem={({ item: channel, index }) => {
           const programs = data.programsByChannel[channel.id] || [];
+          const isTargeted = index === targetFocusIndex && cardFocusNonce > 0;
           return (
             <EpgRow
               channel={channel}
@@ -84,10 +89,11 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
               isSelectedChannel={selectedChannel?.id === channel.id}
               isPlayingChannel={playingChannel?.id === channel.id}
               onChannelPress={onChannelPress}
-              onChannelFocus={onChannelFocus}
+              onChannelFocus={(ch) => onChannelFocus?.(ch, index)}
               onProgramPress={onProgramPress}
               onProgramFocus={onProgramFocus}
               hasPreferredFocus={index === 0}
+              focusNonce={isTargeted ? cardFocusNonce : 0}
             />
           );
         }}

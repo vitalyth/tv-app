@@ -4,8 +4,6 @@ import { TvFocusable } from '../common/TvFocusable';
 import { TvBadge } from '../common/TvBadge';
 import { TvChannel, TvProgram } from '../../types/guide';
 
-const cardScrimSource = require('../../assets/card_scrim.png');
-
 interface HomeLiveCardProps {
   channel: TvChannel;
   program?: TvProgram | null;
@@ -46,7 +44,7 @@ export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
       focusedStyle={styles.cardFocused}
     >
       <View style={styles.contentBox}>
-        {/* Background Image / Thumbnail */}
+        {/* Background Image / Thumbnail covering full box space */}
         {currentProgram?.imageUrl ? (
           <Image
             source={{ uri: currentProgram.imageUrl }}
@@ -56,17 +54,10 @@ export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
         ) : channel.logoUrl ? (
           <Image
             source={{ uri: channel.logoUrl }}
-            style={styles.centerLogo}
-            resizeMode="contain"
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
           />
         ) : null}
-
-        {/* Card Gradient Scrim - Smooth hardware fade, NO horizontal stripe lines */}
-        <Image
-          source={cardScrimSource}
-          style={StyleSheet.absoluteFill}
-          resizeMode="stretch"
-        />
 
         {/* Top Badges */}
         <View style={styles.badgeRow}>
@@ -90,7 +81,11 @@ export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
           <Text style={styles.programTitle} numberOfLines={1}>
             {currentProgram?.title || 'שידור חי'}
           </Text>
-          {currentProgram?.timeRange ? (
+          {currentProgram?.description ? (
+            <Text style={styles.programDescription} numberOfLines={1}>
+              {currentProgram.description}
+            </Text>
+          ) : currentProgram?.timeRange ? (
             <Text style={styles.timeRange} numberOfLines={1}>
               {currentProgram.timeRange}
             </Text>
@@ -120,13 +115,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#171B22',
   },
-  centerLogo: {
-    width: 76,
-    height: 76,
-    alignSelf: 'center',
-    marginTop: 30,
-    opacity: 0.85,
-  },
   badgeRow: {
     position: 'absolute',
     top: 9,
@@ -154,29 +142,50 @@ const styles = StyleSheet.create({
   },
   infoContainer: {
     position: 'absolute',
-    bottom: 10,
-    left: 12,
-    right: 12,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    backgroundColor: 'transparent',
     zIndex: 2,
     gap: 2,
   },
   channelName: {
     color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
   programTitle: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
     textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
+  programDescription: {
+    color: '#E2E8F0',
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
   },
   timeRange: {
-    color: '#B8C1CC',
+    color: '#CBD5E1',
     fontSize: 11,
-    fontWeight: '400',
+    fontWeight: '500',
     textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
   },
 });
 

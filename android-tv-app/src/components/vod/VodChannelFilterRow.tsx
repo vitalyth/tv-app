@@ -6,6 +6,7 @@ import VodChannelBadge from './VodChannelBadge';
 interface VodChannelFilterRowProps {
   selectedProvider: VodProvider | null;
   onSelectProvider: (provider: VodProvider | null) => void;
+  focusNonce?: number;
 }
 
 const PROVIDERS: VodProvider[] = [
@@ -19,6 +20,7 @@ const PROVIDERS: VodProvider[] = [
 export const VodChannelFilterRow: React.FC<VodChannelFilterRowProps> = ({
   selectedProvider,
   onSelectProvider,
+  focusNonce = 0,
 }) => {
   return (
     <View style={styles.container}>
@@ -27,6 +29,8 @@ export const VodChannelFilterRow: React.FC<VodChannelFilterRowProps> = ({
         provider={null}
         isSelected={selectedProvider === null}
         onSelect={() => onSelectProvider(null)}
+        focusNonce={focusNonce}
+        lockLeft={true}
       />
 
       {/* Provider channel circles */}

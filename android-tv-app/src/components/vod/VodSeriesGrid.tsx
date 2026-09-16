@@ -14,7 +14,9 @@ interface VodSeriesGridProps {
   isLoading: boolean;
   error?: string | null;
   onSeriesPress: (series: VodSeries) => void;
-  onSeriesFocus: (series: VodSeries) => void;
+  onSeriesFocus: (series: VodSeries, index: number) => void;
+  targetFocusIndex?: number;
+  cardFocusNonce?: number;
 }
 
 const NUM_COLUMNS = 5;
@@ -25,17 +27,28 @@ export const VodSeriesGrid: React.FC<VodSeriesGridProps> = React.memo(({
   error,
   onSeriesPress,
   onSeriesFocus,
+  targetFocusIndex = 0,
+  cardFocusNonce = 0,
 }) => {
-  const renderItem = useCallback(({ item, index }: { item: VodSeries; index: number }) => (
-    <View style={styles.cardContainer}>
-      <VodSeriesCard
-        series={item}
-        onPress={onSeriesPress}
-        onFocus={onSeriesFocus}
-        hasPreferredFocus={index === 0}
-      />
-    </View>
-  ), [onSeriesPress, onSeriesFocus]);
+  const renderItem = useCallback(({ item, index }: { item: VodSeries; index: number }) => {
+    const isTargeted = index === targetFocusIndex && cardFocusNonce > 0;
+    const lockLeft = index % NUM_COLUMNS === 0;
+    const lockRight = index % NUM_COLUMNS === NUM_COLUMNS - 1 || index === series.length - 1;
+
+    return (
+      <View style={styles.cardContainer}>
+        <VodSeriesCard
+          series={item}
+          onPress={onSeriesPress}
+          onFocus={(s) => onSeriesFocus(s, index)}
+          hasPreferredFocus={index === 0}
+          focusNonce={isTargeted ? cardFocusNonce : 0}
+          lockLeft={lockLeft}
+          lockRight={lockRight}
+        />
+      </View>
+    );
+  }, [onSeriesPress, onSeriesFocus, targetFocusIndex, cardFocusNonce, series.length]);
 
   const keyExtractor = useCallback((item: VodSeries) => item.id, []);
 

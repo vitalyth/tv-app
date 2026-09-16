@@ -31,18 +31,18 @@ export const HomeRow: React.FC<HomeRowProps> = React.memo(({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 24,
+    marginBottom: 12,
   },
   title: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 6,
     textAlign: 'left',
   },
   scrollContent: {
     paddingRight: 80,
-    paddingVertical: 16,
+    paddingVertical: 4,
     paddingLeft: 6,
   },
 });
