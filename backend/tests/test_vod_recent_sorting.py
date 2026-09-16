@@ -72,6 +72,23 @@ class VodRecentSortingTests(unittest.TestCase):
             [channel["id"] for channel in channel_service._get_vod_channels_for_recent(True)],
         )
 
+    def test_vod_recent_stream_endpoint_is_provider_specific(self):
+        self.assertEqual(
+            channel_service._vod_recent_stream_endpoint("keshet-vod", "episode id/1"),
+            "/keshet-vod/stream?episode_id=episode%20id%2F1",
+        )
+
+    def test_vod_recent_cached_items_get_stream_endpoint(self):
+        item = {
+            "id": "c14-vod:1725739",
+            "module": "c14-vod",
+        }
+
+        repaired = channel_service._vod_recent_item_with_stream_endpoint(item)
+
+        self.assertEqual(repaired["episodeId"], "1725739")
+        self.assertEqual(repaired["streamEndpoint"], "/c14-vod/stream?episode_id=1725739")
+
     def test_vod_recent_file_cache_uses_memory_until_file_changes(self):
         original_cache_file = channel_service.VOD_RECENT_CACHE_FILE
         original_cache = channel_service._vod_recent_cache

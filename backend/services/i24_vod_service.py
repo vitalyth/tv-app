@@ -1010,6 +1010,8 @@ def get_i24_vod_series(
             FROM ({base_query}) p
             {sql_where}
             ORDER BY
+                latestEpisodeAddedAt IS NULL,
+                latestEpisodeAddedAt DESC,
                 latestEpisodeSourceSortKey IS NULL,
                 COALESCE(latestEpisodeSourceSortKey, latestEpisodeDateSortKey, latest_episode_timestamp, 0) DESC,
                 COALESCE(latest_episode_timestamp, 0) DESC,

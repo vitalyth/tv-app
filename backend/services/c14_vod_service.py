@@ -1421,6 +1421,8 @@ def get_c14_vod_series(
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
+                latest_episode_added_at IS NULL,
+                latest_episode_added_at DESC,
                 latest_episode_source_sort_key IS NULL,
                 COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, actual_latest_timestamp, p.latest_item_timestamp, 0) DESC,
                 COALESCE(actual_latest_timestamp, p.latest_item_timestamp) IS NULL,

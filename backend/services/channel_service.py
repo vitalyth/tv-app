@@ -11,7 +11,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from bs4 import BeautifulSoup
 from config import BASE_DIR, CACHE_DIR
@@ -1367,6 +1367,37 @@ def _vod_recent_episode_sort_kind(episode: dict) -> str:
     return str(episode.get("source_sort_kind") or episode.get("sourceSortKind") or "").strip().lower()
 
 
+def _vod_recent_stream_endpoint(module: str, episode_id: str) -> str:
+    if not module or not episode_id:
+        return ""
+    return f"/{module}/stream?episode_id={quote(str(episode_id), safe='')}"
+
+
+def _vod_recent_item_with_stream_endpoint(item: dict) -> dict:
+    if item.get("streamEndpoint"):
+        return item
+
+    module = str(item.get("module") or "").strip()
+    if module not in {"kan-vod", "keshet-vod", "reshet-vod", "c14-vod", "i24-vod"}:
+        return item
+
+    episode_id = str(item.get("episodeId") or "").strip()
+    item_id = str(item.get("id") or "").strip()
+    prefix = f"{module}:"
+    if not episode_id and item_id.startswith(prefix):
+        episode_id = item_id[len(prefix):]
+
+    stream_endpoint = _vod_recent_stream_endpoint(module, episode_id)
+    if not stream_endpoint:
+        return item
+
+    return {
+        **item,
+        "episodeId": episode_id,
+        "streamEndpoint": stream_endpoint,
+    }
+
+
 def _fetch_kan_vod_recent_items(limit: int) -> list[dict]:
     recent_items: list[dict] = []
 
@@ -1393,6 +1424,7 @@ def _fetch_kan_vod_recent_items(limit: int) -> list[dict]:
             "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
             "streamUrl": episode.get("stream_url") or "",
             "playUrl": episode.get("play_url") or episode.get("url") or "",
+            "streamEndpoint": _vod_recent_stream_endpoint("kan-vod", episode_id),
             "mode": 0,
             "logo": episode_image or program_image or normalize_vod_image("kan.jpg"),
             "module": "kan-vod",
@@ -1455,6 +1487,7 @@ def _fetch_keshet_vod_recent_items(limit: int) -> list[dict]:
             "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
             "streamUrl": episode.get("stream_url") or "",
             "playUrl": episode.get("play_url") or episode.get("url") or "",
+            "streamEndpoint": _vod_recent_stream_endpoint("keshet-vod", episode_id),
             "mode": 0,
             "logo": episode_image or program_image or normalize_vod_image("mako.png"),
             "module": "keshet-vod",
@@ -1517,6 +1550,7 @@ def _fetch_reshet_vod_recent_items(limit: int) -> list[dict]:
             "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
             "streamUrl": episode.get("stream_url") or "",
             "playUrl": episode.get("play_url") or episode.get("url") or "",
+            "streamEndpoint": _vod_recent_stream_endpoint("reshet-vod", episode_id),
             "mode": 0,
             "logo": episode_image or program_image or normalize_vod_image("13.jpg"),
             "module": "reshet-vod",
@@ -1579,6 +1613,7 @@ def _fetch_c14_vod_recent_items(limit: int) -> list[dict]:
             "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
             "streamUrl": episode.get("stream_url") or "",
             "playUrl": episode.get("play_url") or episode.get("url") or "",
+            "streamEndpoint": _vod_recent_stream_endpoint("c14-vod", episode_id),
             "mode": 0,
             "logo": episode_image or program_image or normalize_vod_image("14tv.png"),
             "module": "c14-vod",
@@ -1641,6 +1676,7 @@ def _fetch_i24_vod_recent_items(limit: int) -> list[dict]:
             "url": episode.get("stream_url") or episode.get("play_url") or episode.get("url") or "",
             "streamUrl": episode.get("stream_url") or "",
             "playUrl": episode.get("play_url") or episode.get("url") or "",
+            "streamEndpoint": _vod_recent_stream_endpoint("i24-vod", episode_id),
             "mode": 0,
             "logo": episode_image or program_image or normalize_vod_image("i24news.png"),
             "module": "i24-vod",
@@ -1809,7 +1845,8 @@ def _merge_vod_recent_cache_items(new_items: list[dict], total_limit: int) -> li
     merged_by_id: dict[str, dict] = {}
     seen_keys: set[str] = set()
 
-    for item in [*new_items, *existing_items]:
+    for raw_item in [*new_items, *existing_items]:
+        item = _vod_recent_item_with_stream_endpoint(raw_item)
         item_id = item.get("id")
         if not item_id or item_id in merged_by_id:
             continue
@@ -2005,7 +2042,9 @@ def get_vod_recent_items(max_per_channel: int = 10, total_limit: int = VOD_RECEN
     file_items = _read_vod_recent_cache_file()
     if file_items is not None:
         return _sort_vod_recent_cache_items([
-            item for item in file_items if not _is_vod_recent_placeholder_item(item)
+            _vod_recent_item_with_stream_endpoint(item)
+            for item in file_items
+            if not _is_vod_recent_placeholder_item(item)
         ])[:total_limit]
 
     # If cache was never generated yet, return an empty list immediately.

@@ -31,6 +31,12 @@ PROXY_REQUEST_TIMEOUT = (PROXY_CONNECT_TIMEOUT_SECONDS, PROXY_READ_TIMEOUT_SECON
 KAN_VOD_PROXY_MAX_BITRATE = int(get_vod_env("VOD_PROXY_MAX_BITRATE", "KAN_VOD_PROXY_MAX_BITRATE", default="0"))
 KAN_VOD_SEGMENT_RETRIES = max(0, int(get_vod_env("VOD_SEGMENT_RETRIES", "KAN_VOD_SEGMENT_RETRIES", default="2")))
 PLUTO_SEGMENT_RETRIES = max(0, int(os.getenv("PLUTO_SEGMENT_RETRIES", "2")))
+MAKO_BASE_URL = "https://www.mako.co.il"
+MAKO_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/121.0.0.0 Safari/537.36"
+)
 
 IMAGE_PROXY_ALLOWED_HOSTS = {
     "cdn.i24news.tv",
@@ -296,6 +302,27 @@ def _is_local_proxy_url(uri):
 def _origin_for_url(url):
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _origin_for_proxy_request(url, referer):
+    referer_origin = _origin_for_referer(referer)
+    host = urlparse(url).netloc.lower()
+    if referer_origin and host == "mako-vod.akamaized.net":
+        return referer_origin
+    return _origin_for_url(url)
+
+
+def _is_mako_vod_akamai_url(url):
+    return urlparse(url).netloc.lower() == "mako-vod.akamaized.net"
+
+
+def _apply_mako_vod_headers(headers, referer):
+    referer_origin = _origin_for_referer(referer) or MAKO_BASE_URL
+    headers["User-Agent"] = MAKO_USER_AGENT
+    headers["Accept"] = "application/vnd.apple.mpegurl,application/x-mpegURL,*/*"
+    headers["Accept-Language"] = "he-IL,he;q=0.9,en;q=0.8"
+    headers["Origin"] = referer_origin
+    headers["Referer"] = referer or f"{referer_origin}/"
 
 
 def _is_absolute_http_url(url):
@@ -1058,7 +1085,7 @@ def handle_local_file_proxy(request, file_path: str, root_dir: str):
 def handle_proxy(request, url, referer, cast=False, channel_id=None):
     url, kodi_headers = _split_kodi_url_props(url)
     url = _resolve_relative_proxy_url(url, referer)
-    origin = _origin_for_url(url)
+    origin = _origin_for_proxy_request(url, referer)
     max_bitrate = _default_max_bitrate_for_request(request, url)
     vpn = _proxy_query_vpn(request)
 
@@ -1069,6 +1096,9 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
         "Referer": referer or origin + "/",
     }
     headers.update(kodi_headers)
+
+    if _is_mako_vod_akamai_url(url):
+        _apply_mako_vod_headers(headers, referer)
 
     if _is_pluto_hls_url(url):
         _apply_pluto_headers(headers, referer)

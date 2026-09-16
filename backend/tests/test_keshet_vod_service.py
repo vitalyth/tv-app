@@ -1,5 +1,7 @@
 import importlib
+import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 
 class KeshetVodServiceTests(unittest.TestCase):
@@ -133,6 +135,120 @@ class KeshetVodServiceTests(unittest.TestCase):
             self.module._pick_media_link(media),
             ("https://cdn.example/akamai/master.m3u8", "AKAMAI"),
         )
+
+    def test_best_hls_variant_from_manifest_prefers_highest_resolution_and_bandwidth(self):
+        manifest = """
+#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=553767,AVERAGE-BANDWIDTH=500000,RESOLUTION=640x360
+../550/hdntl=token/index_550.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2211308,AVERAGE-BANDWIDTH=2200000,RESOLUTION=1280x720
+../2200/hdntl=token/index_2200.m3u8
+"""
+
+        self.assertEqual(
+            self.module._best_hls_variant_from_manifest(
+                "https://mako-vod.akamaized.net/i/VOD/KESHET/show/episode_,550,2200,.mp4.csmil/master.m3u8?hdnea=abc",
+                manifest,
+            ),
+            "https://mako-vod.akamaized.net/i/VOD/KESHET/show/2200/hdntl=token/index_2200.m3u8?hdnea=abc",
+        )
+
+    def test_resolve_keshet_vod_stream_returns_highest_hls_variant(self):
+        media = [
+            {
+                "cdn": "AKAMAI",
+                "cdnLB": "80",
+                "format": "AKAMAI_HLS",
+                "url": "https://mako-vod.akamaized.net/i/VOD/KESHET/show/episode_,550,2200,.mp4.csmil/master.m3u8",
+            }
+        ]
+        manifest = """
+#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=553767,AVERAGE-BANDWIDTH=500000,RESOLUTION=640x360
+../550/hdntl=token/index_550.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2211308,AVERAGE-BANDWIDTH=2200000,RESOLUTION=1280x720
+../2200/hdntl=token/index_2200.m3u8
+"""
+        response = Mock(text=manifest)
+        response.raise_for_status = Mock()
+
+        with patch.object(self.module, "_get_media_playlist", return_value=media), patch.object(
+            self.module,
+            "_get_ticket",
+            return_value="hdnea=abc",
+        ), patch.object(self.module.requests, "get", return_value=response):
+            stream_url = self.module.resolve_keshet_vod_stream(
+                "https://www.mako.co.il/VodPlaylist"
+                "?videoChannelId=channel-1&vcmid=episode-1"
+            )
+
+        self.assertEqual(
+            stream_url,
+            "https://mako-vod.akamaized.net/i/VOD/KESHET/show/2200/hdntl=token/index_2200.m3u8?hdnea=abc",
+        )
+
+    def test_episode_fallback_metadata_from_media_url_uses_playlist_date(self):
+        metadata = self.module._episode_fallback_metadata_from_media_url(
+            "https://mako-vod.akamaized.net/i/VOD/KESHET/show/Ulpan_Shishi_070826_VOD_x/"
+            "Ulpan_Shishi_070826_VOD_x_,550,850,1400,2200,.mp4.csmil/master.m3u8"
+        )
+
+        self.assertEqual(metadata["title"], "07.08.26")
+        self.assertEqual(metadata["published"], "07.08.26")
+        self.assertIsNotNone(metadata.get("published_timestamp"))
+
+    def test_backfill_placeholder_episode_metadata_updates_existing_episode(self):
+        original_db_path = self.module.KESHT_VOD_DB_PATH
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                self.module.KESHT_VOD_DB_PATH = f"{temp_dir}/vod.db"
+                con = self.module._connect()
+                try:
+                    con.execute(
+                        """
+                        INSERT INTO keshet_programs (id, mainid, title, description, url)
+                        VALUES ('program-1', 'main-1', 'תוכנית', '', 'https://www.mako.co.il/show')
+                        """
+                    )
+                    con.execute(
+                        """
+                        INSERT INTO keshet_episodes (id, program_id, title, description, url, play_url)
+                        VALUES (
+                            'episode-1',
+                            'program-1',
+                            'פרק episode-1VgnVCM100000700a10acRCRD',
+                            '',
+                            'https://www.mako.co.il/VodPlaylist?vcmid=episode-1&videoChannelId=channel-1',
+                            'https://www.mako.co.il/VodPlaylist?vcmid=episode-1&videoChannelId=channel-1'
+                        )
+                        """
+                    )
+                    con.commit()
+                    media = [
+                        {
+                            "cdn": "AKAMAI",
+                            "cdnLB": "80",
+                            "format": "AKAMAI_HLS",
+                            "url": "https://mako-vod.akamaized.net/i/VOD/KESHET/show/"
+                            "Ulpan_Shishi_070826_VOD_x/Ulpan_Shishi_070826_VOD_x_,550,2200,.mp4.csmil/master.m3u8",
+                        }
+                    ]
+
+                    with patch.object(self.module, "_get_media_playlist", return_value=media):
+                        updated = self.module._backfill_placeholder_episode_metadata(con, "program-1")
+
+                    row = con.execute(
+                        "SELECT title, published, published_timestamp FROM keshet_episodes WHERE id = 'episode-1'"
+                    ).fetchone()
+                finally:
+                    con.close()
+
+                self.assertEqual(updated, 1)
+                self.assertEqual(row["title"], "07.08.26")
+                self.assertEqual(row["published"], "07.08.26")
+                self.assertIsNotNone(row["published_timestamp"])
+        finally:
+            self.module.KESHT_VOD_DB_PATH = original_db_path
 
 
 if __name__ == "__main__":

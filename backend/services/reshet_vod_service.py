@@ -1043,6 +1043,8 @@ def get_reshet_vod_series(
             GROUP BY p.id
             ORDER BY
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
+                latest_episode_added_at IS NULL,
+                latest_episode_added_at DESC,
                 latest_episode_source_sort_key IS NULL,
                 COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, latest_episode_sort_key, 0) DESC,
                 latest_episode_sort_key DESC,

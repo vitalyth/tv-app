@@ -95,6 +95,7 @@ export interface VodItem {
   programId?: string
   streamUrl?: string
   playUrl?: string
+  streamEndpoint?: string
   programName?: string
   seasonName?: string
   channelName?: string

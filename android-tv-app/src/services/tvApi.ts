@@ -37,6 +37,7 @@ export interface VodItem {
   season?: string;
   programName?: string;
   programImage?: string;
+  streamEndpoint?: string;
   channelName?: string;
   channelImage?: string;
   episodeName?: string;

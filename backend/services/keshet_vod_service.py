@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
-from urllib.parse import quote, urljoin
+from urllib.parse import parse_qs, quote, urljoin, urlsplit
 
 import requests
 
@@ -45,6 +45,13 @@ KESHT_VOD_STREAM_BATCH_SIZE = int(
         default="20",
     )
 )
+KESHT_VOD_METADATA_BACKFILL_LIMIT = int(
+    get_vod_env(
+        "KESHET_VOD_METADATA_BACKFILL_LIMIT",
+        "KESHT_VOD_METADATA_BACKFILL_LIMIT",
+        default="24",
+    )
+)
 
 MAKO_BASE_URL = "https://www.mako.co.il"
 MAKO_INDEX_URL = f"{MAKO_BASE_URL}/mako-vod-index"
@@ -62,6 +69,12 @@ MAKO_HEADERS = {
     "Origin": MAKO_BASE_URL,
 }
 CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[,;|/•·،]+)\s*")
+PLACEHOLDER_EPISODE_TITLE_RE = re.compile(r"^פרק\s+\S*VgnVCM", re.IGNORECASE)
+MEDIA_DATE_RE = re.compile(r"(?:^|[_/-])(\d{2})(\d{2})(\d{2})(?:[_/-])VOD", re.IGNORECASE)
+HLS_STREAM_INF_RE = re.compile(r"#EXT-X-STREAM-INF:([^\r\n]*)[\r\n]+([^\r\n]+)", re.IGNORECASE)
+HLS_BANDWIDTH_RE = re.compile(r"(?:^|,)BANDWIDTH=(\d+)", re.IGNORECASE)
+HLS_AVERAGE_BANDWIDTH_RE = re.compile(r"(?:^|,)AVERAGE-BANDWIDTH=(\d+)", re.IGNORECASE)
+HLS_RESOLUTION_RE = re.compile(r"(?:^|,)RESOLUTION=(\d+)x(\d+)", re.IGNORECASE)
 MAKO_VOD_CATEGORY_FILTERS: tuple[tuple[str, str, str], ...] = (
     ("ריאליטי", "genre", "4f9dbac980653210VgnVCM2000002a0c10acRCRD"),
     ("דוקומנטרי", "genre", "8e8abac980653210VgnVCM2000002a0c10acRCRD"),
@@ -132,8 +145,9 @@ def _connect() -> sqlite3.Connection:
     parent = os.path.dirname(db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(db_path)
+    con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 30000")
     _init_db(con)
     return con
 
@@ -201,6 +215,7 @@ def _init_db(con: sqlite3.Connection) -> None:
     _add_column_if_missing(con, "keshet_episodes", "display_order", "INTEGER")
     _add_column_if_missing(con, "keshet_episodes", "published_timestamp", "REAL")
     _add_column_if_missing(con, "keshet_episodes", "created_at", "TEXT")
+    _add_column_if_missing(con, "keshet_episodes", "metadata_backfill_attempted_at", "TEXT")
     con.execute(
         """
         UPDATE keshet_episodes
@@ -310,6 +325,227 @@ def _backfill_missing_episode_timestamps(con: sqlite3.Connection) -> int:
         con.commit()
 
     return updated
+
+
+def _is_placeholder_episode_title(title: object, episode_id: object = "") -> bool:
+    text = _clean_text(title)
+    if not text:
+        return True
+
+    episode_key = str(episode_id or "").strip()
+    if episode_key and text == f"פרק {episode_key}":
+        return True
+
+    return bool(PLACEHOLDER_EPISODE_TITLE_RE.search(text)) or (
+        text.startswith("פרק ") and "vgnvcm" in text.casefold()
+    )
+
+
+def _episode_fallback_metadata_from_media_url(url: object) -> dict:
+    match = MEDIA_DATE_RE.search(str(url or ""))
+    if not match:
+        return {}
+
+    published = f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+    metadata = {
+        "title": published,
+        "published": published,
+    }
+    timestamp = _parse_published_timestamp(published)
+    if timestamp is not None:
+        metadata["published_timestamp"] = timestamp
+    return metadata
+
+
+def _playlist_identifiers(play_url: object) -> tuple[str, str]:
+    text = str(play_url or "").strip()
+    if not text:
+        return "", ""
+
+    params = parse_qs(urlsplit(text).query)
+    vcmid = _clean_text((params.get("vcmid") or [""])[0])
+    video_channel_id = _clean_text((params.get("videoChannelId") or [""])[0])
+    if vcmid and video_channel_id:
+        return vcmid, video_channel_id
+
+    vcmid_match = re.search(r"(?:[?&])vcmid=([^&]+)", text)
+    channel_match = re.search(r"(?:[?&])videoChannelId=([^&]+)", text)
+    return (
+        _clean_text(vcmid_match.group(1) if vcmid_match else ""),
+        _clean_text(channel_match.group(1) if channel_match else ""),
+    )
+
+
+def _episode_fallback_metadata_from_playlist(play_url: object) -> dict:
+    vcmid, video_channel_id = _playlist_identifiers(play_url)
+    if not vcmid or not video_channel_id:
+        return {}
+
+    media = _get_media_playlist(vcmid, video_channel_id)
+    picked = _pick_media_link(media)
+    if not picked:
+        return {}
+
+    return _episode_fallback_metadata_from_media_url(picked[0])
+
+
+def _backfill_placeholder_episode_metadata(
+    con: sqlite3.Connection,
+    program_id: str,
+    limit: int = KESHT_VOD_METADATA_BACKFILL_LIMIT,
+) -> int:
+    rows = con.execute(
+        """
+        SELECT id, title, published, published_timestamp, play_url, url
+        FROM keshet_episodes
+        WHERE program_id = ?
+          AND (
+            title IS NULL
+            OR TRIM(title) = ''
+            OR title LIKE 'פרק %VgnVCM%'
+          )
+          AND (
+            metadata_backfill_attempted_at IS NULL
+            OR metadata_backfill_attempted_at < datetime('now', '-1 day')
+          )
+        ORDER BY
+            display_order IS NULL,
+            display_order ASC,
+            created_at DESC
+        LIMIT ?
+        """,
+        (program_id, max(1, int(limit or KESHT_VOD_METADATA_BACKFILL_LIMIT))),
+    ).fetchall()
+
+    updates: list[tuple[str, str, float | None, str]] = []
+    attempted_ids: list[str] = []
+    for row in rows:
+        title = _clean_text(row["title"])
+        published = _clean_text(row["published"])
+        published_timestamp = row["published_timestamp"]
+        title_is_placeholder = _is_placeholder_episode_title(title, row["id"])
+
+        if not title_is_placeholder:
+            attempted_ids.append(row["id"])
+            continue
+
+        metadata = (
+            _episode_fallback_metadata_from_media_url(row["url"])
+            or _episode_fallback_metadata_from_media_url(row["play_url"])
+        )
+        if not metadata:
+            try:
+                metadata = _episode_fallback_metadata_from_playlist(row["play_url"] or row["url"])
+            except Exception:
+                metadata = {}
+
+        next_title = metadata.get("title") if metadata.get("title") else title
+        next_published = published or metadata.get("published") or ""
+        next_timestamp = published_timestamp or metadata.get("published_timestamp")
+        changed = (
+            next_title != title
+            or next_published != published
+            or (next_timestamp is not None and next_timestamp != published_timestamp)
+        )
+
+        if changed:
+            updates.append((next_title or title, next_published, next_timestamp, row["id"]))
+        else:
+            attempted_ids.append(row["id"])
+
+    for next_title, next_published, next_timestamp, episode_id in updates:
+        con.execute(
+            """
+            UPDATE keshet_episodes
+            SET title = ?,
+                published = ?,
+                published_timestamp = ?,
+                metadata_backfill_attempted_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (next_title, next_published, next_timestamp, episode_id),
+        )
+    for episode_id in attempted_ids:
+        con.execute(
+            """
+            UPDATE keshet_episodes
+            SET metadata_backfill_attempted_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (episode_id,),
+        )
+
+    if rows:
+        con.commit()
+
+    return len(updates)
+
+
+def repair_keshet_vod_metadata(
+    limit: int = 80,
+    verbose: bool = False,
+) -> dict:
+    con = _connect()
+    try:
+        rows = con.execute(
+            """
+            SELECT program_id, COUNT(*) AS candidate_count
+            FROM keshet_episodes
+            WHERE (
+                title IS NULL
+                OR TRIM(title) = ''
+                OR title LIKE 'פרק %VgnVCM%'
+            )
+              AND (
+                metadata_backfill_attempted_at IS NULL
+                OR metadata_backfill_attempted_at < datetime('now', '-1 day')
+              )
+            GROUP BY program_id
+            ORDER BY MAX(COALESCE(published_timestamp, 0)) DESC, MAX(created_at) DESC
+            """,
+        ).fetchall()
+
+        updated = 0
+        scanned_programs = 0
+        remaining = max(1, int(limit or 80))
+        errors: list[dict] = []
+        for row in rows:
+            if remaining <= 0:
+                break
+
+            program_id = row["program_id"]
+            candidate_count = max(1, int(row["candidate_count"] or 1))
+            scan_limit = min(
+                remaining,
+                max(1, KESHT_VOD_METADATA_BACKFILL_LIMIT),
+                candidate_count,
+            )
+            if verbose:
+                print(
+                    f"Keshet metadata maintenance: {program_id} "
+                    f"({row['candidate_count']} candidates, limit {scan_limit})",
+                    flush=True,
+                )
+
+            try:
+                updated += _backfill_placeholder_episode_metadata(con, program_id, limit=scan_limit)
+                scanned_programs += 1
+            except Exception as ex:
+                errors.append({"programId": program_id, "error": str(ex)})
+
+            remaining -= scan_limit
+
+        return {
+            "provider": "keshet",
+            "candidatePrograms": len(rows),
+            "scannedPrograms": scanned_programs,
+            "updatedEpisodes": updated,
+            "errors": errors,
+            "returnCode": 0 if not errors else 1,
+        }
+    finally:
+        con.close()
 
 
 def _normalize_url(url: str, base: str = MAKO_BASE_URL) -> str:
@@ -747,6 +983,8 @@ def _get_program_category_options(con: sqlite3.Connection, categories: list[str]
            OR TRIM(COALESCE(p.program_format, '')) != ''
         GROUP BY p.id
         ORDER BY
+            latest_episode_added_at IS NULL,
+            latest_episode_added_at DESC,
             latest_episode_source_sort_key IS NULL,
             COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, latest_episode_sort_key, 0) DESC,
             latest_episode_sort_key DESC,
@@ -1358,6 +1596,8 @@ def get_keshet_vod_series(
             GROUP BY p.id
             HAVING COUNT(DISTINCT e.id) > 0
             ORDER BY
+                latest_episode_added_at IS NULL,
+                latest_episode_added_at DESC,
                 latest_episode_source_sort_key IS NULL,
                 COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, latest_episode_sort_key, 0) DESC,
                 latest_episode_sort_key DESC,
@@ -1446,6 +1686,11 @@ def get_keshet_vod_series_details(
                 _with_retries(lambda: _scan_program(con, program_id, with_streams=False))
             except Exception as ex:
                 error = error or str(ex)
+
+        try:
+            _backfill_placeholder_episode_metadata(con, program_id)
+        except Exception as ex:
+            error = error or str(ex)
 
         program = con.execute(
             """
@@ -1636,16 +1881,85 @@ def _pick_media_link(media: list[dict]) -> tuple[str, str] | None:
     return str(item["url"]), str(item.get("cdn") or "AWS").upper()
 
 
+def _absolute_stream_url(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("//"):
+        return f"https:{text}"
+    if text.startswith(("http://", "https://")):
+        return text
+    return urljoin(MAKO_BASE_URL, text)
+
+
+def _hls_attr_int(pattern: re.Pattern[str], value: str) -> int:
+    match = pattern.search(value)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _hls_variant_score(attrs: str) -> tuple[int, int]:
+    resolution = HLS_RESOLUTION_RE.search(attrs)
+    pixels = 0
+    if resolution:
+        try:
+            pixels = int(resolution.group(1)) * int(resolution.group(2))
+        except (TypeError, ValueError):
+            pixels = 0
+
+    bandwidth = _hls_attr_int(HLS_AVERAGE_BANDWIDTH_RE, attrs) or _hls_attr_int(HLS_BANDWIDTH_RE, attrs)
+    return pixels, bandwidth
+
+
+def _hls_master_base_url(url: str) -> str:
+    parsed = urlsplit(url)
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rsplit('/', 1)[0]}/"
+
+
+def _best_hls_variant_from_manifest(master_url: str, manifest: str) -> str | None:
+    variants = [
+        (attrs, uri.strip())
+        for attrs, uri in HLS_STREAM_INF_RE.findall(manifest or "")
+        if uri.strip() and not uri.strip().startswith("#")
+    ]
+    if not variants:
+        return None
+
+    attrs, uri = max(variants, key=lambda item: _hls_variant_score(item[0]))
+    variant_url = urljoin(_hls_master_base_url(master_url), uri)
+    master_query = urlsplit(master_url).query
+    if master_query and not urlsplit(variant_url).query:
+        variant_url = f"{variant_url}?{master_query}"
+    return variant_url
+
+
+def _prefer_best_hls_variant(url: str) -> str:
+    normalized_url = _absolute_stream_url(url)
+    if not normalized_url:
+        return ""
+
+    if not urlsplit(normalized_url).path.lower().endswith(".m3u8"):
+        return normalized_url
+
+    try:
+        response = requests.get(normalized_url, headers=MAKO_HEADERS, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException:
+        return normalized_url
+
+    return _best_hls_variant_from_manifest(normalized_url, response.text) or normalized_url
+
+
 def resolve_keshet_vod_stream(play_url: str) -> str | None:
     if not play_url:
         return None
-    match = re.search(r"vcmid=([^&]+)&videoChannelId=([^&]+)", play_url)
-    if not match:
+    vcmid, video_channel_id = _playlist_identifiers(play_url)
+    if not vcmid or not video_channel_id:
         return None
-    from urllib.parse import unquote
-
-    vcmid = unquote(match.group(1))
-    video_channel_id = unquote(match.group(2))
     try:
         media = _get_media_playlist(vcmid, video_channel_id)
         picked = _pick_media_link(media)
@@ -1663,7 +1977,7 @@ def resolve_keshet_vod_stream(play_url: str) -> str | None:
             return None
 
         separator = "&" if "?" in url else "?"
-        return f"{url}{separator}{ticket}"
+        return _prefer_best_hls_variant(f"{url}{separator}{ticket}")
     except Exception:
         return None
 

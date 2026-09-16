@@ -295,6 +295,41 @@ def command_scan(args: argparse.Namespace) -> int:
     return 0 if all(item.get("returnCode") == 0 for item in results) else 1
 
 
+def _run_keshet_maintenance(args: argparse.Namespace) -> dict:
+    os.environ["VOD_DB_PATH"] = args.db
+    os.environ["KESHET_VOD_DB_PATH"] = args.db
+    os.environ.setdefault("KAN_VOD_DB_PATH", args.db)
+
+    from services.keshet_vod_service import repair_keshet_vod_metadata
+
+    return repair_keshet_vod_metadata(
+        limit=args.limit_episodes,
+        verbose=args.verbose,
+    )
+
+
+def command_maintenance(args: argparse.Namespace) -> int:
+    providers = ["keshet"] if args.provider == "all" else [args.provider]
+    results = []
+
+    for provider in providers:
+        if provider == "keshet":
+            result = _run_keshet_maintenance(args)
+        else:
+            result = {
+                "provider": provider,
+                "returnCode": 0,
+                "skipped": True,
+                "reason": "no provider-specific maintenance",
+            }
+        results.append(result)
+        if args.verbose:
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+
+    print(json.dumps({"results": results}, ensure_ascii=False), flush=True)
+    return 0 if all(item.get("returnCode") == 0 for item in results) else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Unified VOD DB scanner")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -340,6 +375,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--verbose", action="store_true", help="Show detailed scan output")
     scan.set_defaults(func=command_scan)
+
+    maintenance = sub.add_parser("maintenance", help="Run lightweight VOD DB maintenance")
+    maintenance.add_argument(
+        "--provider",
+        choices=["kan", "keshet", "reshet", "c14", "i24", "all"],
+        default="all",
+        help="Which VOD provider to maintain. Default: all.",
+    )
+    maintenance.add_argument(
+        "--db",
+        default=get_vod_db_path(),
+        help="SQLite DB path shared by VOD providers.",
+    )
+    maintenance.add_argument(
+        "--limit-episodes",
+        type=int,
+        default=int(os.getenv("VOD_METADATA_BACKFILL_LIMIT", "80")),
+        help="Limit provider metadata repair work.",
+    )
+    maintenance.add_argument("--verbose", action="store_true", help="Show detailed maintenance output")
+    maintenance.set_defaults(func=command_maintenance)
 
     return parser
 

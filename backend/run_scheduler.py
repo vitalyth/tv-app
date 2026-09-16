@@ -15,6 +15,7 @@ KESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("KESHET_VOD_SCAN_LIMIT_PROGRAMS", "40
 RESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("RESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 C14_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("C14_VOD_SCAN_LIMIT_PROGRAMS", "40")
 I24_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("I24_VOD_SCAN_LIMIT_PROGRAMS", "40")
+VOD_METADATA_BACKFILL_LIMIT = os.getenv("VOD_METADATA_BACKFILL_LIMIT", "80")
 
 
 @dataclass
@@ -107,6 +108,22 @@ def main() -> int:
         8 * 60 * 60,
     )
     jobs = [
+        ScheduledJob(
+            name="vod_db_maintenance",
+            command=[
+                python,
+                "scripts/vod_db_scanner.py",
+                "maintenance",
+                "--provider",
+                "all",
+                "--db",
+                VOD_DB_PATH,
+                "--limit-episodes",
+                VOD_METADATA_BACKFILL_LIMIT,
+                "--verbose",
+            ],
+            interval_seconds=read_interval("VOD_DB_MAINTENANCE_INTERVAL_SECONDS", 24 * 60 * 60),
+        ),
         ScheduledJob(
             name="epg",
             command=[python, "parse_epg.py", "--all-channels"],

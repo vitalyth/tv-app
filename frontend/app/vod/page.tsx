@@ -210,6 +210,7 @@ const itemToChannel = (item: VodItem, stack: VodNode[]): Channel => {
         playerTitle: titleParts.join(" · "),
         playerSubtitle: subtitleParts.join(" · "),
         vodProgramId: getKanVodProgramId(item.module, item.programId, stackUrls),
+        streamEndpoint: item.streamEndpoint,
         vodMeta,
     };
 };
