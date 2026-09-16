@@ -35,6 +35,8 @@ export const EpisodeRow: React.FC<EpisodeRowProps> = ({
               onPress={onEpisodePress}
               onFocus={onEpisodeFocus}
               hasPreferredFocus={index === 0}
+              isFirstCard={index === 0}
+              isLastCard={index === episodes.length - 1}
             />
           ))}
         </ScrollView>
