@@ -33,21 +33,14 @@ export interface TvProgramCardProps {
   scrimHeight?: number;
 }
 
-// 12-stop smooth cubic CSS fade curve (pure CSS, zero external image files)
-const FADE_STOPS = [
-  'rgba(8, 10, 14, 0.0)',
-  'rgba(8, 10, 14, 0.04)',
-  'rgba(8, 10, 14, 0.09)',
-  'rgba(8, 10, 14, 0.16)',
-  'rgba(8, 10, 14, 0.25)',
-  'rgba(8, 10, 14, 0.37)',
-  'rgba(8, 10, 14, 0.50)',
-  'rgba(8, 10, 14, 0.65)',
-  'rgba(8, 10, 14, 0.78)',
-  'rgba(8, 10, 14, 0.88)',
-  'rgba(8, 10, 14, 0.95)',
-  'rgba(8, 10, 14, 0.98)',
-];
+// 96-step 1px-per-row continuous CSS fade (each slice is 1dp tall, perfectly smooth zero-banding transition)
+const FADE_STEPS = 96;
+const FADE_STOPS: string[] = Array.from({ length: FADE_STEPS }, (_, i) => {
+  const t = i / (FADE_STEPS - 1);
+  // Natural cubic-like power curve (t^1.6) from 0.0 to 0.96 opacity
+  const alpha = Math.min(0.96, Math.pow(t, 1.6) * 0.96);
+  return `rgba(8, 10, 14, ${alpha.toFixed(3)})`;
+});
 
 export const TvProgramCard: React.FC<TvProgramCardProps> = React.memo(({
   program,
