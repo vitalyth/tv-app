@@ -123,6 +123,28 @@ def vod_episode_activity_subquery(provider: str) -> str:
     """
 
 
+def vod_program_activity_order_by(
+    source_sort_key: str,
+    date_sort_key: str,
+    added_at: str,
+    *fallback_sort_keys: str,
+) -> str:
+    """Sort programs by provider recency, using DB insertion time only as a tie-breaker."""
+    source_sql = _sql_identifier(source_sort_key)
+    date_sql = _sql_identifier(date_sort_key)
+    added_sql = _sql_identifier(added_at)
+    fallback_sql = [_sql_identifier(value) for value in fallback_sort_keys]
+    recency_sql = ", ".join([source_sql, date_sql, *fallback_sql, "0"])
+    return f"""
+        {source_sql} IS NULL,
+        COALESCE({recency_sql}) DESC,
+        {date_sql} IS NULL,
+        {date_sql} DESC,
+        {added_sql} IS NULL,
+        {added_sql} DESC
+    """
+
+
 def vod_episode_source_sort_key_expr(
     columns: set[str],
     table_alias: str = "e",

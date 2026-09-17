@@ -13,6 +13,7 @@ from services.vod_database import (
     mark_vod_program_detail_scan,
     select_vod_programs_for_detail_scan,
     vod_episode_activity_subquery,
+    vod_program_activity_order_by,
 )
 
 
@@ -456,6 +457,43 @@ class VodDatabaseTests(unittest.TestCase):
 
             self.assertEqual([row["program_id"] for row in numeric_rows], ["newer-program-id", "older-program-id"])
             self.assertEqual([row["program_id"] for row in dated_rows], ["newer-date", "older-date"])
+        finally:
+            con.close()
+
+    def test_program_activity_sort_uses_provider_recency_before_insertion_time(self):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        try:
+            con.executescript(
+                """
+                CREATE TABLE activity (
+                    name TEXT,
+                    source_key INTEGER,
+                    date_key REAL,
+                    added_at TEXT
+                );
+                INSERT INTO activity VALUES
+                    ('old-provider-new-insert', 10, 100, '2026-09-17 12:00:00'),
+                    ('new-provider-old-insert', 20, 200, '2026-09-14 12:00:00');
+                """
+            )
+
+            rows = con.execute(
+                f"""
+                SELECT name
+                FROM activity
+                ORDER BY {vod_program_activity_order_by(
+                    "source_key",
+                    "date_key",
+                    "added_at",
+                )}
+                """
+            ).fetchall()
+
+            self.assertEqual(
+                [row["name"] for row in rows],
+                ["new-provider-old-insert", "old-provider-new-insert"],
+            )
         finally:
             con.close()
 

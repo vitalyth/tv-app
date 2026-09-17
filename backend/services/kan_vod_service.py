@@ -14,6 +14,7 @@ from services.vod_database import (
     vod_episode_activity_subquery,
     vod_episode_source_sort_kind_expr,
     vod_episode_source_sort_key_expr,
+    vod_program_activity_order_by,
 )
 
 
@@ -313,10 +314,12 @@ def get_kan_vod_series(
             GROUP BY p.id
             ORDER BY
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
-                latest_episode_added_at IS NULL,
-                latest_episode_added_at DESC,
-                latest_episode_source_sort_key IS NULL,
-                COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, latest_kan_episode_id, 0) DESC,
+                {vod_program_activity_order_by(
+                    "latest_episode_source_sort_key",
+                    "latest_episode_date_sort_key",
+                    "latest_episode_added_at",
+                    "latest_kan_episode_id",
+                )},
                 latest_episode_timestamp IS NULL,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,

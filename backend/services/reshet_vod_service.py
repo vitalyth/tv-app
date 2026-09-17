@@ -21,6 +21,7 @@ from services.vod_database import (
     vod_episode_activity_subquery,
     vod_episode_source_sort_kind_expr,
     vod_episode_source_sort_key_expr,
+    vod_program_activity_order_by,
 )
 
 
@@ -910,6 +911,7 @@ def refresh_reshet_vod_catalog(
                 limit_programs=limit_programs,
                 full_scan_interval_hours=full_scan_interval_hours,
                 with_streams=with_streams,
+                include_incremental=True,
             )
             if verbose:
                 print(f"Reshet scan summary: {scan_summary}", flush=True)
@@ -1045,10 +1047,12 @@ def get_reshet_vod_series(
             GROUP BY p.id
             ORDER BY
                 CASE WHEN COUNT(DISTINCT e.id) > 0 THEN 0 ELSE 1 END,
-                latest_episode_added_at IS NULL,
-                latest_episode_added_at DESC,
-                latest_episode_source_sort_key IS NULL,
-                COALESCE(latest_episode_source_sort_key, latest_episode_date_sort_key, latest_episode_sort_key, 0) DESC,
+                {vod_program_activity_order_by(
+                    "latest_episode_source_sort_key",
+                    "latest_episode_date_sort_key",
+                    "latest_episode_added_at",
+                    "latest_episode_sort_key",
+                )},
                 latest_episode_sort_key DESC,
                 latest_episode_published IS NULL,
                 latest_episode_published DESC,

@@ -19,6 +19,7 @@ from services.vod_database import (
     vod_episode_activity_subquery,
     vod_episode_source_sort_kind_expr,
     vod_episode_source_sort_key_expr,
+    vod_program_activity_order_by,
 )
 
 
@@ -779,6 +780,7 @@ def refresh_i24_vod_catalog(
                 limit_programs=limit_programs,
                 full_scan_interval_hours=full_scan_interval_hours,
                 with_streams=with_streams,
+                include_incremental=True,
             )
             if verbose:
                 print(f"i24 scan summary: {scan_summary}", flush=True)
@@ -1012,10 +1014,12 @@ def get_i24_vod_series(
             FROM ({base_query}) p
             {sql_where}
             ORDER BY
-                latestEpisodeAddedAt IS NULL,
-                latestEpisodeAddedAt DESC,
-                latestEpisodeSourceSortKey IS NULL,
-                COALESCE(latestEpisodeSourceSortKey, latestEpisodeDateSortKey, latest_episode_timestamp, 0) DESC,
+                {vod_program_activity_order_by(
+                    "latestEpisodeSourceSortKey",
+                    "latestEpisodeDateSortKey",
+                    "latestEpisodeAddedAt",
+                    "latest_episode_timestamp",
+                )},
                 COALESCE(latest_episode_timestamp, 0) DESC,
                 title COLLATE NOCASE
             LIMIT ? OFFSET ?
