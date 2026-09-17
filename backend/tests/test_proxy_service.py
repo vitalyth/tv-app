@@ -1,8 +1,9 @@
 import importlib
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
+import requests
 from fastapi.responses import Response
 
 
@@ -102,6 +103,46 @@ class ProxyServiceTests(unittest.TestCase):
 
         self.assertIs(response, expected)
         buffered.assert_called_once()
+
+    def test_detects_redge_dash_live_fragment_as_segment(self):
+        url = (
+            "https://n-121-12.il.cdn-redge.media/livedash/oil/kancdn-live/live/kan11/"
+            "live.livx?type=video&ft=1&id=0&bitrate=5500000&startTime=123"
+        )
+
+        self.assertTrue(self.module._is_redge_live_segment_url(url))
+
+    def test_kan_live_segment_uses_short_retry_and_buffering(self):
+        url = (
+            "https://n-121-7.il.cdn-redge.media/livehls/oil/kancdn-live/live/kan11/"
+            "live.livx/fragment.ts?bitrate=5692000&startTime=123"
+        )
+        upstream = _UpstreamResponse(url, content=b"segment", content_length=7)
+        expected = Response(content=b"buffered", media_type="video/mp2t")
+        request = SimpleNamespace(headers={}, method="GET", query_params={})
+
+        with patch.object(
+            self.module.live_session,
+            "get",
+            side_effect=[requests.exceptions.ReadTimeout("stalled"), upstream],
+        ) as live_get, patch.object(
+            self.module,
+            "_buffered_segment_response",
+            return_value=expected,
+        ) as buffered:
+            response = self.module.handle_proxy(request, url, "https://www.kan.org.il/")
+
+        self.assertIs(response, expected)
+        self.assertEqual(live_get.call_count, 2)
+        buffered.assert_called_once_with(
+            url,
+            ANY,
+            upstream,
+            "video/mp4",
+            retries=self.module.KAN_LIVE_PROXY_RETRIES,
+            request_session=self.module.live_session,
+            request_timeout=self.module.KAN_LIVE_PROXY_REQUEST_TIMEOUT,
+        )
 
 
 if __name__ == "__main__":

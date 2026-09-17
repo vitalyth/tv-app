@@ -24,10 +24,18 @@ except ImportError:
     ImageOps = None
 
 session = create_session()
+live_session = create_session(total_retries=0, pool_maxsize=32)
 
 PROXY_CONNECT_TIMEOUT_SECONDS = float(os.getenv("PROXY_CONNECT_TIMEOUT_SECONDS", "10"))
 PROXY_READ_TIMEOUT_SECONDS = float(os.getenv("PROXY_READ_TIMEOUT_SECONDS", "60"))
 PROXY_REQUEST_TIMEOUT = (PROXY_CONNECT_TIMEOUT_SECONDS, PROXY_READ_TIMEOUT_SECONDS)
+KAN_LIVE_PROXY_CONNECT_TIMEOUT_SECONDS = float(os.getenv("KAN_LIVE_PROXY_CONNECT_TIMEOUT_SECONDS", "3"))
+KAN_LIVE_PROXY_READ_TIMEOUT_SECONDS = float(os.getenv("KAN_LIVE_PROXY_READ_TIMEOUT_SECONDS", "4"))
+KAN_LIVE_PROXY_REQUEST_TIMEOUT = (
+    KAN_LIVE_PROXY_CONNECT_TIMEOUT_SECONDS,
+    KAN_LIVE_PROXY_READ_TIMEOUT_SECONDS,
+)
+KAN_LIVE_PROXY_RETRIES = max(0, int(os.getenv("KAN_LIVE_PROXY_RETRIES", "1")))
 KAN_VOD_PROXY_MAX_BITRATE = int(get_vod_env("VOD_PROXY_MAX_BITRATE", "KAN_VOD_PROXY_MAX_BITRATE", default="0"))
 KAN_VOD_SEGMENT_RETRIES = max(0, int(get_vod_env("VOD_SEGMENT_RETRIES", "KAN_VOD_SEGMENT_RETRIES", default="2")))
 PLUTO_SEGMENT_RETRIES = max(0, int(os.getenv("PLUTO_SEGMENT_RETRIES", "2")))
@@ -421,6 +429,29 @@ def _is_redge_live_hls_url(url):
     return "redge.media" in host and ("/livehls/" in path or ".livx/" in path)
 
 
+def _is_redge_live_url(url):
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+
+    return (
+        "redge.media" in host
+        and "/kancdn-live/live/" in path
+        and ("/livehls/" in path or "/livedash/" in path)
+    )
+
+
+def _is_redge_live_segment_url(url):
+    if not _is_redge_live_url(url):
+        return False
+
+    if _is_segment_url(url):
+        return True
+
+    query = parse_qs(urlparse(url).query)
+    return query.get("type", [""])[0] in {"audio", "video"} and query.get("ft", [""])[0] in {"0", "1"}
+
+
 def _is_pluto_hls_url(url):
     host = urlparse(url).netloc.lower()
     return "pluto.tv" in host or "plutotv.net" in host
@@ -556,7 +587,15 @@ def _stream_icy_audio_response(upstream, content_type, channel_id):
     )
 
 
-def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
+def _buffered_segment_response(
+    url,
+    headers,
+    upstream,
+    content_type,
+    retries=0,
+    request_session=session,
+    request_timeout=PROXY_REQUEST_TIMEOUT,
+):
     max_attempts = retries + 1
 
     for attempt in range(max_attempts):
@@ -564,7 +603,7 @@ def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
 
         if attempt > 0:
             try:
-                current = session.get(url, headers=headers, stream=True, timeout=PROXY_REQUEST_TIMEOUT)
+                current = request_session.get(url, headers=headers, stream=True, timeout=request_timeout)
             except requests.exceptions.RequestException as exc:
                 print(f"Buffered segment retry open failed ({attempt}/{retries}) for url={url}: {exc}", flush=True)
                 if attempt >= retries:
@@ -623,6 +662,21 @@ def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
         )
 
     return Response(status_code=502, headers=CORS_HEADERS)
+
+
+def _open_upstream(request_session, url, headers, stream, timeout, retries=0):
+    for attempt in range(retries + 1):
+        try:
+            return request_session.get(url, headers=headers, stream=stream, timeout=timeout)
+        except requests.exceptions.RequestException as exc:
+            if attempt >= retries:
+                raise
+            print(
+                f"Retrying live upstream open ({attempt + 1}/{retries}) for url={url}: {exc}",
+                flush=True,
+            )
+
+    raise RuntimeError("upstream retry loop ended unexpectedly")
 
 
 def _retry_upstream_if_needed(url, headers, upstream, retries=0):
@@ -1113,6 +1167,8 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
     origin = _origin_for_proxy_request(url, referer)
     max_bitrate = _default_max_bitrate_for_request(request, url)
     vpn = _proxy_query_vpn(request)
+    is_live_redge = _is_redge_live_url(url)
+    is_live_segment = _is_redge_live_segment_url(url)
 
     headers = {
         "User-Agent": request.headers.get("user-agent", "Mozilla/5.0"),
@@ -1133,13 +1189,27 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
     if channel_id:
         headers["Icy-MetaData"] = "1"
 
+    request_session = live_session if is_live_redge else session
+    request_timeout = KAN_LIVE_PROXY_REQUEST_TIMEOUT if is_live_redge else PROXY_REQUEST_TIMEOUT
+    request_retries = KAN_LIVE_PROXY_RETRIES if is_live_redge else 0
+    stream_upstream = is_live_segment or not is_live_redge
+
     try:
-        r = session.get(url, headers=headers, stream=True, timeout=PROXY_REQUEST_TIMEOUT)
+        r = _open_upstream(
+            request_session,
+            url,
+            headers,
+            stream=stream_upstream,
+            timeout=request_timeout,
+            retries=request_retries,
+        )
     except requests.exceptions.RequestException as e:
         print("Proxy request failed:", e)
         return Response(status_code=502, headers=CORS_HEADERS)
 
     effective_url = r.url or url
+    is_live_redge = is_live_redge or _is_redge_live_url(effective_url)
+    is_live_segment = is_live_segment or _is_redge_live_segment_url(effective_url)
     if _is_pluto_hls_url(effective_url) and _is_segment_url(effective_url):
         r = _retry_upstream_if_needed(effective_url, headers, r, retries=PLUTO_SEGMENT_RETRIES)
         effective_url = r.url or effective_url
@@ -1155,6 +1225,17 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
             r,
             content_type,
             retries=KAN_VOD_SEGMENT_RETRIES,
+        )
+
+    if not is_head and is_live_redge and is_live_segment:
+        return _buffered_segment_response(
+            effective_url,
+            headers,
+            r,
+            content_type,
+            retries=KAN_LIVE_PROXY_RETRIES,
+            request_session=live_session,
+            request_timeout=KAN_LIVE_PROXY_REQUEST_TIMEOUT,
         )
 
     if r.status_code >= 400:
