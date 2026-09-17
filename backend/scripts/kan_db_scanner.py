@@ -849,6 +849,9 @@ def parse_episodes_from_page(program: Program, season: Season) -> list[Episode]:
         episode_id = extract_episode_id_from_url(play_url) or program.id
 
         stream_url, entry_id = resolve_episode_stream(play_url, raise_on_error=False)
+        if play_url.rstrip("/") == program.url.rstrip("/") and not stream_url and not entry_id:
+            return []
+
         episodes.append(
             Episode(
                 id=episode_id,

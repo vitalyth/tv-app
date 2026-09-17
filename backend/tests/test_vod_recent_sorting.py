@@ -89,6 +89,26 @@ class VodRecentSortingTests(unittest.TestCase):
         self.assertEqual(repaired["episodeId"], "1725739")
         self.assertEqual(repaired["streamEndpoint"], "/c14-vod/stream?episode_id=1725739")
 
+    def test_unplayable_kan_program_row_is_not_a_recent_episode(self):
+        item = {
+            "id": "kan-vod:1096531",
+            "module": "kan-vod",
+            "episodeId": "1096531",
+            "programId": "1096531",
+            "url": "https://www.kan.org.il/content/kan/kan-11/p-1096531/",
+            "playUrl": "https://www.kan.org.il/content/kan/kan-11/p-1096531/",
+            "streamUrl": "",
+        }
+
+        self.assertTrue(channel_service._is_vod_recent_placeholder_item(item))
+
+        playable_child = {
+            **item,
+            "episodeId": "1096785",
+            "playUrl": "https://www.kan.org.il/content/kan/kan-11/p-1096531/s1/1096785/",
+        }
+        self.assertFalse(channel_service._is_vod_recent_placeholder_item(playable_child))
+
     def test_vod_recent_file_cache_uses_memory_until_file_changes(self):
         original_cache_file = channel_service.VOD_RECENT_CACHE_FILE
         original_cache = channel_service._vod_recent_cache

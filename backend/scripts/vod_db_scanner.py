@@ -308,12 +308,63 @@ def _run_keshet_maintenance(args: argparse.Namespace) -> dict:
     )
 
 
+def _run_kan_maintenance(args: argparse.Namespace) -> dict:
+    db_path = prepare_vod_db_path(args.db)
+    con = sqlite3.connect(db_path)
+    try:
+        required_columns = {
+            "id",
+            "program_id",
+            "stream_url",
+            "kaltura_entry_id",
+            "play_url",
+            "url",
+        }
+        invalid_predicate = """
+            id = program_id
+            AND TRIM(COALESCE(stream_url, '')) = ''
+            AND TRIM(COALESCE(kaltura_entry_id, '')) = ''
+            AND TRIM(COALESCE(play_url, '')) = TRIM(COALESCE(url, ''))
+        """
+        removed = 0
+        for table, provider_filter in (
+            ("episodes", ""),
+            ("vod_episodes", "provider = 'kan' AND"),
+        ):
+            has_table = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+            if not has_table:
+                continue
+            columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+            if not required_columns.issubset(columns):
+                continue
+            removed += max(
+                0,
+                con.execute(
+                    f"DELETE FROM {table} WHERE {provider_filter} {invalid_predicate}"
+                ).rowcount,
+            )
+        con.commit()
+    finally:
+        con.close()
+
+    return {
+        "provider": "kan",
+        "returnCode": 0,
+        "removedUnplayableProgramPlaceholders": max(0, removed),
+    }
+
+
 def command_maintenance(args: argparse.Namespace) -> int:
-    providers = ["keshet"] if args.provider == "all" else [args.provider]
+    providers = ["kan", "keshet"] if args.provider == "all" else [args.provider]
     results = []
 
     for provider in providers:
-        if provider == "keshet":
+        if provider == "kan":
+            result = _run_kan_maintenance(args)
+        elif provider == "keshet":
             result = _run_keshet_maintenance(args)
         else:
             result = {

@@ -1,9 +1,12 @@
 import sqlite3
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import services.vod_database as vod_database
+from scripts import vod_db_scanner
 from services.vod_database import (
     UNIFIED_SCHEMA_VERSION,
     ensure_unified_schema,
@@ -14,6 +17,75 @@ from services.vod_database import (
 
 
 class VodDatabaseTests(unittest.TestCase):
+    def test_kan_maintenance_handles_empty_db_and_removes_unplayable_placeholders(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            empty_db = str(Path(temp_dir) / "empty.db")
+            empty_result = vod_db_scanner._run_kan_maintenance(
+                SimpleNamespace(db=empty_db)
+            )
+            self.assertEqual(empty_result["removedUnplayableProgramPlaceholders"], 0)
+
+            db_path = str(Path(temp_dir) / "vod.db")
+            con = sqlite3.connect(db_path)
+            try:
+                for table in ("episodes", "vod_episodes"):
+                    provider_column = "provider TEXT," if table == "vod_episodes" else ""
+                    con.execute(
+                        f"""
+                        CREATE TABLE {table} (
+                            {provider_column}
+                            id TEXT,
+                            program_id TEXT,
+                            stream_url TEXT,
+                            kaltura_entry_id TEXT,
+                            play_url TEXT,
+                            url TEXT
+                        )
+                        """
+                    )
+                placeholder = (
+                    "program-1",
+                    "program-1",
+                    "",
+                    "",
+                    "https://example.test/p-program-1/",
+                    "https://example.test/p-program-1/",
+                )
+                playable = (
+                    "episode-1",
+                    "program-1",
+                    "https://cdn.test/master.m3u8",
+                    "entry-1",
+                    "https://example.test/p-program-1/episode-1/",
+                    "https://example.test/p-program-1/episode-1/",
+                )
+                con.executemany(
+                    "INSERT INTO episodes VALUES (?, ?, ?, ?, ?, ?)",
+                    (placeholder, playable),
+                )
+                con.executemany(
+                    "INSERT INTO vod_episodes VALUES ('kan', ?, ?, ?, ?, ?, ?)",
+                    (placeholder, playable),
+                )
+                con.commit()
+            finally:
+                con.close()
+
+            result = vod_db_scanner._run_kan_maintenance(
+                SimpleNamespace(db=db_path)
+            )
+            self.assertEqual(result["removedUnplayableProgramPlaceholders"], 2)
+
+            con = sqlite3.connect(db_path)
+            try:
+                self.assertEqual(con.execute("SELECT id FROM episodes").fetchall(), [("episode-1",)])
+                self.assertEqual(
+                    con.execute("SELECT id FROM vod_episodes").fetchall(),
+                    [("episode-1",)],
+                )
+            finally:
+                con.close()
+
     def test_unified_episode_created_at_uses_legacy_updated_at(self):
         con = sqlite3.connect(":memory:")
         con.row_factory = sqlite3.Row

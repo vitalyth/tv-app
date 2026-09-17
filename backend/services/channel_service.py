@@ -1176,9 +1176,21 @@ def _is_vod_recent_placeholder_item(item: dict) -> bool:
         )
     )
     program_id = str(item.get("programId") or item.get("program_id") or "")
+    episode_id = str(item.get("episodeId") or item.get("episode") or "")
+    item_url = str(item.get("url") or "").rstrip("/")
+    play_url = str(item.get("playUrl") or item.get("play_url") or "").rstrip("/")
+    is_unplayable_kan_program_placeholder = (
+        item.get("module") == "kan-vod"
+        and bool(program_id)
+        and episode_id == program_id
+        and not str(item.get("streamUrl") or item.get("stream_url") or "").strip()
+        and bool(item_url)
+        and play_url == item_url
+    )
 
     return (
         program_id == "991817"
+        or is_unplayable_kan_program_placeholder
         or "vod storage" in text
         or "dam episodes with missing info" in text
         or "לא שויכו לסדרה" in text
