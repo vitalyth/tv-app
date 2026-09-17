@@ -44,7 +44,12 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup
 
-from services.vod_database import connect_vod_db, ensure_unified_schema, prepare_vod_db_path
+from services.vod_database import (
+    connect_vod_db,
+    ensure_unified_schema,
+    prepare_vod_db_path,
+    select_vod_programs_for_detail_scan,
+)
 
 try:
     import cloudscraper
@@ -1838,10 +1843,24 @@ def command_scan(args: argparse.Namespace) -> None:
             mainids=args.program_mainid,
         )
 
-        if args.limit_programs:
-            programs = programs[: args.limit_programs]
-
         current_program_signature = program_catalog_signature(programs)
+        total_programs = len(programs)
+        for program in programs:
+            upsert_program(con, program)
+        con.commit()
+
+        programs, scan_summary = select_vod_programs_for_detail_scan(
+            con,
+            programs,
+            program_table="programs",
+            episode_table="episodes",
+            program_id_getter=lambda program: program.id,
+            incremental=args.incremental,
+            limit_programs=args.limit_programs,
+            full_scan_interval_hours=args.full_scan_interval_hours,
+            with_streams=args.with_streams,
+            include_incremental=True,
+        )
         can_skip_unchanged_seasons = (
             args.incremental
             and not args.with_streams
@@ -1849,7 +1868,8 @@ def command_scan(args: argparse.Namespace) -> None:
             and not getattr(args, "enrich_metadata", False)
         )
 
-        print(f"Found {len(programs)} programs")
+        print(f"Found {total_programs} programs")
+        print(f"Kan scan summary: {scan_summary}")
 
         for index, program in enumerate(programs, start=1):
             print(f"\n[{index}/{len(programs)}] Program: {program.title} ({program.id}, mainid={program.mainid})")

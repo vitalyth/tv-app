@@ -350,6 +350,67 @@ class VodDatabaseTests(unittest.TestCase):
         finally:
             con.close()
 
+    def test_incremental_rotation_prioritizes_new_then_oldest_scanned_program(self):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        try:
+            con.executescript(
+                """
+                CREATE TABLE programs (
+                    id TEXT PRIMARY KEY,
+                    last_full_scan_at TEXT,
+                    last_incremental_scan_at TEXT,
+                    updated_at TEXT
+                );
+                CREATE TABLE episodes (
+                    id TEXT PRIMARY KEY,
+                    program_id TEXT NOT NULL,
+                    stream_url TEXT
+                );
+
+                INSERT INTO programs (id, last_full_scan_at, last_incremental_scan_at)
+                VALUES ('recent', '2026-09-17 10:00:00', '2026-09-17 10:00:00');
+                INSERT INTO programs (id, last_full_scan_at, last_incremental_scan_at)
+                VALUES ('oldest', '2026-09-17 10:00:00', '2026-09-10 10:00:00');
+                INSERT INTO programs (id) VALUES ('new-program');
+                INSERT INTO programs (id, last_full_scan_at, last_incremental_scan_at)
+                VALUES ('recent-empty', '2026-09-17 11:00:00', '2026-09-17 11:00:00');
+                INSERT INTO episodes (id, program_id) VALUES ('recent-episode', 'recent');
+                INSERT INTO episodes (id, program_id) VALUES ('oldest-episode', 'oldest');
+                """
+            )
+            programs = [
+                {"id": "recent"},
+                {"id": "oldest"},
+                {"id": "new-program"},
+                {"id": "recent-empty"},
+            ]
+
+            selected, summary = select_vod_programs_for_detail_scan(
+                con,
+                programs,
+                program_table="programs",
+                episode_table="episodes",
+                program_id_getter=lambda program: program["id"],
+                incremental=True,
+                limit_programs=2,
+                full_scan_interval_hours=0,
+                include_incremental=True,
+            )
+
+            self.assertEqual(
+                [program["id"] for program in selected],
+                ["new-program", "oldest"],
+            )
+            self.assertEqual(summary["candidatePrograms"], 4)
+            self.assertEqual(summary["selectedPrograms"], 2)
+            self.assertEqual(summary["reasons"], {
+                "new-program": 1,
+                "incremental": 1,
+            })
+        finally:
+            con.close()
+
     def test_episode_activity_sort_prefers_numeric_provider_id_then_date(self):
         con = sqlite3.connect(":memory:")
         con.row_factory = sqlite3.Row

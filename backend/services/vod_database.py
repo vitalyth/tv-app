@@ -183,6 +183,7 @@ def select_vod_programs_for_detail_scan(
     limit_programs: int | None,
     full_scan_interval_hours: int,
     with_streams: bool = False,
+    include_incremental: bool = False,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Choose provider programs for detail scans with one policy for all VOD providers."""
     entries = [
@@ -225,6 +226,7 @@ def select_vod_programs_for_detail_scan(
             stat,
             full_scan_interval_hours=full_scan_interval_hours,
             with_streams=with_streams,
+            include_incremental=include_incremental,
         )
         if not reason:
             continue
@@ -249,6 +251,7 @@ def select_vod_programs_for_detail_scan(
         "scheduled-full": 2,
         "missing-streams": 3,
         "missing-episodes": 4,
+        "incremental": 4,
     }
     candidates.sort(
         key=lambda item: (
@@ -982,6 +985,7 @@ def _vod_program_scan_reason(
     *,
     full_scan_interval_hours: int,
     with_streams: bool,
+    include_incremental: bool,
 ) -> str | None:
     episode_count = int(stat.get("episode_count") or 0)
     stream_count = int(stat.get("stream_count") or 0)
@@ -1002,6 +1006,8 @@ def _vod_program_scan_reason(
             return "never-scanned"
         if time.time() - last_full_scan >= int(full_scan_interval_hours) * 60 * 60:
             return "scheduled-full"
+    if include_incremental:
+        return "incremental"
     return None
 
 
