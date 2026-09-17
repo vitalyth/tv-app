@@ -12,6 +12,9 @@ from services.vod_database import get_vod_db_path, prepare_vod_db_path
 BASE_DIR = Path(__file__).resolve().parent
 VOD_DB_PATH = get_vod_db_path()
 VOD_SCAN_LIMIT_PROGRAMS = os.getenv("VOD_SCAN_LIMIT_PROGRAMS", "0").strip() or "0"
+KAN_VOD_SCAN_LIMIT_PROGRAMS = (
+    os.getenv("KAN_VOD_SCAN_LIMIT_PROGRAMS", "").strip() or VOD_SCAN_LIMIT_PROGRAMS
+)
 KESHET_VOD_SCAN_LIMIT_PROGRAMS = (
     os.getenv("KESHET_VOD_SCAN_LIMIT_PROGRAMS", "").strip() or VOD_SCAN_LIMIT_PROGRAMS
 )
@@ -148,6 +151,8 @@ def main() -> int:
                 "kan",
                 "--db",
                 VOD_DB_PATH,
+                "--limit-programs",
+                KAN_VOD_SCAN_LIMIT_PROGRAMS,
                 "--incremental",
                 "--verbose",
             ],
