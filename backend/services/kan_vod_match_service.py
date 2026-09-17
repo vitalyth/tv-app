@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import lru_cache
 
 from services.kan_vod_service import KAN_VOD_DB_PATH, get_kan_vod_series, get_kan_vod_series_details
+from services.vod_database import connect_vod_db
 
 
 DAY_SECONDS = 24 * 60 * 60
@@ -307,8 +308,7 @@ def _find_episode_candidates_from_db(program: dict, api_prefix: str) -> list[tup
                 params.extend([token_like, token_like, token_like, token_like])
             clauses.append(f"({' AND '.join(token_clauses)})")
 
-    with sqlite3.connect(KAN_VOD_DB_PATH) as con:
-        con.row_factory = sqlite3.Row
+    with connect_vod_db(KAN_VOD_DB_PATH) as con:
         rows = con.execute(
             f"""
             SELECT

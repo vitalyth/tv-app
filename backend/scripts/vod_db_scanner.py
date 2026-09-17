@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +11,7 @@ BACKEND_DIR = SCRIPT_DIR.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from services.vod_database import get_vod_db_path, prepare_vod_db_path
+from services.vod_database import connect_vod_db, get_vod_db_path, prepare_vod_db_path
 
 
 def _should_run_ensure_pass(args: argparse.Namespace) -> bool:
@@ -62,8 +61,7 @@ def _run_kan_scan(args: argparse.Namespace) -> dict:
 
 
 def _kan_programs_without_episodes(db_path: str, limit: int = 0) -> list[dict]:
-    con = sqlite3.connect(prepare_vod_db_path(db_path))
-    con.row_factory = sqlite3.Row
+    con = connect_vod_db(db_path)
     try:
         query = """
             SELECT p.id, p.title
@@ -310,7 +308,7 @@ def _run_keshet_maintenance(args: argparse.Namespace) -> dict:
 
 def _run_kan_maintenance(args: argparse.Namespace) -> dict:
     db_path = prepare_vod_db_path(args.db)
-    con = sqlite3.connect(db_path)
+    con = connect_vod_db(db_path)
     try:
         required_columns = {
             "id",

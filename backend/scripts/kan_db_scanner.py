@@ -44,7 +44,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup
 
-from services.vod_database import ensure_unified_schema, prepare_vod_db_path
+from services.vod_database import connect_vod_db, ensure_unified_schema, prepare_vod_db_path
 
 try:
     import cloudscraper
@@ -1168,13 +1168,7 @@ def resolve_episode_stream(
 
 
 def connect_db(db_path: str) -> sqlite3.Connection:
-    parent = os.path.dirname(db_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(db_path, timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout = 30000")
-    return con
+    return connect_vod_db(db_path)
 
 
 def table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:

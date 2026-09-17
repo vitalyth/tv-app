@@ -11,21 +11,30 @@ from typing import Any, Callable
 DEFAULT_VOD_DB_PATH = "db/vod.db"
 LEGACY_KAN_VOD_DB_PATH = "db/kan_vod.db"
 UNIFIED_SCHEMA_VERSION = "3"
+VOD_DB_BUSY_TIMEOUT_MS = 30_000
 _ENSURED_SCHEMA_KEYS: set[tuple[str, tuple[str, ...], str]] = set()
 _PROVIDER_SCHEMA_LOCK = threading.Lock()
 _INITIALIZED_PROVIDER_SCHEMAS: set[tuple[str, str]] = set()
 
 
 def connect_vod_db(db_path: str) -> sqlite3.Connection:
-    """Open the shared VOD database with a consistent lock wait policy."""
+    """Open the shared VOD database with concurrency-safe settings."""
     db_path = prepare_vod_db_path(db_path)
     parent = os.path.dirname(db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(db_path, timeout=30)
+    con = sqlite3.connect(db_path, timeout=VOD_DB_BUSY_TIMEOUT_MS / 1000)
     con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout = 30000")
-    return con
+    try:
+        con.execute(f"PRAGMA busy_timeout = {VOD_DB_BUSY_TIMEOUT_MS}")
+        journal_mode = str(con.execute("PRAGMA journal_mode = WAL").fetchone()[0]).lower()
+        if journal_mode == "wal":
+            con.execute("PRAGMA synchronous = NORMAL")
+            con.execute("PRAGMA wal_autocheckpoint = 1000")
+        return con
+    except Exception:
+        con.close()
+        raise
 
 
 def ensure_vod_provider_schema(
@@ -208,9 +217,9 @@ def select_vod_programs_for_detail_scan(
         with_streams=with_streams,
     )
 
-    candidates: list[tuple[str, Any, str]] = []
+    candidates: list[tuple[str, Any, str, int, float, int]] = []
     candidate_reasons: dict[str, int] = {}
-    for program_id, program in entries:
+    for catalog_index, (program_id, program) in enumerate(entries):
         stat = stats.get(program_id, {})
         reason = _vod_program_scan_reason(
             stat,
@@ -219,15 +228,41 @@ def select_vod_programs_for_detail_scan(
         )
         if not reason:
             continue
-        candidates.append((program_id, program, reason))
+        last_scan = parse_vod_sqlite_timestamp(
+            stat.get("last_incremental_scan_at") or stat.get("last_full_scan_at")
+        ) or 0
+        candidates.append(
+            (
+                program_id,
+                program,
+                reason,
+                int(stat.get("row_id") or 0),
+                last_scan,
+                catalog_index,
+            )
+        )
         candidate_reasons[reason] = candidate_reasons.get(reason, 0) + 1
 
+    reason_priority = {
+        "new-program": 0,
+        "never-scanned": 1,
+        "scheduled-full": 2,
+        "missing-streams": 3,
+        "missing-episodes": 4,
+    }
+    candidates.sort(
+        key=lambda item: (
+            reason_priority.get(item[2], 99),
+            -item[3] if item[2] == "new-program" else item[4],
+            item[5],
+        )
+    )
     selected_candidates = candidates[:limit or None]
     selected_reasons: dict[str, int] = {}
-    for _, _, reason in selected_candidates:
+    for _, _, reason, _, _, _ in selected_candidates:
         selected_reasons[reason] = selected_reasons.get(reason, 0) + 1
 
-    selected = [program for _, program, _ in selected_candidates]
+    selected = [program for _, program, _, _, _, _ in selected_candidates]
     summary["candidatePrograms"] = len(candidates)
     summary["selectedPrograms"] = len(selected)
     summary["skippedPrograms"] = len(entries) - len(selected)
@@ -919,6 +954,7 @@ def _vod_program_scan_stats(
         f"""
         SELECT
             p.id AS id,
+            p.rowid AS row_id,
             {last_full_expr} AS last_full_scan_at,
             {last_incremental_expr} AS last_incremental_scan_at,
             COUNT(DISTINCT e.id) AS episode_count,
@@ -931,6 +967,7 @@ def _vod_program_scan_stats(
 
     return {
         str(row["id"]): {
+            "row_id": int(row["row_id"] or 0),
             "last_full_scan_at": row["last_full_scan_at"],
             "last_incremental_scan_at": row["last_incremental_scan_at"],
             "episode_count": int(row["episode_count"] or 0),
@@ -949,8 +986,11 @@ def _vod_program_scan_reason(
     episode_count = int(stat.get("episode_count") or 0)
     stream_count = int(stat.get("stream_count") or 0)
     last_full_scan_at = stat.get("last_full_scan_at")
+    last_incremental_scan_at = stat.get("last_incremental_scan_at")
 
     if episode_count <= 0:
+        if not last_full_scan_at and not last_incremental_scan_at:
+            return "new-program"
         return "missing-episodes"
     if with_streams and stream_count < episode_count:
         return "missing-streams"

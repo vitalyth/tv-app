@@ -40,17 +40,42 @@ class VodDatabaseTests(unittest.TestCase):
             con = vod_database.connect_vod_db(str(Path(temp_dir) / "vod.db"))
             try:
                 busy_timeout = con.execute("PRAGMA busy_timeout").fetchone()[0]
+                journal_mode = con.execute("PRAGMA journal_mode").fetchone()[0]
+                synchronous = con.execute("PRAGMA synchronous").fetchone()[0]
             finally:
                 con.close()
 
             self.assertEqual(busy_timeout, 30_000)
+            self.assertEqual(journal_mode, "wal")
+            self.assertEqual(synchronous, 1)
+
+    def test_shared_connection_allows_reads_during_an_exclusive_write(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "vod.db")
+            writer = vod_database.connect_vod_db(db_path)
+            reader = vod_database.connect_vod_db(db_path)
+            try:
+                writer.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, value TEXT)")
+                writer.execute("INSERT INTO items (value) VALUES ('visible')")
+                writer.commit()
+
+                writer.execute("BEGIN EXCLUSIVE")
+                writer.execute("INSERT INTO items (value) VALUES ('pending')")
+                rows = reader.execute("SELECT value FROM items ORDER BY id").fetchall()
+
+                self.assertEqual([row[0] for row in rows], ["visible"])
+            finally:
+                writer.rollback()
+                reader.close()
+                writer.close()
 
     def test_kan_maintenance_handles_empty_db_and_removes_unplayable_placeholders(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             empty_db = str(Path(temp_dir) / "empty.db")
-            empty_result = vod_db_scanner._run_kan_maintenance(
-                SimpleNamespace(db=empty_db)
-            )
+            with patch.object(vod_database, "_legacy_db_candidates", return_value=[]):
+                empty_result = vod_db_scanner._run_kan_maintenance(
+                    SimpleNamespace(db=empty_db)
+                )
             self.assertEqual(empty_result["removedUnplayableProgramPlaceholders"], 0)
 
             db_path = str(Path(temp_dir) / "vod.db")
@@ -256,7 +281,7 @@ class VodDatabaseTests(unittest.TestCase):
             self.assertEqual(summary["candidatePrograms"], 4)
             self.assertEqual(summary["selectedPrograms"], 3)
             self.assertEqual(summary["reasons"], {
-                "missing-episodes": 1,
+                "new-program": 1,
                 "never-scanned": 1,
                 "scheduled-full": 1,
             })
@@ -268,6 +293,60 @@ class VodDatabaseTests(unittest.TestCase):
             self.assertTrue(row["last_full_scan_at"])
             self.assertTrue(row["last_incremental_scan_at"])
             self.assertTrue(row["updated_at"])
+        finally:
+            con.close()
+
+    def test_incremental_scan_prioritizes_newest_unscanned_programs(self):
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        try:
+            con.executescript(
+                """
+                CREATE TABLE programs (
+                    id TEXT PRIMARY KEY,
+                    last_full_scan_at TEXT,
+                    last_incremental_scan_at TEXT,
+                    updated_at TEXT
+                );
+                CREATE TABLE episodes (
+                    id TEXT PRIMARY KEY,
+                    program_id TEXT NOT NULL,
+                    stream_url TEXT
+                );
+
+                INSERT INTO programs (id) VALUES ('old-unscanned');
+                INSERT INTO programs (id, last_full_scan_at, last_incremental_scan_at)
+                VALUES ('tried-empty', '2026-09-17 00:00:00', '2026-09-17 00:00:00');
+                INSERT INTO programs (id) VALUES ('new-unscanned');
+                """
+            )
+            programs = [
+                {"id": "old-unscanned"},
+                {"id": "tried-empty"},
+                {"id": "new-unscanned"},
+            ]
+
+            selected, summary = select_vod_programs_for_detail_scan(
+                con,
+                programs,
+                program_table="programs",
+                episode_table="episodes",
+                program_id_getter=lambda program: program["id"],
+                incremental=True,
+                limit_programs=2,
+                full_scan_interval_hours=168,
+            )
+
+            self.assertEqual(
+                [program["id"] for program in selected],
+                ["new-unscanned", "old-unscanned"],
+            )
+            self.assertEqual(summary["candidatePrograms"], 3)
+            self.assertEqual(summary["reasons"], {"new-program": 2})
+            self.assertEqual(summary["candidateReasons"], {
+                "new-program": 2,
+                "missing-episodes": 1,
+            })
         finally:
             con.close()
 
