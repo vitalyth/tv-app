@@ -22,8 +22,8 @@ services:
       SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES:-Israel}
       WIREGUARD_MTU: ${WIREGUARD_MTU:-1280}
       DNS_SERVER: "on"
-      DNS_UPSTREAM_RESOLVER_TYPE: dot
-      DNS_UPSTREAM_RESOLVERS: cloudflare,google
+      DNS_UPSTREAM_RESOLVER_TYPE: doh
+      DNS_UPSTREAM_RESOLVERS: cloudflare
       DNS_CACHING: "on"
       HEALTH_TARGET_ADDRESSES: r.il.cdn-redge.media:443,cloudflare.com:443,github.com:443
       TZ: ${TZ:-Asia/Jerusalem}
