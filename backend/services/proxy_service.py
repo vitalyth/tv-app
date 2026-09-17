@@ -573,17 +573,7 @@ def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
 
         try:
             content = current.content
-            response_headers = _response_metadata_headers(current)
-            response_headers["Content-Length"] = str(len(content))
             status_code = current.status_code
-            current.close()
-
-            return Response(
-                content=content,
-                status_code=status_code,
-                media_type=content_type,
-                headers=_response_headers(response_headers),
-            )
         except requests.exceptions.RequestException as exc:
             try:
                 current.close()
@@ -596,6 +586,41 @@ def _buffered_segment_response(url, headers, upstream, content_type, retries=0):
 
             print(f"Buffered segment failed for url={url}: {exc}", flush=True)
             return Response(status_code=502, headers=CORS_HEADERS)
+
+        expected_length = _query_int(current.headers.get("Content-Length"))
+        incomplete = status_code < 400 and (
+            not content
+            or (expected_length is not None and len(content) < expected_length)
+        )
+        retryable_status = status_code >= 500
+
+        if incomplete or retryable_status:
+            current.close()
+            reason = (
+                f"empty/incomplete body ({len(content)}/{expected_length or '?'})"
+                if incomplete
+                else f"HTTP {status_code}"
+            )
+            if attempt < retries:
+                print(
+                    f"Retrying buffered segment ({attempt + 1}/{retries}) for url={url}: {reason}",
+                    flush=True,
+                )
+                continue
+
+            print(f"Buffered segment failed for url={url}: {reason}", flush=True)
+            return Response(status_code=502, headers=CORS_HEADERS)
+
+        response_headers = _response_metadata_headers(current)
+        response_headers["Content-Length"] = str(len(content))
+        current.close()
+
+        return Response(
+            content=content,
+            status_code=status_code,
+            media_type=content_type,
+            headers=_response_headers(response_headers),
+        )
 
     return Response(status_code=502, headers=CORS_HEADERS)
 
@@ -1123,6 +1148,15 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
     clean_content_type = content_type.lower()
     is_head = request.method == "HEAD"
 
+    if not is_head and _is_kan_vod_redge_url(effective_url) and _is_segment_url(effective_url):
+        return _buffered_segment_response(
+            effective_url,
+            headers,
+            r,
+            content_type,
+            retries=KAN_VOD_SEGMENT_RETRIES,
+        )
+
     if r.status_code >= 400:
         content = r.content
         r.close()
@@ -1143,15 +1177,6 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
 
     # Video/audio segments
     if "video" in clean_content_type or "audio" in clean_content_type or _is_segment_url(effective_url):
-        if cast and _is_kan_vod_redge_url(effective_url) and _is_segment_url(effective_url):
-            return _buffered_segment_response(
-                effective_url,
-                headers,
-                r,
-                content_type,
-                retries=KAN_VOD_SEGMENT_RETRIES,
-            )
-
         if channel_id and "audio" in clean_content_type and r.headers.get("icy-metaint"):
             return _stream_icy_audio_response(r, content_type, channel_id)
 

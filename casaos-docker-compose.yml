@@ -121,7 +121,7 @@ services:
       - "8002"
     depends_on:
       gluetun:
-        condition: service_started
+        condition: service_healthy
         required: true
     environment:
       ROOT_PATH: /api
@@ -143,11 +143,11 @@ services:
         - CMD
         - python
         - -c
-        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/version', timeout=5)
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+        - import socket, ssl, urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/version', timeout=5); raw = socket.create_connection(('r.il.cdn-redge.media', 443), timeout=5); ssl.create_default_context().wrap_socket(raw, server_hostname='r.il.cdn-redge.media').close()
+      interval: 10s
+      timeout: 8s
+      retries: 6
+      start_period: 10s
     logging: *default-logging
     network_mode: service:gluetun
     restart: unless-stopped
@@ -223,7 +223,7 @@ services:
         condition: service_started
         required: true
       backend-vpn:
-        condition: service_started
+        condition: service_healthy
         required: true
     labels:
       icon: http://192.168.86.75:8001/icon.svg
