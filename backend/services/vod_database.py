@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import sqlite3
+import threading
 import time
 from typing import Any, Callable
 
@@ -11,6 +12,37 @@ DEFAULT_VOD_DB_PATH = "db/vod.db"
 LEGACY_KAN_VOD_DB_PATH = "db/kan_vod.db"
 UNIFIED_SCHEMA_VERSION = "3"
 _ENSURED_SCHEMA_KEYS: set[tuple[str, tuple[str, ...], str]] = set()
+_PROVIDER_SCHEMA_LOCK = threading.Lock()
+_INITIALIZED_PROVIDER_SCHEMAS: set[tuple[str, str]] = set()
+
+
+def connect_vod_db(db_path: str) -> sqlite3.Connection:
+    """Open the shared VOD database with a consistent lock wait policy."""
+    db_path = prepare_vod_db_path(db_path)
+    parent = os.path.dirname(db_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    con = sqlite3.connect(db_path, timeout=30)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 30000")
+    return con
+
+
+def ensure_vod_provider_schema(
+    db_path: str,
+    provider: str,
+    initializer: Callable[[], None],
+) -> None:
+    """Run provider schema setup once per database and process."""
+    key = (os.path.realpath(db_path), provider)
+    if key in _INITIALIZED_PROVIDER_SCHEMAS:
+        return
+
+    with _PROVIDER_SCHEMA_LOCK:
+        if key in _INITIALIZED_PROVIDER_SCHEMAS:
+            return
+        initializer()
+        _INITIALIZED_PROVIDER_SCHEMAS.add(key)
 
 
 def get_vod_db_path(*provider_env_names: str) -> str:

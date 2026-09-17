@@ -136,24 +136,7 @@ class KeshetVodServiceTests(unittest.TestCase):
             ("https://cdn.example/akamai/master.m3u8", "AKAMAI"),
         )
 
-    def test_best_hls_variant_from_manifest_prefers_highest_resolution_and_bandwidth(self):
-        manifest = """
-#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=553767,AVERAGE-BANDWIDTH=500000,RESOLUTION=640x360
-../550/hdntl=token/index_550.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=2211308,AVERAGE-BANDWIDTH=2200000,RESOLUTION=1280x720
-../2200/hdntl=token/index_2200.m3u8
-"""
-
-        self.assertEqual(
-            self.module._best_hls_variant_from_manifest(
-                "https://mako-vod.akamaized.net/i/VOD/KESHET/show/episode_,550,2200,.mp4.csmil/master.m3u8?hdnea=abc",
-                manifest,
-            ),
-            "https://mako-vod.akamaized.net/i/VOD/KESHET/show/2200/hdntl=token/index_2200.m3u8?hdnea=abc",
-        )
-
-    def test_resolve_keshet_vod_stream_returns_highest_hls_variant(self):
+    def test_resolve_keshet_vod_stream_returns_signed_master_playlist(self):
         media = [
             {
                 "cdn": "AKAMAI",
@@ -162,21 +145,11 @@ class KeshetVodServiceTests(unittest.TestCase):
                 "url": "https://mako-vod.akamaized.net/i/VOD/KESHET/show/episode_,550,2200,.mp4.csmil/master.m3u8",
             }
         ]
-        manifest = """
-#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=553767,AVERAGE-BANDWIDTH=500000,RESOLUTION=640x360
-../550/hdntl=token/index_550.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=2211308,AVERAGE-BANDWIDTH=2200000,RESOLUTION=1280x720
-../2200/hdntl=token/index_2200.m3u8
-"""
-        response = Mock(text=manifest)
-        response.raise_for_status = Mock()
-
         with patch.object(self.module, "_get_media_playlist", return_value=media), patch.object(
             self.module,
             "_get_ticket",
             return_value="hdnea=abc",
-        ), patch.object(self.module.requests, "get", return_value=response):
+        ):
             stream_url = self.module.resolve_keshet_vod_stream(
                 "https://www.mako.co.il/VodPlaylist"
                 "?videoChannelId=channel-1&vcmid=episode-1"
@@ -184,7 +157,7 @@ class KeshetVodServiceTests(unittest.TestCase):
 
         self.assertEqual(
             stream_url,
-            "https://mako-vod.akamaized.net/i/VOD/KESHET/show/2200/hdntl=token/index_2200.m3u8?hdnea=abc",
+            "https://mako-vod.akamaized.net/i/VOD/KESHET/show/episode_,550,2200,.mp4.csmil/master.m3u8?hdnea=abc",
         )
 
     def test_episode_fallback_metadata_from_media_url_uses_playlist_date(self):

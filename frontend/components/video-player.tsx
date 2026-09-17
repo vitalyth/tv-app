@@ -584,7 +584,7 @@ export function VideoPlayer({
         vhs: {
           overrideNative: !isSafari,
           withCredentials: false,
-          enableLowInitialPlaylist: true,
+          enableLowInitialPlaylist: channel?.type !== "vod",
           useBandwidthFromLocalStorage: true,
           useNetworkInformationApi: true,
         },

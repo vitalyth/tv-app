@@ -17,6 +17,34 @@ from services.vod_database import (
 
 
 class VodDatabaseTests(unittest.TestCase):
+    def test_provider_schema_initializer_runs_once_per_database(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "vod.db")
+            calls = []
+
+            vod_database.ensure_vod_provider_schema(
+                db_path,
+                "test-provider",
+                lambda: calls.append("initialized"),
+            )
+            vod_database.ensure_vod_provider_schema(
+                db_path,
+                "test-provider",
+                lambda: calls.append("initialized-again"),
+            )
+
+            self.assertEqual(calls, ["initialized"])
+
+    def test_shared_connection_waits_for_database_locks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            con = vod_database.connect_vod_db(str(Path(temp_dir) / "vod.db"))
+            try:
+                busy_timeout = con.execute("PRAGMA busy_timeout").fetchone()[0]
+            finally:
+                con.close()
+
+            self.assertEqual(busy_timeout, 30_000)
+
     def test_kan_maintenance_handles_empty_db_and_removes_unplayable_placeholders(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             empty_db = str(Path(temp_dir) / "empty.db")

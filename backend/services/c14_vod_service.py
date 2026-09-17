@@ -10,6 +10,8 @@ from urllib.parse import quote, urlencode, urljoin, urlsplit
 import requests
 
 from services.vod_database import (
+    connect_vod_db,
+    ensure_vod_provider_schema,
     ensure_unified_schema,
     get_vod_db_path,
     get_vod_env,
@@ -131,13 +133,13 @@ def _with_retries(action):
 
 def _connect() -> sqlite3.Connection:
     db_path = prepare_vod_db_path(C14_VOD_DB_PATH)
-    parent = os.path.dirname(db_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(db_path)
-    con.row_factory = sqlite3.Row
-    _init_db(con)
-    return con
+    con = connect_vod_db(db_path)
+    try:
+        ensure_vod_provider_schema(db_path, "c14", lambda: _init_db(con))
+        return con
+    except Exception:
+        con.close()
+        raise
 
 
 def _table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:

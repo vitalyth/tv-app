@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, quote, urljoin, urlsplit
 import requests
 
 from services.vod_database import (
+    connect_vod_db,
+    ensure_vod_provider_schema,
     ensure_unified_schema,
     get_vod_db_path,
     get_vod_env,
@@ -71,10 +73,6 @@ MAKO_HEADERS = {
 CATEGORY_SPLIT_RE = re.compile(r"\s*(?:[,;|/•·،]+)\s*")
 PLACEHOLDER_EPISODE_TITLE_RE = re.compile(r"^פרק\s+\S*VgnVCM", re.IGNORECASE)
 MEDIA_DATE_RE = re.compile(r"(?:^|[_/-])(\d{2})(\d{2})(\d{2})(?:[_/-])VOD", re.IGNORECASE)
-HLS_STREAM_INF_RE = re.compile(r"#EXT-X-STREAM-INF:([^\r\n]*)[\r\n]+([^\r\n]+)", re.IGNORECASE)
-HLS_BANDWIDTH_RE = re.compile(r"(?:^|,)BANDWIDTH=(\d+)", re.IGNORECASE)
-HLS_AVERAGE_BANDWIDTH_RE = re.compile(r"(?:^|,)AVERAGE-BANDWIDTH=(\d+)", re.IGNORECASE)
-HLS_RESOLUTION_RE = re.compile(r"(?:^|,)RESOLUTION=(\d+)x(\d+)", re.IGNORECASE)
 MAKO_VOD_CATEGORY_FILTERS: tuple[tuple[str, str, str], ...] = (
     ("ריאליטי", "genre", "4f9dbac980653210VgnVCM2000002a0c10acRCRD"),
     ("דוקומנטרי", "genre", "8e8abac980653210VgnVCM2000002a0c10acRCRD"),
@@ -142,14 +140,13 @@ def _with_retries(action):
 
 def _connect() -> sqlite3.Connection:
     db_path = prepare_vod_db_path(KESHT_VOD_DB_PATH)
-    parent = os.path.dirname(db_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(db_path, timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout = 30000")
-    _init_db(con)
-    return con
+    con = connect_vod_db(db_path)
+    try:
+        ensure_vod_provider_schema(db_path, "keshet", lambda: _init_db(con))
+        return con
+    except Exception:
+        con.close()
+        raise
 
 
 def _table_columns(con: sqlite3.Connection, table_name: str) -> set[str]:
@@ -1892,68 +1889,6 @@ def _absolute_stream_url(value: object) -> str:
     return urljoin(MAKO_BASE_URL, text)
 
 
-def _hls_attr_int(pattern: re.Pattern[str], value: str) -> int:
-    match = pattern.search(value)
-    if not match:
-        return 0
-    try:
-        return int(match.group(1))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _hls_variant_score(attrs: str) -> tuple[int, int]:
-    resolution = HLS_RESOLUTION_RE.search(attrs)
-    pixels = 0
-    if resolution:
-        try:
-            pixels = int(resolution.group(1)) * int(resolution.group(2))
-        except (TypeError, ValueError):
-            pixels = 0
-
-    bandwidth = _hls_attr_int(HLS_AVERAGE_BANDWIDTH_RE, attrs) or _hls_attr_int(HLS_BANDWIDTH_RE, attrs)
-    return pixels, bandwidth
-
-
-def _hls_master_base_url(url: str) -> str:
-    parsed = urlsplit(url)
-    return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rsplit('/', 1)[0]}/"
-
-
-def _best_hls_variant_from_manifest(master_url: str, manifest: str) -> str | None:
-    variants = [
-        (attrs, uri.strip())
-        for attrs, uri in HLS_STREAM_INF_RE.findall(manifest or "")
-        if uri.strip() and not uri.strip().startswith("#")
-    ]
-    if not variants:
-        return None
-
-    attrs, uri = max(variants, key=lambda item: _hls_variant_score(item[0]))
-    variant_url = urljoin(_hls_master_base_url(master_url), uri)
-    master_query = urlsplit(master_url).query
-    if master_query and not urlsplit(variant_url).query:
-        variant_url = f"{variant_url}?{master_query}"
-    return variant_url
-
-
-def _prefer_best_hls_variant(url: str) -> str:
-    normalized_url = _absolute_stream_url(url)
-    if not normalized_url:
-        return ""
-
-    if not urlsplit(normalized_url).path.lower().endswith(".m3u8"):
-        return normalized_url
-
-    try:
-        response = requests.get(normalized_url, headers=MAKO_HEADERS, timeout=15)
-        response.raise_for_status()
-    except requests.RequestException:
-        return normalized_url
-
-    return _best_hls_variant_from_manifest(normalized_url, response.text) or normalized_url
-
-
 def resolve_keshet_vod_stream(play_url: str) -> str | None:
     if not play_url:
         return None
@@ -1977,7 +1912,7 @@ def resolve_keshet_vod_stream(play_url: str) -> str | None:
             return None
 
         separator = "&" if "?" in url else "?"
-        return _prefer_best_hls_variant(f"{url}{separator}{ticket}")
+        return f"{url}{separator}{ticket}"
     except Exception:
         return None
 

@@ -6,8 +6,11 @@ from urllib.parse import quote
 
 from scripts import kan_db_scanner
 from services.vod_database import (
+    connect_vod_db,
+    ensure_vod_provider_schema,
     get_vod_db_path,
     get_vod_env,
+    prepare_vod_db_path,
     vod_episode_activity_subquery,
     vod_episode_source_sort_kind_expr,
     vod_episode_source_sort_key_expr,
@@ -45,10 +48,13 @@ def _with_retries(action):
 
 
 def _connect() -> sqlite3.Connection:
-    kan_db_scanner.init_db(KAN_VOD_DB_PATH)
-    con = kan_db_scanner.connect_db(KAN_VOD_DB_PATH)
-    con.row_factory = sqlite3.Row
-    return con
+    db_path = prepare_vod_db_path(KAN_VOD_DB_PATH)
+    ensure_vod_provider_schema(
+        db_path,
+        "kan",
+        lambda: kan_db_scanner.init_db(db_path),
+    )
+    return connect_vod_db(db_path)
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -594,8 +600,16 @@ def get_kan_vod_stream(episode_id: str) -> str | None:
             )
             episode.stream_url = stream_url
             episode.kaltura_entry_id = entry_id
-            kan_db_scanner.upsert_episode(con, episode)
-            con.commit()
+            try:
+                # Playback must not wait behind a long scanner transaction just
+                # to persist a URL that can be resolved again later.
+                con.execute("PRAGMA busy_timeout = 250")
+                kan_db_scanner.upsert_episode(con, episode)
+                con.commit()
+            except sqlite3.OperationalError as ex:
+                con.rollback()
+                if "locked" not in str(ex).lower():
+                    raise
 
         return stream_url or row["stream_url"]
     finally:

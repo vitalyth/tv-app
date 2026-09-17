@@ -1171,8 +1171,9 @@ def connect_db(db_path: str) -> sqlite3.Connection:
     parent = os.path.dirname(db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    con = sqlite3.connect(db_path)
+    con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 30000")
     return con
 
 
