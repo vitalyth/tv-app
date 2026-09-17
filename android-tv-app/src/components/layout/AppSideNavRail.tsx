@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, DeviceEventEmitter } from 'react-native';
 import { NavRailItem } from './NavRailItem';
 import { AppDestination } from '../../types/guide';
@@ -34,10 +34,52 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
     };
   }, []);
 
-  // When rail is focused, pressing RIGHT returns focus to the screen content
+  // When focus is requested from a screen (e.g. DPAD_LEFT at start of row)
+  useEffect(() => {
+    if (focusNonce && focusNonce > 0) {
+      setForceCollapsed(false);
+      const targetKey =
+        focusDestination === AppDestination.LIVE_TV
+          ? 'live'
+          : focusDestination === AppDestination.VOD
+          ? 'vod'
+          : 'home';
+      setFocusedKey(targetKey);
+      onExpandedChanged?.(true);
+    }
+  }, [focusNonce, focusDestination, onExpandedChanged]);
+
+  const lastSelectTimeRef = React.useRef(0);
+
+  const handleSelect = useCallback(
+    (dest: AppDestination) => {
+      const now = Date.now();
+      if (now - lastSelectTimeRef.current < 400) return;
+      lastSelectTimeRef.current = now;
+
+      // 1. Instantly collapse the rail
+      setForceCollapsed(true);
+      setFocusedKey(null);
+      onExpandedChanged?.(false);
+
+      // 2. Select destination
+      onDestinationSelected(dest);
+
+      // Re-enable rail expansion after short transition
+      setTimeout(() => {
+        setForceCollapsed(false);
+      }, 400);
+    },
+    [onDestinationSelected, onExpandedChanged]
+  );
+
+  // Remote key navigation in Side Rail
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('onTvRemoteKey', ({ keyCode }: { keyCode: number }) => {
-      if (keyCode === 22 && (focusedKey !== null || isExpanded)) {
+      if (!isExpanded) return;
+
+      if (keyCode === 22) {
+        // RIGHT: return focus to screen
         if (blurTimerRef.current) {
           clearTimeout(blurTimerRef.current);
           blurTimerRef.current = null;
@@ -45,10 +87,30 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
         setFocusedKey(null);
         onExpandedChanged?.(false);
         onReturnFocusToScreen?.();
+      } else if (keyCode === 19) {
+        // UP: cycle up through rail items
+        setFocusedKey((prev) => {
+          if (prev === 'vod') return 'live';
+          if (prev === 'live') return 'home';
+          return 'home';
+        });
+      } else if (keyCode === 20) {
+        // DOWN: cycle down through rail items
+        setFocusedKey((prev) => {
+          if (prev === 'home') return 'live';
+          if (prev === 'live') return 'vod';
+          return 'vod';
+        });
+      } else if (keyCode === 23 || keyCode === 66 || keyCode === 160) {
+        // ENTER: select destination
+        const key = focusedKey || (currentDestination === AppDestination.HOME ? 'home' : currentDestination === AppDestination.LIVE_TV ? 'live' : 'vod');
+        if (key === 'home') handleSelect(AppDestination.HOME);
+        else if (key === 'live') handleSelect(AppDestination.LIVE_TV);
+        else if (key === 'vod') handleSelect(AppDestination.VOD);
       }
     });
     return () => sub.remove();
-  }, [focusedKey, isExpanded, onExpandedChanged, onReturnFocusToScreen]);
+  }, [isExpanded, focusedKey, onExpandedChanged, onReturnFocusToScreen, handleSelect, currentDestination]);
 
   const handleFocus = (key: string) => {
     if (forceCollapsed) return;
@@ -67,30 +129,12 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
     blurTimerRef.current = setTimeout(() => {
       setFocusedKey((prev) => {
         if (prev === key) {
+          onExpandedChanged?.(false);
           return null;
         }
         return prev;
       });
-      onExpandedChanged?.(false);
-    }, 80);
-  };
-
-  const handleSelect = (dest: AppDestination) => {
-    // 1. Instantly collapse the rail
-    setForceCollapsed(true);
-    setFocusedKey(null);
-    onExpandedChanged?.(false);
-
-    // 2. Select destination
-    onDestinationSelected(dest);
-
-    // 3. Immediately return focus to the screen
-    onReturnFocusToScreen?.();
-
-    // 4. Reset force-collapse after navigation completes
-    setTimeout(() => {
-      setForceCollapsed(false);
-    }, 300);
+    }, 120);
   };
 
   return (
@@ -102,6 +146,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="Home"
           isSelected={currentDestination === AppDestination.HOME}
           isRailExpanded={isExpanded}
+          isForcedFocused={focusedKey === 'home'}
           hasTVPreferredFocus={focusDestination === AppDestination.HOME && focusNonce > 0}
           focusNonce={focusDestination === AppDestination.HOME ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.HOME)}
@@ -115,6 +160,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="Live"
           isSelected={currentDestination === AppDestination.LIVE_TV}
           isRailExpanded={isExpanded}
+          isForcedFocused={focusedKey === 'live'}
           hasTVPreferredFocus={focusDestination === AppDestination.LIVE_TV && focusNonce > 0}
           focusNonce={focusDestination === AppDestination.LIVE_TV ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.LIVE_TV)}
@@ -128,6 +174,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
           label="VOD"
           isSelected={currentDestination === AppDestination.VOD}
           isRailExpanded={isExpanded}
+          isForcedFocused={focusedKey === 'vod'}
           hasTVPreferredFocus={focusDestination === AppDestination.VOD && focusNonce > 0}
           focusNonce={focusDestination === AppDestination.VOD ? focusNonce : 0}
           onSelect={() => handleSelect(AppDestination.VOD)}

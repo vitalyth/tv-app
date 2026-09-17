@@ -1,131 +1,109 @@
-import React, { useState } from 'react';
+import React, { memo } from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
 import { TvChannel } from '../../types/guide';
-import { TvFocusable } from '../common/TvFocusable';
 
 interface EpgChannelCardProps {
   channel: TvChannel;
-  isSelected: boolean;
+  height: number;
+  isActiveRow: boolean;
+  isFocused: boolean;
   isPlaying: boolean;
-  onPress: (channel: TvChannel) => void;
-  onFocus?: (channel: TvChannel) => void;
-  hasPreferredFocus?: boolean;
-  focusNonce?: number;
-  lockLeft?: boolean;
-  lockRight?: boolean;
 }
 
-export const EpgChannelCard: React.FC<EpgChannelCardProps> = ({
+export const EpgChannelCard: React.FC<EpgChannelCardProps> = memo(({
   channel,
-  isSelected,
+  height,
+  isActiveRow,
+  isFocused,
   isPlaying,
-  onPress,
-  onFocus,
-  hasPreferredFocus = false,
-  focusNonce = 0,
-  lockLeft = true,
-  lockRight = false,
 }) => {
-  const [isFocused, setIsFocused] = useState(false);
-
-  const handleFocus = () => {
-    setIsFocused(true);
-    onFocus?.(channel);
-  };
+  const cardBg = isFocused ? '#E8EAEE' : isActiveRow ? '#565B64' : '#17181B';
+  const nameColor = isFocused ? '#0A0E12' : '#FFFFFF';
+  const subColor = isFocused ? '#2E343A' : isPlaying ? '#4ADE80' : '#8C8F98';
 
   return (
-    <TvFocusable
-      hasTVPreferredFocus={hasPreferredFocus}
-      focusNonce={focusNonce}
-      lockLeft={lockLeft}
-      lockRight={lockRight}
-      onFocus={handleFocus}
-      onBlur={() => setIsFocused(false)}
-      onPress={() => onPress(channel)}
-      scaleOnFocus={false}
+    <View
       style={[
         styles.container,
-        isSelected && styles.containerSelected,
-        isFocused && styles.containerFocused,
+        {
+          height: height - 6,
+          backgroundColor: cardBg,
+          borderColor: isFocused ? '#FFFFFF' : 'transparent',
+          borderWidth: isFocused ? 2 : 1,
+        },
       ]}
     >
-      {/* Channel Logo */}
-      {channel.logoUrl ? (
-        <Image
-          source={{ uri: channel.logoUrl }}
-          style={styles.logo}
-          resizeMode="contain"
+      {/* Subtle highlight on active row */}
+      {isActiveRow && !isFocused && (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+          ]}
         />
-      ) : (
-        <View style={styles.logoFallback}>
-          <Text style={styles.logoFallbackText}>
-            {channel.number ?? channel.name.slice(0, 2)}
-          </Text>
-        </View>
       )}
 
-      {/* Channel Name / Number */}
-      <View style={styles.info}>
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.name,
-            isFocused ? styles.nameFocused : styles.nameNormal,
-          ]}
-        >
-          {channel.name}
-        </Text>
-        {channel.number ? (
-          <Text style={styles.number}>ערוץ {channel.number}</Text>
-        ) : null}
+      {/* Channel Logo */}
+      <View
+        style={[
+          styles.logoBox,
+          {
+            backgroundColor: isFocused ? '#FFFFFF' : isActiveRow ? '#707680' : '#26272C',
+          },
+        ]}
+      >
+        {channel.logoUrl ? (
+          <Image
+            source={{ uri: channel.logoUrl }}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        ) : (
+          <Text style={[styles.fallbackNumber, { color: isFocused ? '#0A0E12' : '#FFFFFF' }]}>
+            {channel.number || channel.name.slice(0, 2)}
+          </Text>
+        )}
       </View>
 
-      {/* Playing dot indicator */}
-      {isPlaying && <View style={styles.playingIndicator} />}
-    </TvFocusable>
+      {/* Channel Info */}
+      <View style={styles.info}>
+        <Text numberOfLines={1} style={[styles.name, { color: nameColor }]}>
+          {channel.name}
+        </Text>
+        <Text numberOfLines={1} style={[styles.sub, { color: subColor }]}>
+          {isPlaying ? 'מנגן עכשיו' : channel.number ? `ערוץ ${channel.number}` : ''}
+        </Text>
+      </View>
+    </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
-    width: 140,
-    height: 60,
+    width: 142,
+    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    backgroundColor: '#17181B',
+    overflow: 'hidden',
+    position: 'relative',
+    marginRight: 6,
+  },
+  logoBox: {
+    width: 38,
+    height: 38,
     borderRadius: 6,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    gap: 8,
-  },
-  containerSelected: {
-    backgroundColor: '#20232A',
-    borderColor: 'rgba(37, 212, 222, 0.4)',
-  },
-  containerFocused: {
-    backgroundColor: '#F2F4F7',
-    borderColor: '#FFFFFF',
-    transform: [{ scale: 1.04 }],
-    elevation: 6,
-    zIndex: 10,
-  },
-  logo: {
-    width: 36,
-    height: 36,
-    borderRadius: 4,
-  },
-  logoFallback: {
-    width: 36,
-    height: 36,
-    borderRadius: 4,
-    backgroundColor: '#252830',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 8,
+    overflow: 'hidden',
   },
-  logoFallbackText: {
-    color: '#FFFFFF',
-    fontSize: 12,
+  logo: {
+    width: 34,
+    height: 34,
+  },
+  fallbackNumber: {
+    fontSize: 13,
     fontWeight: 'bold',
   },
   info: {
@@ -133,28 +111,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   name: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 'bold',
-    textAlign: 'right',
+    textAlign: 'left',
   },
-  nameNormal: {
-    color: '#FFFFFF',
-  },
-  nameFocused: {
-    color: '#0A0E14',
-  },
-  number: {
-    fontSize: 10,
-    color: '#8E95A2',
-    textAlign: 'right',
-  },
-  playingIndicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#E50914',
+  sub: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'left',
   },
 });
 
 export default EpgChannelCard;
-

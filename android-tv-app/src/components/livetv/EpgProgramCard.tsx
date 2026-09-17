@@ -1,62 +1,104 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { memo } from 'react';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { TvProgram } from '../../types/guide';
-import ProgressBar from '../common/ProgressBar';
-import { TvFocusable } from '../common/TvFocusable';
 
 interface EpgProgramCardProps {
   program: TvProgram;
   width: number;
-  isSelected?: boolean;
+  height: number;
+  isFocused: boolean;
+  isActiveRow: boolean;
+  isLive: boolean;
+  isPlaying: boolean;
   onPress: (program: TvProgram) => void;
-  onFocus?: (program: TvProgram) => void;
-  hasPreferredFocus?: boolean;
-  focusNonce?: number;
-  lockRight?: boolean;
 }
 
-export const EpgProgramCard: React.FC<EpgProgramCardProps> = React.memo(({
+const FADE_STEPS = 12;
+const FADE_ALPHAS = Array.from({ length: FADE_STEPS }, (_, i) =>
+  Math.pow(i / (FADE_STEPS - 1), 1.6)
+);
+const FADE_SLICES_FOCUSED = FADE_ALPHAS.map((a) => `rgba(242, 244, 247, ${a.toFixed(3)})`);
+const FADE_SLICES_LIVE = FADE_ALPHAS.map((a) => `rgba(51, 54, 62, ${a.toFixed(3)})`);
+const FADE_SLICES_DEFAULT = FADE_ALPHAS.map((a) => `rgba(36, 37, 42, ${a.toFixed(3)})`);
+
+const EpgProgramCardComponent: React.FC<EpgProgramCardProps> = ({
   program,
   width,
-  isSelected = false,
+  height,
+  isFocused,
+  isActiveRow,
+  isLive,
+  isPlaying,
   onPress,
-  onFocus,
-  hasPreferredFocus = false,
-  focusNonce = 0,
-  lockRight = false,
 }) => {
-  const [isFocused, setIsFocused] = useState(false);
-
-  const handleFocus = () => {
-    setIsFocused(true);
-    onFocus?.(program);
-  };
-
-  const isLive = program.isLive;
+  const cardBg = isFocused ? '#F2F4F7' : isLive ? '#33363E' : '#24252A';
+  const showImage = isActiveRow && !!program.imageUrl && width >= 115;
+  const imageWidth = Math.min(130, Math.floor(width * 0.44));
+  const sliceBgs = isFocused
+    ? FADE_SLICES_FOCUSED
+    : isLive
+    ? FADE_SLICES_LIVE
+    : FADE_SLICES_DEFAULT;
 
   return (
-    <TvFocusable
-      hasTVPreferredFocus={hasPreferredFocus}
-      focusNonce={focusNonce}
-      lockLeft={false}
-      lockRight={lockRight}
-      onFocus={handleFocus}
-      onBlur={() => setIsFocused(false)}
-      onPress={() => onPress(program)}
-      scaleOnFocus={false}
+    <View
       style={[
         styles.card,
-        { width: Math.max(width, 100) },
-        isSelected && styles.cardSelected,
-        isFocused && styles.cardFocused,
+        {
+          width: Math.max(width - 4, 30),
+          height: height - 6,
+          backgroundColor: cardBg,
+          borderColor: isFocused ? '#FFFFFF' : 'transparent',
+          borderWidth: isFocused ? 2 : 1,
+        },
+        isFocused && styles.cardFocusedShadow,
       ]}
     >
-      <View style={styles.content}>
+      {/* Background Program Thumbnail on the Left with smooth pure-CSS graduated fade */}
+      {showImage && (
+        <View style={[styles.imageContainer, { width: imageWidth }]}>
+          <Image
+            source={{ uri: program.imageUrl || undefined }}
+            style={styles.image}
+            resizeMode="cover"
+          />
+          <View style={styles.fadeOverlay}>
+            {sliceBgs.map((bg, i) => (
+              <View
+                key={i}
+                style={{
+                  flex: 1,
+                  backgroundColor: bg,
+                }}
+              />
+            ))}
+          </View>
+        </View>
+      )}
+
+      {/* LIVE Badge */}
+      {isLive && width >= 80 && (
+        <View
+          style={[
+            styles.liveBadge,
+            { backgroundColor: isPlaying ? '#10B981' : '#E82034' },
+          ]}
+        >
+          {isPlaying && <View style={styles.playTriangle} />}
+          <Text style={styles.liveBadgeText}>LIVE</Text>
+        </View>
+      )}
+
+      {/* Program Text (Title and Time Range) */}
+      <View style={[styles.textContainer, showImage && { paddingLeft: imageWidth * 0.7 }]}>
         <Text
-          numberOfLines={1}
+          numberOfLines={isActiveRow ? 2 : 1}
           style={[
             styles.title,
-            isFocused ? styles.titleFocused : styles.titleNormal,
+            {
+              color: isFocused ? '#071114' : '#FFFFFF',
+              fontSize: isActiveRow ? 13 : 12,
+            },
           ]}
         >
           {program.title}
@@ -66,72 +108,112 @@ export const EpgProgramCard: React.FC<EpgProgramCardProps> = React.memo(({
           numberOfLines={1}
           style={[
             styles.timeRange,
-            isFocused ? styles.timeRangeFocused : styles.timeRangeNormal,
+            {
+              color: isFocused ? '#323A3E' : '#AAAEB8',
+            },
           ]}
         >
-          {program.timeRange || ''}
+          {program.timeRange}
         </Text>
       </View>
-
-      {/* Live indicator / Progress bar */}
-      {isLive && program.progress !== undefined && (
-        <View style={styles.progressWrapper}>
-          <ProgressBar progress={program.progress} height={3} />
-        </View>
-      )}
-    </TvFocusable>
+    </View>
   );
-});
+};
+
+function areProgramCardPropsEqual(
+  prev: EpgProgramCardProps,
+  next: EpgProgramCardProps
+): boolean {
+  return (
+    prev.isFocused === next.isFocused &&
+    prev.width === next.width &&
+    prev.height === next.height &&
+    prev.isActiveRow === next.isActiveRow &&
+    prev.isLive === next.isLive &&
+    prev.isPlaying === next.isPlaying &&
+    prev.program.id === next.program.id &&
+    prev.program.title === next.program.title &&
+    prev.program.imageUrl === next.program.imageUrl
+  );
+}
+
+export const EpgProgramCard = memo(EpgProgramCardComponent, areProgramCardPropsEqual);
 
 const styles = StyleSheet.create({
   card: {
-    height: 60,
-    backgroundColor: '#202020',
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: '#4A4A4A',
+    borderRadius: 8,
+    marginRight: 4,
+    overflow: 'hidden',
+    justifyContent: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 8,
-    justifyContent: 'space-between',
+    position: 'relative',
+  },
+  cardFocusedShadow: {
+    zIndex: 20,
+    elevation: 8,
+  },
+  imageContainer: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 1,
+    borderTopLeftRadius: 7,
+    borderBottomLeftRadius: 7,
     overflow: 'hidden',
   },
-  cardSelected: {
-    borderColor: 'rgba(37, 212, 222, 0.6)',
+  image: {
+    width: '100%',
+    height: '100%',
   },
-  cardFocused: {
-    backgroundColor: '#F2F4F7',
-    borderColor: '#FFFFFF',
-    borderWidth: 2.5,
-    zIndex: 10,
+  fadeOverlay: {
+    ...StyleSheet.absoluteFill,
+    flexDirection: 'row',
   },
-  content: {
-    flex: 1,
+  textContainer: {
+    zIndex: 2,
     justifyContent: 'center',
   },
   title: {
-    fontSize: 12,
     fontWeight: 'bold',
     textAlign: 'left',
-  },
-  titleNormal: {
-    color: '#FFFFFF',
-  },
-  titleFocused: {
-    color: '#0A0E14',
+    marginBottom: 2,
   },
   timeRange: {
-    fontSize: 10,
-    marginTop: 2,
+    fontSize: 11,
     textAlign: 'left',
   },
-  timeRangeNormal: {
-    color: '#8E95A2',
+  liveBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    zIndex: 3,
   },
-  timeRangeFocused: {
-    color: '#344054',
+  playTriangle: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 4,
+    borderRightWidth: 0,
+    borderBottomWidth: 3,
+    borderTopWidth: 3,
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: 'transparent',
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
   },
-  progressWrapper: {
-    marginTop: 4,
+  liveBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 8.5,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });
 

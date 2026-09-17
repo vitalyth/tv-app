@@ -1,90 +1,86 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { formatClock, HALF_HOUR_SECONDS, SLOT_WIDTH, HEADER_HEIGHT } from '../../utils/epgUtils';
 
 interface LiveTvTimelineProps {
-  startSeconds?: number;
-  nowSeconds?: number;
+  startSeconds: number;
+  endSeconds: number;
+  nowSeconds: number;
 }
 
-export const LiveTvTimeline: React.FC<LiveTvTimelineProps> = ({
-  startSeconds = Math.floor((Date.now() / 1000 - 3600) / 1800) * 1800,
-  nowSeconds = Math.floor(Date.now() / 1000),
+export const LiveTvTimeline: React.FC<LiveTvTimelineProps> = memo(({
+  startSeconds,
+  endSeconds,
+  nowSeconds,
 }) => {
-  const slots = [0, 1800, 3600, 5400, 7200, 9000];
+  const totalSlots = Math.max(1, Math.floor((endSeconds - startSeconds) / HALF_HOUR_SECONDS));
+  const slots: number[] = [];
+  for (let i = 0; i < totalSlots; i++) {
+    slots.push(startSeconds + i * HALF_HOUR_SECONDS);
+  }
 
-  const formatTime = (seconds: number) => {
-    const d = new Date(seconds * 1000);
-    const hours = String(d.getHours()).padStart(2, '0');
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    return `${hours}:${mins}`;
-  };
+  const showNow = nowSeconds >= startSeconds && nowSeconds <= endSeconds;
+  const nowOffsetPx = showNow
+    ? ((nowSeconds - startSeconds) / HALF_HOUR_SECONDS) * SLOT_WIDTH
+    : -1;
 
   return (
     <View style={styles.container}>
-      <View style={styles.channelHeaderPlaceholder} />
-      <View style={styles.slotsRow}>
-        {slots.map((offset) => {
-          const slotSec = startSeconds + offset;
-          return (
-            <View key={offset} style={styles.slot}>
-              <Text style={styles.slotText}>{formatTime(slotSec)}</Text>
-            </View>
-          );
-        })}
-
-        {/* Current Time Red Line Badge */}
-        <View style={styles.nowBadge}>
-          <Text style={styles.nowText}>{formatTime(nowSeconds)}</Text>
+      {/* 30-Minute Interval Slots */}
+      {slots.map((slotSec) => (
+        <View key={slotSec} style={styles.slot}>
+          <Text style={styles.slotText}>{formatClock(slotSec)}</Text>
         </View>
-      </View>
+      ))}
+
+      {/* Red LIVE Bubble Marker in Header */}
+      {showNow && (
+        <View style={[styles.nowBubble, { left: nowOffsetPx - 26 }]}>
+          <Text style={styles.nowBubbleText}>{formatClock(nowSeconds)}</Text>
+        </View>
+      )}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    alignItems: 'center',
-    height: 36,
-    marginBottom: 8,
-  },
-  channelHeaderPlaceholder: {
-    width: 140,
-  },
-  slotsRow: {
-    flex: 1,
-    flexDirection: 'row',
+    height: HEADER_HEIGHT,
     position: 'relative',
+    alignItems: 'center',
   },
   slot: {
-    width: 180,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    width: SLOT_WIDTH,
+    height: HEADER_HEIGHT - 6,
+    backgroundColor: 'rgba(23, 24, 27, 0.92)',
     borderRadius: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    marginRight: 6,
-    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 12,
+    marginRight: 4,
   },
   slotText: {
-    color: '#E2E8F0',
-    fontSize: 13,
-    fontWeight: '600',
+    color: '#C8D1D6',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'left',
   },
-  nowBadge: {
+  nowBubble: {
     position: 'absolute',
-    left: 260,
-    backgroundColor: '#E53935',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    width: 52,
+    height: 20,
+    backgroundColor: '#E21D2F',
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 10,
   },
-  nowText: {
+  nowBubbleText: {
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });
 
 export default LiveTvTimeline;
-

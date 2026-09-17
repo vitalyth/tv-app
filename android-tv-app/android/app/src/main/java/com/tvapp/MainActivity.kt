@@ -46,6 +46,7 @@ class MainActivity : ReactActivity() {
         if (event.action == KeyEvent.ACTION_DOWN) {
             try {
                 val reactContext = (application as? com.facebook.react.ReactApplication)?.reactHost?.currentReactContext
+                android.util.Log.d("TV_KEY", "dispatchKeyEvent: key=${event.keyCode} reactContext=${reactContext != null} hasActive=${reactContext?.hasActiveReactInstance()}")
                 if (reactContext != null && reactContext.hasActiveReactInstance()) {
                     val params = Arguments.createMap().apply {
                         putInt("keyCode", event.keyCode)
@@ -55,8 +56,8 @@ class MainActivity : ReactActivity() {
                         .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
                         ?.emit("onTvRemoteKey", params)
                 }
-            } catch (_: Throwable) {
-                // Ignore if React context is not yet initialized
+            } catch (t: Throwable) {
+                android.util.Log.e("TV_KEY", "Error emitting onTvRemoteKey", t)
             }
 
             // Consume boundary key events when locked to prevent native Android FocusFinder

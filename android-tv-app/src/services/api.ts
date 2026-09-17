@@ -396,7 +396,7 @@ export const api = {
     const channels = await api.getLiveChannels(forceRefresh);
     const nowSec = Math.floor(Date.now() / 1000);
     const startSec = Math.floor((nowSec - 3600) / 1800) * 1800;
-    const endSec = startSec + 18000; // 5 hour window
+    const endSec = startSec + 43200; // 12 hour window (matching old app GRID_VISIBLE_WINDOW_SECONDS)
 
     const programsByChannel: Record<string, TvProgram[]> = {};
     for (const ch of channels) {

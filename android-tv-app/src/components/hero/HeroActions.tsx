@@ -33,6 +33,9 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
     return null;
   }
 
+  const isFsFocusable = Boolean(focusTargetButton && focusTargetButton === 'fullscreen');
+  const isMuteFocusable = Boolean(focusTargetButton && focusTargetButton === 'mute');
+
   return (
     <View style={styles.container}>
       {onOpenFullScreen && (
@@ -40,6 +43,7 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
           iconName="fullscreen"
           onPress={onOpenFullScreen}
           label="מסך מלא"
+          focusable={isFsFocusable}
           hasTVPreferredFocus={focusTargetButton === 'fullscreen'}
           focusNonce={focusTargetButton === 'fullscreen' ? focusNonce : 0}
           lockUp={true}
@@ -54,6 +58,7 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
           iconName={isMuted ? 'volume-off' : 'volume-up'}
           onPress={onToggleMute}
           label={isMuted ? 'הפעל קול' : 'השתק'}
+          focusable={isMuteFocusable}
           hasTVPreferredFocus={focusTargetButton === 'mute'}
           focusNonce={focusTargetButton === 'mute' ? focusNonce : 0}
           lockUp={true}

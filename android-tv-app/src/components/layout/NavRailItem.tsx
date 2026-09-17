@@ -10,6 +10,7 @@ interface NavRailItemProps {
   label: string;
   isSelected: boolean;
   isRailExpanded: boolean;
+  isForcedFocused?: boolean;
   hasTVPreferredFocus?: boolean;
   focusNonce?: number;
   onSelect: () => void;
@@ -22,6 +23,7 @@ export const NavRailItem: React.FC<NavRailItemProps> = React.memo(({
   label,
   isSelected,
   isRailExpanded,
+  isForcedFocused = false,
   hasTVPreferredFocus = false,
   focusNonce = 0,
   onSelect,
@@ -30,11 +32,11 @@ export const NavRailItem: React.FC<NavRailItemProps> = React.memo(({
 }) => {
   return (
     <TvFocusable
-      focusable={isRailExpanded || hasTVPreferredFocus}
+      focusable={isRailExpanded || (hasTVPreferredFocus && focusNonce > 0)}
       onPress={onSelect}
       onFocus={onFocus}
       onBlur={onBlur}
-      hasTVPreferredFocus={hasTVPreferredFocus}
+      hasTVPreferredFocus={hasTVPreferredFocus && focusNonce > 0}
       focusNonce={focusNonce}
       lockLeft={true}
       lockRight={true}
@@ -43,11 +45,13 @@ export const NavRailItem: React.FC<NavRailItemProps> = React.memo(({
         styles.item,
         isRailExpanded ? styles.itemExpanded : styles.itemCollapsed,
         isSelected && styles.itemSelected,
+        isForcedFocused && styles.itemFocused,
       ]}
       focusedStyle={styles.itemFocused}
     >
       {({ focused }) => {
-        const contentColor = focused
+        const isEffectiveFocused = focused || isForcedFocused;
+        const contentColor = isEffectiveFocused
           ? '#0A0E14'
           : isSelected
           ? '#F2F4F7'
