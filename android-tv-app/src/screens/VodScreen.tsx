@@ -16,12 +16,14 @@ import VodChannelFilterRow from '../components/vod/VodChannelFilterRow';
 import VodSeriesGrid from '../components/vod/VodSeriesGrid';
 import VodSeriesDetailsView from '../components/vod/VodSeriesDetailsView';
 import { TvFocusable } from '../components/common/TvFocusable';
+import { useTvNav } from '../context/TvNavContext';
 
 interface VodScreenProps {
   onPlayEpisode: (episode: VodEpisode, series: VodSeries) => void;
   focusNonce?: number;
   onRequestSideNavFocus?: (dest: AppDestination) => void;
   isSideNavActive?: boolean;
+  isPlayerActive?: boolean;
 }
 
 export const VodScreen: React.FC<VodScreenProps> = ({
@@ -29,6 +31,7 @@ export const VodScreen: React.FC<VodScreenProps> = ({
   focusNonce = 0,
   onRequestSideNavFocus,
   isSideNavActive = false,
+  isPlayerActive = false,
 }) => {
   const [selectedProvider, setSelectedProvider] = useState<VodProvider | null>(null);
   const [seriesList, setSeriesList] = useState<VodSeries[]>([]);
@@ -45,10 +48,15 @@ export const VodScreen: React.FC<VodScreenProps> = ({
   const focusedIndexRef = useRef(0);
   const isFilterFocusedRef = useRef(false);
   const pendingFocusRef = useRef(false);
-  const prevFocusNonceRef = useRef(focusNonce);
-  const lastNavTimeRef = useRef(0);
   const isSideNavActiveRef = useRef(isSideNavActive);
   isSideNavActiveRef.current = isSideNavActive;
+
+  const { isFullscreenPlayerActive } = useTvNav();
+  const isPlayerEffective = isPlayerActive || isFullscreenPlayerActive;
+  const isPlayerActiveRef = useRef(isPlayerEffective);
+  isPlayerActiveRef.current = isPlayerEffective;
+  const prevFocusNonceRef = useRef(focusNonce);
+  const lastNavTimeRef = useRef(0);
 
   // Details screen state
   const [selectedSeries, setSelectedSeries] = useState<VodSeries | null>(null);
@@ -125,7 +133,7 @@ export const VodScreen: React.FC<VodScreenProps> = ({
     const sub = DeviceEventEmitter.addListener(
       'onTvRemoteKey',
       ({ keyCode, repeatCount = 0 }: { keyCode: number; repeatCount?: number }) => {
-        if (selectedSeries || isSideNavActiveRef.current) return; // In details view or side nav active
+        if (selectedSeries || isSideNavActiveRef.current || isPlayerActiveRef.current) return;
 
         const now = Date.now();
         const timeSince = now - lastNavTimeRef.current;
@@ -305,6 +313,7 @@ const styles = StyleSheet.create({
   },
   fullScreenLoading: {
     flex: 1,
+    marginLeft: 56,
     backgroundColor: '#080A0C',
     alignItems: 'center',
     justifyContent: 'center',

@@ -51,14 +51,23 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
   const mountedRef = useRef(false);
 
   const handleFocus = React.useCallback(() => {
+    if (!focusable) return;
     setIsFocused(true);
     onFocus?.();
-  }, [onFocus]);
+  }, [focusable, onFocus]);
 
   const handleBlur = React.useCallback(() => {
     setIsFocused(false);
     onBlur?.();
   }, [onBlur]);
+
+  // Reset internal focus state if focusable becomes false
+  useEffect(() => {
+    if (!focusable && isFocused) {
+      setIsFocused(false);
+      onBlur?.();
+    }
+  }, [focusable, isFocused, onBlur]);
 
   // Sync focus boundaries with native Android view
   useEffect(() => {
@@ -85,6 +94,8 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
 
   // Controlled programmatic focus (initial mount or fresh focusNonce only)
   useEffect(() => {
+    if (!focusable) return;
+
     if (!mountedRef.current) {
       mountedRef.current = true;
       if (hasTVPreferredFocus) {
@@ -121,7 +132,7 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
       const timer = setTimeout(requestFocus, 40);
       return () => clearTimeout(timer);
     }
-  }, [hasTVPreferredFocus, focusNonce]);
+  }, [hasTVPreferredFocus, focusNonce, focusable]);
 
   return (
     <Pressable
@@ -130,10 +141,10 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
       onPress={onPress}
       onFocus={handleFocus}
       onBlur={handleBlur}
-      hasTVPreferredFocus={hasTVPreferredFocus}
+      hasTVPreferredFocus={focusable ? hasTVPreferredFocus : false}
       testID={testID}
       style={(state: any) => {
-        const focused = isFocused || !!state.focused;
+        const focused = Boolean(focusable && (isFocused || !!state.focused));
         return [
           styles.base,
           style,
@@ -144,7 +155,7 @@ export const TvFocusable: React.FC<TvFocusableProps> = React.memo(({
       }}
     >
       {(state: any) => {
-        const focused = isFocused || !!state.focused;
+        const focused = Boolean(focusable && (isFocused || !!state.focused));
         return typeof children === 'function' ? children({ focused }) : children;
       }}
     </Pressable>

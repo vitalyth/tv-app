@@ -16,6 +16,7 @@ import {
   HALF_HOUR_SECONDS,
   SLOT_WIDTH,
   displayProgramsForChannel,
+  preferredFirstVisibleRow,
 } from '../../utils/epgUtils';
 import LiveTvTimeline from './LiveTvTimeline';
 import EpgChannelCard from './EpgChannelCard';
@@ -29,6 +30,7 @@ interface EpgGridProps {
   selectedRowIndex: number;
   selectedProgramIndex: number;
   focusedColumn: 'channel' | 'program';
+  isGridFocused?: boolean;
   playingChannel: TvChannel | null;
   scrollOffsetAnim: Animated.Value;
   scrollYAnim: Animated.Value;
@@ -49,6 +51,7 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
   selectedRowIndex,
   selectedProgramIndex,
   focusedColumn,
+  isGridFocused = true,
   playingChannel,
   scrollOffsetAnim,
   scrollYAnim,
@@ -97,25 +100,12 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
   const totalSlots = Math.max(1, Math.floor((timelineEndSeconds - timelineStartSeconds) / HALF_HOUR_SECONDS));
   const timelineContentWidth = totalSlots * SLOT_WIDTH;
 
-  // Vertical Windowing: Only render ~6-7 rows around selectedRowIndex
-  const BUFFER_ROWS_BEFORE = 2;
-  const BUFFER_ROWS_AFTER = 4;
-  const startRow = Math.max(0, selectedRowIndex - BUFFER_ROWS_BEFORE);
-  const endRow = Math.min(channels.length - 1, selectedRowIndex + BUFFER_ROWS_AFTER);
-
-  const topSpacerHeight = startRow * INACTIVE_ROW_HEIGHT;
-  const bottomSpacerHeight = (channels.length - 1 - endRow) * INACTIVE_ROW_HEIGHT;
-
-  const visibleChannels = channels.slice(startRow, endRow + 1);
-
   return (
     <View style={styles.container}>
       {/* 1. Sticky Left Column: Channel Header + Channel Cards */}
       <View style={styles.channelsColumn}>
-        {/* Top-Left Corner Placeholder */}
-        <View style={styles.channelHeaderPlaceholder}>
-          <Text style={styles.channelHeaderText}>ערוצים</Text>
-        </View>
+        {/* Top-Left Corner Spacer (Transparent empty space matching reference app) */}
+        <View style={styles.channelHeaderPlaceholder} />
 
         {/* Channels List (Vertically Animated) */}
         <View style={styles.channelsListViewport}>
@@ -124,16 +114,14 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
               transform: [{ translateY: Animated.multiply(scrollYAnim, -1) }],
             }}
           >
-            {topSpacerHeight > 0 && <View style={{ height: topSpacerHeight }} />}
-            {visibleChannels.map((channel, offsetIdx) => {
-              const idx = startRow + offsetIdx;
+            {channels.map((channel, idx) => {
               const isActiveRow = idx === selectedRowIndex;
-              const isChannelFocused = isActiveRow && focusedColumn === 'channel';
+              const isChannelFocused = Boolean(isGridFocused && isActiveRow && focusedColumn === 'channel');
               const rowHeight = isActiveRow ? ACTIVE_ROW_HEIGHT : INACTIVE_ROW_HEIGHT;
               const isPlaying = playingChannel?.id === channel.id;
 
               return (
-                <View key={channel.id} style={{ height: rowHeight }}>
+                <View key={channel.id} style={{ height: rowHeight, justifyContent: 'center' }}>
                   <EpgChannelCard
                     channel={channel}
                     height={rowHeight}
@@ -144,7 +132,6 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
                 </View>
               );
             })}
-            {bottomSpacerHeight > 0 && <View style={{ height: bottomSpacerHeight }} />}
           </Animated.View>
         </View>
       </View>
@@ -178,23 +165,11 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
               ],
             }}
           >
-            {/* Vertical Red LIVE Line extending down all rows */}
-            {showLiveLine && (
-              <View
-                style={[
-                  styles.verticalLiveLine,
-                  { left: nowOffsetPx },
-                ]}
-              />
-            )}
-
-            {topSpacerHeight > 0 && <View style={{ height: topSpacerHeight }} />}
-            {visibleChannels.map((channel, offsetIdx) => {
-              const idx = startRow + offsetIdx;
+            {channels.map((channel, idx) => {
               const isActiveRow = idx === selectedRowIndex;
               const rowHeight = isActiveRow ? ACTIVE_ROW_HEIGHT : INACTIVE_ROW_HEIGHT;
               const programs = programsMap[channel.id] || [];
-              const focusedProgIdx = isActiveRow && focusedColumn === 'program' ? selectedProgramIndex : -1;
+              const focusedProgIdx = isGridFocused && isActiveRow && focusedColumn === 'program' ? selectedProgramIndex : -1;
               const isPlaying = playingChannel?.id === channel.id;
 
               return (
@@ -215,9 +190,29 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
                 />
               );
             })}
-            {bottomSpacerHeight > 0 && <View style={{ height: bottomSpacerHeight }} />}
           </Animated.View>
         </View>
+
+        {/* Vertical Red LIVE Line extending down from bottom of NOW bubble across all rows */}
+        {showLiveLine && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.verticalLiveLineContainer,
+              {
+                width: timelineContentWidth,
+                transform: [{ translateX: Animated.multiply(scrollOffsetAnim, -1) }],
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.verticalLiveLine,
+                { left: nowOffsetPx - 1 },
+              ]}
+            />
+          </Animated.View>
+        )}
       </View>
     </View>
   );
@@ -225,36 +220,31 @@ export const EpgGrid: React.FC<EpgGridProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    width: '100%',
+    height: 330,
     flexDirection: 'row',
     overflow: 'hidden',
   },
   channelsColumn: {
     width: CHANNEL_WIDTH,
+    height: 330,
     zIndex: 10,
   },
   channelHeaderPlaceholder: {
     height: HEADER_HEIGHT,
-    backgroundColor: '#17181B',
-    borderRadius: 6,
-    justifyContent: 'center',
-    paddingLeft: 12,
+    backgroundColor: 'transparent',
     marginRight: 6,
     marginBottom: 0,
   },
-  channelHeaderText: {
-    color: '#8E95A2',
-    fontSize: 12,
-    fontWeight: 'bold',
-    textAlign: 'left',
-  },
   channelsListViewport: {
-    flex: 1,
+    height: 290,
     overflow: 'hidden',
   },
   timelineAndProgramsViewport: {
     flex: 1,
+    height: 330,
     overflow: 'hidden',
+    position: 'relative',
   },
   timelineHeaderRow: {
     height: HEADER_HEIGHT,
@@ -262,17 +252,24 @@ const styles = StyleSheet.create({
     zIndex: 5,
   },
   programsGridViewport: {
-    flex: 1,
+    height: 290,
     overflow: 'hidden',
     position: 'relative',
+  },
+  verticalLiveLineContainer: {
+    position: 'absolute',
+    top: 28,
+    bottom: 0,
+    left: 0,
+    zIndex: 999,
+    elevation: 99,
   },
   verticalLiveLine: {
     position: 'absolute',
     top: 0,
     bottom: 0,
     width: 2,
-    backgroundColor: 'rgba(226, 29, 47, 0.75)',
-    zIndex: 15,
+    backgroundColor: 'rgba(226, 29, 47, 0.95)',
   },
   centerContainer: {
     flex: 1,

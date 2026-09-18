@@ -11,7 +11,6 @@ import VodScreen from './src/screens/VodScreen';
 import LivePlayerOverlay from './src/components/player/LivePlayerOverlay';
 import VodPlayerOverlay from './src/components/player/VodPlayerOverlay';
 import AppSplashScreen from './src/components/common/AppSplashScreen';
-import PageLoadingOverlay from './src/components/common/PageLoadingOverlay';
 import { api } from './src/services/api';
 import { vodProgressService, ContinueWatchingItem } from './src/services/vodProgress';
 import { getStreamType } from './src/utils/stream';
@@ -360,36 +359,14 @@ export default function App() {
     [fullscreenPlayer, activeStreamUrl]
   );
 
-  const [isPageTransitioning, setIsPageTransitioning] = useState(false);
-  const [transitionMessage, setTransitionMessage] = useState('טוען...');
-  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const handleDestinationSelected = useCallback((dest: AppDestination) => {
     if (dest === currentDestination) {
       setIsRailExpanded(false);
       return;
     }
     setIsRailExpanded(false);
-
-    let msg = 'טוען...';
-    if (dest === AppDestination.HOME) msg = 'טוען מסך הבית...';
-    else if (dest === AppDestination.LIVE_TV) msg = 'טוען שידורים חיים...';
-    else if (dest === AppDestination.VOD) msg = 'טוען VOD...';
-
-    setTransitionMessage(msg);
-    setIsPageTransitioning(true);
-
-    if (transitionTimerRef.current) {
-      clearTimeout(transitionTimerRef.current);
-    }
-    // Allow PageLoadingOverlay to render immediately before mounting next destination
-    transitionTimerRef.current = setTimeout(() => {
-      setCurrentDestination(dest);
-      setFocusNonce(Date.now());
-      setTimeout(() => {
-        setIsPageTransitioning(false);
-      }, 300);
-    }, 50);
+    setCurrentDestination(dest);
+    setFocusNonce(Date.now());
   }, [currentDestination]);
 
   if (isAppBootLoading) {
@@ -417,7 +394,13 @@ export default function App() {
             }}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
-            useTextureView={true}
+            useTextureView={false}
+            bufferConfig={{
+              minBufferMs: 4000,
+              maxBufferMs: 12000,
+              bufferForPlaybackMs: 750,
+              bufferForPlaybackAfterRebufferMs: 1500,
+            }}
             muted={isMuted}
             paused={isPaused}
             repeat={true}
@@ -453,7 +436,7 @@ export default function App() {
                   setVodDuration(e.seekableDuration);
                 }
               }
-              setIsBuffering(false);
+              setIsBuffering((b) => (b ? false : b));
 
               // Failsafe seek if onLoad / onReadyForDisplay didn't catch the seek target
               if (
@@ -581,6 +564,7 @@ export default function App() {
               focusNonce={focusNonce}
               onRequestSideNavFocus={handleRequestSideNavFocus}
               isSideNavActive={isRailExpanded}
+              isPlayerActive={!!fullscreenPlayer}
               activeChannelId={activeChannelId}
               activeStreamUrl={activeStreamUrl}
               isVideoReady={isVideoReady}
@@ -595,6 +579,7 @@ export default function App() {
               focusNonce={focusNonce}
               onRequestSideNavFocus={handleRequestSideNavFocus}
               isSideNavActive={isRailExpanded}
+              isPlayerActive={!!fullscreenPlayer}
             />
           )}
         </View>
@@ -652,9 +637,6 @@ export default function App() {
             onSaveProgress={handleSaveProgress}
           />
         ) : null}
-
-        {/* Page Transition Loading Overlay */}
-        {isPageTransitioning && <PageLoadingOverlay message={transitionMessage} />}
       </View>
     </TvNavContext.Provider>
   );

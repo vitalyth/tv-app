@@ -51,6 +51,7 @@ export const TvScreenLayout: React.FC<TvScreenLayoutProps> = React.memo(({
   onToggleMute,
   onOpenFullScreen,
   actions,
+  contentPadding,
   overlayContent,
   children,
 }) => {
@@ -102,7 +103,7 @@ export const TvScreenLayout: React.FC<TvScreenLayoutProps> = React.memo(({
         </View>
 
         {/* Layer 6: Main Content Slot (Only this slot changes per screen) */}
-        <View style={styles.contentSlot}>
+        <View style={[styles.contentSlot, contentPadding]}>
           {children}
         </View>
       </View>
@@ -128,12 +129,12 @@ const styles = StyleSheet.create({
   },
   foregroundStack: {
     flex: 1,
-    paddingRight: 32,
     paddingTop: 28,
   },
   heroWrapper: {
     height: 180,
     marginBottom: 8,
+    paddingRight: 32,
     overflow: 'hidden',
   },
   contentSlot: {

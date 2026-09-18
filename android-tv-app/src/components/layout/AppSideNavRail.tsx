@@ -61,6 +61,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
       setForceCollapsed(true);
       setFocusedKey(null);
       onExpandedChanged?.(false);
+      onReturnFocusToScreen?.();
 
       // 2. Select destination
       onDestinationSelected(dest);
@@ -70,13 +71,13 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
         setForceCollapsed(false);
       }, 400);
     },
-    [onDestinationSelected, onExpandedChanged]
+    [onDestinationSelected, onExpandedChanged, onReturnFocusToScreen]
   );
 
   // Remote key navigation in Side Rail
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('onTvRemoteKey', ({ keyCode }: { keyCode: number }) => {
-      if (!isExpanded) return;
+      if (!isExpanded && !focusedKey) return;
 
       if (keyCode === 22) {
         // RIGHT: return focus to screen

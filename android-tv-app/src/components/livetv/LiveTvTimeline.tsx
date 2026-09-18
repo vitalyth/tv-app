@@ -8,6 +8,16 @@ interface LiveTvTimelineProps {
   nowSeconds: number;
 }
 
+const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatTimelineSlot(sec: number): string {
+  const d = new Date(sec * 1000);
+  const day = SHORT_DAYS[d.getDay()];
+  const hours = String(d.getHours()).padStart(2, '0');
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  return `${day} ${hours}:${mins}`;
+}
+
 export const LiveTvTimeline: React.FC<LiveTvTimelineProps> = memo(({
   startSeconds,
   endSeconds,
@@ -29,7 +39,7 @@ export const LiveTvTimeline: React.FC<LiveTvTimelineProps> = memo(({
       {/* 30-Minute Interval Slots */}
       {slots.map((slotSec) => (
         <View key={slotSec} style={styles.slot}>
-          <Text style={styles.slotText}>{formatClock(slotSec)}</Text>
+          <Text style={styles.slotText}>{formatTimelineSlot(slotSec)}</Text>
         </View>
       ))}
 
@@ -51,13 +61,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   slot: {
-    width: SLOT_WIDTH,
+    width: SLOT_WIDTH - 6,
     height: HEADER_HEIGHT - 6,
     backgroundColor: 'rgba(23, 24, 27, 0.92)',
-    borderRadius: 6,
+    borderRadius: 7,
     justifyContent: 'center',
-    paddingLeft: 12,
-    marginRight: 4,
+    paddingLeft: 10,
+    marginRight: 6,
   },
   slotText: {
     color: '#C8D1D6',
@@ -69,11 +79,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 52,
     height: 20,
-    backgroundColor: '#E21D2F',
+    backgroundColor: '#E82034',
     borderRadius: 5,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 10,
+    zIndex: 20,
   },
   nowBubbleText: {
     color: '#FFFFFF',

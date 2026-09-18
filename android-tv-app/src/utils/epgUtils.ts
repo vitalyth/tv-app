@@ -6,11 +6,21 @@ export const HALF_HOUR_SECONDS = 1800; // 30 minutes
 export const SLOT_WIDTH = 180; // pixels per 30-minute interval
 export const CHANNEL_WIDTH = 148; // sticky channel column width
 export const HEADER_HEIGHT = 36; // timeline header height
-export const ACTIVE_ROW_HEIGHT = 82; // active/focused row height
-export const INACTIVE_ROW_HEIGHT = 58; // inactive row height
+export const ACTIVE_ROW_HEIGHT = 96; // active/focused row height (matching Kotlin Compose 288 * 0.34)
+export const INACTIVE_ROW_HEIGHT = 48; // inactive row height (matching Kotlin Compose (288 - 96) / 4)
 export const ROW_GAP = 6;
 export const GRID_MOTION_MS = 120;
 export const GRID_NAV_THROTTLE_MS = 70;
+export const VISIBLE_ROW_COUNT = 5;
+
+export function preferredFirstVisibleRow(
+  selectedIndex: number,
+  totalChannels: number,
+  visibleRowCount = VISIBLE_ROW_COUNT
+): number {
+  const maxFirstVisible = Math.max(0, totalChannels - visibleRowCount);
+  return Math.max(0, Math.min(selectedIndex - 1, maxFirstVisible));
+}
 
 export function floorToHalfHour(sec: number): number {
   return sec - (((sec % HALF_HOUR_SECONDS) + HALF_HOUR_SECONDS) % HALF_HOUR_SECONDS);

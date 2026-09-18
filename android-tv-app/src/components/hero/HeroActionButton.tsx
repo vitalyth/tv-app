@@ -40,8 +40,8 @@ export const HeroActionButton: React.FC<HeroActionButtonProps> = React.memo(({
       onFocus={onFocus}
       onBlur={onBlur}
       focusable={focusable}
-      hasTVPreferredFocus={hasTVPreferredFocus}
-      focusNonce={focusNonce}
+      hasTVPreferredFocus={hasTVPreferredFocus && focusable}
+      focusNonce={focusable ? focusNonce : 0}
       lockUp={lockUp}
       lockDown={lockDown}
       lockLeft={lockLeft}
@@ -49,13 +49,13 @@ export const HeroActionButton: React.FC<HeroActionButtonProps> = React.memo(({
       testID={testID}
       scaleOnFocus={false}
       style={styles.button}
-      focusedStyle={styles.buttonFocused}
+      focusedStyle={focusable ? styles.buttonFocused : undefined}
     >
       {({ focused }) => (
         <TvIcon
           name={iconName}
           size={20}
-          color={focused ? '#091016' : '#FFFFFF'}
+          color={(focusable && focused) ? '#091016' : '#FFFFFF'}
         />
       )}
     </TvFocusable>
@@ -69,7 +69,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'rgba(14, 20, 29, 0.55)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
+    borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },

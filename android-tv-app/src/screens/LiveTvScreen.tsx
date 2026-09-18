@@ -13,7 +13,7 @@ import TvScreenLayout from '../components/layout/TvScreenLayout';
 import HeroActions from '../components/hero/HeroActions';
 import EpgGrid from '../components/livetv/EpgGrid';
 import { TvFocusable } from '../components/common/TvFocusable';
-import PageLoadingOverlay from '../components/common/PageLoadingOverlay';
+import { useTvNav } from '../context/TvNavContext';
 import {
   GRID_LOOKBACK_SECONDS,
   GRID_VISIBLE_WINDOW_SECONDS,
@@ -30,6 +30,7 @@ import {
   programIndexAtTime,
   liveProgramIndex,
   scrollOffsetKeepingProgramVisible,
+  preferredFirstVisibleRow,
 } from '../utils/epgUtils';
 
 interface LiveTvScreenProps {
@@ -37,6 +38,7 @@ interface LiveTvScreenProps {
   focusNonce?: number;
   onRequestSideNavFocus?: (dest: AppDestination) => void;
   isSideNavActive?: boolean;
+  isPlayerActive?: boolean;
   activeChannelId?: string | null;
   activeStreamUrl?: string | null;
   isVideoReady?: boolean;
@@ -50,6 +52,7 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   focusNonce = 0,
   onRequestSideNavFocus,
   isSideNavActive = false,
+  isPlayerActive = false,
   activeChannelId,
   activeStreamUrl: externalStreamUrl,
   isVideoReady = false,
@@ -88,9 +91,10 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     return timelineStartSeconds + GRID_VISIBLE_WINDOW_SECONDS;
   }, [timelineStartSeconds]);
 
-  // Window viewport width for horizontal scroll calculation
+  // Window viewport width for horizontal scroll calculation - stretches to the right screen edge
+  const { railWidth, isFullscreenPlayerActive } = useTvNav();
   const screenWidth = Dimensions.get('window').width;
-  const viewportWidth = Math.max(300, screenWidth - CHANNEL_WIDTH - 48);
+  const viewportWidth = Math.max(300, screenWidth - (railWidth + 24) - CHANNEL_WIDTH);
 
   // Channels and program maps
   const channels = guideData?.channels || [];
@@ -108,29 +112,10 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   const [selectedRowIndex, setSelectedRowIndex] = useState(initialRowIdx);
   const [focusedColumn, setFocusedColumn] = useState<'channel' | 'program'>('program');
   const [selectedProgramIndex, setSelectedProgramIndex] = useState(0);
-  const [selectedTimeAnchor, setSelectedTimeAnchor] = useState<number>(() => Math.floor(Date.now() / 1000));
+  const selectedTimeAnchorRef = useRef<number>(Math.floor(Date.now() / 1000));
 
-  // Immediate focus for grid navigation (60 FPS)
-  // Debounced hero presentation state (150ms) to prevent image decoding/layout thrash during rapid navigation
-  const [heroRowIndex, setHeroRowIndex] = useState(initialRowIdx);
-  const [heroProgramIndex, setHeroProgramIndex] = useState(0);
-  const heroDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (heroDebounceTimerRef.current) {
-      clearTimeout(heroDebounceTimerRef.current);
-    }
-    heroDebounceTimerRef.current = setTimeout(() => {
-      setHeroRowIndex(selectedRowIndex);
-      setHeroProgramIndex(selectedProgramIndex);
-    }, 150);
-
-    return () => {
-      if (heroDebounceTimerRef.current) {
-        clearTimeout(heroDebounceTimerRef.current);
-      }
-    };
-  }, [selectedRowIndex, selectedProgramIndex]);
+  const hasInitializedSelectionRef = useRef(false);
+  const initialChannelIdRef = useRef(activeChannelId);
 
   // Audio / Video playback state
   const [playingChannel, setPlayingChannel] = useState<TvChannel | null>(() => {
@@ -144,6 +129,16 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   const [isHeroFocused, setIsHeroFocused] = useState(false);
   const [heroFocusButton, setHeroFocusButton] = useState<'fullscreen' | 'mute' | null>(null);
   const [heroFocusNonce, setHeroFocusNonce] = useState(0);
+  const [gridFocusNonce, setGridFocusNonce] = useState(0);
+
+  // Clear Hero focus when SideNav becomes active
+  useEffect(() => {
+    if (isSideNavActive) {
+      setIsHeroFocused(false);
+      setHeroFocusButton(null);
+      setHeroFocusNonce(0);
+    }
+  }, [isSideNavActive]);
 
   // Animated scroll offsets
   const scrollOffsetAnim = useRef(new Animated.Value(0)).current;
@@ -157,6 +152,12 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   const mountTimeRef = useRef(Date.now());
   const isSideNavActiveRef = useRef(isSideNavActive);
   isSideNavActiveRef.current = isSideNavActive;
+
+  const isPlayerEffective = isPlayerActive || isFullscreenPlayerActive;
+  const isPlayerActiveRef = useRef(isPlayerEffective);
+  isPlayerActiveRef.current = isPlayerEffective;
+
+  const prevFocusNonceRef = useRef(focusNonce);
 
   // Cached program map: compute displayProgramsForChannel lazily for needed channels
   const programsCacheRef = useRef<Record<string, TvProgram[]>>({});
@@ -185,33 +186,31 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   const programsByChannelMap = useMemo(() => {
     const map: Record<string, TvProgram[]> = {};
     if (!guideData || channels.length === 0) return map;
-    const startRow = Math.max(0, selectedRowIndex - 3);
-    const endRow = Math.min(channels.length - 1, selectedRowIndex + 5);
-    for (let i = startRow; i <= endRow; i++) {
+    for (let i = 0; i < channels.length; i++) {
       const ch = channels[i];
       if (ch) {
         map[ch.id] = getOrComputePrograms(ch);
       }
     }
-    const curCh = channels[selectedRowIndex];
-    if (curCh && !map[curCh.id]) {
-      map[curCh.id] = getOrComputePrograms(curCh);
-    }
     return map;
-  }, [guideData, channels, selectedRowIndex, getOrComputePrograms]);
+  }, [guideData, channels, getOrComputePrograms]);
 
   // Load guide data from API
   const loadGuide = useCallback(async () => {
     try {
+      if (!hasInitializedSelectionRef.current) {
+        setIsLoading(true);
+      }
       const data = await api.getGuideData();
       setGuideData(data);
-      if (data.channels.length > 0) {
-        const targetIdx = activeChannelId
-          ? data.channels.findIndex((c) => c.id === activeChannelId)
+      if (data.channels.length > 0 && !hasInitializedSelectionRef.current) {
+        hasInitializedSelectionRef.current = true;
+        const targetIdx = initialChannelIdRef.current
+          ? data.channels.findIndex((c) => c.id === initialChannelIdRef.current)
           : 0;
         const validIdx = targetIdx >= 0 ? targetIdx : 0;
+        selectedRowIndexRef.current = validIdx;
         setSelectedRowIndex(validIdx);
-        setHeroRowIndex(validIdx);
         const targetCh = data.channels[validIdx];
         setPlayingChannel(targetCh);
 
@@ -223,8 +222,8 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
         );
         const liveIdx = liveProgramIndex(chProgs, Math.floor(Date.now() / 1000));
         const effectiveProgIdx = liveIdx >= 0 ? liveIdx : 0;
+        selectedProgramIndexRef.current = effectiveProgIdx;
         setSelectedProgramIndex(effectiveProgIdx);
-        setHeroProgramIndex(effectiveProgIdx);
 
         const liveProg = chProgs[effectiveProgIdx];
         if (liveProg) {
@@ -245,7 +244,8 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
           scrollOffsetAnim.setValue(targetX);
         }
 
-        const targetY = Math.max(0, (validIdx - 1) * INACTIVE_ROW_HEIGHT);
+        const firstVisibleRow = preferredFirstVisibleRow(validIdx, data.channels.length);
+        const targetY = firstVisibleRow * INACTIVE_ROW_HEIGHT;
         currentScrollYRef.current = targetY;
         scrollYAnim.setValue(targetY);
       }
@@ -254,21 +254,30 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [activeChannelId, timelineStartSeconds, timelineEndSeconds, viewportWidth, scrollOffsetAnim, scrollYAnim]);
+  }, [timelineStartSeconds, timelineEndSeconds, viewportWidth, scrollOffsetAnim, scrollYAnim]);
 
   useEffect(() => {
     loadGuide();
+
+    // 10-minute silent refresh interval matching old app LIVE_GUIDE_REFRESH_INTERVAL_MS
+    const refreshTimer = setInterval(async () => {
+      try {
+        const freshData = await api.getGuideData(true);
+        if (freshData && freshData.channels.length > 0) {
+          setGuideData(freshData);
+        }
+      } catch {
+        // Silent error handling: preserve current guide
+      }
+    }, 10 * 60 * 1000);
+
+    return () => clearInterval(refreshTimer);
   }, [loadGuide]);
 
-  // Active channel and program objects for grid navigation
+  // Active channel and program objects for grid navigation & hero presentation
   const activeChannel = channels[selectedRowIndex] || null;
   const activeChannelPrograms = (activeChannel && (programsByChannelMap[activeChannel.id] || getOrComputePrograms(activeChannel))) || [];
   const activeProgram = activeChannelPrograms[selectedProgramIndex] || null;
-
-  // Hero uses debounced indices to avoid layout/artwork churn during rapid D-pad steps
-  const heroChannel = channels[heroRowIndex] || activeChannel;
-  const heroChannelPrograms = (heroChannel && (programsByChannelMap[heroChannel.id] || getOrComputePrograms(heroChannel))) || [];
-  const heroProgram = heroChannelPrograms[heroProgramIndex] || activeProgram;
 
   // Smooth scroll animations
   const animateHorizontalScroll = useCallback((targetOffset: number) => {
@@ -290,44 +299,51 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     }).start();
   }, [scrollYAnim]);
 
-  // Requirement 5: Hero updates + Debounced background playback (350ms)
+  // Requirement 5: Debounced background playback (350ms)
   useEffect(() => {
-    if (!heroChannel) return;
+    if (!activeChannel) return;
 
     if (playbackDebounceTimerRef.current) {
       clearTimeout(playbackDebounceTimerRef.current);
       playbackDebounceTimerRef.current = null;
     }
 
-    const isLive = heroProgram ? isProgramCurrent(heroProgram, nowSeconds) : false;
+    const isLive = activeProgram ? isProgramCurrent(activeProgram, nowSeconds) : false;
 
-    if (isLive) {
-      if (playingChannel?.id === heroChannel.id && externalStreamUrl) {
-        return; // Already playing this channel
+    if (!isLive) {
+      // Non-live program: immediately stop player and audio
+      if (playingChannel !== null) {
+        setPlayingChannel(null);
+        onMediaChange?.(null, null);
       }
-      // 350ms debounce before switching live stream
-      playbackDebounceTimerRef.current = setTimeout(async () => {
-        setPlayingChannel(heroChannel);
-        let stream = heroChannel.streamUrl;
-        if (!stream && heroChannel.rawChannel) {
-          const resolved = await api.getLiveChannelStream(heroChannel.rawChannel);
-          if (resolved) stream = resolved;
-        }
-        onMediaChange?.(stream, heroChannel.id);
-      }, 350);
-    } else {
-      // Non-live program: keep channel playing in background behind showArtwork
-      if (playingChannel?.id !== heroChannel.id) {
-        setPlayingChannel(heroChannel);
-      }
+      return;
     }
+
+    // Is live program: if channel changed, immediately cut off previous audio/video
+    if (playingChannel?.id !== activeChannel.id) {
+      onMediaChange?.(null, null);
+      setPlayingChannel(null);
+    } else if (externalStreamUrl) {
+      return; // Already playing this channel
+    }
+
+    // 350ms debounce before switching live stream: directly transition to new stream without unmounting player
+    playbackDebounceTimerRef.current = setTimeout(async () => {
+      setPlayingChannel(activeChannel);
+      let stream = activeChannel.streamUrl;
+      if (!stream && activeChannel.rawChannel) {
+        const resolved = await api.getLiveChannelStream(activeChannel.rawChannel);
+        if (resolved) stream = resolved;
+      }
+      onMediaChange?.(stream, activeChannel.id);
+    }, 350);
 
     return () => {
       if (playbackDebounceTimerRef.current) {
         clearTimeout(playbackDebounceTimerRef.current);
       }
     };
-  }, [heroChannel?.id, heroProgram?.id, nowSeconds, playingChannel?.id, externalStreamUrl, onMediaChange]);
+  }, [activeChannel?.id, activeProgram?.id, nowSeconds, playingChannel?.id, externalStreamUrl, onMediaChange]);
 
   const handleToggleMute = useCallback(() => {
     if (externalOnToggleMute) {
@@ -337,13 +353,132 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     }
   }, [externalOnToggleMute]);
 
-  // Remote key listeners for full D-pad grid navigation
+  // Refs for synchronous event handling without listener re-binding
+  const selectedRowIndexRef = useRef(selectedRowIndex);
+  selectedRowIndexRef.current = selectedRowIndex;
+
+  const selectedProgramIndexRef = useRef(selectedProgramIndex);
+  selectedProgramIndexRef.current = selectedProgramIndex;
+
+  const focusedColumnRef = useRef(focusedColumn);
+  focusedColumnRef.current = focusedColumn;
+
+  const isHeroFocusedRef = useRef(isHeroFocused);
+  isHeroFocusedRef.current = isHeroFocused;
+
+  const heroFocusButtonRef = useRef(heroFocusButton);
+  heroFocusButtonRef.current = heroFocusButton;
+
+  const channelsRef = useRef(channels);
+  channelsRef.current = channels;
+
+  const programsByChannelMapRef = useRef(programsByChannelMap);
+  programsByChannelMapRef.current = programsByChannelMap;
+
+  const activeChannelProgramsRef = useRef(activeChannelPrograms);
+  activeChannelProgramsRef.current = activeChannelPrograms;
+
+  const activeChannelRef = useRef(activeChannel);
+  activeChannelRef.current = activeChannel;
+
+  const activeProgramRef = useRef(activeProgram);
+  activeProgramRef.current = activeProgram;
+
+  const viewportWidthRef = useRef(viewportWidth);
+  viewportWidthRef.current = viewportWidth;
+
+  const timelineStartSecondsRef = useRef(timelineStartSeconds);
+  timelineStartSecondsRef.current = timelineStartSeconds;
+
+  const getOrComputeProgramsRef = useRef(getOrComputePrograms);
+  getOrComputeProgramsRef.current = getOrComputePrograms;
+
+  const onPlayFullscreenRef = useRef(onPlayFullscreen);
+  onPlayFullscreenRef.current = onPlayFullscreen;
+
+  const onRequestSideNavFocusRef = useRef(onRequestSideNavFocus);
+  onRequestSideNavFocusRef.current = onRequestSideNavFocus;
+
+  const handleToggleMuteRef = useRef(handleToggleMute);
+  handleToggleMuteRef.current = handleToggleMute;
+
+  const animateHorizontalScrollRef = useRef(animateHorizontalScroll);
+  animateHorizontalScrollRef.current = animateHorizontalScroll;
+
+  const animateVerticalScrollRef = useRef(animateVerticalScroll);
+  animateVerticalScrollRef.current = animateVerticalScroll;
+
+  // Requirement: When closing fullscreen player, restore focus to the active channel's LIVE program
+  useEffect(() => {
+    if (focusNonce > 0 && focusNonce !== prevFocusNonceRef.current) {
+      prevFocusNonceRef.current = focusNonce;
+
+      const chList = channelsRef.current;
+      if (chList.length === 0) return;
+
+      const targetChannelId = activeChannelId || playingChannel?.id;
+      let targetRow = -1;
+      if (targetChannelId) {
+        targetRow = chList.findIndex((c) => c.id === targetChannelId);
+      }
+      const validRowIdx = targetRow >= 0 ? targetRow : selectedRowIndexRef.current;
+      selectedRowIndexRef.current = validRowIdx;
+      setSelectedRowIndex(validRowIdx);
+
+      const targetCh = chList[validRowIdx];
+      if (targetCh) {
+        setPlayingChannel(targetCh);
+        const progMap = programsByChannelMapRef.current;
+        const chProgs = progMap[targetCh.id] || getOrComputeProgramsRef.current(targetCh);
+
+        const nowSec = Math.floor(Date.now() / 1000);
+        const liveIdx = liveProgramIndex(chProgs, nowSec);
+        const validProgIdx = liveIdx >= 0 ? liveIdx : 0;
+
+        selectedProgramIndexRef.current = validProgIdx;
+        setSelectedProgramIndex(validProgIdx);
+
+        focusedColumnRef.current = 'program';
+        setFocusedColumn('program');
+        isHeroFocusedRef.current = false;
+        setIsHeroFocused(false);
+        heroFocusButtonRef.current = null;
+        setHeroFocusButton(null);
+        setHeroFocusNonce(0);
+
+        const liveProg = chProgs[validProgIdx];
+        if (liveProg) {
+          selectedTimeAnchorRef.current = liveProg.startSeconds;
+          const maxScroll = Math.max(
+            0,
+            (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidthRef.current
+          );
+          const targetX = scrollOffsetKeepingProgramVisible(
+            liveProg,
+            timelineStartSecondsRef.current,
+            SLOT_WIDTH,
+            viewportWidthRef.current,
+            currentScrollOffsetRef.current,
+            maxScroll
+          );
+          animateHorizontalScrollRef.current(targetX);
+        }
+
+        const firstVisibleRow = preferredFirstVisibleRow(validRowIdx, chList.length);
+        const targetY = firstVisibleRow * INACTIVE_ROW_HEIGHT;
+        animateVerticalScrollRef.current(targetY);
+
+        setGridFocusNonce(Date.now());
+      }
+    }
+  }, [focusNonce, activeChannelId, playingChannel?.id]);
+
+  // Remote key listeners for full D-pad grid navigation (stable mount with 70ms throttle)
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(
       'onTvRemoteKey',
-      ({ keyCode, repeatCount = 0 }: { keyCode: number; repeatCount?: number }) => {
-        console.log('[LiveTvKey]', keyCode, 'isSideNavActive:', isSideNavActiveRef.current, 'isHeroFocused:', isHeroFocused, 'row:', selectedRowIndex, 'prog:', selectedProgramIndex, 'column:', focusedColumn);
-        if (isSideNavActiveRef.current) return;
+      ({ keyCode }: { keyCode: number; repeatCount?: number }) => {
+        if (isPlayerActiveRef.current || isSideNavActiveRef.current) return;
         const now = Date.now();
         const timeSince = now - lastNavTimeRef.current;
 
@@ -352,42 +487,49 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
           if (timeSince < GRID_NAV_THROTTLE_MS) return;
           lastNavTimeRef.current = now;
 
-          if (isHeroFocused) return;
+          if (isHeroFocusedRef.current) return;
 
-          if (selectedRowIndex === 0) {
+          if (selectedRowIndexRef.current === 0) {
             // From top channel row, move UP to Hero Actions
+            isHeroFocusedRef.current = true;
             setIsHeroFocused(true);
+            heroFocusButtonRef.current = 'fullscreen';
             setHeroFocusButton('fullscreen');
             setHeroFocusNonce(Date.now());
           } else {
             // Move up one channel row, maintaining time anchor
-            const nextRow = selectedRowIndex - 1;
+            const nextRow = selectedRowIndexRef.current - 1;
+            selectedRowIndexRef.current = nextRow;
             setSelectedRowIndex(nextRow);
 
-            const nextCh = channels[nextRow];
-            const nextProgs = nextCh ? programsByChannelMap[nextCh.id] || getOrComputePrograms(nextCh) : [];
-            const nextProgIdx = programIndexAtTime(nextProgs, selectedTimeAnchor);
+            const chList = channelsRef.current;
+            const nextCh = chList[nextRow];
+            const progMap = programsByChannelMapRef.current;
+            const nextProgs = nextCh ? progMap[nextCh.id] || getOrComputeProgramsRef.current(nextCh) : [];
+            const nextProgIdx = programIndexAtTime(nextProgs, selectedTimeAnchorRef.current);
             const validProgIdx = nextProgIdx >= 0 ? nextProgIdx : 0;
+            selectedProgramIndexRef.current = validProgIdx;
             setSelectedProgramIndex(validProgIdx);
 
             // Animate vertical scroll
-            const targetY = Math.max(0, (nextRow - 1) * INACTIVE_ROW_HEIGHT);
-            animateVerticalScroll(targetY);
+            const firstVisibleRow = preferredFirstVisibleRow(nextRow, chList.length);
+            const targetY = firstVisibleRow * INACTIVE_ROW_HEIGHT;
+            animateVerticalScrollRef.current(targetY);
 
             // Ensure next program is horizontally visible
             const nextProg = nextProgs[validProgIdx];
             if (nextProg) {
-              const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidth);
+              const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidthRef.current);
               const targetX = scrollOffsetKeepingProgramVisible(
                 nextProg,
-                timelineStartSeconds,
+                timelineStartSecondsRef.current,
                 SLOT_WIDTH,
-                viewportWidth,
+                viewportWidthRef.current,
                 currentScrollOffsetRef.current,
                 maxScroll
               );
               if (targetX !== currentScrollOffsetRef.current) {
-                animateHorizontalScroll(targetX);
+                animateHorizontalScrollRef.current(targetX);
               }
             }
           }
@@ -397,40 +539,48 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
           if (timeSince < GRID_NAV_THROTTLE_MS) return;
           lastNavTimeRef.current = now;
 
-          if (isHeroFocused) {
+          if (isHeroFocusedRef.current) {
             // Return down from Hero to Grid
+            isHeroFocusedRef.current = false;
             setIsHeroFocused(false);
+            heroFocusButtonRef.current = null;
             setHeroFocusButton(null);
             setHeroFocusNonce(0);
-          } else if (selectedRowIndex < channels.length - 1) {
+            setGridFocusNonce(Date.now());
+          } else if (selectedRowIndexRef.current < channelsRef.current.length - 1) {
             // Move down one channel row, maintaining time anchor
-            const nextRow = selectedRowIndex + 1;
+            const nextRow = selectedRowIndexRef.current + 1;
+            selectedRowIndexRef.current = nextRow;
             setSelectedRowIndex(nextRow);
 
-            const nextCh = channels[nextRow];
-            const nextProgs = nextCh ? programsByChannelMap[nextCh.id] || getOrComputePrograms(nextCh) : [];
-            const nextProgIdx = programIndexAtTime(nextProgs, selectedTimeAnchor);
+            const chList = channelsRef.current;
+            const nextCh = chList[nextRow];
+            const progMap = programsByChannelMapRef.current;
+            const nextProgs = nextCh ? progMap[nextCh.id] || getOrComputeProgramsRef.current(nextCh) : [];
+            const nextProgIdx = programIndexAtTime(nextProgs, selectedTimeAnchorRef.current);
             const validProgIdx = nextProgIdx >= 0 ? nextProgIdx : 0;
+            selectedProgramIndexRef.current = validProgIdx;
             setSelectedProgramIndex(validProgIdx);
 
             // Animate vertical scroll
-            const targetY = Math.max(0, (nextRow - 1) * INACTIVE_ROW_HEIGHT);
-            animateVerticalScroll(targetY);
+            const firstVisibleRow = preferredFirstVisibleRow(nextRow, chList.length);
+            const targetY = firstVisibleRow * INACTIVE_ROW_HEIGHT;
+            animateVerticalScrollRef.current(targetY);
 
             // Ensure next program is horizontally visible
             const nextProg = nextProgs[validProgIdx];
             if (nextProg) {
-              const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidth);
+              const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidthRef.current);
               const targetX = scrollOffsetKeepingProgramVisible(
                 nextProg,
-                timelineStartSeconds,
+                timelineStartSecondsRef.current,
                 SLOT_WIDTH,
-                viewportWidth,
+                viewportWidthRef.current,
                 currentScrollOffsetRef.current,
                 maxScroll
               );
               if (targetX !== currentScrollOffsetRef.current) {
-                animateHorizontalScroll(targetX);
+                animateHorizontalScrollRef.current(targetX);
               }
             }
           }
@@ -440,31 +590,40 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
           if (timeSince < GRID_NAV_THROTTLE_MS) return;
           lastNavTimeRef.current = now;
 
-          if (isHeroFocused) {
-            if (heroFocusButton === 'fullscreen') {
+          if (isHeroFocusedRef.current) {
+            if (heroFocusButtonRef.current === 'fullscreen') {
+              heroFocusButtonRef.current = 'mute';
               setHeroFocusButton('mute');
+              setHeroFocusNonce(Date.now());
             }
           } else {
-            if (focusedColumn === 'channel') {
+            if (focusedColumnRef.current === 'channel') {
               // Move from Channel card into Programs
+              focusedColumnRef.current = 'program';
               setFocusedColumn('program');
-            } else if (selectedProgramIndex < activeChannelPrograms.length - 1) {
-              // Move to next program in row
-              const nextIdx = selectedProgramIndex + 1;
-              setSelectedProgramIndex(nextIdx);
-              const prog = activeChannelPrograms[nextIdx];
-              if (prog) {
-                setSelectedTimeAnchor(prog.startSeconds);
-                const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidth);
-                const targetX = scrollOffsetKeepingProgramVisible(
-                  prog,
-                  timelineStartSeconds,
-                  SLOT_WIDTH,
-                  viewportWidth,
-                  currentScrollOffsetRef.current,
-                  maxScroll
-                );
-                animateHorizontalScroll(targetX);
+            } else {
+              const curProgIdx = selectedProgramIndexRef.current;
+              const ch = channelsRef.current[selectedRowIndexRef.current];
+              const progMap = programsByChannelMapRef.current;
+              const progs = ch ? progMap[ch.id] || getOrComputeProgramsRef.current(ch) : [];
+              if (curProgIdx < progs.length - 1) {
+                const nextIdx = curProgIdx + 1;
+                selectedProgramIndexRef.current = nextIdx;
+                setSelectedProgramIndex(nextIdx);
+                const prog = progs[nextIdx];
+                if (prog) {
+                  selectedTimeAnchorRef.current = prog.startSeconds;
+                  const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidthRef.current);
+                  const targetX = scrollOffsetKeepingProgramVisible(
+                    prog,
+                    timelineStartSecondsRef.current,
+                    SLOT_WIDTH,
+                    viewportWidthRef.current,
+                    currentScrollOffsetRef.current,
+                    maxScroll
+                  );
+                  animateHorizontalScrollRef.current(targetX);
+                }
               }
             }
           }
@@ -474,88 +633,85 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
           if (timeSince < GRID_NAV_THROTTLE_MS) return;
           lastNavTimeRef.current = now;
 
-          if (isHeroFocused) {
-            if (heroFocusButton === 'mute') {
+          if (isHeroFocusedRef.current) {
+            if (heroFocusButtonRef.current === 'mute') {
+              heroFocusButtonRef.current = 'fullscreen';
               setHeroFocusButton('fullscreen');
-            } else if (heroFocusButton === 'fullscreen') {
-              onRequestSideNavFocus?.(AppDestination.LIVE_TV);
+              setHeroFocusNonce(Date.now());
+            } else if (heroFocusButtonRef.current === 'fullscreen') {
+              isHeroFocusedRef.current = false;
+              setIsHeroFocused(false);
+              heroFocusButtonRef.current = null;
+              setHeroFocusButton(null);
+              setHeroFocusNonce(0);
+              onRequestSideNavFocusRef.current?.(AppDestination.LIVE_TV);
             }
           } else {
-            if (focusedColumn === 'program') {
-              if (selectedProgramIndex > 0) {
+            if (focusedColumnRef.current === 'program') {
+              const curProgIdx = selectedProgramIndexRef.current;
+              if (curProgIdx > 0) {
                 // Move to previous program in row
-                const prevIdx = selectedProgramIndex - 1;
+                const prevIdx = curProgIdx - 1;
+                selectedProgramIndexRef.current = prevIdx;
                 setSelectedProgramIndex(prevIdx);
-                const prog = activeChannelPrograms[prevIdx];
+                const ch = channelsRef.current[selectedRowIndexRef.current];
+                const progMap = programsByChannelMapRef.current;
+                const progs = ch ? progMap[ch.id] || getOrComputeProgramsRef.current(ch) : [];
+                const prog = progs[prevIdx];
                 if (prog) {
-                  setSelectedTimeAnchor(prog.startSeconds);
-                  const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidth);
+                  selectedTimeAnchorRef.current = prog.startSeconds;
+                  const maxScroll = Math.max(0, (GRID_VISIBLE_WINDOW_SECONDS / HALF_HOUR_SECONDS) * SLOT_WIDTH - viewportWidthRef.current);
                   const targetX = scrollOffsetKeepingProgramVisible(
                     prog,
-                    timelineStartSeconds,
+                    timelineStartSecondsRef.current,
                     SLOT_WIDTH,
-                    viewportWidth,
+                    viewportWidthRef.current,
                     currentScrollOffsetRef.current,
                     maxScroll
                   );
-                  animateHorizontalScroll(targetX);
+                  animateHorizontalScrollRef.current(targetX);
                 }
               } else {
                 // Leftmost program: move focus to channel card
+                focusedColumnRef.current = 'channel';
                 setFocusedColumn('channel');
               }
-            } else if (focusedColumn === 'channel') {
+            } else if (focusedColumnRef.current === 'channel') {
               // On channel card: open Side Nav Rail
-              onRequestSideNavFocus?.(AppDestination.LIVE_TV);
+              onRequestSideNavFocusRef.current?.(AppDestination.LIVE_TV);
             }
           }
         }
         // DPAD_CENTER = 23 or ENTER = 66
         else if (keyCode === 23 || keyCode === 66) {
           if (Date.now() - mountTimeRef.current < 400) return;
-          if (isHeroFocused) {
-            if (heroFocusButton === 'fullscreen' && activeChannel) {
-              onPlayFullscreen(activeChannel, activeProgram);
-            } else if (heroFocusButton === 'mute') {
-              handleToggleMute();
+          if (isHeroFocusedRef.current) {
+            if (heroFocusButtonRef.current === 'fullscreen' && activeChannelRef.current) {
+              onPlayFullscreenRef.current(activeChannelRef.current, activeProgramRef.current);
+            } else if (heroFocusButtonRef.current === 'mute') {
+              handleToggleMuteRef.current();
             }
-          } else if (activeChannel) {
-            onPlayFullscreen(activeChannel, activeProgram);
+          } else if (activeChannelRef.current) {
+            onPlayFullscreenRef.current(activeChannelRef.current, activeProgramRef.current);
           }
         }
         // BACK = 4
         else if (keyCode === 4) {
-          if (isHeroFocused) {
+          if (isHeroFocusedRef.current) {
+            isHeroFocusedRef.current = false;
             setIsHeroFocused(false);
+            heroFocusButtonRef.current = null;
             setHeroFocusButton(null);
+            setGridFocusNonce(Date.now());
           } else {
-            onRequestSideNavFocus?.(AppDestination.LIVE_TV);
+            onRequestSideNavFocusRef.current?.(AppDestination.LIVE_TV);
           }
         }
       }
     );
 
     return () => sub.remove();
-  }, [
-    isHeroFocused,
-    heroFocusButton,
-    selectedRowIndex,
-    focusedColumn,
-    selectedProgramIndex,
-    selectedTimeAnchor,
-    channels,
-    activeChannel,
-    activeProgram,
-    activeChannelPrograms,
-    programsByChannelMap,
-    viewportWidth,
-    timelineStartSeconds,
-    animateHorizontalScroll,
-    animateVerticalScroll,
-    onPlayFullscreen,
-    onRequestSideNavFocus,
-    handleToggleMute,
-  ]);
+  }, []);
 
   // Click handlers
   const handleChannelPress = useCallback((channel: TvChannel) => {
@@ -572,20 +728,24 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     }
   };
 
-  // Hero Presentation (debounced to avoid artwork and layout thrashing during fast D-pad steps)
-  const isLiveProgram = heroProgram ? isProgramCurrent(heroProgram, nowSeconds) : false;
-  const heroTitle = heroProgram?.title || heroChannel?.name || 'שידור חי';
-  const heroSubtitle = heroChannel?.name || '';
+  // Hero Presentation (instant updates on D-pad navigation)
+  const isLiveProgram = activeProgram ? isProgramCurrent(activeProgram, nowSeconds) : false;
+  const heroTitle = activeProgram?.title || activeChannel?.name || 'שידור חי';
+  const heroSubtitle = activeChannel?.name || '';
   const heroDescription =
-    heroProgram?.description ||
-    (isLiveProgram ? `שידור חי בערוץ ${heroChannel?.name || ''}` : heroChannel?.name || '');
-  const heroTimeRange = heroProgram?.timeRange;
-  const heroChannelLogoUrl = heroChannel?.logoUrl;
-  const backgroundImageUrl = heroProgram?.imageUrl || heroChannel?.logoUrl;
+    activeProgram?.description ||
+    (isLiveProgram ? `שידור חי בערוץ ${activeChannel?.name || ''}` : activeChannel?.name || '');
+  const heroTimeRange = activeProgram?.timeRange;
+  const heroChannelLogoUrl = activeChannel?.logoUrl;
+  const backgroundImageUrl = activeProgram?.imageUrl || activeChannel?.logoUrl;
   const currentStream = externalStreamUrl || playingChannel?.streamUrl;
 
   if (isLoading || !guideData || guideData.channels.length === 0) {
-    return <PageLoadingOverlay message="טוען לוח שידורים..." />;
+    return (
+      <View style={styles.fullScreenLoading}>
+        <ActivityIndicator size="large" color="#25D4DE" />
+      </View>
+    );
   }
 
   return (
@@ -605,6 +765,7 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
       showArtwork={!isLiveProgram || !isVideoReady}
       actions={
         <HeroActions
+          hasActivePlayer={isLiveProgram && Boolean(currentStream)}
           onOpenFullScreen={handleOpenFullscreen}
           onToggleMute={handleToggleMute}
           isMuted={isMuted}
@@ -620,12 +781,19 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
     >
       <View style={styles.content}>
         <TvFocusable
-          hasTVPreferredFocus={!isSideNavActive}
-          focusNonce={focusNonce}
+          hasTVPreferredFocus={!isSideNavActive && !isHeroFocused}
+          focusNonce={gridFocusNonce || focusNonce}
           style={styles.focusAnchor}
           focusedStyle={styles.focusAnchorFocused}
-          focusable={!isSideNavActive}
-        />
+          focusable={!isSideNavActive && !isHeroFocused}
+          scaleOnFocus={false}
+          lockUp={false}
+          lockDown={false}
+          lockLeft={false}
+          lockRight={false}
+        >
+          <View pointerEvents="none" style={StyleSheet.absoluteFill} />
+        </TvFocusable>
         <EpgGrid
           data={guideData}
           programsMap={programsByChannelMap}
@@ -634,6 +802,7 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
           selectedRowIndex={selectedRowIndex}
           selectedProgramIndex={selectedProgramIndex}
           focusedColumn={focusedColumn}
+          isGridFocused={!isSideNavActive && !isHeroFocused}
           playingChannel={playingChannel}
           scrollOffsetAnim={scrollOffsetAnim}
           scrollYAnim={scrollYAnim}
@@ -656,23 +825,22 @@ const styles = StyleSheet.create({
   },
   focusAnchor: {
     position: 'absolute',
-    width: 0,
-    height: 0,
-    opacity: 0,
-    backgroundColor: 'transparent',
     top: 0,
     left: 0,
-    zIndex: -1,
+    right: 0,
+    bottom: 0,
+    opacity: 0.01,
+    backgroundColor: 'transparent',
+    zIndex: 1,
   },
   focusAnchorFocused: {
     borderWidth: 0,
     borderColor: 'transparent',
-    width: 0,
-    height: 0,
-    opacity: 0,
+    backgroundColor: 'transparent',
   },
   fullScreenLoading: {
     flex: 1,
+    marginLeft: 56,
     backgroundColor: '#080A0C',
     alignItems: 'center',
     justifyContent: 'center',

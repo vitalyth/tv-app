@@ -14,7 +14,7 @@ interface HomeLiveCardProps {
   onFocus: () => void;
 }
 
-export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
+const HomeLiveCardComponent: React.FC<HomeLiveCardProps> = ({
   channel,
   program,
   hasTVPreferredFocus = false,
@@ -34,7 +34,7 @@ export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
     imageUrl: currentProgram?.imageUrl || channel.logoUrl,
     channelLogoUrl: channel.logoUrl,
     badgeType: 'live',
-  }), [channel, currentProgram]);
+  }), [channel.name, channel.logoUrl, currentProgram?.title, currentProgram?.description, currentProgram?.timeRange, currentProgram?.imageUrl]);
 
   return (
     <TvProgramCard
@@ -50,6 +50,21 @@ export const HomeLiveCard: React.FC<HomeLiveCardProps> = React.memo(({
       onPress={onPress}
       onFocus={onFocus}
     />
+  );
+};
+
+export const HomeLiveCard = React.memo(HomeLiveCardComponent, (prev, next) => {
+  return (
+    prev.channel.id === next.channel.id &&
+    prev.channel.name === next.channel.name &&
+    prev.channel.logoUrl === next.channel.logoUrl &&
+    prev.channel.currentProgram?.id === next.channel.currentProgram?.id &&
+    prev.channel.currentProgram?.title === next.channel.currentProgram?.title &&
+    prev.hasPreferredFocus === next.hasPreferredFocus &&
+    prev.hasTVPreferredFocus === next.hasTVPreferredFocus &&
+    prev.focusNonce === next.focusNonce &&
+    prev.isFirstCard === next.isFirstCard &&
+    prev.isLastCard === next.isLastCard
   );
 });
 

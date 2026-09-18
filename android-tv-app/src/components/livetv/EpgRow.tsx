@@ -19,7 +19,7 @@ interface EpgRowProps {
   onProgramPress: (channel: TvChannel, program: TvProgram) => void;
 }
 
-export const EpgRow: React.FC<EpgRowProps> = memo(({
+const EpgRowComponent: React.FC<EpgRowProps> = ({
   channel,
   programs,
   timelineStartSeconds,
@@ -109,6 +109,14 @@ export const EpgRow: React.FC<EpgRowProps> = memo(({
         const isLive = isProgramCurrent(program, nowSeconds);
         const isPlaying = isPlayingChannel && isLive;
 
+        // Visible slice of this card within the horizontal viewport
+        const currentScrollPx = scrollOffsetPx ?? 0;
+        const currentViewportWidth = viewportWidth ?? 800;
+        const cardStartPx = ((program.startSeconds - timelineStartSeconds) / HALF_HOUR_SECONDS) * SLOT_WIDTH;
+        const visibleStartPx = Math.max(0, currentScrollPx - cardStartPx);
+        const visibleEndPx = Math.min(cardWidth, currentScrollPx + currentViewportWidth - cardStartPx);
+        const visibleWidthPx = Math.max(0, visibleEndPx - visibleStartPx);
+
         return (
           <EpgProgramCard
             key={program.id || `${channel.id}_${idx}`}
@@ -119,6 +127,9 @@ export const EpgRow: React.FC<EpgRowProps> = memo(({
             isActiveRow={isActiveRow}
             isLive={isLive}
             isPlaying={isPlaying}
+            visibleStartPx={visibleStartPx}
+            visibleEndPx={visibleEndPx}
+            visibleWidthPx={visibleWidthPx}
             onPress={handleCardPress}
           />
         );
@@ -126,7 +137,25 @@ export const EpgRow: React.FC<EpgRowProps> = memo(({
       {rightSpacerWidth > 0 && <View style={{ width: rightSpacerWidth, height: rowHeight }} />}
     </View>
   );
-});
+};
+
+function areRowPropsEqual(prev: EpgRowProps, next: EpgRowProps): boolean {
+  return (
+    prev.channel.id === next.channel.id &&
+    prev.isActiveRow === next.isActiveRow &&
+    prev.focusedProgramIndex === next.focusedProgramIndex &&
+    prev.rowHeight === next.rowHeight &&
+    prev.isPlayingChannel === next.isPlayingChannel &&
+    prev.scrollOffsetPx === next.scrollOffsetPx &&
+    prev.viewportWidth === next.viewportWidth &&
+    prev.timelineStartSeconds === next.timelineStartSeconds &&
+    prev.timelineEndSeconds === next.timelineEndSeconds &&
+    prev.nowSeconds === next.nowSeconds &&
+    prev.programs === next.programs
+  );
+}
+
+export const EpgRow = memo(EpgRowComponent, areRowPropsEqual);
 
 const styles = StyleSheet.create({
   row: {

@@ -10,14 +10,14 @@ interface EpgChannelCardProps {
   isPlaying: boolean;
 }
 
-export const EpgChannelCard: React.FC<EpgChannelCardProps> = memo(({
+const EpgChannelCardComponent: React.FC<EpgChannelCardProps> = ({
   channel,
   height,
   isActiveRow,
   isFocused,
   isPlaying,
 }) => {
-  const cardBg = isFocused ? '#E8EAEE' : isActiveRow ? '#565B64' : '#17181B';
+  const cardBg = isFocused ? '#FFFFFF' : isActiveRow ? '#343C48' : '#17181B';
   const nameColor = isFocused ? '#0A0E12' : '#FFFFFF';
   const subColor = isFocused ? '#2E343A' : isPlaying ? '#4ADE80' : '#8C8F98';
 
@@ -38,7 +38,7 @@ export const EpgChannelCard: React.FC<EpgChannelCardProps> = memo(({
         <View
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: 'rgba(255, 255, 255, 0.08)' },
+            { backgroundColor: 'rgba(255, 255, 255, 0.05)' },
           ]}
         />
       )}
@@ -48,18 +48,24 @@ export const EpgChannelCard: React.FC<EpgChannelCardProps> = memo(({
         style={[
           styles.logoBox,
           {
-            backgroundColor: isFocused ? '#FFFFFF' : isActiveRow ? '#707680' : '#26272C',
+            width: isActiveRow ? 42 : 32,
+            height: isActiveRow ? 42 : 32,
+            borderRadius: isActiveRow ? 7 : 5,
+            backgroundColor: isFocused ? '#FFFFFF' : isActiveRow ? '#47515F' : '#26272C',
           },
         ]}
       >
         {channel.logoUrl ? (
           <Image
             source={{ uri: channel.logoUrl }}
-            style={styles.logo}
+            style={{
+              width: isActiveRow ? 38 : 28,
+              height: isActiveRow ? 38 : 28,
+            }}
             resizeMode="contain"
           />
         ) : (
-          <Text style={[styles.fallbackNumber, { color: isFocused ? '#0A0E12' : '#FFFFFF' }]}>
+          <Text style={[styles.fallbackNumber, { fontSize: isActiveRow ? 16 : 13, color: isFocused ? '#0A0E12' : '#FFFFFF' }]}>
             {channel.number || channel.name.slice(0, 2)}
           </Text>
         )}
@@ -67,21 +73,38 @@ export const EpgChannelCard: React.FC<EpgChannelCardProps> = memo(({
 
       {/* Channel Info */}
       <View style={styles.info}>
-        <Text numberOfLines={1} style={[styles.name, { color: nameColor }]}>
+        <Text numberOfLines={1} style={[styles.name, { fontSize: isActiveRow ? 14 : 12, color: nameColor }]}>
           {channel.name}
         </Text>
-        <Text numberOfLines={1} style={[styles.sub, { color: subColor }]}>
-          {isPlaying ? 'מנגן עכשיו' : channel.number ? `ערוץ ${channel.number}` : ''}
+        <Text numberOfLines={1} style={[styles.sub, { fontSize: isActiveRow ? 11.5 : 10, color: subColor }]}>
+          {isPlaying ? 'מנגן עכשיו' : channel.number || ''}
         </Text>
       </View>
     </View>
   );
-});
+};
+
+function areChannelCardPropsEqual(
+  prev: EpgChannelCardProps,
+  next: EpgChannelCardProps
+): boolean {
+  return (
+    prev.channel.id === next.channel.id &&
+    prev.height === next.height &&
+    prev.isActiveRow === next.isActiveRow &&
+    prev.isFocused === next.isFocused &&
+    prev.isPlaying === next.isPlaying &&
+    prev.channel.name === next.channel.name &&
+    prev.channel.logoUrl === next.channel.logoUrl
+  );
+}
+
+export const EpgChannelCard = memo(EpgChannelCardComponent, areChannelCardPropsEqual);
 
 const styles = StyleSheet.create({
   container: {
     width: 142,
-    borderRadius: 8,
+    borderRadius: 7,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
@@ -90,8 +113,8 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   logoBox: {
-    width: 38,
-    height: 38,
+    width: 36,
+    height: 36,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
@@ -99,11 +122,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   logo: {
-    width: 34,
-    height: 34,
+    width: 32,
+    height: 32,
   },
   fallbackNumber: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   info: {

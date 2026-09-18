@@ -33,14 +33,7 @@ export interface TvProgramCardProps {
   scrimHeight?: number;
 }
 
-// 96-step 1px-per-row continuous CSS fade (each slice is 1dp tall, perfectly smooth zero-banding transition)
-const FADE_STEPS = 96;
-const FADE_STOPS: string[] = Array.from({ length: FADE_STEPS }, (_, i) => {
-  const t = i / (FADE_STEPS - 1);
-  // Natural cubic-like power curve (t^1.6) from 0.0 to 0.96 opacity
-  const alpha = Math.min(0.96, Math.pow(t, 1.6) * 0.96);
-  return `rgba(8, 10, 14, ${alpha.toFixed(3)})`;
-});
+const cardScrimImage = require('../../assets/card_scrim.png');
 
 export const TvProgramCard: React.FC<TvProgramCardProps> = React.memo(({
   program,
@@ -97,11 +90,13 @@ export const TvProgramCard: React.FC<TvProgramCardProps> = React.memo(({
           </View>
         )}
 
-        {/* Layer 2: Pure CSS Graduated Fade Scrim behind text */}
+        {/* Layer 2: Hardware-Accelerated Scrim behind text */}
         <View pointerEvents="none" style={[styles.scrimContainer, { height: scrimHeight }]}>
-          {FADE_STOPS.map((color, idx) => (
-            <View key={idx} style={{ flex: 1, backgroundColor: color }} />
-          ))}
+          <Image
+            source={cardScrimImage}
+            style={StyleSheet.absoluteFill}
+            resizeMode="stretch"
+          />
         </View>
 
         {/* Layer 3: Top Badges */}
@@ -180,6 +175,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 1,
+    overflow: 'hidden',
   },
   badgeRow: {
     position: 'absolute',

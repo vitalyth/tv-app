@@ -77,8 +77,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   // Hero Actions focus state (Fullscreen vs Mute button)
   const [heroFocusButton, setHeroFocusButton] = useState<'fullscreen' | 'mute' | null>(null);
   const [heroFocusNonce, setHeroFocusNonce] = useState(0);
+  const [isHeroFocused, setIsHeroFocused] = useState(false);
   const isHeroFocusedRef = useRef(false);
   const initialFocusDoneRef = useRef(false);
+
+  // Clear Hero focus when SideNav becomes active
+  useEffect(() => {
+    if (isSideNavActive) {
+      isHeroFocusedRef.current = false;
+      setIsHeroFocused(false);
+      setHeroFocusButton(null);
+      setHeroFocusNonce(0);
+    }
+  }, [isSideNavActive]);
 
   // Card programmatic focus target for D-pad navigation - targeted at Card 0 initially
   const [cardFocusTarget, setCardFocusTarget] = useState<{ row: number; index: number; nonce: number } | null>({
@@ -312,6 +323,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   const handleChannelFocus = useCallback((channel: TvChannel, index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
+    setIsHeroFocused(false);
     setHeroFocusButton(null);
     setFocusedLiveIndex(index);
     focusedIndicesRef.current.row0 = index;
@@ -385,6 +397,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   const handleContinueFocus = useCallback((item: ContinueWatchingItem, index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
+    setIsHeroFocused(false);
     setHeroFocusButton(null);
     setFocusedContinueIndex(index);
     focusedIndicesRef.current.row1 = index;
@@ -430,6 +443,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   const handleNewVodFocus = useCallback((item: VodRecentItem, index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
+    setIsHeroFocused(false);
     setHeroFocusButton(null);
     setFocusedNewVodIndex(index);
     const newVodRow = continueWatchingItems.length > 0 ? 2 : 1;
@@ -476,6 +490,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   const handleShortcutFocus = useCallback((index: number) => {
     setHasHadInitialFocus(true);
     isHeroFocusedRef.current = false;
+    setIsHeroFocused(false);
     setHeroFocusButton(null);
     setFocusedShortcutIndex(index);
     const shortcutRow = continueWatchingItems.length > 0 ? 3 : 2;
@@ -537,14 +552,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
 
           const now = Date.now();
           const timeSinceLastNav = now - lastVerticalNavTimeRef.current;
-          if (repeatCount > 0 && timeSinceLastNav < 220) return;
-          if (timeSinceLastNav < 140) return;
+          if (repeatCount > 0 && timeSinceLastNav < 90) return;
+          if (timeSinceLastNav < 70) return;
           lastVerticalNavTimeRef.current = now;
 
           const currentRow = focusedRowRef.current;
           if (currentRow === 0) {
             // Requirement 1: Moving UP from Row 0 moves UP to Fullscreen icon
             isHeroFocusedRef.current = true;
+            setIsHeroFocused(true);
             setHeroFocusButton('fullscreen');
             setHeroFocusNonce(Date.now());
           } else {
@@ -580,13 +596,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
         else if (keyCode === 20) {
           const now = Date.now();
           const timeSinceLastNav = now - lastVerticalNavTimeRef.current;
-          if (repeatCount > 0 && timeSinceLastNav < 220) return;
-          if (timeSinceLastNav < 140) return;
+          if (repeatCount > 0 && timeSinceLastNav < 90) return;
+          if (timeSinceLastNav < 70) return;
           lastVerticalNavTimeRef.current = now;
 
           if (isHeroFocusedRef.current) {
             // From Hero buttons, move DOWN back to Row 0 directly below
             isHeroFocusedRef.current = false;
+            setIsHeroFocused(false);
             setHeroFocusButton(null);
             setHeroFocusNonce(0);
             focusedRowRef.current = 0;
@@ -633,7 +650,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
         }
         // DPAD_RIGHT = 22
         else if (keyCode === 22) {
-          // In hero buttons, native Android moves focus between Fullscreen and Mute naturally.
+          if (isHeroFocusedRef.current) {
+            if (heroFocusButton === 'fullscreen') {
+              setHeroFocusButton('mute');
+              setHeroFocusNonce(Date.now());
+            }
+            return;
+          }
+
           // In rows, lockRight stops at the end. Check right boundary to prevent state desync:
           const currentRow = focusedRowRef.current;
           let isAtEnd = false;
@@ -659,8 +683,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
         // DPAD_LEFT = 21
         else if (keyCode === 21) {
           if (isHeroFocusedRef.current) {
-            if (heroFocusButton === 'fullscreen') {
+            if (heroFocusButton === 'mute') {
+              setHeroFocusButton('fullscreen');
+              setHeroFocusNonce(Date.now());
+            } else if (heroFocusButton === 'fullscreen') {
               // Left from fullscreen hero button moves to side navigation rail
+              isHeroFocusedRef.current = false;
+              setIsHeroFocused(false);
+              setHeroFocusButton(null);
+              setHeroFocusNonce(0);
               onRequestSideNavFocus?.(AppDestination.HOME);
             }
             return;
@@ -797,11 +828,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
           onOpenFullScreen={handleOpenFullScreen}
           onToggleMute={onToggleMute}
           isMuted={isMuted}
-          focusTargetButton={heroFocusButton}
+          focusTargetButton={isHeroFocused ? heroFocusButton : null}
           focusNonce={heroFocusNonce}
           onFocusAction={(btn) => {
-            isHeroFocusedRef.current = true;
-            setHeroFocusButton(btn);
+            if (isHeroFocusedRef.current) {
+              setHeroFocusButton(btn);
+            }
           }}
         />
       }
@@ -1019,6 +1051,7 @@ const styles = StyleSheet.create({
   },
   fullScreenLoading: {
     flex: 1,
+    marginLeft: 56,
     backgroundColor: '#080A0C',
     alignItems: 'center',
     justifyContent: 'center',

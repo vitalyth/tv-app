@@ -25,12 +25,12 @@ export const HeroActions: React.FC<HeroActionsProps> = React.memo(({
   onFocusAction,
   onBlurAction,
 }) => {
-  if (customActions) {
-    return <View style={styles.container}>{customActions}</View>;
-  }
-
   if (!hasActivePlayer) {
     return null;
+  }
+
+  if (customActions) {
+    return <View style={styles.container}>{customActions}</View>;
   }
 
   const isFsFocusable = Boolean(focusTargetButton && focusTargetButton === 'fullscreen');

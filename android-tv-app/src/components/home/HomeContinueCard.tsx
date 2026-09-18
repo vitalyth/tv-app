@@ -13,7 +13,7 @@ interface HomeContinueCardProps {
   onFocus: () => void;
 }
 
-export const HomeContinueCard: React.FC<HomeContinueCardProps> = React.memo(({
+const HomeContinueCardComponent: React.FC<HomeContinueCardProps> = ({
   item,
   hasTVPreferredFocus = false,
   hasPreferredFocus = false,
@@ -41,7 +41,7 @@ export const HomeContinueCard: React.FC<HomeContinueCardProps> = React.memo(({
       badgeType: 'vod',
       progress: progressVal,
     };
-  }, [item]);
+  }, [item.title, item.seriesTitle, item.imageUrl, item.channelLogo, (item as any).positionMs, (item as any).durationMs, (item as any).progressPercentage]);
 
   return (
     <TvProgramCard
@@ -57,6 +57,20 @@ export const HomeContinueCard: React.FC<HomeContinueCardProps> = React.memo(({
       onPress={onPress}
       onFocus={onFocus}
     />
+  );
+};
+
+export const HomeContinueCard = React.memo(HomeContinueCardComponent, (prev, next) => {
+  return (
+    prev.item.episodeId === next.item.episodeId &&
+    prev.item.title === next.item.title &&
+    prev.item.imageUrl === next.item.imageUrl &&
+    (prev.item as any).positionMs === (next.item as any).positionMs &&
+    prev.hasPreferredFocus === next.hasPreferredFocus &&
+    prev.hasTVPreferredFocus === next.hasTVPreferredFocus &&
+    prev.focusNonce === next.focusNonce &&
+    prev.isFirstCard === next.isFirstCard &&
+    prev.isLastCard === next.isLastCard
   );
 });
 
