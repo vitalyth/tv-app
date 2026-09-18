@@ -2,6 +2,7 @@
 import xbmc, xbmcgui, xbmcplugin, xbmcaddon
 import sys, os, io, random, re, json, urllib, shutil, time
 import tempfile
+import threading
 
 try:
 	# For Python 3.0 and later
@@ -17,6 +18,7 @@ Addon = xbmcaddon.Addon(AddonID)
 icon = Addon.getAddonInfo('icon')
 AddonVer = Addon.getAddonInfo('version')
 AddonName = "Idan Plus"
+channelsLock = threading.RLock()
 
 def decode(text, dec, force=False):
 	if py2:
@@ -577,7 +579,7 @@ def GetDisplayChannels(displayChannelsFile):
 		WriteList(displayChannelsFile, displayChannels)
 	return displayChannels
 
-def GetChannels(type=None, downloadOnly=False):
+def _GetChannels(type=None, downloadOnly=False):
 	deltaInSec = 0 if downloadOnly else Addon.getSettingInt("updateChannelsLinksInterval")*3600
 	if downloadOnly or isFileOld(displayChannelsFile, deltaInSec=deltaInSec):
 		fileName = 'channels.json'
@@ -610,6 +612,10 @@ def GetChannels(type=None, downloadOnly=False):
 	if type is None:
 		return displayChannels
 	return [[chID, item] for chID, item in items(displayChannels) if item['type'] == type]
+
+def GetChannels(type=None, downloadOnly=False):
+	with channelsLock:
+		return _GetChannels(type=type, downloadOnly=downloadOnly)
 
 def GetChannel(channelID):
 	channels = GetChannels()
