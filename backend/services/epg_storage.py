@@ -331,4 +331,8 @@ def epg_db_mtime(db_path: Path | str | None = None) -> float:
     path = get_epg_db_path(db_path)
     if not path.exists():
         return 0
-    return path.stat().st_mtime
+    wal_path = path.with_name(path.name + "-wal")
+    return max(
+        path.stat().st_mtime,
+        wal_path.stat().st_mtime if wal_path.exists() else 0,
+    )
