@@ -189,7 +189,7 @@ services:
       interval: 10s
       timeout: 15s
       retries: 6
-      start_period: 10s
+      start_period: 210s
     logging: *default-logging
     network_mode: service:gluetun
     restart: unless-stopped
