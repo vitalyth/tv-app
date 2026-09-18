@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import xbmc, xbmcgui, xbmcplugin, xbmcaddon
 import sys, os, io, random, re, json, urllib, shutil, time
+import tempfile
 
 try:
 	# For Python 3.0 and later
@@ -238,12 +239,30 @@ def ReadList(fileName):
 	return content
 
 def WriteList(filename, list):
+	temp_fd = None
+	temp_filename = None
 	try:
-		with io.open(filename, 'w', encoding='utf-8') as f:
+		temp_fd, temp_filename = tempfile.mkstemp(
+			prefix='.' + os.path.basename(filename) + '.',
+			suffix='.tmp',
+			dir=os.path.dirname(filename) or '.',
+		)
+		os.close(temp_fd)
+		temp_fd = None
+		with io.open(temp_filename, 'w', encoding='utf-8') as f:
 			f.write(uni_code(json.dumps(list, indent='\t', ensure_ascii=False)))
+		os.replace(temp_filename, filename)
+		temp_filename = None
 		success = True
 	except Exception as ex:
 		xbmc.log(str(ex), xbmc.LOGERROR)
+		try:
+			if temp_fd is not None:
+				os.close(temp_fd)
+			if temp_filename and os.path.isfile(temp_filename):
+				os.remove(temp_filename)
+		except Exception:
+			pass
 		success = False
 	return success
 
@@ -552,7 +571,11 @@ def GetUpdatedList(listFile, listUrl, headers={}, deltaInSec=86400, isZip=False,
 def GetDisplayChannels(displayChannelsFile):
 	if not os.path.isfile(displayChannelsFile):
 		WriteList(displayChannelsFile, {})
-	return ReadList(displayChannelsFile)
+	displayChannels = ReadList(displayChannelsFile)
+	if not isinstance(displayChannels, dict):
+		displayChannels = {}
+		WriteList(displayChannelsFile, displayChannels)
+	return displayChannels
 
 def GetChannels(type=None, downloadOnly=False):
 	deltaInSec = 0 if downloadOnly else Addon.getSettingInt("updateChannelsLinksInterval")*3600
@@ -561,9 +584,9 @@ def GetChannels(type=None, downloadOnly=False):
 		channelsFile = os.path.join(profileDir, fileName)
 		channelsUrl = 'https://raw.githubusercontent.com/Fishenzon/repo/master/plugin.video.idanplus/{0}'.format(fileName)
 		channels = GetUpdatedList(channelsFile, channelsUrl, deltaInSec=deltaInSec)
-		if len(channels) == 0:
+		if not isinstance(channels, dict) or len(channels) == 0:
 			channels = ReadList(os.path.join(resourcesDir, fileName))
-			if len(channels) == 0:
+			if not isinstance(channels, dict) or len(channels) == 0:
 				return {}
 		displayChannels = GetDisplayChannels(displayChannelsFile)
 		for channelID, channel in items(channels):

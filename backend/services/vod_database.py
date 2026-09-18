@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 from typing import Any, Callable
+from urllib.parse import quote
 
 
 DEFAULT_VOD_DB_PATH = "db/vod.db"
@@ -15,6 +16,90 @@ VOD_DB_BUSY_TIMEOUT_MS = 30_000
 _ENSURED_SCHEMA_KEYS: set[tuple[str, tuple[str, ...], str]] = set()
 _PROVIDER_SCHEMA_LOCK = threading.Lock()
 _INITIALIZED_PROVIDER_SCHEMAS: set[tuple[str, str]] = set()
+_PROVIDER_SCHEMA_META_PREFIX = "provider_schema_version:"
+
+_PROVIDER_REQUIRED_COLUMNS: dict[str, dict[str, set[str]]] = {
+    "kan": {
+        "programs": {
+            "id", "mainid", "title", "description", "url", "image",
+            "program_format", "program_genre", "last_full_scan_at",
+            "last_incremental_scan_at", "updated_at",
+        },
+        "seasons": {
+            "season_id", "program_id", "title", "url", "season_number",
+            "last_scanned_at", "updated_at",
+        },
+        "episodes": {
+            "id", "program_id", "season_id", "title", "description", "url",
+            "image", "play_url", "stream_url", "kaltura_entry_id", "published",
+            "display_order", "created_at", "updated_at",
+        },
+    },
+    "keshet": {
+        "keshet_programs": {
+            "id", "mainid", "title", "description", "url", "image",
+            "program_format", "program_genre", "last_full_scan_at",
+            "last_incremental_scan_at", "updated_at",
+        },
+        "keshet_seasons": {
+            "season_id", "program_id", "title", "url", "season_number",
+            "last_scanned_at", "updated_at",
+        },
+        "keshet_episodes": {
+            "id", "program_id", "season_id", "title", "description", "url",
+            "image", "play_url", "stream_url", "kaltura_entry_id", "published",
+            "published_timestamp", "display_order", "created_at", "updated_at",
+            "metadata_backfill_attempted_at",
+        },
+    },
+    "reshet": {
+        "reshet_programs": {
+            "id", "title", "description", "url", "image", "program_format",
+            "program_genre", "last_full_scan_at", "last_incremental_scan_at",
+            "updated_at",
+        },
+        "reshet_seasons": {
+            "season_id", "program_id", "title", "url", "season_number", "updated_at",
+        },
+        "reshet_episodes": {
+            "id", "program_id", "season_id", "title", "description", "url",
+            "image", "play_url", "stream_url", "kaltura_entry_id", "published",
+            "published_timestamp", "display_order", "created_at", "updated_at",
+        },
+    },
+    "c14": {
+        "c14_programs": {
+            "id", "title", "description", "url", "image", "program_format",
+            "program_genre", "latest_item_published", "latest_item_timestamp",
+            "last_full_scan_at", "last_incremental_scan_at", "updated_at",
+        },
+        "c14_seasons": {
+            "season_id", "program_id", "title", "url", "season_number", "updated_at",
+        },
+        "c14_episodes": {
+            "id", "program_id", "season_id", "title", "description", "url",
+            "image", "play_url", "stream_url", "published", "published_timestamp",
+            "display_order", "source_type", "created_at", "updated_at",
+        },
+    },
+    "i24": {
+        "i24_programs": {
+            "id", "locale", "source_id", "title", "description", "url", "image",
+            "program_format", "program_genre", "latest_episode_published",
+            "latest_episode_timestamp", "last_full_scan_at", "last_incremental_scan_at",
+            "updated_at",
+        },
+        "i24_seasons": {
+            "season_id", "program_id", "title", "url", "season_number",
+            "latest_episode_published", "latest_episode_timestamp", "updated_at",
+        },
+        "i24_episodes": {
+            "id", "source_id", "program_id", "season_id", "title", "description",
+            "url", "image", "play_url", "stream_url", "published",
+            "published_timestamp", "display_order", "created_at", "updated_at",
+        },
+    },
+}
 
 
 def connect_vod_db(db_path: str) -> sqlite3.Connection:
@@ -27,7 +112,9 @@ def connect_vod_db(db_path: str) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     try:
         con.execute(f"PRAGMA busy_timeout = {VOD_DB_BUSY_TIMEOUT_MS}")
-        journal_mode = str(con.execute("PRAGMA journal_mode = WAL").fetchone()[0]).lower()
+        journal_mode = str(con.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+        if journal_mode != "wal":
+            journal_mode = str(con.execute("PRAGMA journal_mode = WAL").fetchone()[0]).lower()
         if journal_mode == "wal":
             con.execute("PRAGMA synchronous = NORMAL")
             con.execute("PRAGMA wal_autocheckpoint = 1000")
@@ -46,12 +133,66 @@ def ensure_vod_provider_schema(
     key = (os.path.realpath(db_path), provider)
     if key in _INITIALIZED_PROVIDER_SCHEMAS:
         return
+    if _provider_schema_is_current(db_path, provider):
+        _INITIALIZED_PROVIDER_SCHEMAS.add(key)
+        return
 
     with _PROVIDER_SCHEMA_LOCK:
         if key in _INITIALIZED_PROVIDER_SCHEMAS:
             return
+        if _provider_schema_is_current(db_path, provider):
+            _INITIALIZED_PROVIDER_SCHEMAS.add(key)
+            return
         initializer()
         _INITIALIZED_PROVIDER_SCHEMAS.add(key)
+
+
+def _provider_schema_is_current(db_path: str, provider: str) -> bool:
+    """Check schema readiness without taking a write lock on the shared DB."""
+    if not os.path.isfile(db_path):
+        return False
+
+    encoded_path = quote(os.path.abspath(db_path), safe="/")
+    try:
+        con = sqlite3.connect(
+            f"file:{encoded_path}?mode=ro",
+            uri=True,
+            timeout=0.25,
+        )
+    except sqlite3.Error:
+        return False
+
+    try:
+        con.execute("PRAGMA busy_timeout = 250")
+        if not _has_table(con, "vod_schema_meta"):
+            return False
+        if _get_unified_schema_version(con) != UNIFIED_SCHEMA_VERSION:
+            return False
+
+        required_tables = _PROVIDER_REQUIRED_COLUMNS.get(provider)
+        if not required_tables:
+            return False
+        if not all(
+            _has_table(con, table)
+            for table in ("vod_programs", "vod_seasons", "vod_episodes")
+        ):
+            return False
+        schema_matches = all(
+            _has_table(con, table) and columns.issubset(_table_columns(con, table))
+            for table, columns in required_tables.items()
+        )
+        if not schema_matches:
+            return False
+
+        marker = con.execute(
+            "SELECT value FROM vod_schema_meta WHERE key = ?",
+            (f"{_PROVIDER_SCHEMA_META_PREFIX}{provider}",),
+        ).fetchone()
+        return marker is None or str(marker[0]) == UNIFIED_SCHEMA_VERSION
+    except sqlite3.Error:
+        return False
+    finally:
+        con.close()
 
 
 def get_vod_db_path(*provider_env_names: str) -> str:
@@ -438,6 +579,7 @@ def ensure_unified_schema(
         _sync_seasons(con, provider, tables["seasons"])
         _sync_episodes(con, provider, tables["episodes"])
     _set_unified_schema_version(con)
+    _set_provider_schema_versions(con, selected)
     _ENSURED_SCHEMA_KEYS.add(cache_key)
 
 
@@ -581,6 +723,23 @@ def _set_unified_schema_version(con: sqlite3.Connection) -> None:
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """,
         (UNIFIED_SCHEMA_VERSION,),
+    )
+
+
+def _set_provider_schema_versions(
+    con: sqlite3.Connection,
+    providers: tuple[str, ...],
+) -> None:
+    con.executemany(
+        """
+        INSERT INTO vod_schema_meta (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        [
+            (f"{_PROVIDER_SCHEMA_META_PREFIX}{provider}", UNIFIED_SCHEMA_VERSION)
+            for provider in providers
+        ],
     )
 
 

@@ -23,7 +23,7 @@ services:
       WIREGUARD_MTU: ${WIREGUARD_MTU:-1280}
       DNS_SERVER: "on"
       DNS_UPSTREAM_RESOLVER_TYPE: plain
-      DNS_UPSTREAM_PLAIN_ADDRESSES: 8.8.8.8:53,8.8.4.4:53
+      DNS_UPSTREAM_PLAIN_ADDRESSES: ${VPN_DNS_UPSTREAM_PLAIN_ADDRESSES:-8.8.8.8:53,8.8.4.4:53,9.9.9.9:53}
       DNS_CACHING: "on"
       HEALTH_TARGET_ADDRESSES: r.il.cdn-redge.media:443,cloudflare.com:443,github.com:443
       TZ: ${TZ:-Asia/Jerusalem}

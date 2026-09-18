@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +37,105 @@ class VodDatabaseTests(unittest.TestCase):
 
             self.assertEqual(calls, ["initialized"])
 
+    def test_provider_initializer_is_skipped_when_shared_schema_is_current(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "vod.db")
+            con = vod_database.connect_vod_db(db_path)
+            try:
+                con.executescript(
+                    """
+                    CREATE TABLE programs (
+                        id TEXT, mainid TEXT, title TEXT, description TEXT, url TEXT,
+                        image TEXT, program_format TEXT, program_genre TEXT,
+                        last_full_scan_at TEXT, last_incremental_scan_at TEXT,
+                        updated_at TEXT
+                    );
+                    CREATE TABLE seasons (
+                        season_id TEXT, program_id TEXT, title TEXT, url TEXT,
+                        season_number INTEGER, last_scanned_at TEXT, updated_at TEXT
+                    );
+                    CREATE TABLE episodes (
+                        id TEXT, program_id TEXT, season_id TEXT, title TEXT,
+                        description TEXT, url TEXT, image TEXT, play_url TEXT,
+                        stream_url TEXT, kaltura_entry_id TEXT, published TEXT,
+                        display_order INTEGER, created_at TEXT, updated_at TEXT
+                    );
+                    """
+                )
+                ensure_unified_schema(con, providers=("kan",))
+                con.commit()
+            finally:
+                con.close()
+
+            vod_database._INITIALIZED_PROVIDER_SCHEMAS.clear()
+            calls = []
+            vod_database.ensure_vod_provider_schema(
+                db_path,
+                "kan",
+                lambda: calls.append("initialized"),
+            )
+
+            self.assertEqual(calls, [])
+
+    def test_provider_schema_marker_is_written_with_unified_schema(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "vod.db")
+            con = vod_database.connect_vod_db(db_path)
+            try:
+                ensure_unified_schema(con, providers=("kan",))
+                con.commit()
+                marker = con.execute(
+                    "SELECT value FROM vod_schema_meta WHERE key = ?",
+                    ("provider_schema_version:kan",),
+                ).fetchone()
+            finally:
+                con.close()
+
+            self.assertEqual(marker[0], UNIFIED_SCHEMA_VERSION)
+
+    def test_ready_provider_schema_does_not_wait_for_active_writer(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "vod.db")
+            con = vod_database.connect_vod_db(db_path)
+            try:
+                con.executescript(
+                    """
+                    CREATE TABLE programs (
+                        id TEXT, mainid TEXT, title TEXT, description TEXT, url TEXT,
+                        image TEXT, program_format TEXT, program_genre TEXT,
+                        last_full_scan_at TEXT, last_incremental_scan_at TEXT,
+                        updated_at TEXT
+                    );
+                    CREATE TABLE seasons (
+                        season_id TEXT, program_id TEXT, title TEXT, url TEXT,
+                        season_number INTEGER, last_scanned_at TEXT, updated_at TEXT
+                    );
+                    CREATE TABLE episodes (
+                        id TEXT, program_id TEXT, season_id TEXT, title TEXT,
+                        description TEXT, url TEXT, image TEXT, play_url TEXT,
+                        stream_url TEXT, kaltura_entry_id TEXT, published TEXT,
+                        display_order INTEGER, created_at TEXT, updated_at TEXT
+                    );
+                    """
+                )
+                ensure_unified_schema(con, providers=("kan",))
+                con.commit()
+                con.execute("BEGIN IMMEDIATE")
+
+                vod_database._INITIALIZED_PROVIDER_SCHEMAS.clear()
+                started = time.monotonic()
+                vod_database.ensure_vod_provider_schema(
+                    db_path,
+                    "kan",
+                    lambda: self.fail("initializer should not run"),
+                )
+                elapsed = time.monotonic() - started
+            finally:
+                con.rollback()
+                con.close()
+
+            self.assertLess(elapsed, 1)
+
     def test_shared_connection_waits_for_database_locks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             con = vod_database.connect_vod_db(str(Path(temp_dir) / "vod.db"))
@@ -68,6 +168,31 @@ class VodDatabaseTests(unittest.TestCase):
             finally:
                 writer.rollback()
                 reader.close()
+                writer.close()
+
+    def test_shared_connection_opens_while_another_process_is_writing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "vod.db")
+            writer = vod_database.connect_vod_db(db_path)
+            reader = None
+            try:
+                writer.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, value TEXT)")
+                writer.execute("INSERT INTO items (value) VALUES ('visible')")
+                writer.commit()
+                writer.execute("BEGIN IMMEDIATE")
+                writer.execute("INSERT INTO items (value) VALUES ('pending')")
+
+                started = time.monotonic()
+                reader = vod_database.connect_vod_db(db_path)
+                elapsed = time.monotonic() - started
+                rows = reader.execute("SELECT value FROM items ORDER BY id").fetchall()
+
+                self.assertLess(elapsed, 1)
+                self.assertEqual([row[0] for row in rows], ["visible"])
+            finally:
+                writer.rollback()
+                if reader is not None:
+                    reader.close()
                 writer.close()
 
     def test_kan_maintenance_handles_empty_db_and_removes_unplayable_placeholders(self):
