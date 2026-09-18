@@ -140,19 +140,29 @@ const EpgRowComponent: React.FC<EpgRowProps> = ({
 };
 
 function areRowPropsEqual(prev: EpgRowProps, next: EpgRowProps): boolean {
-  return (
-    prev.channel.id === next.channel.id &&
-    prev.isActiveRow === next.isActiveRow &&
-    prev.focusedProgramIndex === next.focusedProgramIndex &&
-    prev.rowHeight === next.rowHeight &&
-    prev.isPlayingChannel === next.isPlayingChannel &&
-    prev.scrollOffsetPx === next.scrollOffsetPx &&
-    prev.viewportWidth === next.viewportWidth &&
-    prev.timelineStartSeconds === next.timelineStartSeconds &&
-    prev.timelineEndSeconds === next.timelineEndSeconds &&
-    prev.nowSeconds === next.nowSeconds &&
-    prev.programs === next.programs
-  );
+  if (
+    prev.channel.id !== next.channel.id ||
+    prev.isActiveRow !== next.isActiveRow ||
+    prev.focusedProgramIndex !== next.focusedProgramIndex ||
+    prev.rowHeight !== next.rowHeight ||
+    prev.isPlayingChannel !== next.isPlayingChannel ||
+    prev.viewportWidth !== next.viewportWidth ||
+    prev.timelineStartSeconds !== next.timelineStartSeconds ||
+    prev.timelineEndSeconds !== next.timelineEndSeconds ||
+    prev.nowSeconds !== next.nowSeconds ||
+    prev.programs !== next.programs
+  ) {
+    return false;
+  }
+
+  // Inactive rows only need re-render if horizontal window changes by > 360px buffer
+  if (!next.isActiveRow) {
+    const prevBucket = Math.floor((prev.scrollOffsetPx ?? 0) / 360);
+    const nextBucket = Math.floor((next.scrollOffsetPx ?? 0) / 360);
+    return prevBucket === nextBucket;
+  }
+
+  return prev.scrollOffsetPx === next.scrollOffsetPx;
 }
 
 export const EpgRow = memo(EpgRowComponent, areRowPropsEqual);

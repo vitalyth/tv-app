@@ -108,7 +108,6 @@ android {
     packaging {
         jniLibs {
             excludes += [
-                'lib/arm64-v8a/**',
                 'lib/x86/**',
                 'lib/x86_64/**',
             ]
@@ -118,8 +117,8 @@ android {
         abi {
             enable true
             reset()
-            include "armeabi-v7a"
-            universalApk false
+            include "armeabi-v7a", "arm64-v8a"
+            universalApk true
         }
     }
 }

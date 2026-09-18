@@ -16,10 +16,11 @@ interface EpgProgramCardProps {
   onPress?: (program: TvProgram) => void;
 }
 
-const FADE_STEPS = 5;
-const FADE_ALPHAS = Array.from({ length: FADE_STEPS }, (_, i) =>
-  Math.pow(i / (FADE_STEPS - 1), 1.6)
-);
+const FADE_STEPS = 32;
+const FADE_ALPHAS = Array.from({ length: FADE_STEPS }, (_, i) => {
+  const t = i / (FADE_STEPS - 1);
+  return Math.min(1.0, Math.pow(t, 1.5));
+});
 const FADE_SLICES_FOCUSED = FADE_ALPHAS.map((a) => `rgba(255, 255, 255, ${a.toFixed(3)})`);
 const FADE_SLICES_LIVE = FADE_ALPHAS.map((a) => `rgba(49, 51, 58, ${a.toFixed(3)})`);
 const FADE_SLICES_DEFAULT = FADE_ALPHAS.map((a) => `rgba(36, 37, 42, ${a.toFixed(3)})`);

@@ -279,15 +279,32 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
   const activeChannelPrograms = (activeChannel && (programsByChannelMap[activeChannel.id] || getOrComputePrograms(activeChannel))) || [];
   const activeProgram = activeChannelPrograms[selectedProgramIndex] || null;
 
+  const scrollOffsetDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Smooth scroll animations
   const animateHorizontalScroll = useCallback((targetOffset: number) => {
     currentScrollOffsetRef.current = targetOffset;
-    setScrollOffsetPx(targetOffset);
     Animated.timing(scrollOffsetAnim, {
       toValue: targetOffset,
       duration: GRID_MOTION_MS,
       useNativeDriver: true,
     }).start();
+
+    // Quantized update: only re-render JS rows if scroll changed by >= 180px (1 slot)
+    setScrollOffsetPx((prev) => {
+      if (Math.abs(prev - targetOffset) >= 180) {
+        return Math.round(targetOffset / 180) * 180;
+      }
+      return prev;
+    });
+
+    // Debounced sync when scrolling settles
+    if (scrollOffsetDebounceRef.current) {
+      clearTimeout(scrollOffsetDebounceRef.current);
+    }
+    scrollOffsetDebounceRef.current = setTimeout(() => {
+      setScrollOffsetPx(targetOffset);
+    }, 120);
   }, [scrollOffsetAnim]);
 
   const animateVerticalScroll = useCallback((targetY: number) => {

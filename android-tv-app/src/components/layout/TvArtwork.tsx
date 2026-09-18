@@ -12,16 +12,25 @@ export const TvArtwork: React.FC<TvArtworkProps> = React.memo(({
   visible = true,
 }) => {
   const highResUrl = imageUrl ? resolveImageUrl(imageUrl, true) : null;
-  const [currentUrl, setCurrentUrl] = useState<string | null>(highResUrl || null);
+  const [activeUrl, setActiveUrl] = useState<string | null>(highResUrl || null);
+  const [incomingUrl, setIncomingUrl] = useState<string | null>(null);
   const [isRendered, setIsRendered] = useState(visible);
   const fadeAnim = useRef(new Animated.Value(visible ? 1 : 0)).current;
 
-  // Keep currentUrl in sync with highResUrl
+  // When highResUrl changes, set incomingUrl to preload
   useEffect(() => {
-    if (highResUrl && highResUrl !== currentUrl) {
-      setCurrentUrl(highResUrl);
+    if (highResUrl && highResUrl !== activeUrl) {
+      setIncomingUrl(highResUrl);
     }
-  }, [highResUrl, currentUrl]);
+  }, [highResUrl, activeUrl]);
+
+  // When incoming image is loaded, promote to activeUrl
+  const handleIncomingLoad = React.useCallback(() => {
+    if (incomingUrl) {
+      setActiveUrl(incomingUrl);
+      setIncomingUrl(null);
+    }
+  }, [incomingUrl]);
 
   // Visibility transitions: fade in / fade out smoothly
   useEffect(() => {
@@ -51,7 +60,7 @@ export const TvArtwork: React.FC<TvArtworkProps> = React.memo(({
   }
 
   // If visible but no image URL, show dark fallback
-  if (!currentUrl) {
+  if (!activeUrl && !incomingUrl) {
     if (!visible) return null;
     return <View style={[StyleSheet.absoluteFill, styles.fallback]} pointerEvents="none" />;
   }
@@ -61,11 +70,21 @@ export const TvArtwork: React.FC<TvArtworkProps> = React.memo(({
       style={[StyleSheet.absoluteFill, { opacity: fadeAnim }]}
       pointerEvents="none"
     >
-      <Image
-        source={{ uri: currentUrl }}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-      />
+      {activeUrl && (
+        <Image
+          source={{ uri: activeUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
+      )}
+      {incomingUrl && incomingUrl !== activeUrl && (
+        <Image
+          source={{ uri: incomingUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          onLoad={handleIncomingLoad}
+        />
+      )}
     </Animated.View>
   );
 });
