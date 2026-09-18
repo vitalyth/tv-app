@@ -127,7 +127,8 @@ python run_scheduler.py
 The scheduler runs both jobs immediately on startup, then repeats:
 
 * EPG once per day (`EPG_INTERVAL_SECONDS=86400`)
-* Recent VOD twice per day (`VOD_RECENT_INTERVAL_SECONDS=43200`)
+* VOD provider scans every four hours (`VOD_SCAN_INTERVAL_SECONDS=14400`)
+* Recent VOD every four hours (`VOD_RECENT_INTERVAL_SECONDS=14400`)
 
 Generated cache files are written under:
 

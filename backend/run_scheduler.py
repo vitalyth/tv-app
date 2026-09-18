@@ -117,7 +117,7 @@ def main() -> int:
     python = sys.executable
     vod_scan_interval_seconds = read_interval_any(
         ("VOD_SCAN_INTERVAL_SECONDS", "KAN_VOD_SCAN_INTERVAL_SECONDS"),
-        8 * 60 * 60,
+        4 * 60 * 60,
     )
     jobs = [
         ScheduledJob(
@@ -241,7 +241,7 @@ def main() -> int:
         ScheduledJob(
             name="vod_recent",
             command=[python, "refresh_vod_recent.py"],
-            interval_seconds=read_interval("VOD_RECENT_INTERVAL_SECONDS", 12 * 60 * 60),
+            interval_seconds=read_interval("VOD_RECENT_INTERVAL_SECONDS", 4 * 60 * 60),
         ),
         ScheduledJob(
             name="epg_vod_enrichment",
