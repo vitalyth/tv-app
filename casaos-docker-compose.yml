@@ -148,9 +148,26 @@ services:
         - CMD
         - python
         - -c
-        - import socket, ssl, urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/version', timeout=5); raw = socket.create_connection(('r.il.cdn-redge.media', 443), timeout=5); ssl.create_default_context().wrap_socket(raw, server_hostname='r.il.cdn-redge.media').close()
+        - |
+          import os, time, urllib.parse, urllib.request
+          upstream = 'https://n-121-7.il.cdn-redge.media/livehls/oil/kancdn-live/live/kan11/live.livx/playlist.m3u8?bitrate=5692000&audioId=1&videoId=0&dvr=120000'
+          params = urllib.parse.urlencode({'url': upstream, 'referer': 'https://n-121-7.il.cdn-redge.media/', 'vpn': 'true'})
+          health_url = 'http://127.0.0.1:8002/proxy?' + params
+          marker = '/tmp/kan-live-proxy-ready'
+          fresh = os.path.exists(marker) and time.time() - os.path.getmtime(marker) < 60
+          attempts = 0 if fresh else (1 if os.path.exists(marker) else 3)
+          for _ in range(attempts):
+              with urllib.request.urlopen(health_url, timeout=12) as response:
+                  body = response.read()
+                  assert response.status == 200 and body.startswith(b'#EXTM3U')
+              time.sleep(0.5)
+          if attempts:
+              open(marker, 'a').close()
+              os.utime(marker, None)
+          else:
+              urllib.request.urlopen('http://127.0.0.1:8002/version', timeout=5).read()
       interval: 10s
-      timeout: 8s
+      timeout: 15s
       retries: 6
       start_period: 10s
     logging: *default-logging
