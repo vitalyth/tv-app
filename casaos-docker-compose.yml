@@ -19,7 +19,7 @@ services:
       VPN_TYPE: wireguard
       WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY}
       WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES}
-      WIREGUARD_ENDPOINT_IP: ${WIREGUARD_ENDPOINT_IP:-}
+      WIREGUARD_ENDPOINT_IP: ${WIREGUARD_ENDPOINT_IP:-169.150.227.135}
       SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES:-Israel}
       WIREGUARD_MTU: ${WIREGUARD_MTU:-1280}
       DNS_SERVER: "on"
@@ -140,7 +140,6 @@ services:
       VOD_RETRIES: ${VOD_RETRIES:-3}
       VOD_STREAM_BATCH_SIZE: ${VOD_STREAM_BATCH_SIZE:-20}
       KAN_LIVE_DVR_MILLISECONDS: ${KAN_LIVE_DVR_MILLISECONDS:-120000}
-      KAN_VPN_STABLE_SECONDS: ${KAN_VPN_STABLE_SECONDS:-180}
       VOD_PROGRAMS_REFRESH_TTL_SECONDS: ${VOD_PROGRAMS_REFRESH_TTL_SECONDS:-21600}
       LOCAL_VOD_TV_DIR: /app/media/tv
       TMDB_API_KEY: ${TMDB_API_KEY}
@@ -157,39 +156,23 @@ services:
           upstream = 'https://n-121-7.il.cdn-redge.media/livehls/oil/kancdn-live/live/kan11/live.livx/playlist.m3u8?bitrate=5692000&audioId=1&videoId=0&dvr=120000'
           params = urllib.parse.urlencode({'url': upstream, 'referer': 'https://n-121-7.il.cdn-redge.media/', 'vpn': 'true'})
           health_url = 'http://127.0.0.1:8002/proxy?' + params
-          warming = '/tmp/kan-live-proxy-warming'
-          ready = '/tmp/kan-live-proxy-ready'
-          stable_seconds = int(os.getenv('KAN_VPN_STABLE_SECONDS', '180'))
-          now = time.time()
-          if os.path.exists(ready) and now - os.path.getmtime(ready) < 60:
-              urllib.request.urlopen('http://127.0.0.1:8002/version', timeout=5).read()
+          marker = '/tmp/kan-live-proxy-ready'
+          fresh = os.path.exists(marker) and time.time() - os.path.getmtime(marker) < 60
+          attempts = 0 if fresh else (1 if os.path.exists(marker) else 3)
+          for _ in range(attempts):
+              with urllib.request.urlopen(health_url, timeout=12) as response:
+                  body = response.read()
+                  assert response.status == 200 and body.startswith(b'#EXTM3U')
+              time.sleep(0.5)
+          if attempts:
+              open(marker, 'a').close()
+              os.utime(marker, None)
           else:
-              was_ready = os.path.exists(ready)
-              try:
-                  with urllib.request.urlopen(health_url, timeout=12) as response:
-                      body = response.read()
-                      assert response.status == 200 and body.startswith(b'#EXTM3U')
-              except Exception:
-                  if not was_ready and os.path.exists(warming):
-                      os.unlink(warming)
-                  raise
-              if was_ready:
-                  os.utime(ready, None)
-              elif not os.path.exists(warming):
-                  with open(warming, 'w') as state:
-                      state.write(str(now))
-                  raise RuntimeError('Kan VPN stability check started')
-              else:
-                  with open(warming) as state:
-                      started = float(state.read())
-                  if now - started < stable_seconds:
-                      raise RuntimeError('Kan VPN is still in the stability window')
-                  open(ready, 'a').close()
-                  os.utime(ready, None)
+              urllib.request.urlopen('http://127.0.0.1:8002/version', timeout=5).read()
       interval: 10s
       timeout: 15s
       retries: 6
-      start_period: 210s
+      start_period: 10s
     logging: *default-logging
     network_mode: service:gluetun
     restart: unless-stopped
