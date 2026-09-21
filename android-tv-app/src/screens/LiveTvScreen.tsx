@@ -62,7 +62,7 @@ export const LiveTvScreen: React.FC<LiveTvScreenProps> = ({
 }) => {
   const cachedGuide = api.getCachedGuideData();
   const [guideData, setGuideData] = useState<GuideData | null>(cachedGuide);
-  const [isLoading, setIsLoading] = useState(!cachedGuide);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Time state: current time in epoch seconds, updated every minute

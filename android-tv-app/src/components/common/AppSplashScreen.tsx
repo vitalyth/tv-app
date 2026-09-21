@@ -6,7 +6,6 @@ export const AppSplashScreen: React.FC = React.memo(() => {
   return (
     <View style={styles.container}>
       <StatusBar hidden />
-      <View style={styles.gradientTop} pointerEvents="none" />
       <View style={styles.content}>
         <AppLogo size={96} />
         <Text style={styles.title}>TV App</Text>
@@ -20,19 +19,10 @@ export const AppSplashScreen: React.FC = React.memo(() => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#050607',
+    backgroundColor: '#080A0C',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-  },
-  gradientTop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '55%',
-    backgroundColor: '#17262A',
-    opacity: 0.45,
   },
   content: {
     alignItems: 'center',

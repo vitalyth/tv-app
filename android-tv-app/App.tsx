@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, StyleSheet, StatusBar } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import Video, { VideoRef } from 'react-native-video';
 import { AppDestination, TvChannel, TvProgram } from './src/types/guide';
 import { VodEpisode, VodSeries, VodRecentItem } from './src/types/vod';
@@ -382,8 +382,6 @@ export default function App() {
       }}
     >
       <View style={styles.root}>
-        <StatusBar hidden />
-
         {/* Persistent Root Video Player (Zero tearing down, continuous background to fullscreen) */}
         {activeStreamUrl && (
           <Video

@@ -158,7 +158,7 @@ export const AppSideNavRail: React.FC<AppSideNavRailProps> = ({
         <NavRailItem
           destination={AppDestination.LIVE_TV}
           iconName="live"
-          label="Live"
+          label="Live TV"
           isSelected={currentDestination === AppDestination.LIVE_TV}
           isRailExpanded={isExpanded}
           isForcedFocused={focusedKey === 'live'}

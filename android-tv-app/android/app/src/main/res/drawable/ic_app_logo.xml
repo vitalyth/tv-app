@@ -3,20 +3,39 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Red background with rounded corners.
+         Everything outside this path is transparent -->
     <path
         android:fillColor="#E91E2F"
-        android:pathData="M0,0h108v108h-108z" />
+        android:pathData="
+            M12,0
+            H96
+            A12,12 0,0 1,108,12
+            V96
+            A12,12 0,0 1,96,108
+            H12
+            A12,12 0,0 1,0,96
+            V12
+            A12,12 0,0 1,12,0
+            Z" />
+
+    <!-- TV -->
     <path
         android:fillColor="#00FFFFFF"
         android:strokeColor="#FFFFFFFF"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:strokeWidth="5"
-        android:pathData="M42,48h24a5,5 0,0 1,5 5v13a5,5 0,0 1,-5 5h-24a5,5 0,0 1,-5 -5v-13a5,5 0,0 1,5 -5z" />
+        android:strokeWidth="8"
+        android:pathData="M36,45h36a6,6 0,0 1,6 6v19a6,6 0,0 1,-6 6h-36a6,6 0,0 1,-6 -6v-19a6,6 0,0 1,6 -6z" />
+
+    <!-- Antenna -->
     <path
         android:fillColor="#00FFFFFF"
         android:strokeColor="#FFFFFFFF"
         android:strokeLineCap="round"
-        android:strokeWidth="5"
-        android:pathData="M47,41L54,48L61,41" />
+        android:strokeLineJoin="round"
+        android:strokeWidth="8"
+        android:pathData="M44,26L54,40L64,26" />
+
 </vector>

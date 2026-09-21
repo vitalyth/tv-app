@@ -54,7 +54,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = React.memo(({
   const [channels, setChannels] = useState<TvChannel[]>(initialChannels);
   const [continueWatchingItems, setContinueWatchingItems] = useState<ContinueWatchingItem[]>(initialContinueWatching);
   const [newVodItems, setNewVodItems] = useState<VodRecentItem[]>(initialNewVod);
-  const [loading, setLoading] = useState(initialChannels.length === 0);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [focusedChannel, setFocusedChannel] = useState<TvChannel | null>(
