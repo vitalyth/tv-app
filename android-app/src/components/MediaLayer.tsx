@@ -1,14 +1,42 @@
 import { StyleSheet, View } from 'react-native';
+import { useMediaController } from '../media/MediaController';
+import { MediaSurface } from '../media/MediaSurface';
+import { RemoteImage } from './RemoteImage';
 
 export function MediaLayer() {
+  const { item, stream, presentation, status, markError, markPlaying } =
+    useMediaController();
+
   return (
     <View
       pointerEvents="none"
       style={styles.layer}
       testID="persistent-media-layer"
     >
-      <View style={styles.light} />
-      <View style={styles.horizon} />
+      {item && stream && presentation !== 'background-image' ? (
+        <MediaSurface
+          streamUrl={stream.url}
+          streamType={stream.type}
+          fallbackStreamUrl={stream.fallbackUrl}
+          fallbackStreamType={stream.fallbackType}
+          onFirstFrame={markPlaying}
+          onError={markError}
+        />
+      ) : (
+        <>
+          <View style={styles.light} />
+          <View style={styles.horizon} />
+        </>
+      )}
+      {item?.imageUrl &&
+      (presentation === 'background-image' || status !== 'playing') ? (
+        <RemoteImage
+          uri={item.imageUrl}
+          fallbackUri={item.fallbackImageUrl}
+          resizeMode="cover"
+          style={styles.poster}
+        />
+      ) : null}
       <View style={styles.scrim} />
     </View>
   );
@@ -37,6 +65,7 @@ const styles = StyleSheet.create({
     height: '46%',
     backgroundColor: '#12232e',
   },
+  poster: { ...StyleSheet.absoluteFillObject },
   scrim: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(2, 8, 14, 0.48)',

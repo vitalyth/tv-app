@@ -5,6 +5,7 @@ import { initialShellState, shellReducer } from '../navigation/shellState';
 import { tvPlatform } from '../platform/runtime';
 import { IntroRegion } from './IntroRegion';
 import { MediaLayer } from './MediaLayer';
+import {MediaControllerProvider} from '../media/MediaController';
 import { PageContent, type PageContentHandle } from './PageContent';
 import { SideMenu } from './SideMenu';
 
@@ -35,29 +36,31 @@ export function ApplicationShell() {
   };
 
   return (
-    <View style={styles.screen}>
-      <MediaLayer />
-      <View style={styles.overlay}>
-        <View style={styles.mainArea}>
-          <View style={styles.topBar}>
-            <Text style={styles.platform}>{tvPlatform.displayName}</Text>
-            <Text style={styles.clock}>20:45</Text>
+    <MediaControllerProvider>
+      <View style={styles.screen}>
+        <MediaLayer />
+        <View style={styles.overlay}>
+          <View style={styles.mainArea}>
+            <View style={styles.topBar}>
+              <Text style={styles.platform}>{tvPlatform.displayName}</Text>
+              <Text style={styles.clock}>20:45</Text>
+            </View>
+            <IntroRegion route={activeRoute} />
+            <PageContent
+              ref={pageContentRef}
+              route={activeRoute}
+              onContentFocus={() => dispatch({ type: 'focus-content' })}
+            />
           </View>
-          <IntroRegion route={activeRoute} />
-          <PageContent
-            ref={pageContentRef}
-            route={activeRoute}
-            onContentFocus={() => dispatch({ type: 'focus-content' })}
+          <SideMenu
+            activeRoute={state.activeRoute}
+            expanded={state.menuExpanded}
+            onFocus={() => dispatch({ type: 'focus-menu' })}
+            onSelectRoute={selectRoute}
           />
         </View>
-        <SideMenu
-          activeRoute={state.activeRoute}
-          expanded={state.menuExpanded}
-          onFocus={() => dispatch({ type: 'focus-menu' })}
-          onSelectRoute={selectRoute}
-        />
       </View>
-    </View>
+    </MediaControllerProvider>
   );
 }
 

@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "react": "19.2.0",
-    "react-native": "npm:react-native-tvos@0.83.6-0"
+    "react-native": "npm:react-native-tvos@0.83.6-0",
+    "react-native-video": "6.19.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -36,5 +37,7 @@
     "react-test-renderer": "19.2.0",
     "typescript": "5.8.3"
   },
-  "engines": {"node": ">=22.11.0"}
+  "engines": {
+    "node": ">=22.11.0"
+  }
 }

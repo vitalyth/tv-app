@@ -1,13 +1,28 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
+import {
+  ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TVFocusGuideView,
   View,
   type View as ViewType,
 } from 'react-native';
+import {
+  getPlayableLiveChannels,
+  resolveLiveChannelStream,
+} from '../api/channels';
+import { useMediaController } from '../media/MediaController';
+import type { MediaItem } from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
+import { RemoteImage } from './RemoteImage';
 
 export interface PageContentHandle {
   focusFirst: () => void;
@@ -19,17 +34,38 @@ interface PageContentProps {
   onContentFocus: () => void;
 }
 
-const PLACEHOLDERS = [
-  'Primary content',
-  'Secondary content',
-  'More to explore',
-];
-
 export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
-  function PageContentView({ route, onContentFocus }, ref) {
+  function PageContentImpl({ route, onContentFocus }, ref) {
     const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+    const [channels, setChannels] = useState<MediaItem[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
     const itemRefs = useRef<Array<ViewType | null>>([]);
+    const scrollRef = useRef<ScrollView>(null);
     const lastFocusedIndex = useRef(0);
+    const playbackRequestId = useRef(0);
+    const media = useMediaController();
+    const showImage = media.showImage;
+
+    useEffect(() => {
+      let active = true;
+      getPlayableLiveChannels()
+        .then(items => {
+          if (active) {
+            setChannels(items);
+            setLoadFailed(items.length === 0);
+            if (items[0]) {
+              showImage(items[0]);
+            }
+          }
+        })
+        .catch(() => active && setLoadFailed(true))
+        .finally(() => active && setLoading(false));
+      return () => {
+        active = false;
+        playbackRequestId.current += 1;
+      };
+    }, [showImage]);
 
     useImperativeHandle(ref, () => ({
       focusFirst() {
@@ -43,46 +79,87 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
 
     return (
       <View style={styles.root}>
-        <Text style={styles.heading}>{route.label}</Text>
-        <TVFocusGuideView autoFocus trapFocusRight style={styles.row}>
-          {PLACEHOLDERS.map((label, index) => (
-            <Pressable
-              key={label}
-              ref={node => {
-                itemRefs.current[index] = node;
-              }}
-              accessibilityLabel={`${route.label}: ${label}`}
-              accessibilityRole="button"
-              hasTVPreferredFocus={index === 0}
-              onBlur={() =>
-                setFocusedIndex(current => (current === index ? null : current))
-              }
-              onFocus={() => {
-                lastFocusedIndex.current = index;
-                setFocusedIndex(index);
-                onContentFocus();
-              }}
-              onPress={() => undefined}
-              style={[
-                styles.card,
-                focusedIndex === index && styles.focusedCard,
-              ]}
-            >
-              <View
+        <Text style={styles.heading}>
+          {route.label}
+          {channels.length ? `  ·  ${channels.length} live sources` : ''}
+        </Text>
+        {loading ? <ActivityIndicator color="#ffffff" size="large" /> : null}
+        {loadFailed ? (
+          <Text style={styles.error}>Live channels unavailable</Text>
+        ) : null}
+        <ScrollView
+          horizontal
+          ref={scrollRef}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          style={styles.scroller}
+        >
+          <TVFocusGuideView autoFocus trapFocusRight style={styles.row}>
+            {channels.map((channel, index) => (
+              <Pressable
+                key={channel.id}
+                ref={node => {
+                  itemRefs.current[index] = node;
+                }}
+                accessibilityLabel={`${route.label}: ${channel.title}`}
+                accessibilityRole="button"
+                hasTVPreferredFocus={index === 0}
+                onBlur={() =>
+                  setFocusedIndex(current =>
+                    current === index ? null : current,
+                  )
+                }
+                onFocus={() => {
+                  playbackRequestId.current += 1;
+                  lastFocusedIndex.current = index;
+                  setFocusedIndex(index);
+                  media.showImage(channel);
+                  scrollRef.current?.scrollTo({
+                    x: Math.max(0, index * 296 - 24),
+                    animated: false,
+                  });
+                  onContentFocus();
+                }}
+                onPress={() => {
+                  const requestId = ++playbackRequestId.current;
+                  resolveLiveChannelStream(channel)
+                    .then(stream => {
+                      if (playbackRequestId.current === requestId) {
+                        media.play(channel, stream);
+                      }
+                    })
+                    .catch(() => {
+                      if (playbackRequestId.current === requestId) {
+                        media.markError();
+                      }
+                    });
+                }}
                 style={[
-                  styles.cardAccent,
-                  index === 1 && styles.cyan,
-                  index === 2 && styles.red,
+                  styles.card,
+                  focusedIndex === index && styles.focusedCard,
                 ]}
-              />
-              <Text style={styles.cardKicker}>SHELL PREVIEW</Text>
-              <Text style={styles.cardTitle}>{label}</Text>
-              <Text style={styles.cardCaption}>
-                Content arrives in a later stage
-              </Text>
-            </Pressable>
-          ))}
-        </TVFocusGuideView>
+              >
+                {channel.imageUrl ? (
+                  <RemoteImage
+                    uri={channel.imageUrl}
+                    fallbackUri={channel.fallbackImageUrl}
+                    resizeMode="cover"
+                    style={styles.cardImage}
+                  />
+                ) : null}
+                <View style={styles.cardShade} />
+                <Text style={styles.cardKicker}>LIVE</Text>
+                <Text numberOfLines={1} style={styles.cardTitle}>
+                  {channel.title}
+                </Text>
+                <Text numberOfLines={1} style={styles.cardCaption}>
+                  {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
+                  {channel.channelName}
+                </Text>
+              </Pressable>
+            ))}
+          </TVFocusGuideView>
+        </ScrollView>
       </View>
     );
   },
@@ -97,13 +174,16 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   row: { flexDirection: 'row', gap: 18, padding: 4 },
+  scroller: { marginHorizontal: -4 },
+  scrollContent: { paddingHorizontal: 4, paddingVertical: 4 },
+  error: { color: '#ffb4b9', fontSize: 16, height: 150 },
   card: {
     width: 278,
     height: 150,
     borderRadius: 6,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.18)',
-    backgroundColor: 'rgba(15, 31, 43, 0.92)',
+    backgroundColor: '#0f1f2b',
     padding: 18,
     overflow: 'hidden',
   },
@@ -112,22 +192,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#173b55',
     transform: [{ scale: 1.035 }],
   },
-  cardAccent: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 6,
-    backgroundColor: '#754bd8',
+  cardImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: undefined,
+    height: undefined,
   },
-  cyan: { backgroundColor: '#1597ba' },
-  red: { backgroundColor: '#d64550' },
-  cardKicker: { color: '#7fcaff', fontSize: 12, fontWeight: '800' },
+  cardShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(2, 8, 14, 0.5)',
+  },
+  cardKicker: { color: '#ff626c', fontSize: 12, fontWeight: '800' },
   cardTitle: {
     color: '#ffffff',
     fontSize: 21,
     fontWeight: '700',
-    marginTop: 20,
+    marginTop: 48,
   },
   cardCaption: { color: '#9fb0bd', fontSize: 14, marginTop: 8 },
 });

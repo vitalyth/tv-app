@@ -1,10 +1,37 @@
 export type MediaKind = 'live' | 'vod';
 
+export type MediaPresentation =
+  | 'background-image'
+  | 'single-video'
+  | 'fullscreen'
+  | 'multi-tile';
+
+export type PlaybackStatus =
+  | 'idle'
+  | 'loading'
+  | 'playing'
+  | 'paused'
+  | 'error';
+
+export type MediaStreamType = 'm3u8' | 'mpd';
+
+export interface MediaStream {
+  url: string;
+  type?: MediaStreamType;
+  fallbackUrl?: string;
+  fallbackType?: MediaStreamType;
+}
+
 export interface MediaItem {
   id: string;
   kind: MediaKind;
   title: string;
-  streamUrl: string;
+  imageUrl?: string;
+  fallbackImageUrl?: string;
+  description?: string;
+  channelName?: string;
+  channelNumber?: string;
+  sourcePayload?: unknown;
 }
 
 export interface PlayerAdapter {
