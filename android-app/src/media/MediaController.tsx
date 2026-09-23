@@ -24,7 +24,14 @@ interface MediaControllerValue {
   markError: () => void;
 }
 
+type MediaControllerActions = Pick<
+  MediaControllerValue,
+  'play' | 'showImage' | 'markPlaying' | 'markError'
+>;
+
 const MediaControllerContext = createContext<MediaControllerValue | null>(null);
+const MediaControllerActionsContext =
+  createContext<MediaControllerActions | null>(null);
 
 export function MediaControllerProvider({ children }: PropsWithChildren) {
   const [item, setItem] = useState<MediaItem>();
@@ -70,11 +77,17 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       stream,
     ],
   );
+  const actions = useMemo<MediaControllerActions>(
+    () => ({ play, showImage, markPlaying, markError }),
+    [markError, markPlaying, play, showImage],
+  );
 
   return (
-    <MediaControllerContext.Provider value={value}>
-      {children}
-    </MediaControllerContext.Provider>
+    <MediaControllerActionsContext.Provider value={actions}>
+      <MediaControllerContext.Provider value={value}>
+        {children}
+      </MediaControllerContext.Provider>
+    </MediaControllerActionsContext.Provider>
   );
 }
 
@@ -86,4 +99,14 @@ export function useMediaController() {
     );
   }
   return controller;
+}
+
+export function useMediaActions() {
+  const actions = useContext(MediaControllerActionsContext);
+  if (!actions) {
+    throw new Error(
+      'useMediaActions must be used inside MediaControllerProvider',
+    );
+  }
+  return actions;
 }

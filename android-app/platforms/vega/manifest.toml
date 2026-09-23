@@ -26,6 +26,13 @@ id = "/com.amazon.kepler.keplermediadescriptor_1@IKeplermediadescriptor_1"
 [[needs.module]]
 id = "/com.amazon.kepler.w3cmedia_2@IW3cmedia_3"
 
+[[needs.privilege]]
+id = "com.amazon.audio.privilege.settings.control"
+
+[[needs.module]]
+id = "/com.amazon.kepler.audio_lib_2@IAudioLib_0"
+
+
 [wants]
 [[wants.service]]
 id = "com.amazon.mediametrics.service"
@@ -44,6 +51,9 @@ id = "com.amazon.audio.stream"
 
 [[wants.service]]
 id = "com.amazon.audio.control"
+
+[[wants.service]]
+id = "com.amazon.audio.system"
 
 [[wants.service]]
 id = "com.amazon.media.server"

@@ -1,17 +1,18 @@
 import {
   forwardRef,
+  memo,
+  useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TVFocusGuideView,
   View,
   type View as ViewType,
 } from 'react-native';
@@ -19,10 +20,67 @@ import {
   getPlayableLiveChannels,
   resolveLiveChannelStream,
 } from '../api/channels';
-import { useMediaController } from '../media/MediaController';
+import { useMediaActions } from '../media/MediaController';
 import type { MediaItem } from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
+import { playFocusSound } from '../platform/focusSound';
+import { MediaCarousel } from './MediaCarousel';
 import { RemoteImage } from './RemoteImage';
+
+const CARD_WIDTH = 278;
+const CAROUSEL_HEIGHT = 162;
+
+interface ChannelCardProps {
+  channel: MediaItem;
+  itemKey: string;
+  routeLabel: string;
+  preferredFocus: boolean;
+  onActivate: (channel: MediaItem) => void;
+  onFocused: (itemKey: string, channel: MediaItem) => void;
+}
+
+const ChannelCard = memo(
+  forwardRef<ViewType, ChannelCardProps>(function ChannelCardImpl(
+    { channel, itemKey, routeLabel, preferredFocus, onActivate, onFocused },
+    ref,
+  ) {
+    const [focused, setFocused] = useState(false);
+
+    return (
+      <Pressable
+        ref={ref}
+        accessibilityLabel={`${routeLabel}: ${channel.title}`}
+        accessibilityRole="button"
+        hasTVPreferredFocus={preferredFocus}
+        onBlur={() => setFocused(false)}
+        onFocus={() => {
+          setFocused(true);
+          onFocused(itemKey, channel);
+        }}
+        onPress={() => onActivate(channel)}
+        style={[styles.card, focused && styles.focusedCard]}
+      >
+        {channel.imageUrl ? (
+          <RemoteImage
+            uri={channel.imageUrl}
+            fallbackUri={channel.fallbackImageUrl}
+            resizeMode="cover"
+            style={styles.cardImage}
+          />
+        ) : null}
+        <View style={styles.cardShade} />
+        <Text style={styles.cardKicker}>LIVE</Text>
+        <Text numberOfLines={1} style={styles.cardTitle}>
+          {channel.title}
+        </Text>
+        <Text numberOfLines={1} style={styles.cardCaption}>
+          {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
+          {channel.channelName}
+        </Text>
+      </Pressable>
+    );
+  }),
+);
 
 export interface PageContentHandle {
   focusFirst: () => void;
@@ -36,16 +94,13 @@ interface PageContentProps {
 
 export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
   function PageContentImpl({ route, onContentFocus }, ref) {
-    const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
     const [channels, setChannels] = useState<MediaItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
-    const itemRefs = useRef<Array<ViewType | null>>([]);
-    const scrollRef = useRef<ScrollView>(null);
-    const lastFocusedIndex = useRef(0);
+    const itemRefs = useRef<Record<string, ViewType | null>>({});
+    const lastFocusedItem = useRef('primary-0');
     const playbackRequestId = useRef(0);
-    const media = useMediaController();
-    const showImage = media.showImage;
+    const { markError, play, showImage } = useMediaActions();
 
     useEffect(() => {
       let active = true;
@@ -69,116 +124,122 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
 
     useImperativeHandle(ref, () => ({
       focusFirst() {
-        lastFocusedIndex.current = 0;
-        itemRefs.current[0]?.requestTVFocus?.();
+        lastFocusedItem.current = 'primary-0';
+        itemRefs.current['primary-0']?.requestTVFocus?.();
       },
       restoreFocus() {
-        itemRefs.current[lastFocusedIndex.current]?.requestTVFocus?.();
+        itemRefs.current[lastFocusedItem.current]?.requestTVFocus?.();
       },
     }));
 
+    const handleFocused = useCallback(
+      (itemKey: string, channel: MediaItem) => {
+        playbackRequestId.current += 1;
+        lastFocusedItem.current = itemKey;
+        playFocusSound();
+        showImage(channel);
+        onContentFocus();
+      },
+      [onContentFocus, showImage],
+    );
+
+    const handleActivate = useCallback(
+      (channel: MediaItem) => {
+        const requestId = ++playbackRequestId.current;
+        resolveLiveChannelStream(channel)
+          .then(stream => {
+            if (playbackRequestId.current === requestId) {
+              play(channel, stream);
+            }
+          })
+          .catch(() => {
+            if (playbackRequestId.current === requestId) {
+              markError();
+            }
+          });
+      },
+      [markError, play],
+    );
+
+    const renderCard = useCallback(
+      (channel: MediaItem, index: number, rowId: 'primary' | 'secondary') => {
+        const itemKey = `${rowId}-${index}`;
+        return (
+          <ChannelCard
+            ref={node => {
+              itemRefs.current[itemKey] = node;
+            }}
+            channel={channel}
+            itemKey={itemKey}
+            routeLabel={route.label}
+            preferredFocus={rowId === 'primary' && index === 0}
+            onActivate={handleActivate}
+            onFocused={handleFocused}
+          />
+        );
+      },
+      [handleActivate, handleFocused, route.label],
+    );
+
+    const secondaryChannels = useMemo(
+      () => [...channels].reverse(),
+      [channels],
+    );
+
     return (
       <View style={styles.root}>
-        <Text style={styles.heading}>
-          {route.label}
-          {channels.length ? `  ·  ${channels.length} live sources` : ''}
-        </Text>
         {loading ? <ActivityIndicator color="#ffffff" size="large" /> : null}
         {loadFailed ? (
           <Text style={styles.error}>Live channels unavailable</Text>
         ) : null}
-        <ScrollView
-          horizontal
-          ref={scrollRef}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-          style={styles.scroller}
-        >
-          <TVFocusGuideView autoFocus trapFocusRight style={styles.row}>
-            {channels.map((channel, index) => (
-              <Pressable
-                key={channel.id}
-                ref={node => {
-                  itemRefs.current[index] = node;
-                }}
-                accessibilityLabel={`${route.label}: ${channel.title}`}
-                accessibilityRole="button"
-                hasTVPreferredFocus={index === 0}
-                onBlur={() =>
-                  setFocusedIndex(current =>
-                    current === index ? null : current,
-                  )
-                }
-                onFocus={() => {
-                  playbackRequestId.current += 1;
-                  lastFocusedIndex.current = index;
-                  setFocusedIndex(index);
-                  media.showImage(channel);
-                  scrollRef.current?.scrollTo({
-                    x: Math.max(0, index * 296 - 24),
-                    animated: false,
-                  });
-                  onContentFocus();
-                }}
-                onPress={() => {
-                  const requestId = ++playbackRequestId.current;
-                  resolveLiveChannelStream(channel)
-                    .then(stream => {
-                      if (playbackRequestId.current === requestId) {
-                        media.play(channel, stream);
-                      }
-                    })
-                    .catch(() => {
-                      if (playbackRequestId.current === requestId) {
-                        media.markError();
-                      }
-                    });
-                }}
-                style={[
-                  styles.card,
-                  focusedIndex === index && styles.focusedCard,
-                ]}
-              >
-                {channel.imageUrl ? (
-                  <RemoteImage
-                    uri={channel.imageUrl}
-                    fallbackUri={channel.fallbackImageUrl}
-                    resizeMode="cover"
-                    style={styles.cardImage}
-                  />
-                ) : null}
-                <View style={styles.cardShade} />
-                <Text style={styles.cardKicker}>LIVE</Text>
-                <Text numberOfLines={1} style={styles.cardTitle}>
-                  {channel.title}
-                </Text>
-                <Text numberOfLines={1} style={styles.cardCaption}>
-                  {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
-                  {channel.channelName}
-                </Text>
-              </Pressable>
-            ))}
-          </TVFocusGuideView>
-        </ScrollView>
+        {channels.length ? (
+          <>
+            <Text style={styles.heading}>
+              {route.label} · {channels.length} live sources
+            </Text>
+            <MediaCarousel
+              id={`${route.id}-primary`}
+              items={channels}
+              itemWidth={CARD_WIDTH}
+              height={CAROUSEL_HEIGHT}
+              preferredFocus
+              keyExtractor={channel => channel.id}
+              renderItem={(channel, index) =>
+                renderCard(channel, index, 'primary')
+              }
+            />
+            <Text style={[styles.heading, styles.secondaryHeading]}>
+              More live channels
+            </Text>
+            <MediaCarousel
+              id={`${route.id}-secondary`}
+              items={secondaryChannels}
+              itemWidth={CARD_WIDTH}
+              height={CAROUSEL_HEIGHT}
+              keyExtractor={channel => channel.id}
+              renderItem={(channel, index) =>
+                renderCard(channel, index, 'secondary')
+              }
+            />
+          </>
+        ) : null}
       </View>
     );
   },
 );
 
 const styles = StyleSheet.create({
-  root: { marginTop: 34 },
+  root: { flex: 1, marginTop: 22 },
   heading: {
     color: '#ffffff',
     fontSize: 23,
     fontWeight: '700',
-    marginBottom: 14,
+    marginBottom: 8,
   },
-  row: { flexDirection: 'row', gap: 18, padding: 4 },
-  scroller: { marginHorizontal: -4 },
-  scrollContent: { paddingHorizontal: 4, paddingVertical: 4 },
+  secondaryHeading: { marginTop: 10 },
   error: { color: '#ffb4b9', fontSize: 16, height: 150 },
   card: {
-    width: 278,
+    width: CARD_WIDTH,
     height: 150,
     borderRadius: 6,
     borderWidth: 2,
