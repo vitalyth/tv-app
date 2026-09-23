@@ -13,6 +13,9 @@ interface ApiProgram {
   name?: unknown;
   description?: unknown;
   image?: unknown;
+  backdrop?: unknown;
+  backdrop_image?: unknown;
+  poster?: unknown;
 }
 
 interface ApiChannel {
@@ -21,6 +24,9 @@ interface ApiChannel {
   name?: unknown;
   channelNumber?: unknown;
   logo?: unknown;
+  artwork?: unknown;
+  poster?: unknown;
+  backdrop?: unknown;
   linkDetails?: { link?: unknown; vpn?: unknown; referer?: unknown };
   programs?: unknown;
   type?: unknown;
@@ -60,18 +66,51 @@ function currentProgram(programs: unknown): ApiProgram | undefined {
   }) as ApiProgram | undefined;
 }
 
-function imageUrl(program: ApiProgram | undefined, logo: unknown) {
-  const programImage = text(program?.image);
+export function resolveBackdropUrl(
+  program?: ApiProgram,
+  channel?: ApiChannel,
+): string | undefined {
+  // 1. Highest-quality Program/VOD backdrop
+  const programBackdrop =
+    text(program?.backdrop) ?? text(program?.backdrop_image);
+  if (programBackdrop) {
+    return proxiedImageUrl(programBackdrop);
+  }
+  // 2. Highest-quality Program/VOD image
+  const programImage = text(program?.image) ?? text(program?.poster);
   if (programImage) {
     return proxiedImageUrl(programImage);
   }
-  const logoPath = text(logo);
-  if (!logoPath) {
-    return undefined;
+  // 3. Highest-quality Channel artwork
+  const channelArtwork =
+    text(channel?.artwork) ?? text(channel?.backdrop) ?? text(channel?.poster);
+  if (channelArtwork) {
+    return channelArtwork.startsWith('http')
+      ? proxiedImageUrl(channelArtwork)
+      : `${SERVICE_BASE_URL}/ch/${channelArtwork.replace(/^\//, '')}`;
   }
-  return logoPath.startsWith('http')
-    ? logoPath
-    : `${SERVICE_BASE_URL}/ch/${logoPath.replace(/^\//, '')}`;
+  // 4. Channel fallback
+  return channelLogoUrl(channel?.logo);
+}
+
+export function resolvePosterUrl(
+  program?: ApiProgram,
+  channel?: ApiChannel,
+): string | undefined {
+  // 1. Highest-quality Program/VOD image
+  const programImage = text(program?.image) ?? text(program?.poster);
+  if (programImage) {
+    return proxiedImageUrl(programImage);
+  }
+  // 2. Highest-quality Channel artwork
+  const channelArtwork = text(channel?.artwork) ?? text(channel?.poster);
+  if (channelArtwork) {
+    return channelArtwork.startsWith('http')
+      ? proxiedImageUrl(channelArtwork)
+      : `${SERVICE_BASE_URL}/ch/${channelArtwork.replace(/^\//, '')}`;
+  }
+  // 3. Channel fallback
+  return channelLogoUrl(channel?.logo);
 }
 
 function channelLogoUrl(logo: unknown) {
@@ -108,12 +147,16 @@ function toMediaItem(channel: ApiChannel): MediaItem | undefined {
     return undefined;
   }
   const program = currentProgram(channel.programs);
+  const backdropUrl = resolveBackdropUrl(program, channel);
+  const posterUrl = resolvePosterUrl(program, channel);
+  const fallbackImageUrl = channelLogoUrl(channel.logo);
   return {
     id,
     kind: 'live',
     title: text(program?.name) ?? channelName,
-    imageUrl: imageUrl(program, channel.logo),
-    fallbackImageUrl: channelLogoUrl(channel.logo),
+    imageUrl: posterUrl ?? backdropUrl ?? fallbackImageUrl,
+    fallbackImageUrl,
+    backdropUrl: backdropUrl ?? posterUrl ?? fallbackImageUrl,
     description: text(program?.description),
     channelName,
     channelNumber:

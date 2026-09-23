@@ -21,6 +21,7 @@ import {
   resolveLiveChannelStream,
 } from '../api/channels';
 import { useMediaActions } from '../media/MediaController';
+import { useMediaPreviewEngine } from '../media/MediaPreviewEngine';
 import type { MediaItem } from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
 import { playFocusSound } from '../platform/focusSound';
@@ -99,8 +100,8 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
     const [loadFailed, setLoadFailed] = useState(false);
     const itemRefs = useRef<Record<string, ViewType | null>>({});
     const lastFocusedItem = useRef('primary-0');
-    const playbackRequestId = useRef(0);
-    const { markError, play, showImage } = useMediaActions();
+    const { markError, play } = useMediaActions();
+    const previewEngine = useMediaPreviewEngine();
 
     useEffect(() => {
       let active = true;
@@ -110,7 +111,7 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
             setChannels(items);
             setLoadFailed(items.length === 0);
             if (items[0]) {
-              showImage(items[0]);
+              previewEngine.focusMediaItem(items[0]);
             }
           }
         })
@@ -118,9 +119,9 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
         .finally(() => active && setLoading(false));
       return () => {
         active = false;
-        playbackRequestId.current += 1;
+        previewEngine.clearPreview();
       };
-    }, [showImage]);
+    }, [previewEngine]);
 
     useImperativeHandle(ref, () => ({
       focusFirst() {
@@ -134,28 +135,22 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
 
     const handleFocused = useCallback(
       (itemKey: string, channel: MediaItem) => {
-        playbackRequestId.current += 1;
         lastFocusedItem.current = itemKey;
         playFocusSound();
-        showImage(channel);
+        previewEngine.focusMediaItem(channel);
         onContentFocus();
       },
-      [onContentFocus, showImage],
+      [onContentFocus, previewEngine],
     );
 
     const handleActivate = useCallback(
       (channel: MediaItem) => {
-        const requestId = ++playbackRequestId.current;
         resolveLiveChannelStream(channel)
           .then(stream => {
-            if (playbackRequestId.current === requestId) {
-              play(channel, stream);
-            }
+            play(channel, stream);
           })
           .catch(() => {
-            if (playbackRequestId.current === requestId) {
-              markError();
-            }
+            markError();
           });
       },
       [markError, play],

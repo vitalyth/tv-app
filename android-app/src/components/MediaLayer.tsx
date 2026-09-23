@@ -28,10 +28,10 @@ export function MediaLayer() {
           <View style={styles.horizon} />
         </>
       )}
-      {item?.imageUrl &&
+      {(item?.backdropUrl || item?.imageUrl) &&
       (presentation === 'background-image' || status !== 'playing') ? (
         <RemoteImage
-          uri={item.imageUrl}
+          uri={item.backdropUrl ?? item.imageUrl!}
           fallbackUri={item.fallbackImageUrl}
           resizeMode="cover"
           style={styles.poster}

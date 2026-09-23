@@ -28,6 +28,7 @@ export interface MediaItem {
   title: string;
   imageUrl?: string;
   fallbackImageUrl?: string;
+  backdropUrl?: string;
   description?: string;
   channelName?: string;
   channelNumber?: string;

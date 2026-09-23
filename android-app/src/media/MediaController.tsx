@@ -20,13 +20,20 @@ interface MediaControllerValue {
   status: PlaybackStatus;
   play: (item: MediaItem, stream: MediaStream) => void;
   showImage: (item: MediaItem) => void;
+  stopVideo: () => void;
+  stopAll: () => void;
   markPlaying: () => void;
   markError: () => void;
 }
 
 type MediaControllerActions = Pick<
   MediaControllerValue,
-  'play' | 'showImage' | 'markPlaying' | 'markError'
+  | 'play'
+  | 'showImage'
+  | 'stopVideo'
+  | 'stopAll'
+  | 'markPlaying'
+  | 'markError'
 >;
 
 const MediaControllerContext = createContext<MediaControllerValue | null>(null);
@@ -52,6 +59,17 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setItem(nextItem);
     setStream(undefined);
   }, []);
+  const stopVideo = useCallback(() => {
+    setStatus('idle');
+    setPresentation('background-image');
+    setStream(undefined);
+  }, []);
+  const stopAll = useCallback(() => {
+    setStatus('idle');
+    setPresentation('background-image');
+    setItem(undefined);
+    setStream(undefined);
+  }, []);
   const markPlaying = useCallback(() => setStatus('playing'), []);
   const markError = useCallback(() => setStatus('error'), []);
 
@@ -63,6 +81,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       status,
       play,
       showImage,
+      stopVideo,
+      stopAll,
       markPlaying,
       markError,
     }),
@@ -74,12 +94,14 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       presentation,
       showImage,
       status,
+      stopAll,
+      stopVideo,
       stream,
     ],
   );
   const actions = useMemo<MediaControllerActions>(
-    () => ({ play, showImage, markPlaying, markError }),
-    [markError, markPlaying, play, showImage],
+    () => ({ play, showImage, stopVideo, stopAll, markPlaying, markError }),
+    [markError, markPlaying, play, showImage, stopAll, stopVideo],
   );
 
   return (
