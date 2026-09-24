@@ -3,6 +3,7 @@ import type { FocusDestination } from 'react-native';
 
 export interface MediaCarouselHandle {
   focusIndex: (index: number) => void;
+  getSelectedIndex: () => number;
   restoreFocus: () => void;
 }
 

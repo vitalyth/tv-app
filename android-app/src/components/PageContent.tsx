@@ -85,6 +85,7 @@ const ChannelCard = memo(function ChannelCardView({
 });
 
 export interface PageContentHandle {
+  canExitToMenu: () => boolean;
   focusFirst: () => void;
   restoreFocus: () => void;
 }
@@ -108,6 +109,9 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
     const primaryCarouselRef = useRef<MediaCarouselHandle>(null);
     const secondaryCarouselRef = useRef<MediaCarouselHandle>(null);
     const lastFocusedRowRef = useRef<'primary' | 'secondary'>('primary');
+    const [focusedRow, setFocusedRow] = useState<'primary' | 'secondary'>(
+      'primary',
+    );
     const { markError, play } = useMediaActions();
     const previewEngine = useMediaPreviewEngine();
 
@@ -141,8 +145,16 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
     }, [previewEngine]);
 
     useImperativeHandle(ref, () => ({
+      canExitToMenu() {
+        const target =
+          lastFocusedRowRef.current === 'primary'
+            ? primaryCarouselRef
+            : secondaryCarouselRef;
+        return target.current?.getSelectedIndex() === 0;
+      },
       focusFirst() {
         lastFocusedRowRef.current = 'primary';
+        setFocusedRow('primary');
         primaryCarouselRef.current?.focusIndex(0);
       },
       restoreFocus() {
@@ -157,6 +169,7 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
     const handleFocused = useCallback(
       (row: 'primary' | 'secondary', channel: MediaItem) => {
         lastFocusedRowRef.current = row;
+        setFocusedRow(current => (current === row ? current : row));
         playFocusSound();
         previewEngine.focusMediaItem(channel);
         onContentFocus();
@@ -224,7 +237,7 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
               height={carouselHeight}
               leadingInset={MAIN_CONTENT_INSET_LEFT}
               trailingInset={MAIN_CONTENT_INSET_RIGHT}
-              active={active}
+              active={active && focusedRow === 'primary'}
               preferredFocus
               trapFocusUp
               leftFocusDestination={menuFocusDestination}
@@ -244,7 +257,7 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
               height={carouselHeight}
               leadingInset={MAIN_CONTENT_INSET_LEFT}
               trailingInset={MAIN_CONTENT_INSET_RIGHT}
-              active={active}
+              active={active && focusedRow === 'secondary'}
               trapFocusDown
               leftFocusDestination={menuFocusDestination}
               keyExtractor={channel => channel.id}

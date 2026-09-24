@@ -7,7 +7,13 @@ import {
   type ReactElement,
   type Ref,
 } from 'react';
-import {Pressable, type View} from 'react-native';
+import {
+  findNodeHandle,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  type View as ViewType,
+} from 'react-native';
 import {
   Carousel,
   type CarouselRef,
@@ -27,28 +33,23 @@ const ITEM_STYLE = {
 };
 const ANIMATION_DURATION = {
   itemPressedDuration: 0.08,
-  itemScrollDuration: 0.12,
-  containerSelectionChangeDuration: 0.12,
+  itemScrollDuration: 0.06,
+  containerSelectionChangeDuration: 0.06,
 };
-const SELECTION_BORDER = {
-  borderStrategy: 'outset' as const,
-  borderWidth: 3,
-  borderColor: '#ffffff',
-  borderRadius: 8,
-  borderStrokeWidth: 0,
-};
-
-type FocusableView = View & {requestTVFocus?: () => void};
+const FOCUS_VERTICAL_SPACE = 8;
+type FocusableView = ViewType & {requestTVFocus?: () => void};
 
 function VegaMediaCarouselInner<ItemT>(
   {
     id,
     items,
+    itemWidth,
     height,
     leadingInset = 0,
     trailingInset = 0,
     active = true,
     preferredFocus = false,
+    leftFocusDestination,
     keyExtractor,
     renderItem,
     onItemFocus,
@@ -84,6 +85,9 @@ function VegaMediaCarouselInner<ItemT>(
 
   useImperativeHandle(ref, () => ({
     focusIndex,
+    getSelectedIndex() {
+      return selectedIndexRef.current;
+    },
     restoreFocus() {
       focusIndex(selectedIndexRef.current);
     },
@@ -104,56 +108,94 @@ function VegaMediaCarouselInner<ItemT>(
     }),
     [getItem, getItemCount, getItemKey],
   );
-  const containerStyle = useMemo(
+  const wrapperStyle = useMemo(
     () => ({
-      height,
+      height: height - FOCUS_VERTICAL_SPACE,
       marginLeft: -leadingInset,
       marginRight: -trailingInset,
     }),
     [height, leadingInset, trailingInset],
   );
+  const leftFocusHandle = leftFocusDestination
+    ? findNodeHandle(leftFocusDestination)
+    : undefined;
 
   if (items.length === 0) {
     return null;
   }
 
   return (
-    <Carousel<ItemT>
-      ref={carouselRef}
-      dataAdapter={dataAdapter}
-      renderItem={({item, index}) => (
-        <Pressable
-          ref={(node) => {
-            itemRefs.current[index] = node;
-          }}
-          accessibilityRole="button"
-          onFocus={() => {
-            selectedIndexRef.current = index;
-            onItemFocus?.(item, index);
-          }}
-          onPress={() => onItemSelect?.(item, index)}>
-          {renderItem(item, index, false)}
-        </Pressable>
-      )}
-      testID={id}
-      uniqueId={id}
-      orientation="horizontal"
-      renderedItemsCount={Math.min(8, items.length)}
-      numOffsetItems={Math.min(2, Math.max(0, items.length - 1))}
-      navigableScrollAreaMargin={leadingInset}
-      hasPreferredFocus={preferredFocus}
-      initialStartIndex={0}
-      trapSelectionOnOrientation={false}
-      containerStyle={containerStyle}
-      itemStyle={ITEM_STYLE}
-      animationDuration={ANIMATION_DURATION}
-      selectionStrategy="anchored"
-      selectionBorder={active ? SELECTION_BORDER : undefined}
-      onSelectionChanged={({selectedIndex}) => notifyItemFocus(selectedIndex)}
-    />
+    <View style={wrapperStyle}>
+      <Carousel<ItemT>
+        ref={carouselRef}
+        dataAdapter={dataAdapter}
+        renderItem={({item, index}) => (
+          <TouchableOpacity
+            ref={node => {
+              itemRefs.current[index] = node;
+            }}
+            activeOpacity={1}
+            accessibilityRole="button"
+            nextFocusLeft={
+              index === 0 ? leftFocusHandle ?? undefined : undefined
+            }
+            style={{
+              width: itemWidth,
+              height: height - FOCUS_VERTICAL_SPACE,
+            }}
+            onFocus={() => {
+              selectedIndexRef.current = index;
+              onItemFocus?.(item, index);
+            }}
+            onPress={() => onItemSelect?.(item, index)}>
+            {renderItem(item, index, false)}
+          </TouchableOpacity>
+        )}
+        testID={id}
+        uniqueId={id}
+        orientation="horizontal"
+        renderedItemsCount={Math.min(8, items.length)}
+        numOffsetItems={Math.min(2, Math.max(0, items.length - 1))}
+        navigableScrollAreaMargin={leadingInset}
+        hasPreferredFocus={preferredFocus}
+        initialStartIndex={0}
+        trapSelectionOnOrientation={false}
+        containerStyle={styles.carousel}
+        itemStyle={ITEM_STYLE}
+        animationDuration={ANIMATION_DURATION}
+        selectionStrategy="anchored"
+        onSelectionChanged={({selectedIndex: nextIndex}) =>
+          notifyItemFocus(nextIndex)
+        }
+      />
+      {active ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.focusBorder,
+            {
+              left: leadingInset - 3,
+              width: itemWidth + 6,
+              height: height - FOCUS_VERTICAL_SPACE + 6,
+            },
+          ]}
+        />
+      ) : null}
+    </View>
   );
 }
 
 export const VegaMediaCarousel = forwardRef(VegaMediaCarouselInner) as <ItemT>(
   props: MediaCarouselProps<ItemT> & {ref?: Ref<MediaCarouselHandle>},
 ) => ReactElement;
+
+const styles = StyleSheet.create({
+  carousel: {height: '100%'},
+  focusBorder: {
+    position: 'absolute',
+    top: -3,
+    borderColor: '#ffffff',
+    borderRadius: 9,
+    borderWidth: 3,
+  },
+});

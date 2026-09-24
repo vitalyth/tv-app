@@ -3,8 +3,10 @@ import {
   BackHandler,
   StyleSheet,
   Text,
+  useTVEventHandler,
   View,
   type FocusDestination,
+  type View as ViewType,
 } from 'react-native';
 import { getRoute, type RootRoute } from '../navigation/routes';
 import { initialShellState, shellReducer } from '../navigation/shellState';
@@ -25,6 +27,30 @@ export function ApplicationShell() {
     useState<FocusDestination>(null);
   const pageContentRef = useRef<PageContentHandle>(null);
   const activeRoute = getRoute(state.activeRoute);
+
+  useTVEventHandler(event => {
+    if (event.eventKeyAction === 1) {
+      return;
+    }
+
+    if (event.eventType === 'right' && state.menuExpanded) {
+      dispatch({ type: 'collapse-menu' });
+      pageContentRef.current?.restoreFocus();
+      return;
+    }
+
+    if (
+      event.eventType === 'left' &&
+      !state.menuExpanded &&
+      pageContentRef.current?.canExitToMenu()
+    ) {
+      dispatch({ type: 'focus-menu' });
+      const destination = menuFocusDestination as
+        | (ViewType & { requestTVFocus?: () => void })
+        | null;
+      destination?.requestTVFocus?.();
+    }
+  });
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(

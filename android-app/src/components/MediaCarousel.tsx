@@ -25,7 +25,6 @@ import { MEDIA_CAROUSEL_ITEM_SPACING } from '../theme/layout';
 const FOCUS_GUTTER = 4;
 
 interface CarouselCellProps<ItemT> {
-  active: boolean;
   height: number;
   index: number;
   item: ItemT;
@@ -39,7 +38,6 @@ interface CarouselCellProps<ItemT> {
 }
 
 const CarouselCell = memo(function CarouselCellView<ItemT>({
-  active,
   height,
   index,
   item,
@@ -73,7 +71,7 @@ const CarouselCell = memo(function CarouselCellView<ItemT>({
         marginRight: MEDIA_CAROUSEL_ITEM_SPACING,
       }}
     >
-      {renderItem(item, index, active && focused)}
+      {renderItem(item, index, focused)}
     </Pressable>
   );
 }) as <ItemT>(props: CarouselCellProps<ItemT>) => React.ReactElement;
@@ -86,7 +84,6 @@ function MediaCarouselInner<ItemT>(
     height,
     leadingInset = 0,
     trailingInset = 0,
-    active = true,
     preferredFocus = false,
     leftFocusDestination,
     trapFocusUp = false,
@@ -145,6 +142,9 @@ function MediaCarouselInner<ItemT>(
 
   useImperativeHandle(ref, () => ({
     focusIndex,
+    getSelectedIndex() {
+      return selectedIndexRef.current;
+    },
     restoreFocus() {
       focusIndex(selectedIndexRef.current);
     },
@@ -153,7 +153,6 @@ function MediaCarouselInner<ItemT>(
   const renderListItem = useCallback(
     ({ item, index }: ListRenderItemInfo<ItemT>) => (
       <CarouselCell
-        active={active}
         height={height}
         index={index}
         item={item}
@@ -167,7 +166,6 @@ function MediaCarouselInner<ItemT>(
       />
     ),
     [
-      active,
       handleItemFocus,
       hasPreferredFocus,
       height,

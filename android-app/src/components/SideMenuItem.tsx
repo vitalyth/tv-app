@@ -1,18 +1,19 @@
 import { forwardRef, memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { RootRoute, RouteDefinition } from '../navigation/routes';
 
 interface SideMenuItemProps {
   route: RouteDefinition;
   active: boolean;
   expanded: boolean;
+  labelOpacity: Animated.AnimatedInterpolation<number>;
   onFocus: () => void;
   onSelectRoute: (route: RootRoute) => void;
 }
 
 export const SideMenuItem = memo(
   forwardRef<View, SideMenuItemProps>(function SideMenuItemView(
-    { route, active, expanded, onFocus, onSelectRoute },
+    { route, active, expanded, labelOpacity, onFocus, onSelectRoute },
     ref,
   ) {
     return (
@@ -46,17 +47,17 @@ export const SideMenuItem = memo(
                   {route.shortLabel}
                 </Text>
               </View>
-              <Text
+              <Animated.Text
                 numberOfLines={1}
                 style={[
                   styles.label,
                   active && styles.activeLabel,
                   isFocused && styles.focusedText,
-                  !expanded && styles.hiddenLabel,
+                  { opacity: labelOpacity },
                 ]}
               >
                 {route.label}
-              </Text>
+              </Animated.Text>
             </>
           );
         }}
@@ -92,5 +93,4 @@ const styles = StyleSheet.create({
   label: { color: '#dbe8f2', fontSize: 20, marginLeft: 16 },
   activeLabel: { color: '#ffffff', fontWeight: '700' },
   focusedText: { color: '#ffffff' },
-  hiddenLabel: { opacity: 0 },
 });

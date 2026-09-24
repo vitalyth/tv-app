@@ -40,8 +40,9 @@ export const SideMenu = memo(function SideMenuView({
     outputRange: [-176, 0],
   });
   const labelOpacity = reveal.interpolate({
-    inputRange: [0, 0.45, 1],
+    inputRange: [0, 0.88, 1],
     outputRange: [0, 0, 1],
+    extrapolate: 'clamp',
   });
 
   return (
@@ -71,6 +72,7 @@ export const SideMenu = memo(function SideMenuView({
               ref={active ? onActiveItemChange : undefined}
               active={active}
               expanded={expanded}
+              labelOpacity={labelOpacity}
               onFocus={onFocus}
               onSelectRoute={onSelectRoute}
               route={route}
