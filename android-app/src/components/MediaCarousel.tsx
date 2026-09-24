@@ -1,47 +1,234 @@
-import { FlatList, StyleSheet, View } from 'react-native';
-import type { MediaCarouselProps } from './MediaCarousel.types';
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
+import {
+  FlatList,
+  Pressable,
+  StyleSheet,
+  TVFocusGuideView,
+  type FocusDestination,
+  type ListRenderItemInfo,
+  type View as ViewType,
+} from 'react-native';
+import type {
+  MediaCarouselHandle,
+  MediaCarouselProps,
+} from './MediaCarousel.types';
+import { MEDIA_CAROUSEL_ITEM_SPACING } from '../theme/layout';
 
-const ITEM_SPACING = 18;
+const FOCUS_GUTTER = 4;
 
-export function MediaCarousel<ItemT>({
-  id,
-  items,
-  itemWidth,
+interface CarouselCellProps<ItemT> {
+  active: boolean;
+  height: number;
+  index: number;
+  item: ItemT;
+  itemWidth: number;
+  preferredFocus: boolean;
+  leftFocusDestination?: FocusDestination;
+  renderItem: MediaCarouselProps<ItemT>['renderItem'];
+  setItemRef: (index: number, node: ViewType | null) => void;
+  onFocus: (item: ItemT, index: number) => void;
+  onSelect?: (item: ItemT, index: number) => void;
+}
+
+const CarouselCell = memo(function CarouselCellView<ItemT>({
+  active,
   height,
-  keyExtractor,
+  index,
+  item,
+  itemWidth,
+  preferredFocus,
+  leftFocusDestination,
   renderItem,
-}: MediaCarouselProps<ItemT>) {
-  const itemExtent = itemWidth + ITEM_SPACING;
+  setItemRef,
+  onFocus,
+  onSelect,
+}: CarouselCellProps<ItemT>) {
+  const [focused, setFocused] = useState(false);
 
   return (
-    <FlatList
-      horizontal
-      data={items as ItemT[]}
-      testID={id}
-      keyExtractor={keyExtractor}
-      renderItem={({ item, index }) => renderItem(item, index)}
-      ItemSeparatorComponent={ItemSeparator}
-      contentContainerStyle={styles.content}
-      style={[styles.list, { height }]}
-      showsHorizontalScrollIndicator={false}
-      initialNumToRender={6}
-      maxToRenderPerBatch={4}
-      windowSize={5}
-      getItemLayout={(_, index) => ({
-        index,
-        length: itemExtent,
-        offset: itemExtent * index,
-      })}
-    />
+    <Pressable
+      ref={node => setItemRef(index, node)}
+      accessibilityRole="button"
+      focusable
+      hasTVPreferredFocus={preferredFocus}
+      nextFocusLeft={index === 0 ? leftFocusDestination : undefined}
+      scrollSnapAlign="start"
+      onBlur={() => setFocused(false)}
+      onFocus={() => {
+        setFocused(true);
+        onFocus(item, index);
+      }}
+      onPress={() => onSelect?.(item, index)}
+      style={{
+        width: itemWidth,
+        height: height - FOCUS_GUTTER * 2,
+        marginRight: MEDIA_CAROUSEL_ITEM_SPACING,
+      }}
+    >
+      {renderItem(item, index, active && focused)}
+    </Pressable>
+  );
+}) as <ItemT>(props: CarouselCellProps<ItemT>) => React.ReactElement;
+
+function MediaCarouselInner<ItemT>(
+  {
+    id,
+    items,
+    itemWidth,
+    height,
+    leadingInset = 0,
+    trailingInset = 0,
+    active = true,
+    preferredFocus = false,
+    leftFocusDestination,
+    trapFocusUp = false,
+    trapFocusDown = false,
+    keyExtractor,
+    renderItem,
+    onItemFocus,
+    onItemSelect,
+  }: MediaCarouselProps<ItemT>,
+  ref: Ref<MediaCarouselHandle>,
+) {
+  const [hasPreferredFocus, setHasPreferredFocus] = useState(preferredFocus);
+  const listRef = useRef<FlatList<ItemT>>(null);
+  const itemRefs = useRef<Record<number, ViewType | null>>({});
+  const selectedIndexRef = useRef(0);
+  const itemExtent = itemWidth + MEDIA_CAROUSEL_ITEM_SPACING;
+
+  const setItemRef = useCallback((index: number, node: ViewType | null) => {
+    if (node) {
+      itemRefs.current[index] = node;
+    } else {
+      delete itemRefs.current[index];
+    }
+  }, []);
+
+  const scrollToIndex = useCallback(
+    (index: number, animated: boolean) => {
+      listRef.current?.scrollToOffset({
+        animated,
+        offset: index * itemExtent,
+      });
+    },
+    [itemExtent],
+  );
+
+  const handleItemFocus = useCallback(
+    (item: ItemT, index: number) => {
+      if (hasPreferredFocus) {
+        setHasPreferredFocus(false);
+      }
+      selectedIndexRef.current = index;
+      onItemFocus?.(item, index);
+    },
+    [hasPreferredFocus, onItemFocus],
+  );
+
+  const focusIndex = useCallback(
+    (requestedIndex: number) => {
+      const index = Math.max(0, Math.min(requestedIndex, items.length - 1));
+      selectedIndexRef.current = index;
+      scrollToIndex(index, false);
+      requestAnimationFrame(() => itemRefs.current[index]?.requestTVFocus?.());
+    },
+    [items.length, scrollToIndex],
+  );
+
+  useImperativeHandle(ref, () => ({
+    focusIndex,
+    restoreFocus() {
+      focusIndex(selectedIndexRef.current);
+    },
+  }));
+
+  const renderListItem = useCallback(
+    ({ item, index }: ListRenderItemInfo<ItemT>) => (
+      <CarouselCell
+        active={active}
+        height={height}
+        index={index}
+        item={item}
+        itemWidth={itemWidth}
+        preferredFocus={hasPreferredFocus && index === 0}
+        leftFocusDestination={leftFocusDestination}
+        renderItem={renderItem}
+        setItemRef={setItemRef}
+        onFocus={handleItemFocus}
+        onSelect={onItemSelect}
+      />
+    ),
+    [
+      active,
+      handleItemFocus,
+      hasPreferredFocus,
+      height,
+      itemWidth,
+      leftFocusDestination,
+      onItemSelect,
+      renderItem,
+      setItemRef,
+    ],
+  );
+
+  return (
+    <TVFocusGuideView
+      trapFocusRight
+      trapFocusUp={trapFocusUp}
+      trapFocusDown={trapFocusDown}
+      style={{ height }}
+    >
+      <FlatList<ItemT>
+        ref={listRef}
+        horizontal
+        data={items as ItemT[]}
+        testID={id}
+        keyExtractor={keyExtractor}
+        renderItem={renderListItem}
+        contentContainerStyle={{
+          paddingLeft: leadingInset + FOCUS_GUTTER,
+          paddingRight: trailingInset + FOCUS_GUTTER,
+          paddingVertical: FOCUS_GUTTER,
+        }}
+        style={[
+          styles.list,
+          {
+            height,
+            marginLeft: -leadingInset,
+            marginRight: -trailingInset,
+          },
+        ]}
+        showsHorizontalScrollIndicator={false}
+        snapToAlignment="item"
+        snapToItemPadding={leadingInset + FOCUS_GUTTER}
+        scrollAnimationEnabled
+        initialNumToRender={8}
+        maxToRenderPerBatch={4}
+        updateCellsBatchingPeriod={16}
+        windowSize={3}
+        removeClippedSubviews={false}
+        getItemLayout={(_, index) => ({
+          index,
+          length: itemExtent,
+          offset: itemExtent * index,
+        })}
+      />
+    </TVFocusGuideView>
   );
 }
 
-function ItemSeparator() {
-  return <View style={styles.separator} />;
-}
+export const MediaCarousel = forwardRef(MediaCarouselInner) as <ItemT>(
+  props: MediaCarouselProps<ItemT> & { ref?: Ref<MediaCarouselHandle> },
+) => React.ReactElement;
 
 const styles = StyleSheet.create({
-  list: { flexGrow: 0, marginHorizontal: -6, overflow: 'visible' },
-  content: { paddingHorizontal: 6, paddingVertical: 6 },
-  separator: { width: ITEM_SPACING },
+  list: { flexGrow: 0 },
 });

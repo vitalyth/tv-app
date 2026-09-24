@@ -27,7 +27,11 @@ export function shellReducer(
     case 'collapse-menu':
       return state.menuExpanded ? { ...state, menuExpanded: false } : state;
     case 'select-route':
-      return { ...state, activeRoute: action.route };
+      return {
+        ...state,
+        activeRoute: action.route,
+        menuExpanded: false,
+      };
     default:
       return state;
   }

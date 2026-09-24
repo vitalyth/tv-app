@@ -1,60 +1,69 @@
-import { useState } from 'react';
+import { forwardRef, memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { RouteDefinition } from '../navigation/routes';
+import type { RootRoute, RouteDefinition } from '../navigation/routes';
 
 interface SideMenuItemProps {
   route: RouteDefinition;
   active: boolean;
   expanded: boolean;
   onFocus: () => void;
-  onSelect: () => void;
+  onSelectRoute: (route: RootRoute) => void;
 }
 
-export function SideMenuItem({
-  route,
-  active,
-  expanded,
-  onFocus,
-  onSelect,
-}: SideMenuItemProps) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <Pressable
-      accessibilityLabel={route.label}
-      accessibilityRole="button"
-      onBlur={() => setFocused(false)}
-      onFocus={() => {
-        setFocused(true);
-        onFocus();
-      }}
-      onPress={onSelect}
-      style={[styles.item, focused && styles.focusedItem]}
-    >
-      <View
-        style={[
-          styles.icon,
-          active && styles.activeIcon,
-          focused && styles.focusedIcon,
+export const SideMenuItem = memo(
+  forwardRef<View, SideMenuItemProps>(function SideMenuItemView(
+    { route, active, expanded, onFocus, onSelectRoute },
+    ref,
+  ) {
+    return (
+      <Pressable
+        ref={ref}
+        accessibilityLabel={route.label}
+        accessibilityRole="button"
+        focusable={expanded || active}
+        unstable_pressDelay={0}
+        onFocus={onFocus}
+        onPressIn={() => onSelectRoute(route.id)}
+        style={({ focused }) => [
+          styles.item,
+          focused && expanded && styles.focusedItem,
         ]}
       >
-        <Text style={[styles.iconText, focused && styles.focusedText]}>
-          {route.shortLabel}
-        </Text>
-      </View>
-      <Text
-        numberOfLines={1}
-        style={[
-          styles.label,
-          active && styles.activeLabel,
-          focused && styles.focusedText,
-          !expanded && styles.hiddenLabel,
-        ]}
-      >
-        {route.label}
-      </Text>
-    </Pressable>
-  );
-}
+        {({ focused }) => {
+          const isFocused = focused && expanded;
+          return (
+            <>
+              <View
+                style={[
+                  styles.icon,
+                  active && styles.activeIcon,
+                  isFocused && styles.focusedIcon,
+                ]}
+              >
+                <Text
+                  style={[styles.iconText, isFocused && styles.focusedText]}
+                >
+                  {route.shortLabel}
+                </Text>
+              </View>
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.label,
+                  active && styles.activeLabel,
+                  isFocused && styles.focusedText,
+                  !expanded && styles.hiddenLabel,
+                ]}
+              >
+                {route.label}
+              </Text>
+            </>
+          );
+        }}
+      </Pressable>
+    );
+  }),
+);
 
 const styles = StyleSheet.create({
   item: {

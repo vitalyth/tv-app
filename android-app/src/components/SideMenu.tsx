@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useLayoutEffect, useRef } from 'react';
 import {
   Animated,
   StyleSheet,
@@ -13,22 +13,26 @@ interface SideMenuProps {
   activeRoute: RootRoute;
   expanded: boolean;
   onFocus: () => void;
+  onActiveItemChange: (item: View | null) => void;
   onSelectRoute: (route: RootRoute) => void;
 }
 
-export function SideMenu({
+export const SideMenu = memo(function SideMenuView({
   activeRoute,
   expanded,
   onFocus,
+  onActiveItemChange,
   onSelectRoute,
 }: SideMenuProps) {
   const reveal = useRef(new Animated.Value(expanded ? 1 : 0)).current;
-  useEffect(() => {
-    Animated.timing(reveal, {
+  useLayoutEffect(() => {
+    const animation = Animated.timing(reveal, {
       toValue: expanded ? 1 : 0,
-      duration: expanded ? 180 : 140,
+      duration: expanded ? 120 : 80,
       useNativeDriver: true,
-    }).start();
+    });
+    animation.start();
+    return () => animation.stop();
   }, [expanded, reveal]);
 
   const panelTranslate = reveal.interpolate({
@@ -54,25 +58,29 @@ export function SideMenu({
         </Animated.Text>
       </View>
       <TVFocusGuideView
-        autoFocus
         trapFocusUp
         trapFocusDown
+        trapFocusLeft
         style={styles.items}
       >
-        {routes.map(route => (
-          <SideMenuItem
-            key={route.id}
-            active={route.id === activeRoute}
-            expanded={expanded}
-            onFocus={onFocus}
-            onSelect={() => onSelectRoute(route.id)}
-            route={route}
-          />
-        ))}
+        {routes.map(route => {
+          const active = route.id === activeRoute;
+          return (
+            <SideMenuItem
+              key={route.id}
+              ref={active ? onActiveItemChange : undefined}
+              active={active}
+              expanded={expanded}
+              onFocus={onFocus}
+              onSelectRoute={onSelectRoute}
+              route={route}
+            />
+          );
+        })}
       </TVFocusGuideView>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   root: {

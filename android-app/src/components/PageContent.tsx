@@ -10,11 +10,11 @@ import {
 } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
+  useWindowDimensions,
   StyleSheet,
   Text,
   View,
-  type View as ViewType,
+  type FocusDestination,
 } from 'react-native';
 import {
   getPlayableLiveChannels,
@@ -26,41 +26,39 @@ import type { MediaItem } from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
 import { playFocusSound } from '../platform/focusSound';
 import { MediaCarousel } from './MediaCarousel';
+import type { MediaCarouselHandle } from './MediaCarousel.types';
 import { RemoteImage } from './RemoteImage';
+import {
+  MAIN_CONTENT_INSET_LEFT,
+  MAIN_CONTENT_INSET_RIGHT,
+  MEDIA_CAROUSEL_ITEM_SPACING,
+} from '../theme/layout';
 
-const CARD_WIDTH = 278;
-const CAROUSEL_HEIGHT = 162;
+const VISIBLE_CARD_COUNT = 4;
+const CARD_ASPECT_RATIO = 16 / 9;
+const FOCUS_VERTICAL_SPACE = 8;
 
 interface ChannelCardProps {
   channel: MediaItem;
-  itemKey: string;
   routeLabel: string;
-  preferredFocus: boolean;
-  onActivate: (channel: MediaItem) => void;
-  onFocused: (itemKey: string, channel: MediaItem) => void;
+  width: number;
+  height: number;
+  focused: boolean;
 }
 
-const ChannelCard = memo(
-  forwardRef<ViewType, ChannelCardProps>(function ChannelCardImpl(
-    { channel, itemKey, routeLabel, preferredFocus, onActivate, onFocused },
-    ref,
-  ) {
-    const [focused, setFocused] = useState(false);
-
-    return (
-      <Pressable
-        ref={ref}
-        accessibilityLabel={`${routeLabel}: ${channel.title}`}
-        accessibilityRole="button"
-        hasTVPreferredFocus={preferredFocus}
-        onBlur={() => setFocused(false)}
-        onFocus={() => {
-          setFocused(true);
-          onFocused(itemKey, channel);
-        }}
-        onPress={() => onActivate(channel)}
-        style={[styles.card, focused && styles.focusedCard]}
-      >
+const ChannelCard = memo(function ChannelCardView({
+  channel,
+  routeLabel,
+  width,
+  height,
+  focused,
+}: ChannelCardProps) {
+  return (
+    <View
+      accessibilityLabel={`${routeLabel}: ${channel.title}`}
+      style={[styles.cardContainer, { width, height }]}
+    >
+      <View style={styles.cardSurface}>
         {channel.imageUrl ? (
           <RemoteImage
             uri={channel.imageUrl}
@@ -78,10 +76,13 @@ const ChannelCard = memo(
           {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
           {channel.channelName}
         </Text>
-      </Pressable>
-    );
-  }),
-);
+      </View>
+      {focused ? (
+        <View pointerEvents="none" style={styles.focusBorder} />
+      ) : null}
+    </View>
+  );
+});
 
 export interface PageContentHandle {
   focusFirst: () => void;
@@ -90,24 +91,40 @@ export interface PageContentHandle {
 
 interface PageContentProps {
   route: RouteDefinition;
+  active: boolean;
+  menuFocusDestination: FocusDestination;
   onContentFocus: () => void;
 }
 
 export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
-  function PageContentImpl({ route, onContentFocus }, ref) {
+  function PageContentImpl(
+    { route, active, menuFocusDestination, onContentFocus },
+    ref,
+  ) {
     const [channels, setChannels] = useState<MediaItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
-    const itemRefs = useRef<Record<string, ViewType | null>>({});
-    const lastFocusedItem = useRef('primary-0');
+    const { width: windowWidth } = useWindowDimensions();
+    const primaryCarouselRef = useRef<MediaCarouselHandle>(null);
+    const secondaryCarouselRef = useRef<MediaCarouselHandle>(null);
+    const lastFocusedRowRef = useRef<'primary' | 'secondary'>('primary');
     const { markError, play } = useMediaActions();
     const previewEngine = useMediaPreviewEngine();
 
+    const contentWidth =
+      windowWidth - MAIN_CONTENT_INSET_LEFT - MAIN_CONTENT_INSET_RIGHT;
+    const cardWidth = Math.floor(
+      (contentWidth - MEDIA_CAROUSEL_ITEM_SPACING * (VISIBLE_CARD_COUNT - 1)) /
+        VISIBLE_CARD_COUNT,
+    );
+    const cardHeight = Math.round(cardWidth / CARD_ASPECT_RATIO);
+    const carouselHeight = cardHeight + FOCUS_VERTICAL_SPACE;
+
     useEffect(() => {
-      let active = true;
+      let mounted = true;
       getPlayableLiveChannels()
         .then(items => {
-          if (active) {
+          if (mounted) {
             setChannels(items);
             setLoadFailed(items.length === 0);
             if (items[0]) {
@@ -115,27 +132,31 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
             }
           }
         })
-        .catch(() => active && setLoadFailed(true))
-        .finally(() => active && setLoading(false));
+        .catch(() => mounted && setLoadFailed(true))
+        .finally(() => mounted && setLoading(false));
       return () => {
-        active = false;
+        mounted = false;
         previewEngine.clearPreview();
       };
     }, [previewEngine]);
 
     useImperativeHandle(ref, () => ({
       focusFirst() {
-        lastFocusedItem.current = 'primary-0';
-        itemRefs.current['primary-0']?.requestTVFocus?.();
+        lastFocusedRowRef.current = 'primary';
+        primaryCarouselRef.current?.focusIndex(0);
       },
       restoreFocus() {
-        itemRefs.current[lastFocusedItem.current]?.requestTVFocus?.();
+        const target =
+          lastFocusedRowRef.current === 'primary'
+            ? primaryCarouselRef
+            : secondaryCarouselRef;
+        target.current?.restoreFocus();
       },
     }));
 
     const handleFocused = useCallback(
-      (itemKey: string, channel: MediaItem) => {
-        lastFocusedItem.current = itemKey;
+      (row: 'primary' | 'secondary', channel: MediaItem) => {
+        lastFocusedRowRef.current = row;
         playFocusSound();
         previewEngine.focusMediaItem(channel);
         onContentFocus();
@@ -156,29 +177,32 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
       [markError, play],
     );
 
-    const renderCard = useCallback(
-      (channel: MediaItem, index: number, rowId: 'primary' | 'secondary') => {
-        const itemKey = `${rowId}-${index}`;
-        return (
-          <ChannelCard
-            ref={node => {
-              itemRefs.current[itemKey] = node;
-            }}
-            channel={channel}
-            itemKey={itemKey}
-            routeLabel={route.label}
-            preferredFocus={rowId === 'primary' && index === 0}
-            onActivate={handleActivate}
-            onFocused={handleFocused}
-          />
-        );
-      },
-      [handleActivate, handleFocused, route.label],
-    );
-
     const secondaryChannels = useMemo(
       () => [...channels].reverse(),
       [channels],
+    );
+
+    const renderChannelCard = useCallback(
+      (channel: MediaItem, _index: number, focused: boolean) => (
+        <ChannelCard
+          channel={channel}
+          routeLabel={route.label}
+          width={cardWidth}
+          height={cardHeight}
+          focused={focused}
+        />
+      ),
+      [cardHeight, cardWidth, route.label],
+    );
+
+    const handlePrimaryFocus = useCallback(
+      (channel: MediaItem) => handleFocused('primary', channel),
+      [handleFocused],
+    );
+
+    const handleSecondaryFocus = useCallback(
+      (channel: MediaItem) => handleFocused('secondary', channel),
+      [handleFocused],
     );
 
     return (
@@ -194,27 +218,39 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
             </Text>
             <MediaCarousel
               id={`${route.id}-primary`}
+              ref={primaryCarouselRef}
               items={channels}
-              itemWidth={CARD_WIDTH}
-              height={CAROUSEL_HEIGHT}
+              itemWidth={cardWidth}
+              height={carouselHeight}
+              leadingInset={MAIN_CONTENT_INSET_LEFT}
+              trailingInset={MAIN_CONTENT_INSET_RIGHT}
+              active={active}
               preferredFocus
+              trapFocusUp
+              leftFocusDestination={menuFocusDestination}
               keyExtractor={channel => channel.id}
-              renderItem={(channel, index) =>
-                renderCard(channel, index, 'primary')
-              }
+              renderItem={renderChannelCard}
+              onItemFocus={handlePrimaryFocus}
+              onItemSelect={handleActivate}
             />
             <Text style={[styles.heading, styles.secondaryHeading]}>
               More live channels
             </Text>
             <MediaCarousel
               id={`${route.id}-secondary`}
+              ref={secondaryCarouselRef}
               items={secondaryChannels}
-              itemWidth={CARD_WIDTH}
-              height={CAROUSEL_HEIGHT}
+              itemWidth={cardWidth}
+              height={carouselHeight}
+              leadingInset={MAIN_CONTENT_INSET_LEFT}
+              trailingInset={MAIN_CONTENT_INSET_RIGHT}
+              active={active}
+              trapFocusDown
+              leftFocusDestination={menuFocusDestination}
               keyExtractor={channel => channel.id}
-              renderItem={(channel, index) =>
-                renderCard(channel, index, 'secondary')
-              }
+              renderItem={renderChannelCard}
+              onItemFocus={handleSecondaryFocus}
+              onItemSelect={handleActivate}
             />
           </>
         ) : null}
@@ -224,7 +260,7 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
 );
 
 const styles = StyleSheet.create({
-  root: { flex: 1, marginTop: 22 },
+  root: { flex: 1, marginTop: 22, overflow: 'visible' },
   heading: {
     color: '#ffffff',
     fontSize: 23,
@@ -233,20 +269,30 @@ const styles = StyleSheet.create({
   },
   secondaryHeading: { marginTop: 10 },
   error: { color: '#ffb4b9', fontSize: 16, height: 150 },
-  card: {
-    width: CARD_WIDTH,
-    height: 150,
+  cardContainer: {
+    position: 'relative',
+    overflow: 'visible',
+  },
+  cardSurface: {
+    width: '100%',
+    height: '100%',
     borderRadius: 6,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.18)',
     backgroundColor: '#0f1f2b',
-    padding: 18,
+    padding: 12,
+    justifyContent: 'flex-end',
     overflow: 'hidden',
   },
-  focusedCard: {
+  focusBorder: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    bottom: -3,
+    left: -3,
     borderColor: '#ffffff',
-    backgroundColor: '#173b55',
-    transform: [{ scale: 1.035 }],
+    borderRadius: 9,
+    borderWidth: 3,
   },
   cardImage: {
     ...StyleSheet.absoluteFillObject,
@@ -257,12 +303,19 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(2, 8, 14, 0.5)',
   },
-  cardKicker: { color: '#ff626c', fontSize: 12, fontWeight: '800' },
+  cardKicker: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    color: '#ff626c',
+    fontSize: 11,
+    fontWeight: '800',
+  },
   cardTitle: {
     color: '#ffffff',
-    fontSize: 21,
+    fontSize: 16,
     fontWeight: '700',
-    marginTop: 48,
+    lineHeight: 20,
   },
-  cardCaption: { color: '#9fb0bd', fontSize: 14, marginTop: 8 },
+  cardCaption: { color: '#c0cbd4', fontSize: 12, marginTop: 3 },
 });

@@ -1,16 +1,28 @@
-import { useEffect, useReducer, useRef } from 'react';
-import { BackHandler, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import {
+  BackHandler,
+  StyleSheet,
+  Text,
+  View,
+  type FocusDestination,
+} from 'react-native';
 import { getRoute, type RootRoute } from '../navigation/routes';
 import { initialShellState, shellReducer } from '../navigation/shellState';
 import { tvPlatform } from '../platform/runtime';
+import {
+  MAIN_CONTENT_INSET_LEFT,
+  MAIN_CONTENT_INSET_RIGHT,
+} from '../theme/layout';
 import { IntroRegion } from './IntroRegion';
 import { MediaLayer } from './MediaLayer';
-import {MediaControllerProvider} from '../media/MediaController';
+import { MediaControllerProvider } from '../media/MediaController';
 import { PageContent, type PageContentHandle } from './PageContent';
 import { SideMenu } from './SideMenu';
 
 export function ApplicationShell() {
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
+  const [menuFocusDestination, setMenuFocusDestination] =
+    useState<FocusDestination>(null);
   const pageContentRef = useRef<PageContentHandle>(null);
   const activeRoute = getRoute(state.activeRoute);
 
@@ -29,11 +41,18 @@ export function ApplicationShell() {
     return () => subscription.remove();
   }, [state.menuExpanded]);
 
-  const selectRoute = (route: RootRoute) => {
+  const selectRoute = useCallback((route: RootRoute) => {
     dispatch({ type: 'select-route', route });
-    dispatch({ type: 'collapse-menu' });
-    requestAnimationFrame(() => pageContentRef.current?.focusFirst());
-  };
+    pageContentRef.current?.focusFirst();
+  }, []);
+
+  const handleMenuFocus = useCallback(() => {
+    dispatch({ type: 'focus-menu' });
+  }, []);
+
+  const handleContentFocus = useCallback(() => {
+    dispatch({ type: 'focus-content' });
+  }, []);
 
   return (
     <MediaControllerProvider>
@@ -49,13 +68,16 @@ export function ApplicationShell() {
             <PageContent
               ref={pageContentRef}
               route={activeRoute}
-              onContentFocus={() => dispatch({ type: 'focus-content' })}
+              active={!state.menuExpanded}
+              menuFocusDestination={menuFocusDestination}
+              onContentFocus={handleContentFocus}
             />
           </View>
           <SideMenu
             activeRoute={state.activeRoute}
             expanded={state.menuExpanded}
-            onFocus={() => dispatch({ type: 'focus-menu' })}
+            onFocus={handleMenuFocus}
+            onActiveItemChange={setMenuFocusDestination}
             onSelectRoute={selectRoute}
           />
         </View>
@@ -67,7 +89,12 @@ export function ApplicationShell() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#07111c' },
   overlay: { flex: 1 },
-  mainArea: { flex: 1, paddingLeft: 116, paddingRight: 44, paddingTop: 24 },
+  mainArea: {
+    flex: 1,
+    paddingLeft: MAIN_CONTENT_INSET_LEFT,
+    paddingRight: MAIN_CONTENT_INSET_RIGHT,
+    paddingTop: 24,
+  },
   topBar: {
     height: 38,
     flexDirection: 'row',

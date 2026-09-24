@@ -14,7 +14,7 @@ export function playFocusSound() {
     return;
   }
   lastPlayedAt = now;
-  AudioManager.playSystemSoundAsync(AudioSystemSound.KEYPRESS_NORMAL).catch(
+  AudioManager.playSystemSoundAsync(AudioSystemSound.SELECT).catch(
     () => undefined,
   );
 }
