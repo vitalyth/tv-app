@@ -42,14 +42,25 @@ describe('MediaPreviewEngine', () => {
     onEngineReady,
     onControllerChange,
     streamResolver,
-    debounceMs = 400,
+    imageDebounceMs = 300,
+    videoDebounceMs = 1000,
+    debounceMs,
   }: {
     onEngineReady: (engine: ReturnType<typeof useMediaPreviewEngine>) => void;
-    onControllerChange: (controller: ReturnType<typeof useMediaController>) => void;
+    onControllerChange: (
+      controller: ReturnType<typeof useMediaController>,
+    ) => void;
     streamResolver?: (item: MediaItem) => Promise<MediaStream>;
+    imageDebounceMs?: number;
+    videoDebounceMs?: number;
     debounceMs?: number;
   }) {
-    const engine = useMediaPreviewEngine({ debounceMs, streamResolver });
+    const engine = useMediaPreviewEngine({
+      imageDebounceMs,
+      videoDebounceMs,
+      debounceMs,
+      streamResolver,
+    });
     const controller = useMediaController();
 
     React.useEffect(() => {
@@ -63,13 +74,15 @@ describe('MediaPreviewEngine', () => {
     return null;
   }
 
-  it('stops previous video and shows image immediately on focus, then plays video after debounce', async () => {
+  it('stops previous video and clears image on focus, shows image after 300ms, then plays video after 1000ms', async () => {
     let engineRef!: ReturnType<typeof useMediaPreviewEngine>;
     let controllerRef!: ReturnType<typeof useMediaController>;
-    const streamResolver = jest.fn(async (item: MediaItem): Promise<MediaStream> => ({
-      url: `https://stream.example.com/${item.id}.m3u8`,
-      type: 'm3u8',
-    }));
+    const streamResolver = jest.fn(
+      async (item: MediaItem): Promise<MediaStream> => ({
+        url: `https://stream.example.com/${item.id}.m3u8`,
+        type: 'm3u8',
+      }),
+    );
 
     act(() => {
       renderer = ReactTestRenderer.create(
@@ -82,7 +95,8 @@ describe('MediaPreviewEngine', () => {
               controllerRef = c;
             }}
             streamResolver={streamResolver}
-            debounceMs={400}
+            imageDebounceMs={300}
+            videoDebounceMs={1000}
           />
         </MediaControllerProvider>,
       );
@@ -95,19 +109,34 @@ describe('MediaPreviewEngine', () => {
       engineRef.focusMediaItem(itemA);
     });
 
-    // Immediately: presentation should be 'background-image', status 'idle', item A
+    // Immediately on focus: video stopped and image cleared
     expect(controllerRef.presentation).toBe('background-image');
-    expect(controllerRef.item?.id).toBe('A');
+    expect(controllerRef.item).toBeUndefined();
     expect(controllerRef.status).toBe('idle');
     expect(streamResolver).not.toHaveBeenCalled();
 
-    // Advance 399ms - stream resolver still not called
+    // Advance 299ms: still no image
     act(() => {
-      jest.advanceTimersByTime(399);
+      jest.advanceTimersByTime(299);
+    });
+    expect(controllerRef.item).toBeUndefined();
+    expect(streamResolver).not.toHaveBeenCalled();
+
+    // Advance to 300ms: image debounce fires!
+    act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    expect(controllerRef.item?.id).toBe('A');
+    expect(controllerRef.presentation).toBe('background-image');
+    expect(streamResolver).not.toHaveBeenCalled();
+
+    // Advance to 999ms: video debounce has not fired yet
+    act(() => {
+      jest.advanceTimersByTime(699);
     });
     expect(streamResolver).not.toHaveBeenCalled();
 
-    // Advance to 400ms - debounce fires and stream resolves
+    // Advance to 1000ms: video debounce fires and stream resolves!
     await act(async () => {
       jest.advanceTimersByTime(1);
     });
@@ -121,13 +150,15 @@ describe('MediaPreviewEngine', () => {
     expect(controllerRef.stream?.url).toBe('https://stream.example.com/A.m3u8');
   });
 
-  it('handles rapid focus movement A -> B -> C -> D -> E without 5 uncontrolled requests', async () => {
+  it('handles rapid focus movement A -> B -> C -> D -> E without intermediate image or stream requests', async () => {
     let engineRef!: ReturnType<typeof useMediaPreviewEngine>;
     let controllerRef!: ReturnType<typeof useMediaController>;
-    const streamResolver = jest.fn(async (item: MediaItem): Promise<MediaStream> => ({
-      url: `https://stream.example.com/${item.id}.m3u8`,
-      type: 'm3u8',
-    }));
+    const streamResolver = jest.fn(
+      async (item: MediaItem): Promise<MediaStream> => ({
+        url: `https://stream.example.com/${item.id}.m3u8`,
+        type: 'm3u8',
+      }),
+    );
 
     act(() => {
       renderer = ReactTestRenderer.create(
@@ -140,7 +171,8 @@ describe('MediaPreviewEngine', () => {
               controllerRef = c;
             }}
             streamResolver={streamResolver}
-            debounceMs={400}
+            imageDebounceMs={300}
+            videoDebounceMs={1000}
           />
         </MediaControllerProvider>,
       );
@@ -156,14 +188,23 @@ describe('MediaPreviewEngine', () => {
       act(() => {
         jest.advanceTimersByTime(100);
       });
+      // While rapidly navigating (100ms < 300ms), no intermediate image is set
+      expect(controllerRef.item).toBeUndefined();
     }
 
     // Stream resolver should NOT have been called yet for any intermediate item
     expect(streamResolver).not.toHaveBeenCalled();
 
-    // After remaining 300ms, debounce for E expires
+    // After staying 200ms more on E (total 300ms on E), E image appears
+    act(() => {
+      jest.advanceTimersByTime(200);
+    });
+    expect(controllerRef.item?.id).toBe('E');
+    expect(streamResolver).not.toHaveBeenCalled();
+
+    // After remaining 700ms (total 1000ms on E), video debounce for E expires
     await act(async () => {
-      jest.advanceTimersByTime(300);
+      jest.advanceTimersByTime(700);
     });
 
     // Exactly ONE stream request was made: for E only!
@@ -204,7 +245,8 @@ describe('MediaPreviewEngine', () => {
               controllerRef = c;
             }}
             streamResolver={streamResolver}
-            debounceMs={400}
+            imageDebounceMs={300}
+            videoDebounceMs={1000}
           />
         </MediaControllerProvider>,
       );
@@ -218,9 +260,15 @@ describe('MediaPreviewEngine', () => {
       engineRef.focusMediaItem(slowItem);
     });
 
-    // Advance 400ms: debounce fires, streamResolver starts for 'slow'
+    // Advance 300ms: slowItem image appears
     act(() => {
-      jest.advanceTimersByTime(400);
+      jest.advanceTimersByTime(300);
+    });
+    expect(controllerRef.item?.id).toBe('slow');
+
+    // Advance to 1000ms: video debounce fires, streamResolver starts for 'slow'
+    act(() => {
+      jest.advanceTimersByTime(700);
     });
     expect(streamResolver).toHaveBeenCalledWith(slowItem);
 
@@ -229,8 +277,8 @@ describe('MediaPreviewEngine', () => {
       engineRef.focusMediaItem(fastItem);
     });
 
-    // Immediately fastItem image is displayed, slowItem is obsoleted
-    expect(controllerRef.item?.id).toBe('fast');
+    // Immediately on focus: video stopped and image cleared
+    expect(controllerRef.item).toBeUndefined();
     expect(controllerRef.presentation).toBe('background-image');
 
     // 3. Now slowItem promise finally resolves in background
@@ -241,28 +289,38 @@ describe('MediaPreviewEngine', () => {
       });
     });
 
-    // Verify slowItem did NOT win the race! Item remains 'fast'
-    expect(controllerRef.item?.id).toBe('fast');
+    // Verify slowItem did NOT win the race! Item is not slow
+    expect(controllerRef.item?.id).not.toBe('slow');
     expect(controllerRef.stream?.url).toBeUndefined();
 
-    // 4. Now fastItem debounce expires
+    // 4. Advance 300ms on fastItem: fastItem image appears
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    expect(controllerRef.item?.id).toBe('fast');
+
+    // 5. Advance to 1000ms on fastItem: fastItem video plays
     await act(async () => {
-      jest.advanceTimersByTime(400);
+      jest.advanceTimersByTime(700);
     });
 
     // fastItem correctly plays
     expect(controllerRef.item?.id).toBe('fast');
-    expect(controllerRef.stream?.url).toBe('https://stream.example.com/fast.m3u8');
+    expect(controllerRef.stream?.url).toBe(
+      'https://stream.example.com/fast.m3u8',
+    );
     expect(controllerRef.presentation).toBe('single-video');
   });
 
   it('stops video immediately when focusing a new item while already playing', async () => {
     let engineRef!: ReturnType<typeof useMediaPreviewEngine>;
     let controllerRef!: ReturnType<typeof useMediaController>;
-    const streamResolver = jest.fn(async (item: MediaItem): Promise<MediaStream> => ({
-      url: `https://stream.example.com/${item.id}.m3u8`,
-      type: 'm3u8',
-    }));
+    const streamResolver = jest.fn(
+      async (item: MediaItem): Promise<MediaStream> => ({
+        url: `https://stream.example.com/${item.id}.m3u8`,
+        type: 'm3u8',
+      }),
+    );
 
     act(() => {
       renderer = ReactTestRenderer.create(
@@ -275,7 +333,8 @@ describe('MediaPreviewEngine', () => {
               controllerRef = c;
             }}
             streamResolver={streamResolver}
-            debounceMs={400}
+            imageDebounceMs={300}
+            videoDebounceMs={1000}
           />
         </MediaControllerProvider>,
       );
@@ -284,12 +343,12 @@ describe('MediaPreviewEngine', () => {
     const itemA = createItem('A');
     const itemB = createItem('B');
 
-    // Focus and play Item A
+    // Focus and play Item A (advance 1000ms)
     act(() => {
       engineRef.focusMediaItem(itemA);
     });
     await act(async () => {
-      jest.advanceTimersByTime(400);
+      jest.advanceTimersByTime(1000);
     });
 
     expect(controllerRef.presentation).toBe('single-video');
@@ -299,8 +358,21 @@ describe('MediaPreviewEngine', () => {
       engineRef.focusMediaItem(itemB);
     });
 
-    // Previous video MUST STOP IMMEDIATELY (presentation reverted to background-image)
+    // Previous video MUST STOP IMMEDIATELY and image cleared
     expect(controllerRef.presentation).toBe('background-image');
+    expect(controllerRef.item).toBeUndefined();
+
+    // After 300ms, item B image appears
+    act(() => {
+      jest.advanceTimersByTime(300);
+    });
+    expect(controllerRef.item?.id).toBe('B');
+
+    // After 1000ms total, item B video plays
+    await act(async () => {
+      jest.advanceTimersByTime(700);
+    });
+    expect(controllerRef.presentation).toBe('single-video');
     expect(controllerRef.item?.id).toBe('B');
   });
 });

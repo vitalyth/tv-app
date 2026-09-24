@@ -66,6 +66,136 @@ function currentProgram(programs: unknown): ApiProgram | undefined {
   }) as ApiProgram | undefined;
 }
 
+function splitUrlSuffix(rawUrl: string): [string, string] {
+  const suffixIndex = rawUrl.search(/[?#]/);
+  return suffixIndex === -1
+    ? [rawUrl, '']
+    : [rawUrl.slice(0, suffixIndex), rawUrl.slice(suffixIndex)];
+}
+
+function replaceNumericQueryParams(
+  rawUrl: string,
+  keys: readonly string[],
+  value: number,
+): string {
+  return keys.reduce(
+    (url, key) =>
+      url.replace(
+        new RegExp(`([?&])(${key})=\\d+`, 'gi'),
+        (_match, separator: string, originalKey: string) =>
+          `${separator}${originalKey}=${value}`,
+      ),
+    rawUrl,
+  );
+}
+
+export function upgradeImageResolution(
+  rawUrl: string,
+  isBackdrop = false,
+): string {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return rawUrl;
+  }
+
+  const targetWidth = isBackdrop ? 1920 : 480;
+  const targetHeight = isBackdrop ? 1080 : 270;
+  const targetQuality = isBackdrop ? 90 : 78;
+
+  try {
+    // 1. Immergo / Channel 14 resize proxy: extract inner original URL for high-res backdrop
+    if (isBackdrop && rawUrl.includes('insight-images-do.immergo.tv/resize')) {
+      const match = rawUrl.match(/[?&]url=([^&]+)/);
+      if (match?.[1]) {
+        return decodeURIComponent(match[1]);
+      }
+    }
+
+    // 2. Kaltura OTT CDN: /width/X/height/Y/quality/Z
+    if (rawUrl.includes('images.frp1.ott.kaltura.com')) {
+      const [pathWithOrigin, suffix] = splitUrlSuffix(rawUrl);
+      let path = pathWithOrigin
+        .replace(/\/width\/\d+/gi, `/width/${targetWidth}`)
+        .replace(/\/height\/\d+/gi, `/height/${targetHeight}`)
+        .replace(/\/quality\/\d+/gi, `/quality/${targetQuality}`);
+      if (!/\/width\/\d+/i.test(path)) {
+        path = `${path.replace(/\/+$/, '')}/width/${targetWidth}/height/${targetHeight}`;
+      }
+      if (!/\/quality\/\d+/i.test(path)) {
+        path = `${path.replace(/\/+$/, '')}/quality/${targetQuality}`;
+      }
+      return `${path}${suffix}`;
+    }
+
+    // 3. Cloudinary (Reshet 13 & others): /image/upload/...
+    if (rawUrl.includes('/image/upload/')) {
+      const marker = '/image/upload/';
+      const idx = rawUrl.indexOf(marker);
+      if (idx !== -1) {
+        const prefix = rawUrl.substring(0, idx + marker.length);
+        const suffix = rawUrl.substring(idx + marker.length);
+        const parts = suffix.split('/');
+        const versionIdx = parts.findIndex(p => /^v\d+$/.test(p));
+        const hasNamedTransformation = /^t_[^/]+$/.test(parts[0] ?? '');
+        const rest =
+          versionIdx >= 0
+            ? parts.slice(versionIdx).join('/')
+            : parts.slice(hasNamedTransformation ? 1 : 0).join('/');
+        if (rest) {
+          return `${prefix}c_fill,g_auto,w_${targetWidth},h_${targetHeight},q_${targetQuality},f_auto/${rest}`;
+        }
+      }
+    }
+
+    // 4. Kan only serves the EPG thumbnail's original size and 1920x1080.
+    if (rawUrl.includes('kan.org.il/')) {
+      if (!isBackdrop) {
+        return rawUrl;
+      }
+      const withWidth = replaceNumericQueryParams(rawUrl, ['width'], 1920);
+      return replaceNumericQueryParams(withWidth, ['height'], 1080);
+    }
+
+    // 5. Query resize params used by Redge and generic image services.
+    if (/[?&](?:width|w|dstw|height|h|dsth)=\d+/i.test(rawUrl)) {
+      const withWidth = replaceNumericQueryParams(
+        rawUrl,
+        ['width', 'w', 'dstw'],
+        targetWidth,
+      );
+      const withHeight = replaceNumericQueryParams(
+        withWidth,
+        ['height', 'h', 'dsth'],
+        targetHeight,
+      );
+      return replaceNumericQueryParams(
+        withHeight,
+        ['quality', 'q'],
+        targetQuality,
+      );
+    }
+
+    // 6. Channel 14 WordPress image service: /images/{width}/{quality}/...
+    if (/\/images\/\d+\/\d+\//i.test(rawUrl)) {
+      return rawUrl.replace(
+        /\/images\/\d+\/\d+\//i,
+        `/images/${targetWidth}/${targetQuality}/`,
+      );
+    }
+
+    // 7. Path segment resize params like /w_300,h_200/
+    if (/[,/]w_\d+/.test(rawUrl)) {
+      return rawUrl
+        .replace(/w_\d+/gi, `w_${targetWidth}`)
+        .replace(/h_\d+/gi, `h_${targetHeight}`)
+        .replace(/q_\d+/gi, `q_${targetQuality}`);
+    }
+  } catch {
+    return rawUrl;
+  }
+
+  return rawUrl;
+}
+
 export function resolveBackdropUrl(
   program?: ApiProgram,
   channel?: ApiChannel,
@@ -74,20 +204,21 @@ export function resolveBackdropUrl(
   const programBackdrop =
     text(program?.backdrop) ?? text(program?.backdrop_image);
   if (programBackdrop) {
-    return proxiedImageUrl(programBackdrop);
+    return proxiedImageUrl(upgradeImageResolution(programBackdrop, true));
   }
   // 2. Highest-quality Program/VOD image
   const programImage = text(program?.image) ?? text(program?.poster);
   if (programImage) {
-    return proxiedImageUrl(programImage);
+    return proxiedImageUrl(upgradeImageResolution(programImage, true));
   }
   // 3. Highest-quality Channel artwork
   const channelArtwork =
     text(channel?.artwork) ?? text(channel?.backdrop) ?? text(channel?.poster);
   if (channelArtwork) {
-    return channelArtwork.startsWith('http')
-      ? proxiedImageUrl(channelArtwork)
-      : `${SERVICE_BASE_URL}/ch/${channelArtwork.replace(/^\//, '')}`;
+    const upgraded = upgradeImageResolution(channelArtwork, true);
+    return upgraded.startsWith('http')
+      ? proxiedImageUrl(upgraded)
+      : `${SERVICE_BASE_URL}/ch/${upgraded.replace(/^\//, '')}`;
   }
   // 4. Channel fallback
   return channelLogoUrl(channel?.logo);
@@ -100,14 +231,15 @@ export function resolvePosterUrl(
   // 1. Highest-quality Program/VOD image
   const programImage = text(program?.image) ?? text(program?.poster);
   if (programImage) {
-    return proxiedImageUrl(programImage);
+    return proxiedImageUrl(upgradeImageResolution(programImage, false));
   }
   // 2. Highest-quality Channel artwork
   const channelArtwork = text(channel?.artwork) ?? text(channel?.poster);
   if (channelArtwork) {
-    return channelArtwork.startsWith('http')
-      ? proxiedImageUrl(channelArtwork)
-      : `${SERVICE_BASE_URL}/ch/${channelArtwork.replace(/^\//, '')}`;
+    const upgraded = upgradeImageResolution(channelArtwork, false);
+    return upgraded.startsWith('http')
+      ? proxiedImageUrl(upgraded)
+      : `${SERVICE_BASE_URL}/ch/${upgraded.replace(/^\//, '')}`;
   }
   // 3. Channel fallback
   return channelLogoUrl(channel?.logo);

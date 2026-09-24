@@ -3,9 +3,13 @@ import type { MediaItem, MediaStream } from './player';
 import { useMediaActions } from './MediaController';
 import { resolveLiveChannelStream } from '../api/channels';
 
-export const DEFAULT_PREVIEW_DEBOUNCE_MS = 400;
+export const DEFAULT_IMAGE_DEBOUNCE_MS = 300;
+export const DEFAULT_VIDEO_DEBOUNCE_MS = 1000;
+export const DEFAULT_PREVIEW_DEBOUNCE_MS = DEFAULT_VIDEO_DEBOUNCE_MS;
 
 export interface MediaPreviewEngineOptions {
+  imageDebounceMs?: number;
+  videoDebounceMs?: number;
   debounceMs?: number;
   streamResolver?: (item: MediaItem) => Promise<MediaStream>;
 }
@@ -20,20 +24,26 @@ export function useMediaPreviewEngine(
   options: MediaPreviewEngineOptions = {},
 ): MediaPreviewEngine {
   const {
-    debounceMs = DEFAULT_PREVIEW_DEBOUNCE_MS,
+    imageDebounceMs = DEFAULT_IMAGE_DEBOUNCE_MS,
+    videoDebounceMs = options.debounceMs ?? DEFAULT_VIDEO_DEBOUNCE_MS,
     streamResolver = resolveLiveChannelStream,
   } = options;
 
-  const { play, showImage, stopVideo, markError } = useMediaActions();
+  const { play, showImage, stopAll, markError } = useMediaActions();
 
   const currentFocusedItemRef = useRef<MediaItem | null>(null);
   const sequenceIdRef = useRef<number>(0);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const imageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearTimer = useCallback(() => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
+  const clearTimers = useCallback(() => {
+    if (imageTimerRef.current) {
+      clearTimeout(imageTimerRef.current);
+      imageTimerRef.current = null;
+    }
+    if (videoTimerRef.current) {
+      clearTimeout(videoTimerRef.current);
+      videoTimerRef.current = null;
     }
   }, []);
 
@@ -46,19 +56,26 @@ export function useMediaPreviewEngine(
 
       currentFocusedItemRef.current = item;
 
-      // 1. Stop current video immediately
-      stopVideo();
+      // 1. Stop current video and clear previous image immediately
+      stopAll();
 
-      // 2. Cancel/obsolete pending previous media work
-      clearTimer();
+      // 2. Cancel/obsolete pending previous media timers
+      clearTimers();
       const sequence = ++sequenceIdRef.current;
 
-      // 3 & 4. Display the new image immediately
-      showImage(item);
+      // 3. Display the new image after imageDebounceMs (300ms)
+      imageTimerRef.current = setTimeout(() => {
+        if (
+          sequenceIdRef.current !== sequence ||
+          currentFocusedItemRef.current?.id !== item.id
+        ) {
+          return;
+        }
+        showImage(item);
+      }, imageDebounceMs);
 
-      // 5. Start a short configurable focus debounce
-      debounceTimerRef.current = setTimeout(async () => {
-        // 6. Confirm the same media item is still relevant
+      // 4. Start video resolution and playback after videoDebounceMs (1000ms)
+      videoTimerRef.current = setTimeout(async () => {
         if (
           sequenceIdRef.current !== sequence ||
           currentFocusedItemRef.current?.id !== item.id
@@ -67,10 +84,8 @@ export function useMediaPreviewEngine(
         }
 
         try {
-          // 7. Resolve the stream
           const stream = await streamResolver(item);
 
-          // Confirm again after async resolution
           if (
             sequenceIdRef.current !== sequence ||
             currentFocusedItemRef.current?.id !== item.id
@@ -78,10 +93,8 @@ export function useMediaPreviewEngine(
             return;
           }
 
-          // 8. When ready, transition Image -> Video
           play(item, stream);
         } catch {
-          // If stream resolution fails, remain on the backdrop/image safely
           if (
             sequenceIdRef.current === sequence &&
             currentFocusedItemRef.current?.id === item.id
@@ -89,22 +102,31 @@ export function useMediaPreviewEngine(
             markError();
           }
         }
-      }, debounceMs);
+      }, videoDebounceMs);
     },
-    [clearTimer, debounceMs, markError, play, showImage, stopVideo, streamResolver],
+    [
+      clearTimers,
+      imageDebounceMs,
+      markError,
+      play,
+      showImage,
+      stopAll,
+      streamResolver,
+      videoDebounceMs,
+    ],
   );
 
   const clearPreview = useCallback(() => {
-    clearTimer();
+    clearTimers();
     sequenceIdRef.current += 1;
     currentFocusedItemRef.current = null;
-    stopVideo();
-  }, [clearTimer, stopVideo]);
+    stopAll();
+  }, [clearTimers, stopAll]);
 
   const getCurrentItem = useCallback(() => currentFocusedItemRef.current, []);
 
   // Cleanup timers on unmount
-  useEffect(() => () => clearTimer(), [clearTimer]);
+  useEffect(() => () => clearTimers(), [clearTimers]);
 
   return useMemo(
     () => ({
