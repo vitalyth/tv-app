@@ -9,61 +9,6 @@ import { MEDIA_CAROUSEL_ITEM_SPACING } from '../theme/layout';
 
 const CARD_COUNT_PER_ROW = 4;
 
-interface SkeletonCardProps {
-  width: number;
-  height: number;
-  delayMs: number;
-}
-
-const SkeletonCard = memo(function SkeletonCardView({
-  width,
-  height,
-  delayMs,
-}: SkeletonCardProps) {
-  const pulseAnim = useRef(new Animated.Value(0.15)).current;
-
-  useEffect(() => {
-    let anim: Animated.CompositeAnimation | null = null;
-    const timer = setTimeout(() => {
-      anim = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 0.85,
-            duration: 850,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 0.15,
-            duration: 850,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ]),
-      );
-      anim.start();
-    }, delayMs);
-
-    return () => {
-      clearTimeout(timer);
-      anim?.stop();
-    };
-  }, [delayMs, pulseAnim]);
-
-  return (
-    <View testID="skeleton-card" style={[styles.cardBase, { width, height }]}>
-      {/* Animated pulsing color overlay */}
-      <Animated.View style={[styles.shimmerOverlay, { opacity: pulseAnim }]} />
-
-      {/* Top placeholder: Badge */}
-      <View style={styles.badgePlaceholder} />
-
-      {/* Bottom placeholder: Title line */}
-      <View style={styles.titlePlaceholder} />
-    </View>
-  );
-});
-
 interface SkeletonRowsProps {
   cardWidth: number;
   cardHeight: number;
@@ -73,44 +18,82 @@ export const SkeletonRows = memo(function SkeletonRowsView({
   cardWidth,
   cardHeight,
 }: SkeletonRowsProps) {
-  const headingPulseAnim = useRef(new Animated.Value(0.3)).current;
+  const colorAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([
-        Animated.timing(headingPulseAnim, {
-          toValue: 0.7,
+        Animated.timing(colorAnim, {
+          toValue: 1,
           duration: 900,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
+          useNativeDriver: false,
         }),
-        Animated.timing(headingPulseAnim, {
-          toValue: 0.3,
+        Animated.timing(colorAnim, {
+          toValue: 0,
           duration: 900,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
+          useNativeDriver: false,
         }),
       ]),
     );
     anim.start();
     return () => anim.stop();
-  }, [headingPulseAnim]);
+  }, [colorAnim]);
+
+  // Phase-shifted color interpolations for each card column to create a wave effect
+  // using direct backgroundColor (0 extra offscreen GPU layers, 0 MB VRAM)
+  const cardColor0 = colorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#131e29', '#24374a'],
+  });
+
+  const cardColor1 = colorAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: ['#182635', '#24374a', '#131e29'],
+  });
+
+  const cardColor2 = colorAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: ['#24374a', '#131e29', '#182635'],
+  });
+
+  const cardColor3 = colorAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: ['#182635', '#131e29', '#24374a'],
+  });
+
+  const cardColors = [cardColor0, cardColor1, cardColor2, cardColor3];
+
+  const headingColor = colorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#192837', '#253749'],
+  });
 
   return (
     <View style={styles.container}>
       {/* Row 1 */}
       <View style={styles.row}>
         <Animated.View
-          style={[styles.headingPlaceholder, { opacity: headingPulseAnim }]}
+          style={[styles.headingPlaceholder, { backgroundColor: headingColor }]}
         />
         <View style={styles.cardsRow}>
           {Array.from({ length: CARD_COUNT_PER_ROW }).map((_, idx) => (
-            <SkeletonCard
+            <Animated.View
               key={`sk-row1-${idx}`}
-              width={cardWidth}
-              height={cardHeight}
-              delayMs={idx * 160}
-            />
+              testID="skeleton-card"
+              style={[
+                styles.cardBase,
+                {
+                  width: cardWidth,
+                  height: cardHeight,
+                  backgroundColor: cardColors[idx % 4],
+                },
+              ]}
+            >
+              <View style={styles.badgePlaceholder} />
+              <View style={styles.titlePlaceholder} />
+            </Animated.View>
           ))}
         </View>
       </View>
@@ -121,17 +104,26 @@ export const SkeletonRows = memo(function SkeletonRowsView({
           style={[
             styles.headingPlaceholder,
             styles.secondaryHeadingPlaceholder,
-            { opacity: headingPulseAnim },
+            { backgroundColor: headingColor },
           ]}
         />
         <View style={styles.cardsRow}>
           {Array.from({ length: CARD_COUNT_PER_ROW }).map((_, idx) => (
-            <SkeletonCard
+            <Animated.View
               key={`sk-row2-${idx}`}
-              width={cardWidth}
-              height={cardHeight}
-              delayMs={120 + idx * 160}
-            />
+              testID="skeleton-card"
+              style={[
+                styles.cardBase,
+                {
+                  width: cardWidth,
+                  height: cardHeight,
+                  backgroundColor: cardColors[(idx + 2) % 4],
+                },
+              ]}
+            >
+              <View style={styles.badgePlaceholder} />
+              <View style={styles.titlePlaceholder} />
+            </Animated.View>
           ))}
         </View>
       </View>
@@ -154,7 +146,6 @@ const styles = StyleSheet.create({
     width: 150,
     height: 20,
     borderRadius: 4,
-    backgroundColor: '#203244',
     marginBottom: 10,
   },
   secondaryHeadingPlaceholder: {
@@ -165,16 +156,11 @@ const styles = StyleSheet.create({
     gap: MEDIA_CAROUSEL_ITEM_SPACING,
   },
   cardBase: {
-    backgroundColor: '#131e29',
     borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
     justifyContent: 'space-between',
     padding: 10,
-  },
-  shimmerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#263a4d',
   },
   badgePlaceholder: {
     width: 24,

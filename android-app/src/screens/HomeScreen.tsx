@@ -75,6 +75,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
       [],
     );
     const [showSkeleton, setShowSkeleton] = useState(true);
+    const [contentReady, setContentReady] = useState(false);
     const skeletonOpacity = useRef(new Animated.Value(1)).current;
     const contentOpacity = useRef(new Animated.Value(0)).current;
     const [loadFailed, setLoadFailed] = useState(false);
@@ -273,6 +274,26 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
           if (firstItem) {
             previewEngineRef.current.focusMediaItem(firstItem);
             onItemFocusedRef.current?.(firstItem);
+          }
+
+          Animated.timing(skeletonOpacity, {
+            toValue: 0,
+            duration: 250,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: true,
+          }).start(() => {
+            if (!mounted) {
+              return;
+            }
+            setShowSkeleton(false);
+            setContentReady(true);
+            Animated.timing(contentOpacity, {
+              toValue: 1,
+              duration: 250,
+              easing: Easing.out(Easing.ease),
+              useNativeDriver: true,
+            }).start();
+
             setTimeout(() => {
               if (!mounted) {
                 return;
@@ -282,32 +303,15 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
                   ? continueCarouselRef
                   : liveCarouselRef;
               targetCarousel.current?.focusIndex(0);
-            }, 100);
-          }
+            }, 60);
+          });
         })
-        .catch(() => mounted && setLoadFailed(true))
-        .finally(() => {
+        .catch(() => {
           if (!mounted) {
             return;
           }
-          Animated.parallel([
-            Animated.timing(skeletonOpacity, {
-              toValue: 0,
-              duration: 400,
-              easing: Easing.out(Easing.ease),
-              useNativeDriver: true,
-            }),
-            Animated.timing(contentOpacity, {
-              toValue: 1,
-              duration: 400,
-              easing: Easing.out(Easing.ease),
-              useNativeDriver: true,
-            }),
-          ]).start(() => {
-            if (mounted) {
-              setShowSkeleton(false);
-            }
-          });
+          setLoadFailed(true);
+          setShowSkeleton(false);
         });
 
       return () => {
@@ -445,15 +449,16 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
           </Animated.View>
         ) : null}
 
-        <Animated.View
-          style={[
-            styles.rowsContainer,
-            {
-              opacity: contentOpacity,
-              transform: [{ translateY: translateYAnim }],
-            },
-          ]}
-        >
+        {contentReady ? (
+          <Animated.View
+            style={[
+              styles.rowsContainer,
+              {
+                opacity: contentOpacity,
+                transform: [{ translateY: translateYAnim }],
+              },
+            ]}
+          >
           {/* שורה 1: המשך צפייה (מוסתרת כשרעיונית אין פריטים) */}
           {hasContinue ? (
             <Animated.View
@@ -552,6 +557,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
             </Animated.View>
           ) : null}
         </Animated.View>
+        ) : null}
       </View>
     );
   },
