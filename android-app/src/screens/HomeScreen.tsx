@@ -8,7 +8,6 @@ import {
   useState,
 } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   Easing,
   StyleSheet,
@@ -38,6 +37,7 @@ import type { MediaCarouselHandle } from '../components/MediaCarousel.types';
 import { LiveChannelCard } from '../components/cards/LiveChannelCard';
 import { VodCard } from '../components/cards/VodCard';
 import { ContinueWatchingCard } from '../components/cards/ContinueWatchingCard';
+import { SkeletonRows } from '../components/SkeletonRows';
 import {
   MAIN_CONTENT_INSET_LEFT,
   MAIN_CONTENT_INSET_RIGHT,
@@ -74,7 +74,9 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     const [continueItems, setContinueItems] = useState<ContinueWatchingItem[]>(
       [],
     );
-    const [loading, setLoading] = useState(true);
+    const [showSkeleton, setShowSkeleton] = useState(true);
+    const skeletonOpacity = useRef(new Animated.Value(1)).current;
+    const contentOpacity = useRef(new Animated.Value(0)).current;
     const [loadFailed, setLoadFailed] = useState(false);
 
     const { width: windowWidth } = useWindowDimensions();
@@ -284,13 +286,35 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
           }
         })
         .catch(() => mounted && setLoadFailed(true))
-        .finally(() => mounted && setLoading(false));
+        .finally(() => {
+          if (!mounted) {
+            return;
+          }
+          Animated.parallel([
+            Animated.timing(skeletonOpacity, {
+              toValue: 0,
+              duration: 400,
+              easing: Easing.out(Easing.ease),
+              useNativeDriver: true,
+            }),
+            Animated.timing(contentOpacity, {
+              toValue: 1,
+              duration: 400,
+              easing: Easing.out(Easing.ease),
+              useNativeDriver: true,
+            }),
+          ]).start(() => {
+            if (mounted) {
+              setShowSkeleton(false);
+            }
+          });
+        });
 
       return () => {
         mounted = false;
         previewEngineRef.current.clearPreview();
       };
-    }, []);
+    }, [contentOpacity, skeletonOpacity]);
 
     const getActiveCarousel = useCallback(() => {
       switch (lastFocusedRowRef.current) {
@@ -405,15 +429,29 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
 
     return (
       <View style={styles.root}>
-        {loading ? <ActivityIndicator color="#ffffff" size="large" /> : null}
         {loadFailed ? (
           <Text style={styles.error}>{t('homeContentUnavailable')}</Text>
+        ) : null}
+
+        {showSkeleton ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.skeletonContainer,
+              { opacity: skeletonOpacity },
+            ]}
+          >
+            <SkeletonRows cardWidth={cardWidth} cardHeight={cardHeight} />
+          </Animated.View>
         ) : null}
 
         <Animated.View
           style={[
             styles.rowsContainer,
-            { transform: [{ translateY: translateYAnim }] },
+            {
+              opacity: contentOpacity,
+              transform: [{ translateY: translateYAnim }],
+            },
           ]}
         >
           {/* שורה 1: המשך צפייה (מוסתרת כשרעיונית אין פריטים) */}
@@ -520,7 +558,11 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
 );
 
 const styles = StyleSheet.create({
-  root: { flex: 1, marginTop: 22, overflow: 'visible' },
+  root: { flex: 1, marginTop: 22, overflow: 'visible', position: 'relative' },
+  skeletonContainer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
   rowsContainer: { flex: 1, overflow: 'visible' },
   row: { overflow: 'visible' },
   heading: {

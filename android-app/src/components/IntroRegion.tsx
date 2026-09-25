@@ -53,19 +53,7 @@ export const IntroRegion = memo(function IntroRegionView({
   }, [currentKey, fadeAnim]);
 
   if (!focusedItem) {
-    return (
-      <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
-        <Text numberOfLines={1} style={styles.fallbackEyebrow}>
-          {route.eyebrow}
-        </Text>
-        <Text numberOfLines={1} style={styles.title}>
-          {route.title}
-        </Text>
-        <Text numberOfLines={2} style={styles.description}>
-          {route.description}
-        </Text>
-      </Animated.View>
-    );
+    return <View style={styles.root} />;
   }
 
   const isLive = focusedItem.kind === 'live';
@@ -223,12 +211,6 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
-  },
-  fallbackEyebrow: {
-    color: '#63bfff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
   },
   title: {
     color: '#FFFFFF',
