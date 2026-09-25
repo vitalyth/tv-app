@@ -1,8 +1,10 @@
 import { memo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import type { ContinueWatchingItem } from '../../services/watchProgress';
 import { RemoteImage } from '../RemoteImage';
 import { t } from '../../i18n';
+
+const cardScrim = require('../../assets/card_scrim.png');
 
 interface ContinueWatchingCardProps {
   item: ContinueWatchingItem;
@@ -37,19 +39,24 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardView({
             style={styles.cardImage}
           />
         ) : null}
-        <View style={styles.cardShade} />
+        {/* Smooth, continuous gradient scrim without horizontal stripes */}
+        <Image
+          source={cardScrim}
+          resizeMode="stretch"
+          style={StyleSheet.absoluteFill}
+        />
 
         <View style={styles.kickerRow}>
           <Text style={styles.cardKicker}>{t('continueWatching')}</Text>
           <Text style={styles.percentText}>{percent}%</Text>
         </View>
 
-        <Text numberOfLines={1} style={styles.cardTitle}>
-          {item.title}
-        </Text>
-        <Text numberOfLines={1} style={styles.cardCaption}>
-          {item.seriesTitle ?? item.channelName ?? ''}
-        </Text>
+        <View style={styles.bottomBar}>
+          <Text numberOfLines={1} style={styles.cardTitle}>
+            {item.title}
+            {item.seriesTitle ? ` · ${item.seriesTitle}` : ''}
+          </Text>
+        </View>
 
         <View style={styles.progressBarTrack}>
           <View style={[styles.progressBarFill, { width: `${percent}%` }]} />
@@ -129,17 +136,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  bottomBar: {
+    width: '100%',
+    paddingHorizontal: 10,
+    paddingBottom: 11,
+    justifyContent: 'flex-end',
+  },
   cardTitle: {
     color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-    lineHeight: 20,
-  },
-  cardCaption: {
-    color: '#c0cbd4',
     fontSize: 12,
-    marginTop: 3,
-    marginBottom: 4,
+    fontWeight: '700',
+    lineHeight: 16,
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   progressBarTrack: {
     position: 'absolute',

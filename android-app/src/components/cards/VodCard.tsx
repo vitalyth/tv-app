@@ -1,7 +1,9 @@
 import { memo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import type { MediaItem } from '../../media/player';
 import { RemoteImage } from '../RemoteImage';
+
+const cardScrim = require('../../assets/card_scrim.png');
 
 interface ChannelLogoBadgeProps {
   uri: string;
@@ -57,9 +59,13 @@ export const VodCard = memo(function VodCardView({
       : undefined;
   const season = item.seasonName || item.channelNumber;
 
+  const displayTitle = episodeName
+    ? `${programName} · ${episodeName}`
+    : programName;
+
   return (
     <View
-      accessibilityLabel={`VOD: ${item.channelName ?? ''} - ${programName}${season ? ` - ${season}` : ''}${episodeName ? ` - ${episodeName}` : ''}`}
+      accessibilityLabel={`VOD: ${item.channelName ?? ''} - ${displayTitle}${season ? ` - ${season}` : ''}`}
       style={[
         styles.cardContainer,
         { width, height },
@@ -76,16 +82,16 @@ export const VodCard = memo(function VodCardView({
           />
         ) : null}
 
-        {/* Multi-layer gradient scrim for contrast against background artwork */}
-        <View pointerEvents="none" style={styles.cardBaseTint} />
-        <View pointerEvents="none" style={styles.scrimLayer1} />
-        <View pointerEvents="none" style={styles.scrimLayer2} />
-        <View pointerEvents="none" style={styles.scrimLayer3} />
+        {/* Smooth, continuous gradient scrim without horizontal stripes */}
+        <Image
+          source={cardScrim}
+          resizeMode="stretch"
+          style={StyleSheet.absoluteFill}
+        />
 
-        {/* All content at the very bottom */}
-        <View style={styles.bottomContent}>
-          {/* 1. Meta row: Channel Logo, VOD badge, Season */}
-          <View style={styles.metaRow}>
+        {/* 1. Top bar: Channel logo, VOD badge, Season badge */}
+        <View style={styles.topBar}>
+          <View style={styles.topBarLeft}>
             {showLogo ? (
               <ChannelLogoBadge
                 uri={item.fallbackImageUrl!}
@@ -95,28 +101,19 @@ export const VodCard = memo(function VodCardView({
             <View style={styles.kickerBadge}>
               <Text style={styles.cardKicker}>VOD</Text>
             </View>
-            {season ? (
-              <View style={styles.seasonBadge}>
-                <Text style={styles.seasonBadgeText}>{season}</Text>
-              </View>
-            ) : null}
           </View>
-
-          {/* 2. Program name */}
-          <Text numberOfLines={1} style={styles.programTitle}>
-            {programName}
-          </Text>
-
-          {/* 3. Episode name */}
-          {episodeName ? (
-            <Text numberOfLines={1} style={styles.episodeTitle}>
-              {episodeName}
-            </Text>
-          ) : !showLogo && item.channelName ? (
-            <Text numberOfLines={1} style={styles.episodeTitle}>
-              {item.channelName}
-            </Text>
+          {season ? (
+            <View style={styles.seasonBadge}>
+              <Text style={styles.seasonBadgeText}>{season}</Text>
+            </View>
           ) : null}
+        </View>
+
+        {/* 2. Bottom bar: Program & Episode name in a single compact line */}
+        <View style={styles.bottomBar}>
+          <Text numberOfLines={1} style={styles.cardTitle}>
+            {displayTitle}
+          </Text>
         </View>
       </View>
       {focused ? <View pointerEvents="none" style={styles.focusBorder} /> : null}
@@ -165,45 +162,19 @@ const styles = StyleSheet.create({
     width: undefined,
     height: undefined,
   },
-  cardBaseTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(2, 6, 12, 0.2)',
-  },
-  scrimLayer1: {
+  topBar: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '75%',
-    backgroundColor: 'rgba(2, 6, 12, 0.35)',
+    top: 9,
+    left: 10,
+    right: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  scrimLayer2: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '52%',
-    backgroundColor: 'rgba(2, 6, 12, 0.45)',
-  },
-  scrimLayer3: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '28%',
-    backgroundColor: 'rgba(2, 6, 12, 0.45)',
-  },
-  bottomContent: {
-    width: '100%',
-    paddingHorizontal: 10,
-    paddingBottom: 9,
-    justifyContent: 'flex-end',
-  },
-  metaRow: {
+  topBarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 4,
   },
   logoBadge: {
     width: 22,
@@ -220,7 +191,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   kickerBadge: {
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+    backgroundColor: 'rgba(56, 189, 248, 0.22)',
     paddingHorizontal: 5,
     paddingVertical: 1.5,
     borderRadius: 3,
@@ -232,8 +203,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   seasonBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    paddingHorizontal: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    paddingHorizontal: 6,
     paddingVertical: 1.5,
     borderRadius: 3,
   },
@@ -242,21 +213,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
   },
-  programTitle: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 17,
-    textShadowColor: 'rgba(0, 0, 0, 0.95)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+  bottomBar: {
+    width: '100%',
+    paddingHorizontal: 10,
+    paddingBottom: 9,
+    justifyContent: 'flex-end',
   },
-  episodeTitle: {
-    color: '#cbd5e1',
-    fontSize: 11,
-    fontWeight: '500',
-    lineHeight: 15,
-    marginTop: 2,
+  cardTitle: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,

@@ -1,7 +1,9 @@
 import { memo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import type { MediaItem } from '../../media/player';
 import { RemoteImage } from '../RemoteImage';
+
+const cardScrim = require('../../assets/card_scrim.png');
 
 interface ChannelLogoBadgeProps {
   uri: string;
@@ -72,21 +74,16 @@ export const LiveChannelCard = memo(function LiveChannelCardView({
           />
         ) : null}
 
-        {/* Multi-layer gradient scrim for contrast against background artwork */}
-        <View pointerEvents="none" style={styles.cardBaseTint} />
-        <View pointerEvents="none" style={styles.scrimLayer1} />
-        <View pointerEvents="none" style={styles.scrimLayer2} />
-        <View pointerEvents="none" style={styles.scrimLayer3} />
+        {/* Smooth, continuous gradient scrim without horizontal stripes */}
+        <Image
+          source={cardScrim}
+          resizeMode="stretch"
+          style={StyleSheet.absoluteFill}
+        />
 
-        {/* All content at the very bottom */}
-        <View
-          style={[
-            styles.bottomContent,
-            hasProgress && styles.bottomContentWithProgress,
-          ]}
-        >
-          {/* 1. Meta row: Channel Logo, LIVE badge */}
-          <View style={styles.metaRow}>
+        {/* 1. Top bar: Channel logo, LIVE badge, Time range */}
+        <View style={styles.topBar}>
+          <View style={styles.topBarLeft}>
             {showLogo ? (
               <ChannelLogoBadge
                 uri={channel.fallbackImageUrl!}
@@ -103,18 +100,21 @@ export const LiveChannelCard = memo(function LiveChannelCardView({
               </Text>
             ) : null}
           </View>
+          {channel.timeRange ? (
+            <Text style={styles.timeRange}>{channel.timeRange}</Text>
+          ) : null}
+        </View>
 
-          {/* 2. למטה שם התוכנית (Below it, Program Name) */}
-          <Text numberOfLines={1} style={styles.programTitle}>
+        {/* 2. Bottom bar: Program Name in a single compact line */}
+        <View
+          style={[
+            styles.bottomBar,
+            hasProgress && styles.bottomBarWithProgress,
+          ]}
+        >
+          <Text numberOfLines={1} style={styles.cardTitle}>
             {channel.title}
           </Text>
-
-          {/* 3. זמן (Time) */}
-          {channel.timeRange ? (
-            <Text numberOfLines={1} style={styles.timeRange}>
-              {channel.timeRange}
-            </Text>
-          ) : null}
         </View>
 
         {/* Progress bar at the bottom edge */}
@@ -175,48 +175,19 @@ const styles = StyleSheet.create({
     width: undefined,
     height: undefined,
   },
-  cardBaseTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(2, 6, 12, 0.2)',
-  },
-  scrimLayer1: {
+  topBar: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '75%',
-    backgroundColor: 'rgba(2, 6, 12, 0.35)',
+    top: 9,
+    left: 10,
+    right: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  scrimLayer2: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '52%',
-    backgroundColor: 'rgba(2, 6, 12, 0.45)',
-  },
-  scrimLayer3: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '28%',
-    backgroundColor: 'rgba(2, 6, 12, 0.45)',
-  },
-  bottomContent: {
-    width: '100%',
-    paddingHorizontal: 10,
-    paddingBottom: 9,
-    justifyContent: 'flex-end',
-  },
-  bottomContentWithProgress: {
-    paddingBottom: 12,
-  },
-  metaRow: {
+  topBarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 4,
   },
   logoBadge: {
     width: 22,
@@ -249,21 +220,28 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
-  programTitle: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 17,
+  timeRange: {
+    color: '#cbd5e1',
+    fontSize: 11,
+    fontWeight: '600',
     textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
   },
-  timeRange: {
-    color: '#cbd5e1',
-    fontSize: 11,
-    fontWeight: '500',
-    lineHeight: 15,
-    marginTop: 2,
+  bottomBar: {
+    width: '100%',
+    paddingHorizontal: 10,
+    paddingBottom: 9,
+    justifyContent: 'flex-end',
+  },
+  bottomBarWithProgress: {
+    paddingBottom: 11,
+  },
+  cardTitle: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
