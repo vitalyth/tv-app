@@ -41,16 +41,25 @@ export const IntroRegion = memo(function IntroRegionView({
   focusedItem,
 }: IntroRegionProps) {
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
   const currentKey = focusedItem?.id ?? route.id;
 
   useEffect(() => {
     fadeAnim.setValue(0);
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-  }, [currentKey, fadeAnim]);
+    slideAnim.setValue(22);
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 280,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 280,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [currentKey, fadeAnim, slideAnim]);
 
   if (!focusedItem) {
     return <View style={styles.root} />;
@@ -82,7 +91,15 @@ export const IntroRegion = memo(function IntroRegionView({
   const logoUri = focusedItem.fallbackImageUrl || focusedItem.imageUrl;
 
   return (
-    <Animated.View style={[styles.root, { opacity: fadeAnim }]}>
+    <Animated.View
+      style={[
+        styles.root,
+        {
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }],
+        },
+      ]}
+    >
       {/* 1. Metadata row with Logo, Badge, Subtitle, TimeRange */}
       <View style={styles.metadataRow}>
         {logoUri ? (
@@ -136,9 +153,8 @@ export const IntroRegion = memo(function IntroRegionView({
 const styles = StyleSheet.create({
   root: {
     height: 180,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     maxWidth: '75%',
-    overflow: 'hidden',
   },
   metadataRow: {
     flexDirection: 'row',

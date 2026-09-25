@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
   BackHandler,
   StyleSheet,
@@ -21,6 +21,27 @@ import type { MediaItem } from '../media/player';
 import { MediaControllerProvider } from '../media/MediaController';
 import { PageContent, type PageContentHandle } from './PageContent';
 import { SideMenu } from './SideMenu';
+
+function getFormattedTime(): string {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+const LiveClock = memo(function LiveClockView() {
+  const [time, setTime] = useState(getFormattedTime);
+
+  useEffect(() => {
+    const update = () => setTime(getFormattedTime());
+    update();
+    const interval = setInterval(update, 1000);
+    (interval as unknown as { unref?: () => void }).unref?.();
+    return () => clearInterval(interval);
+  }, []);
+
+  return <Text style={styles.clock}>{time}</Text>;
+});
 
 export function ApplicationShell() {
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
@@ -93,7 +114,7 @@ export function ApplicationShell() {
           <View style={styles.mainArea}>
             <View style={styles.topBar}>
               <Text style={styles.platform}>{tvPlatform.displayName}</Text>
-              <Text style={styles.clock}>20:45</Text>
+              <LiveClock />
             </View>
             <IntroRegion route={activeRoute} focusedItem={focusedMediaItem} />
             <PageContent
@@ -125,14 +146,26 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingLeft: MAIN_CONTENT_INSET_LEFT,
     paddingRight: MAIN_CONTENT_INSET_RIGHT,
-    paddingTop: 24,
+    paddingTop: 8,
   },
   topBar: {
-    height: 38,
+    height: 18,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 4,
   },
-  platform: { color: '#8da1b2', fontSize: 13, fontWeight: '600' },
-  clock: { color: '#dce7ef', fontSize: 20 },
+  platform: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.3,
+  },
+  clock: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
 });
+

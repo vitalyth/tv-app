@@ -132,6 +132,7 @@ describe('HomeScreen', () => {
           />
         </MediaControllerProvider>,
       );
+      await new Promise(r => setTimeout(() => r(null), 600));
     });
 
     const root = renderer!.root;
@@ -185,6 +186,7 @@ describe('HomeScreen', () => {
           />
         </MediaControllerProvider>,
       );
+      await new Promise(r => setTimeout(() => r(null), 600));
     });
 
     const root = renderer!.root;

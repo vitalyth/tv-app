@@ -1,12 +1,15 @@
 import { memo, useLayoutEffect, useRef } from 'react';
 import {
   Animated,
+  Image,
   StyleSheet,
   TVFocusGuideView,
   View,
 } from 'react-native';
 import { routes, type RootRoute } from '../navigation/routes';
 import { SideMenuItem } from './SideMenuItem';
+
+const menuShadow = require('../assets/menu_shadow.png');
 
 interface SideMenuProps {
   activeRoute: RootRoute;
@@ -38,11 +41,6 @@ export const SideMenu = memo(function SideMenuView({
     inputRange: [0, 1],
     outputRange: [-172, 0],
   });
-  const labelOpacity = reveal.interpolate({
-    inputRange: [0, 0.6, 1],
-    outputRange: [0, 0, 1],
-    extrapolate: 'clamp',
-  });
 
   return (
     <View pointerEvents="box-none" style={styles.root}>
@@ -53,7 +51,18 @@ export const SideMenu = memo(function SideMenuView({
             transform: [{ translateX: panelTranslate }],
           },
         ]}
-      />
+      >
+        <View style={styles.panelSurface} />
+        {expanded ? (
+          <View pointerEvents="none" style={styles.shadowEdge}>
+            <Image
+              source={menuShadow}
+              style={styles.shadowImage}
+              resizeMode="stretch"
+            />
+          </View>
+        ) : null}
+      </Animated.View>
       <TVFocusGuideView
         trapFocusUp
         trapFocusDown
@@ -68,7 +77,6 @@ export const SideMenu = memo(function SideMenuView({
               ref={active ? onActiveItemChange : undefined}
               active={active}
               expanded={expanded}
-              labelOpacity={labelOpacity}
               onFocus={onFocus}
               onSelectRoute={onSelectRoute}
               route={route}
@@ -84,20 +92,45 @@ const styles = StyleSheet.create({
   root: {
     position: 'absolute',
     zIndex: 20,
-    elevation: 20,
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 320,
+  },
+  panel: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 304,
+  },
+  panelSurface: {
+    position: 'absolute',
     left: 0,
     top: 0,
     bottom: 0,
     width: 240,
+    backgroundColor: 'rgba(8, 10, 14, 0.94)',
   },
-  panel: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(6, 12, 20, 0.88)',
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+  shadowEdge: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 240,
+    width: 64,
+  },
+  shadowImage: {
+    width: '100%',
+    height: '100%',
   },
   items: {
+    position: 'relative',
+    zIndex: 10,
+    width: 240,
     flex: 1,
     paddingTop: 36,
   },
 });
+
+
+

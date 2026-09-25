@@ -1,5 +1,5 @@
-import { forwardRef, memo } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { forwardRef, memo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { RootRoute, RouteDefinition } from '../navigation/routes';
 import { SideMenuIcon } from './SideMenuIcon';
 
@@ -7,16 +7,18 @@ interface SideMenuItemProps {
   route: RouteDefinition;
   active: boolean;
   expanded: boolean;
-  labelOpacity: Animated.AnimatedInterpolation<number>;
   onFocus: () => void;
   onSelectRoute: (route: RootRoute) => void;
 }
 
 export const SideMenuItem = memo(
   forwardRef<View, SideMenuItemProps>(function SideMenuItemView(
-    { route, active, expanded, labelOpacity, onFocus, onSelectRoute },
+    { route, active, expanded, onFocus, onSelectRoute },
     ref,
   ) {
+    const [focused, setFocused] = useState(false);
+    const isHighlighted = (focused && expanded) || (!expanded && active);
+
     return (
       <Pressable
         ref={ref}
@@ -24,47 +26,39 @@ export const SideMenuItem = memo(
         accessibilityRole="button"
         focusable={expanded || active}
         unstable_pressDelay={0}
-        onFocus={onFocus}
+        onFocus={() => {
+          setFocused(true);
+          onFocus();
+        }}
+        onBlur={() => {
+          setFocused(false);
+        }}
         onPressIn={() => onSelectRoute(route.id)}
-        style={({ focused }) => {
-          const isHighlighted = (focused && expanded) || (!expanded && active);
-          return [
-            styles.item,
-            expanded ? styles.itemExpanded : styles.itemCollapsed,
-            isHighlighted && styles.itemHighlighted,
-          ];
-        }}
+        style={[
+          styles.item,
+          expanded ? styles.itemExpanded : styles.itemCollapsed,
+          isHighlighted && styles.itemHighlighted,
+        ]}
       >
-        {({ focused }) => {
-          const isHighlighted = (focused && expanded) || (!expanded && active);
-          const iconColor = isHighlighted ? '#ffffff' : '#9db1c1';
-          return (
-            <>
-              <View style={styles.iconContainer}>
-                <SideMenuIcon
-                  name={route.id}
-                  size={22}
-                  color={iconColor}
-                  highlighted={isHighlighted}
-                />
-              </View>
-              {expanded ? (
-                <Animated.Text
-                  numberOfLines={1}
-                  style={[
-                    styles.label,
-                    isHighlighted
-                      ? styles.labelHighlighted
-                      : styles.labelDimmed,
-                    { opacity: labelOpacity },
-                  ]}
-                >
-                  {route.label}
-                </Animated.Text>
-              ) : null}
-            </>
-          );
-        }}
+        <View style={styles.iconContainer}>
+          <SideMenuIcon
+            name={route.id}
+            size={24}
+            color="#ffffff"
+            highlighted={isHighlighted}
+          />
+        </View>
+        {expanded ? (
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.label,
+              isHighlighted ? styles.labelHighlighted : styles.labelRegular,
+            ]}
+          >
+            {route.label}
+          </Text>
+        ) : null}
       </Pressable>
     );
   }),
@@ -92,8 +86,8 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   itemHighlighted: {
-    backgroundColor: 'rgba(10, 132, 255, 0.28)',
-    borderColor: '#0a84ff',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: '#ffffff',
   },
   iconContainer: {
     width: 40,
@@ -104,13 +98,14 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     marginLeft: 10,
+    color: '#ffffff',
   },
   labelHighlighted: {
-    color: '#ffffff',
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  labelDimmed: {
-    color: '#9db1c1',
-    fontWeight: '400',
+  labelRegular: {
+    fontWeight: '500',
+    color: '#ffffff',
   },
 });
+
