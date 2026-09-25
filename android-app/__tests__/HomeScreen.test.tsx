@@ -47,6 +47,8 @@ jest.mock('../src/components/MediaCarousel', () => {
   };
 });
 
+jest.setTimeout(15000);
+
 describe('HomeScreen', () => {
   let renderer: ReactTestRenderer.ReactTestRenderer | null = null;
 
@@ -203,5 +205,57 @@ describe('HomeScreen', () => {
 
     // Imperative handle methods
     expect(homeRef.current?.canExitToMenu()).toBe(true);
+  });
+
+  it('prioritizes recently watched channels in order', () => {
+    const { prioritizeLiveChannels } = require('../src/screens/HomeScreen');
+    const channels = [
+      { id: 'ch-11', title: 'כאן 11' },
+      { id: 'ch-12', title: 'קשת 12' },
+      { id: 'ch-13', title: 'רשת 13' },
+      { id: 'ch-14', title: 'ערוץ 14' },
+    ];
+    const recentIds = ['ch-13', 'ch-11'];
+    const prioritized = prioritizeLiveChannels(channels as any, recentIds);
+    expect(prioritized.map((c: any) => c.id)).toEqual([
+      'ch-13',
+      'ch-11',
+      'ch-12',
+      'ch-14',
+    ]);
+  });
+
+  it('renders live channels with recent channels prioritized on mount', async () => {
+    const { RecentChannelsService } = require('../src/services/recentChannels');
+    jest.spyOn(RecentChannelsService, 'getRecentChannelIds').mockResolvedValue(['ch-12']);
+    jest.spyOn(channelsApi, 'getDistinctLiveChannels').mockResolvedValue(mockLiveChannels);
+    jest.spyOn(vodApi, 'getRecentVodItems').mockResolvedValue(mockVodItems);
+    jest.spyOn(WatchProgressService, 'getContinueWatching').mockResolvedValue([]);
+
+    const homeRef = createRef<HomeScreenHandle>();
+    const onItemFocused = jest.fn();
+
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <HomeScreen
+            ref={homeRef}
+            route={mockRoute}
+            active={true}
+            menuFocusDestination={null}
+            onContentFocus={jest.fn()}
+            onItemFocused={onItemFocused}
+          />
+        </MediaControllerProvider>,
+      );
+      await new Promise(r => setTimeout(() => r(null), 600));
+    });
+
+    const root = renderer!.root;
+    const liveCarousel = root.findByProps({ id: 'home-live' });
+    expect(liveCarousel).toBeDefined();
+    // ch-12 was in recentChannelIds, so it should be prioritized first
+    expect(liveCarousel.props.items[0].id).toBe('ch-12');
+    expect(liveCarousel.props.items[1].id).toBe('ch-11');
   });
 });

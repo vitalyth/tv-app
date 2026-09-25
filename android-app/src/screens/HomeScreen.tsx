@@ -19,6 +19,8 @@ import {
 } from 'react-native';
 import {
   getDistinctLiveChannels,
+  mergeLiveChannelsPreservingOrder,
+  refreshMediaItemEpg,
   resolveLiveChannelStream,
 } from '../api/channels';
 import { getRecentVodItems, resolveVodStream } from '../api/vod';
@@ -27,6 +29,7 @@ import {
   WatchProgressService,
   type ContinueWatchingItem,
 } from '../services/watchProgress';
+import { RecentChannelsService } from '../services/recentChannels';
 import { useMediaActions } from '../media/MediaController';
 import { useMediaPreviewEngine } from '../media/MediaPreviewEngine';
 import type { MediaItem, MediaStream } from '../media/player';
@@ -64,6 +67,38 @@ interface HomeScreenProps {
 
 type RowKey = 'continue' | 'live' | 'vod';
 
+export function prioritizeLiveChannels(
+  channels: MediaItem[],
+  recentChannelIds: string[],
+): MediaItem[] {
+  if (recentChannelIds.length === 0) {
+    return channels;
+  }
+  const channelMap = new Map<string, MediaItem>();
+  for (const ch of channels) {
+    channelMap.set(ch.id, ch);
+  }
+
+  const prioritized: MediaItem[] = [];
+  const seenIds = new Set<string>();
+
+  for (const id of recentChannelIds) {
+    const found = channelMap.get(id);
+    if (found && !seenIds.has(id)) {
+      prioritized.push(found);
+      seenIds.add(id);
+    }
+  }
+
+  for (const ch of channels) {
+    if (!seenIds.has(ch.id)) {
+      prioritized.push(ch);
+    }
+  }
+
+  return prioritized;
+}
+
 export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
   function HomeScreenImpl(
     { route, active, menuFocusDestination, onContentFocus, onItemFocused },
@@ -79,6 +114,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     const skeletonOpacity = useRef(new Animated.Value(1)).current;
     const contentOpacity = useRef(new Animated.Value(0)).current;
     const [loadFailed, setLoadFailed] = useState(false);
+    const currentlyFocusedItemRef = useRef<MediaItem | undefined>(undefined);
 
     const { width: windowWidth } = useWindowDimensions();
     const continueCarouselRef = useRef<MediaCarouselHandle>(null);
@@ -221,19 +257,27 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
 
       Promise.allSettled([
         WatchProgressService.getContinueWatching(),
-        getDistinctLiveChannels(),
+        getDistinctLiveChannels({ requireEpg: true }),
         getRecentVodItems(),
+        RecentChannelsService.getRecentChannelIds(),
       ])
-        .then(([continueRes, liveRes, vodRes]) => {
+        .then(([continueRes, liveRes, vodRes, recentRes]) => {
           if (!mounted) {
             return;
           }
 
           const resolvedContinue =
             continueRes.status === 'fulfilled' ? continueRes.value : [];
-          const resolvedLive =
+          const resolvedLiveRaw =
             liveRes.status === 'fulfilled' ? liveRes.value : [];
           const resolvedVod = vodRes.status === 'fulfilled' ? vodRes.value : [];
+          const recentChannelIds =
+            recentRes.status === 'fulfilled' ? recentRes.value : [];
+
+          const resolvedLive = prioritizeLiveChannels(
+            resolvedLiveRaw,
+            recentChannelIds,
+          );
 
           setContinueItems(resolvedContinue);
           setLiveChannels(resolvedLive);
@@ -270,6 +314,8 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
           } else {
             firstItem = resolvedLive[0] ?? resolvedVod[0];
           }
+
+          currentlyFocusedItemRef.current = firstItem;
 
           if (firstItem) {
             previewEngineRef.current.focusMediaItem(firstItem);
@@ -320,6 +366,69 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
       };
     }, [contentOpacity, skeletonOpacity]);
 
+    // Periodic EPG progress & program recalculation without altering ordering
+    useEffect(() => {
+      if (!contentReady || !active) {
+        return;
+      }
+      const localInterval = setInterval(() => {
+        setLiveChannels(prev => {
+          const updated = prev.map(refreshMediaItemEpg);
+          if (currentlyFocusedItemRef.current?.kind === 'live') {
+            const currentId = currentlyFocusedItemRef.current.id;
+            const updatedFocused = updated.find(c => c.id === currentId);
+            if (
+              updatedFocused &&
+              (updatedFocused.title !== currentlyFocusedItemRef.current.title ||
+                updatedFocused.timeRange !==
+                  currentlyFocusedItemRef.current.timeRange ||
+                updatedFocused.progressPercentage !==
+                  currentlyFocusedItemRef.current.progressPercentage)
+            ) {
+              currentlyFocusedItemRef.current = updatedFocused;
+              onItemFocusedRef.current?.(updatedFocused);
+              previewEngineRef.current.focusMediaItem(updatedFocused);
+            }
+          }
+          return updated;
+        });
+      }, 30_000);
+
+      const remoteInterval = setInterval(() => {
+        getDistinctLiveChannels({ requireEpg: true })
+          .then(fresh => {
+            setLiveChannels(prev => {
+              const merged = mergeLiveChannelsPreservingOrder(prev, fresh);
+              if (currentlyFocusedItemRef.current?.kind === 'live') {
+                const currentId = currentlyFocusedItemRef.current.id;
+                const updatedFocused = merged.find(c => c.id === currentId);
+                if (
+                  updatedFocused &&
+                  (updatedFocused.title !==
+                    currentlyFocusedItemRef.current.title ||
+                    updatedFocused.timeRange !==
+                      currentlyFocusedItemRef.current.timeRange)
+                ) {
+                  currentlyFocusedItemRef.current = updatedFocused;
+                  onItemFocusedRef.current?.(updatedFocused);
+                  previewEngineRef.current.focusMediaItem(updatedFocused);
+                }
+              }
+              return merged;
+            });
+          })
+          .catch(() => {});
+      }, 180_000);
+
+      (localInterval as unknown as { unref?: () => void }).unref?.();
+      (remoteInterval as unknown as { unref?: () => void }).unref?.();
+
+      return () => {
+        clearInterval(localInterval);
+        clearInterval(remoteInterval);
+      };
+    }, [active, contentReady]);
+
     const getActiveCarousel = useCallback(() => {
       switch (lastFocusedRowRef.current) {
         case 'continue':
@@ -355,6 +464,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
       (row: RowKey, item: MediaItem) => {
         lastFocusedRowRef.current = row;
         setFocusedRow(current => (current === row ? current : row));
+        currentlyFocusedItemRef.current = item;
         playFocusSound();
         previewEngineRef.current.focusMediaItem(item);
         onItemFocusedRef.current?.(item);
@@ -378,6 +488,9 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
 
     const handleActivate = useCallback(
       (item: MediaItem) => {
+        if (item.kind === 'live') {
+          RecentChannelsService.recordChannelWatched(item.id).catch(() => {});
+        }
         streamResolver(item)
           .then(stream => {
             play(item, stream);

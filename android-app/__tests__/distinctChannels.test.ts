@@ -62,5 +62,64 @@ describe('Channels deduplication and time formatting', () => {
     expect(calculateProgramProgress(startMs, endMs)).toBe(50);
     spy.mockRestore();
   });
+
+  it('filters out channels without EPG when requireEpg is true', () => {
+    const { toMediaItem } = require('../src/api/channels');
+    const now = 1700000000000;
+    const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+
+    const channelWithEpg = {
+      id: 'ch-1',
+      name: 'Channel 1',
+      programs: [
+        {
+          name: 'Morning News',
+          start: now - 10000,
+          end: now + 50000,
+        },
+      ],
+    };
+
+    const channelWithoutEpg = {
+      id: 'ch-2',
+      name: 'Channel 2',
+      programs: [],
+    };
+
+    const itemWithEpg = toMediaItem(channelWithEpg, { requireEpg: true });
+    const itemWithoutEpg = toMediaItem(channelWithoutEpg, { requireEpg: true });
+    const itemWithoutEpgAllowed = toMediaItem(channelWithoutEpg, {
+      requireEpg: false,
+    });
+
+    expect(itemWithEpg).toBeDefined();
+    expect(itemWithEpg?.title).toBe('Morning News');
+    expect(itemWithoutEpg).toBeUndefined();
+    expect(itemWithoutEpgAllowed).toBeDefined();
+    expect(itemWithoutEpgAllowed?.title).toBe('Channel 2');
+
+    dateSpy.mockRestore();
+  });
+
+  it('merges live channels updates while strictly preserving order', () => {
+    const { mergeLiveChannelsPreservingOrder } = require('../src/api/channels');
+    const existing = [
+      { id: 'ch-12', kind: 'live', title: 'Old 12', timeRange: '10:00 - 11:00' },
+      { id: 'ch-11', kind: 'live', title: 'Old 11', timeRange: '10:00 - 11:00' },
+      { id: 'ch-13', kind: 'live', title: 'Old 13', timeRange: '10:00 - 11:00' },
+    ];
+
+    const fresh = [
+      { id: 'ch-11', kind: 'live', title: 'New 11', timeRange: '11:00 - 12:00' },
+      { id: 'ch-13', kind: 'live', title: 'New 13', timeRange: '11:00 - 12:00' },
+      { id: 'ch-12', kind: 'live', title: 'New 12', timeRange: '11:00 - 12:00' },
+    ];
+
+    const merged = mergeLiveChannelsPreservingOrder(existing as any, fresh as any);
+    expect(merged.map((c: any) => c.id)).toEqual(['ch-12', 'ch-11', 'ch-13']);
+    expect(merged[0].title).toBe('New 12');
+    expect(merged[1].title).toBe('New 11');
+    expect(merged[2].title).toBe('New 13');
+  });
 });
 

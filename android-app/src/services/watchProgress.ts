@@ -1,3 +1,5 @@
+import appStorage, { StorageAdapter } from './storage';
+
 export interface ContinueWatchingItem {
   id: string;
   episodeId: string;
@@ -36,63 +38,34 @@ const COMPLETION_REMAINING_MS_THRESHOLD = 25000; // 25 seconds
 // In-memory backing store for instant access and testing environments
 let memoryStore: Record<string, string> = {};
 
-export interface StorageAdapter {
-  getItem: (key: string) => Promise<string | null>;
-  setItem: (key: string, value: string) => Promise<void>;
-  removeItem: (key: string) => Promise<void>;
-}
-
-function getLocalStorage(): {
-  getItem: (k: string) => string | null;
-  setItem: (k: string, v: string) => void;
-  removeItem: (k: string) => void;
-} | undefined {
-  try {
-    const g = globalThis as unknown as {
-      localStorage?: {
-        getItem: (k: string) => string | null;
-        setItem: (k: string, v: string) => void;
-        removeItem: (k: string) => void;
-      };
-    };
-    return typeof g.localStorage !== 'undefined' ? g.localStorage : undefined;
-  } catch {
-    return undefined;
-  }
-}
+export type { StorageAdapter };
 
 const defaultStorage: StorageAdapter = {
   async getItem(key: string): Promise<string | null> {
-    const storage = getLocalStorage();
-    if (storage) {
-      try {
-        return storage.getItem(key);
-      } catch {
-        // Fall back to memory
+    try {
+      const val = await appStorage.getItem(key);
+      if (val !== null && val !== undefined) {
+        return val;
       }
+    } catch {
+      // Fall through to memory store
     }
     return memoryStore[key] ?? null;
   },
   async setItem(key: string, value: string): Promise<void> {
     memoryStore[key] = value;
-    const storage = getLocalStorage();
-    if (storage) {
-      try {
-        storage.setItem(key, value);
-      } catch {
-        // Ignore write failures
-      }
+    try {
+      await appStorage.setItem(key, value);
+    } catch {
+      // Ignore write failures
     }
   },
   async removeItem(key: string): Promise<void> {
     delete memoryStore[key];
-    const storage = getLocalStorage();
-    if (storage) {
-      try {
-        storage.removeItem(key);
-      } catch {
-        // Ignore remove failures
-      }
+    try {
+      await appStorage.removeItem(key);
+    } catch {
+      // Ignore remove failures
     }
   },
 };

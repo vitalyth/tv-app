@@ -188,6 +188,7 @@ function MediaCarouselInner<ItemT>(
         ref={listRef}
         horizontal
         data={items as ItemT[]}
+        extraData={items}
         testID={id}
         keyExtractor={keyExtractor}
         renderItem={renderListItem}

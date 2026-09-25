@@ -294,25 +294,37 @@ export function calculateProgramProgress(
   return Math.round(((now - startMs) / (endMs - startMs)) * 100);
 }
 
-function toMediaItem(channel: ApiChannel): MediaItem | undefined {
+export interface LiveChannelOptions {
+  requireEpg?: boolean;
+}
+
+export function toMediaItem(
+  channel: ApiChannel,
+  options?: LiveChannelOptions,
+): MediaItem | undefined {
   const id = text(channel.id) ?? text(channel.channelID);
   const channelName = text(channel.name);
   if (!id || !channelName) {
     return undefined;
   }
   const program = currentProgram(channel.programs);
+  const programTitle = text(program?.name);
   const startMs = program ? timestamp(program.start) : undefined;
   const endMs = program ? timestamp(program.end) : undefined;
   const timeRange = formatProgramTimeRange(startMs, endMs);
-  const progressPercentage = calculateProgramProgress(startMs, endMs);
 
+  if (options?.requireEpg && (!program || !programTitle || !timeRange)) {
+    return undefined;
+  }
+
+  const progressPercentage = calculateProgramProgress(startMs, endMs);
   const backdropUrl = resolveBackdropUrl(program, channel);
   const posterUrl = resolvePosterUrl(program, channel);
   const fallbackImageUrl = channelLogoUrl(channel.logo);
   return {
     id,
     kind: 'live',
-    title: text(program?.name) ?? channelName,
+    title: programTitle ?? channelName,
     imageUrl: posterUrl ?? backdropUrl ?? fallbackImageUrl,
     fallbackImageUrl,
     backdropUrl: backdropUrl ?? posterUrl ?? fallbackImageUrl,
@@ -461,19 +473,79 @@ export function distinctLogicalChannels(rawChannels: unknown[]): ApiChannel[] {
   return distinctList;
 }
 
-export async function getDistinctLiveChannels(): Promise<MediaItem[]> {
+export async function getDistinctLiveChannels(
+  options: LiveChannelOptions = { requireEpg: true },
+): Promise<MediaItem[]> {
   const channels = await getJson<unknown>('/live_channels');
   if (!Array.isArray(channels)) {
     throw new Error('Unexpected live channels response');
   }
   const distinct = distinctLogicalChannels(channels);
   return distinct
-    .map(channel => toMediaItem(channel))
+    .map(channel => toMediaItem(channel, options))
     .filter((item): item is MediaItem => item !== undefined);
 }
 
+export function refreshMediaItemEpg(item: MediaItem): MediaItem {
+  const channel = item.sourcePayload as ApiChannel | undefined;
+  if (!channel || !Array.isArray(channel.programs)) {
+    return item;
+  }
+  const program = currentProgram(channel.programs);
+  if (!program) {
+    return item;
+  }
+  const programTitle = text(program.name);
+  if (!programTitle) {
+    return item;
+  }
+  const startMs = timestamp(program.start);
+  const endMs = timestamp(program.end);
+  const timeRange = formatProgramTimeRange(startMs, endMs);
+  const progressPercentage = calculateProgramProgress(startMs, endMs);
+  const backdropUrl = resolveBackdropUrl(program, channel);
+  const posterUrl = resolvePosterUrl(program, channel);
+
+  return {
+    ...item,
+    title: programTitle,
+    description: text(program.description),
+    imageUrl: posterUrl ?? backdropUrl ?? item.fallbackImageUrl ?? item.imageUrl,
+    backdropUrl: backdropUrl ?? posterUrl ?? item.fallbackImageUrl ?? item.backdropUrl,
+    timeRange: timeRange ?? item.timeRange,
+    progressPercentage: progressPercentage ?? item.progressPercentage,
+  };
+}
+
+export function mergeLiveChannelsPreservingOrder(
+  existingItems: MediaItem[],
+  freshItems: MediaItem[],
+): MediaItem[] {
+  const freshMap = new Map<string, MediaItem>();
+  for (const item of freshItems) {
+    freshMap.set(item.id, item);
+  }
+
+  return existingItems.map(existing => {
+    const fresh = freshMap.get(existing.id);
+    if (!fresh) {
+      return refreshMediaItemEpg(existing);
+    }
+    return {
+      ...existing,
+      title: fresh.title,
+      description: fresh.description,
+      imageUrl: fresh.imageUrl,
+      backdropUrl: fresh.backdropUrl,
+      timeRange: fresh.timeRange,
+      progressPercentage: fresh.progressPercentage,
+      sourcePayload: fresh.sourcePayload ?? existing.sourcePayload,
+    };
+  });
+}
+
 export async function getPlayableLiveChannels(): Promise<MediaItem[]> {
-  return getDistinctLiveChannels();
+  return getDistinctLiveChannels({ requireEpg: false });
 }
 
 export async function resolveLiveChannelStream(

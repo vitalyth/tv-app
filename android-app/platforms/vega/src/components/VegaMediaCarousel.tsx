@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -16,6 +17,8 @@ import {
 } from 'react-native';
 import {
   Carousel,
+  type CarouselDataChange,
+  CarouselDataChangeType,
   type CarouselRef,
   type CarouselRenderInfo,
 } from '@amazon-devices/vega-carousel';
@@ -93,6 +96,17 @@ function VegaMediaCarouselInner<ItemT>(
     },
   }));
 
+  const dataChangeCallbackRef = useRef<
+    ((changes: CarouselDataChange[]) => void) | null
+  >(null);
+
+  const registerDataChangeCallback = useCallback(
+    (cb: (changes: CarouselDataChange[]) => void) => {
+      dataChangeCallbackRef.current = cb;
+    },
+    [],
+  );
+
   const getItem = useCallback((index: number) => items[index], [items]);
   const getItemCount = useCallback(() => items.length, [items]);
   const getItemKey = useCallback(
@@ -105,9 +119,59 @@ function VegaMediaCarouselInner<ItemT>(
       getItemCount,
       getItemKey,
       notifyDataError: () => false,
+      registerDataChangeCallback,
     }),
-    [getItem, getItemCount, getItemKey],
+    [getItem, getItemCount, getItemKey, registerDataChangeCallback],
   );
+
+  const prevItemsRef = useRef(items);
+  useEffect(() => {
+    const prev = prevItemsRef.current;
+    if (prev !== items) {
+      prevItemsRef.current = items;
+      const changes: CarouselDataChange[] = [];
+      const maxLen = Math.max(prev.length, items.length);
+      for (let i = 0; i < maxLen; i++) {
+        const prevItem = prev[i];
+        const nextItem = items[i];
+        if (!prevItem && nextItem) {
+          changes.push({
+            type: CarouselDataChangeType.ADD,
+            position: i,
+            count: 1,
+          });
+        } else if (prevItem && !nextItem) {
+          changes.push({
+            type: CarouselDataChangeType.REMOVE,
+            position: i,
+            count: 1,
+          });
+        } else if (prevItem && nextItem) {
+          const p = prevItem as Record<string, unknown>;
+          const n = nextItem as Record<string, unknown>;
+          const contentChanged =
+            p.title !== n.title ||
+            p.timeRange !== n.timeRange ||
+            p.progressPercentage !== n.progressPercentage ||
+            p.imageUrl !== n.imageUrl ||
+            p.backdropUrl !== n.backdropUrl ||
+            p.description !== n.description;
+
+          if (contentChanged) {
+            changes.push({
+              type: CarouselDataChangeType.UPDATE,
+              position: i,
+              count: 1,
+            });
+          }
+        }
+      }
+      if (changes.length > 0) {
+        dataChangeCallbackRef.current?.(changes);
+        carouselRef.current?.notifyDataChange(changes, false);
+      }
+    }
+  }, [items, keyExtractor]);
   const wrapperStyle = useMemo(
     () => ({
       height: height - FOCUS_VERTICAL_SPACE,
