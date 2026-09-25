@@ -74,11 +74,21 @@ export const IntroRegion = memo(function IntroRegionView({
   let subtitle = focusedItem.channelName || '';
   if (isLive && focusedItem.channelNumber) {
     subtitle = `${focusedItem.channelNumber}  ${focusedItem.channelName ?? ''}`.trim();
-  } else if (isVod && focusedItem.channelNumber) {
-    subtitle = `${focusedItem.channelName ?? 'VOD'} · ${focusedItem.channelNumber}`.trim();
+  } else if (isVod) {
+    const parts = [
+      focusedItem.channelName,
+      focusedItem.seasonName || focusedItem.channelNumber,
+      focusedItem.episodeName && focusedItem.episodeName !== focusedItem.programName
+        ? focusedItem.episodeName
+        : undefined,
+    ].filter(Boolean);
+    subtitle = parts.join(' · ');
   }
 
-  const title = focusedItem.title || route.title;
+  const title =
+    (isVod ? focusedItem.programName : undefined) ||
+    focusedItem.title ||
+    route.title;
   const description = focusedItem.description || route.description;
   const timeRange = isLive ? focusedItem.timeRange : undefined;
   const logoUri = focusedItem.fallbackImageUrl || focusedItem.imageUrl;
@@ -153,7 +163,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 4,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -161,6 +171,7 @@ const styles = StyleSheet.create({
   logoImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 4,
   },
   liveBadge: {
     flexDirection: 'row',

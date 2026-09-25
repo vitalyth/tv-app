@@ -38,6 +38,7 @@ export interface ApiVodRecentItem {
   sourceTimestamp?: unknown;
   sourceOrder?: unknown;
   vodChannelId?: unknown;
+  vodChannelName?: unknown;
 }
 
 function text(value: unknown): string | undefined {
@@ -55,7 +56,22 @@ export function resolveVodImage(item: ApiVodRecentItem): {
   // 2. Program-specific image
   const progImage = text(item.programImage);
   // 3. Channel/provider logo
-  const chImage = text(item.channelImage);
+  let chImage = text(item.channelImage);
+  if (!chImage) {
+    const mod = text(item.module)?.toLowerCase() ?? '';
+    const chId = text(item.vodChannelId)?.toLowerCase() ?? '';
+    if (mod.includes('kan') || chId.includes('kan')) {
+      chImage = 'kan.jpg';
+    } else if (mod.includes('keshet') || chId.includes('keshet') || chId.includes('12')) {
+      chImage = '12tv.jpg';
+    } else if (mod.includes('reshet') || chId.includes('reshet') || chId.includes('13')) {
+      chImage = '13.jpg';
+    } else if (mod.includes('c14') || chId.includes('14') || mod.includes('now14')) {
+      chImage = '14.jpg';
+    } else if (mod.includes('i24') || chId.includes('i24')) {
+      chImage = 'i24.jpg';
+    }
+  }
 
   const selectedPrimary = epImage || progImage || chImage;
   const selectedFallback = chImage || progImage || epImage;
@@ -82,16 +98,37 @@ export function toVodMediaItem(item: ApiVodRecentItem): MediaItem | undefined {
     return undefined;
   }
 
-  const title =
+  const programName = text(item.programName);
+  const rawSeason = text(item.season);
+  const seasonName =
+    text(item.seasonName) && text(item.seasonName) !== 'פרקים'
+      ? text(item.seasonName)
+      : rawSeason
+      ? t('seasonNumber', { season: rawSeason })
+      : undefined;
+
+  const rawEpisodeName =
     text(item.episodeName) ??
     text(item.name) ??
-    text(item.title) ??
-    text(item.programName) ??
-    t('vodProgram');
+    text(item.title);
+
+  // Clean episode name if it starts with the program name
+  let episodeName = rawEpisodeName;
+  if (programName && episodeName && episodeName.startsWith(programName)) {
+    const trimmed = episodeName
+      .slice(programName.length)
+      .replace(/^[\s,:\-–]+/, '')
+      .trim();
+    if (trimmed) {
+      episodeName = trimmed;
+    }
+  }
+
+  const title = rawEpisodeName || programName || t('vodProgram');
 
   const channelName =
+    text(item.vodChannelName) ??
     text(item.channelName) ??
-    text(item.programName) ??
     (text(item.module)?.includes('kan') ? 'כאן 11' : undefined);
 
   const description =
@@ -106,11 +143,12 @@ export function toVodMediaItem(item: ApiVodRecentItem): MediaItem | undefined {
     id: `vod-${episodeId}`,
     kind: 'vod',
     title,
+    programName,
+    seasonName,
+    episodeName,
     description,
     channelName,
-    channelNumber: text(item.season)
-      ? t('seasonNumber', { season: text(item.season)! })
-      : undefined,
+    channelNumber: seasonName,
     imageUrl: imageUrl ?? fallbackImageUrl,
     backdropUrl: backdropUrl ?? imageUrl ?? fallbackImageUrl,
     fallbackImageUrl,

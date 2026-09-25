@@ -71,10 +71,22 @@ export const LiveChannelCard = memo(function LiveChannelCardView({
             style={styles.cardImage}
           />
         ) : null}
-        <View style={styles.cardShade} />
 
-        <View style={styles.kickerRow}>
-          <View style={styles.kickerLeft}>
+        {/* Multi-layer gradient scrim for contrast against background artwork */}
+        <View pointerEvents="none" style={styles.cardBaseTint} />
+        <View pointerEvents="none" style={styles.scrimLayer1} />
+        <View pointerEvents="none" style={styles.scrimLayer2} />
+        <View pointerEvents="none" style={styles.scrimLayer3} />
+
+        {/* All content at the very bottom */}
+        <View
+          style={[
+            styles.bottomContent,
+            hasProgress && styles.bottomContentWithProgress,
+          ]}
+        >
+          {/* 1. Meta row: Channel Logo, LIVE badge */}
+          <View style={styles.metaRow}>
             {showLogo ? (
               <ChannelLogoBadge
                 uri={channel.fallbackImageUrl!}
@@ -84,22 +96,28 @@ export const LiveChannelCard = memo(function LiveChannelCardView({
             <View style={styles.kickerBadge}>
               <Text style={styles.cardKicker}>LIVE</Text>
             </View>
+            {!showLogo && channel.channelName ? (
+              <Text numberOfLines={1} style={styles.channelNameFallback}>
+                {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
+                {channel.channelName}
+              </Text>
+            ) : null}
           </View>
+
+          {/* 2. למטה שם התוכנית (Below it, Program Name) */}
+          <Text numberOfLines={1} style={styles.programTitle}>
+            {channel.title}
+          </Text>
+
+          {/* 3. זמן (Time) */}
           {channel.timeRange ? (
-            <Text style={styles.timeRange}>{channel.timeRange}</Text>
+            <Text numberOfLines={1} style={styles.timeRange}>
+              {channel.timeRange}
+            </Text>
           ) : null}
         </View>
 
-        <Text numberOfLines={1} style={styles.cardTitle}>
-          {channel.title}
-        </Text>
-        {!showLogo ? (
-          <Text numberOfLines={1} style={styles.cardCaption}>
-            {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
-            {channel.channelName}
-          </Text>
-        ) : null}
-
+        {/* Progress bar at the bottom edge */}
         {hasProgress ? (
           <View style={styles.progressBarTrack}>
             <View
@@ -139,7 +157,6 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 8,
     backgroundColor: '#0f1f2b',
-    padding: 12,
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },
@@ -158,29 +175,54 @@ const styles = StyleSheet.create({
     width: undefined,
     height: undefined,
   },
-  cardShade: {
+  cardBaseTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(2, 8, 14, 0.55)',
+    backgroundColor: 'rgba(2, 6, 12, 0.2)',
   },
-  kickerRow: {
+  scrimLayer1: {
     position: 'absolute',
-    top: 10,
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '75%',
+    backgroundColor: 'rgba(2, 6, 12, 0.35)',
   },
-  kickerLeft: {
+  scrimLayer2: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '52%',
+    backgroundColor: 'rgba(2, 6, 12, 0.45)',
+  },
+  scrimLayer3: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '28%',
+    backgroundColor: 'rgba(2, 6, 12, 0.45)',
+  },
+  bottomContent: {
+    width: '100%',
+    paddingHorizontal: 10,
+    paddingBottom: 9,
+    justifyContent: 'flex-end',
+  },
+  bottomContentWithProgress: {
+    paddingBottom: 12,
+  },
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginBottom: 4,
   },
   logoBadge: {
-    width: 26,
-    height: 26,
+    width: 22,
+    height: 22,
     borderRadius: 4,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -188,33 +230,43 @@ const styles = StyleSheet.create({
   logoBadgeImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 4,
   },
   kickerBadge: {
-    backgroundColor: 'rgba(255, 98, 108, 0.15)',
+    backgroundColor: 'rgba(226, 29, 47, 0.9)',
     paddingHorizontal: 5,
-    paddingVertical: 2,
+    paddingVertical: 1.5,
     borderRadius: 3,
   },
   cardKicker: {
-    color: '#ff626c',
-    fontSize: 11,
+    color: '#ffffff',
+    fontSize: 10,
     fontWeight: '800',
+    letterSpacing: 0.4,
   },
-  timeRange: {
-    color: '#c4d4e0',
+  channelNameFallback: {
+    color: '#c0cbd4',
     fontSize: 11,
     fontWeight: '600',
   },
-  cardTitle: {
+  programTitle: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
-    lineHeight: 20,
+    lineHeight: 17,
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
-  cardCaption: {
-    color: '#c0cbd4',
-    fontSize: 12,
-    marginTop: 3,
+  timeRange: {
+    color: '#cbd5e1',
+    fontSize: 11,
+    fontWeight: '500',
+    lineHeight: 15,
+    marginTop: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   progressBarTrack: {
     position: 'absolute',

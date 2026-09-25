@@ -25,6 +25,9 @@ describe('VOD API Mapper & Resolver', () => {
     expect(mediaItem?.id).toBe('vod-12345');
     expect(mediaItem?.kind).toBe('vod');
     expect(mediaItem?.title).toBe('פרק 3: ההתחלה');
+    expect(mediaItem?.programName).toBe('טהרן');
+    expect(mediaItem?.seasonName).toBe('Season 2');
+    expect(mediaItem?.episodeName).toBe('פרק 3: ההתחלה');
     expect(mediaItem?.channelName).toBe('כאן 11');
     expect(mediaItem?.channelNumber).toBe('Season 2');
     expect(mediaItem?.description).toBe('תיאור הפרק...');

@@ -50,9 +50,16 @@ export const VodCard = memo(function VodCardView({
     Boolean(item.fallbackImageUrl && item.fallbackImageUrl !== item.imageUrl) &&
     !logoFailed;
 
+  const programName = item.programName || item.title;
+  const episodeName =
+    item.episodeName && item.episodeName !== programName
+      ? item.episodeName
+      : undefined;
+  const season = item.seasonName || item.channelNumber;
+
   return (
     <View
-      accessibilityLabel={`VOD: ${item.channelName ?? ''} - ${item.title}`}
+      accessibilityLabel={`VOD: ${item.channelName ?? ''} - ${programName}${season ? ` - ${season}` : ''}${episodeName ? ` - ${episodeName}` : ''}`}
       style={[
         styles.cardContainer,
         { width, height },
@@ -68,10 +75,17 @@ export const VodCard = memo(function VodCardView({
             style={styles.cardImage}
           />
         ) : null}
-        <View style={styles.cardShade} />
 
-        <View style={styles.kickerRow}>
-          <View style={styles.kickerLeft}>
+        {/* Multi-layer gradient scrim for contrast against background artwork */}
+        <View pointerEvents="none" style={styles.cardBaseTint} />
+        <View pointerEvents="none" style={styles.scrimLayer1} />
+        <View pointerEvents="none" style={styles.scrimLayer2} />
+        <View pointerEvents="none" style={styles.scrimLayer3} />
+
+        {/* All content at the very bottom */}
+        <View style={styles.bottomContent}>
+          {/* 1. Meta row: Channel Logo, VOD badge, Season */}
+          <View style={styles.metaRow}>
             {showLogo ? (
               <ChannelLogoBadge
                 uri={item.fallbackImageUrl!}
@@ -81,20 +95,29 @@ export const VodCard = memo(function VodCardView({
             <View style={styles.kickerBadge}>
               <Text style={styles.cardKicker}>VOD</Text>
             </View>
+            {season ? (
+              <View style={styles.seasonBadge}>
+                <Text style={styles.seasonBadgeText}>{season}</Text>
+              </View>
+            ) : null}
           </View>
-          {item.channelNumber ? (
-            <Text style={styles.seasonBadge}>{item.channelNumber}</Text>
+
+          {/* 2. Program name */}
+          <Text numberOfLines={1} style={styles.programTitle}>
+            {programName}
+          </Text>
+
+          {/* 3. Episode name */}
+          {episodeName ? (
+            <Text numberOfLines={1} style={styles.episodeTitle}>
+              {episodeName}
+            </Text>
+          ) : !showLogo && item.channelName ? (
+            <Text numberOfLines={1} style={styles.episodeTitle}>
+              {item.channelName}
+            </Text>
           ) : null}
         </View>
-
-        <Text numberOfLines={1} style={styles.cardTitle}>
-          {item.title}
-        </Text>
-        {!showLogo && item.channelName ? (
-          <Text numberOfLines={1} style={styles.cardCaption}>
-            {item.channelName}
-          </Text>
-        ) : null}
       </View>
       {focused ? <View pointerEvents="none" style={styles.focusBorder} /> : null}
     </View>
@@ -124,7 +147,6 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 8,
     backgroundColor: '#0f1f2b',
-    padding: 12,
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },
@@ -143,29 +165,51 @@ const styles = StyleSheet.create({
     width: undefined,
     height: undefined,
   },
-  cardShade: {
+  cardBaseTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(2, 8, 14, 0.55)',
+    backgroundColor: 'rgba(2, 6, 12, 0.2)',
   },
-  kickerRow: {
+  scrimLayer1: {
     position: 'absolute',
-    top: 10,
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '75%',
+    backgroundColor: 'rgba(2, 6, 12, 0.35)',
   },
-  kickerLeft: {
+  scrimLayer2: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '52%',
+    backgroundColor: 'rgba(2, 6, 12, 0.45)',
+  },
+  scrimLayer3: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '28%',
+    backgroundColor: 'rgba(2, 6, 12, 0.45)',
+  },
+  bottomContent: {
+    width: '100%',
+    paddingHorizontal: 10,
+    paddingBottom: 9,
+    justifyContent: 'flex-end',
+  },
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginBottom: 4,
   },
   logoBadge: {
-    width: 26,
-    height: 26,
+    width: 22,
+    height: 22,
     borderRadius: 4,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -173,32 +217,48 @@ const styles = StyleSheet.create({
   logoBadgeImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 4,
   },
   kickerBadge: {
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    backgroundColor: 'rgba(56, 189, 248, 0.2)',
     paddingHorizontal: 5,
-    paddingVertical: 2,
+    paddingVertical: 1.5,
     borderRadius: 3,
   },
   cardKicker: {
     color: '#38bdf8',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
+    letterSpacing: 0.4,
   },
   seasonBadge: {
-    color: '#c4d4e0',
-    fontSize: 11,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 3,
+  },
+  seasonBadgeText: {
+    color: '#e2e8f0',
+    fontSize: 10,
     fontWeight: '600',
   },
-  cardTitle: {
+  programTitle: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
-    lineHeight: 20,
+    lineHeight: 17,
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
-  cardCaption: {
-    color: '#c0cbd4',
-    fontSize: 12,
-    marginTop: 3,
+  episodeTitle: {
+    color: '#cbd5e1',
+    fontSize: 11,
+    fontWeight: '500',
+    lineHeight: 15,
+    marginTop: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
 });

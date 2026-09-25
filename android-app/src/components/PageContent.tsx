@@ -389,7 +389,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 4,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'transparent',
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -397,6 +397,7 @@ const styles = StyleSheet.create({
   logoBadgeImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 4,
   },
   cardKicker: {
     color: '#ff626c',

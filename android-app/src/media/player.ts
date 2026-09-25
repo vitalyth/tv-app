@@ -26,6 +26,9 @@ export interface MediaItem {
   id: string;
   kind: MediaKind;
   title: string;
+  programName?: string;
+  seasonName?: string;
+  episodeName?: string;
   imageUrl?: string;
   fallbackImageUrl?: string;
   backdropUrl?: string;
