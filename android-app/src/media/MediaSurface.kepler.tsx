@@ -18,6 +18,7 @@ const { VideoPlayer } = require(
 
 interface SurfaceEngineProps {
   url: string;
+  type?: MediaStreamType;
   onFirstFrame: () => void;
   onError: () => void;
 }
@@ -85,12 +86,14 @@ function NativeHlsSurface({
       scalingmode="fill"
       onTimeUpdate={handleTimeUpdate}
       onError={onError}
+      onEnded={onError}
     />
   );
 }
 
-function ShakaDashSurface({
+function ShakaPlayerSurface({
   url,
+  type = 'mpd',
   onFirstFrame,
   onError,
 }: SurfaceEngineProps) {
@@ -160,15 +163,22 @@ function ShakaDashSurface({
       player.addEventListener('error', onError);
       const shaka = new VegaShakaPlayer(player, onError);
       shakaPlayer.current = shaka;
+      const streamType: 'm3u8' | 'mpd' =
+        type === 'mpd' || url.includes('.mpd') ? 'mpd' : 'm3u8';
       try {
-        await shaka.load(url, 'mpd');
-      } catch {
+        console.info('[MediaSurface] Vega Shaka loading:', {
+          type: streamType,
+          url: url.slice(0, 100),
+        });
+        await shaka.load(url, streamType);
+      } catch (err) {
+        console.warn('[MediaSurface] Vega Shaka load failed:', err);
         if (!destroyed.current) {
           onError();
         }
       }
     },
-    [onError, onFirstFrame, url],
+    [onError, onFirstFrame, type, url],
   );
 
   useEffect(
@@ -194,6 +204,31 @@ function ShakaDashSurface({
   );
 }
 
+const FMP4_CONTAINER_PATTERNS = [
+  'fmp4',
+  'cmaf',
+  '.mpd',
+  '.ism',
+  '.m4s',
+  '.mp4',
+];
+
+function shouldUseShaka(url?: string, type?: MediaStreamType): boolean {
+  if (!url) {
+    return false;
+  }
+  if (type === 'mpd') {
+    return true;
+  }
+  const lower = url.toLowerCase();
+  // Formats and container patterns that require Shaka's MSE pipeline instead of native GStreamer:
+  // - DASH manifests (.mpd)
+  // - Fragmented MP4 / CMAF in HLS playlists
+  // - Smooth Streaming (.ism) manifests
+  // - ISOBMFF media segments (.m4s, .mp4)
+  return FMP4_CONTAINER_PATTERNS.some(pattern => lower.includes(pattern));
+}
+
 export function MediaSurface({
   streamUrl,
   streamType,
@@ -207,10 +242,12 @@ export function MediaSurface({
     type: streamType,
   });
   const [mountedSource, setMountedSource] = useState<typeof activeSource>();
+  const [useShakaFallback, setUseShakaFallback] = useState(false);
   const usingFallback = useRef(false);
 
   useEffect(() => {
     usingFallback.current = false;
+    setUseShakaFallback(false);
     setActiveSource({ url: streamUrl, type: streamType });
   }, [streamType, streamUrl]);
 
@@ -228,8 +265,20 @@ export function MediaSurface({
   }, [activeSource]);
 
   const handleError = useCallback(() => {
+    if (
+      !useShakaFallback &&
+      !shouldUseShaka(activeSource.url, activeSource.type)
+    ) {
+      console.info(
+        '[MediaSurface] Native HLS failed, falling back to Shaka Player',
+      );
+      setUseShakaFallback(true);
+      return;
+    }
+
     if (fallbackStreamUrl && !usingFallback.current) {
       usingFallback.current = true;
+      setUseShakaFallback(false);
       setActiveSource({
         url: fallbackStreamUrl,
         type: fallbackStreamType,
@@ -237,22 +286,28 @@ export function MediaSurface({
       return;
     }
     onError();
-  }, [fallbackStreamType, fallbackStreamUrl, onError]);
+  }, [
+    activeSource,
+    fallbackStreamType,
+    fallbackStreamUrl,
+    onError,
+    useShakaFallback,
+  ]);
 
   if (!mountedSource) {
     return <View pointerEvents="none" style={styles.surface} />;
   }
 
-  const Engine =
-    mountedSource.type === ('mpd' satisfies MediaStreamType)
-      ? ShakaDashSurface
-      : NativeHlsSurface;
+  const useShaka =
+    useShakaFallback || shouldUseShaka(mountedSource.url, mountedSource.type);
+  const Engine = useShaka ? ShakaPlayerSurface : NativeHlsSurface;
 
   return (
     <View pointerEvents="none" style={styles.surface}>
       <Engine
-        key={mountedSource.url}
+        key={`${mountedSource.url}-${useShaka ? 'shaka' : 'native'}`}
         url={mountedSource.url}
+        type={mountedSource.type}
         onFirstFrame={onFirstFrame}
         onError={handleError}
       />

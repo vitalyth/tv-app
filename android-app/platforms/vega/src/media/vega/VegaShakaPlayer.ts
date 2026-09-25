@@ -50,6 +50,11 @@ function installPolyfills(mediaElement: any) {
   runtime.navigator.mediaCapabilities = {decodingInfo};
   runtime.navigator.userAgent = 'AFTCA001';
   runtime.window.fetch = fetch;
+  runtime.window.XMLHttpRequest ??= runtime.XMLHttpRequest;
+  if (typeof runtime.TextEncoder === 'undefined') {
+    const { TextEncoder: TE } = require('fastestsmallesttextencoderdecoder');
+    runtime.TextEncoder = runtime.window.TextEncoder = TE;
+  }
   runtime.window.crypto = WebCrypto;
   runtime.window.atob = decode;
   runtime.window.addEventListener ??= () => undefined;
@@ -100,7 +105,10 @@ export class VegaShakaPlayer {
     installPolyfills(mediaElement);
     this.mediaElement = mediaElement;
     this.player = new shaka.Player(mediaElement);
-    this.player.addEventListener('error', onError);
+    this.player.addEventListener('error', (event: any) => {
+      console.warn('[VegaShakaPlayer] error event:', event?.detail ?? event);
+      onError();
+    });
     this.player.addEventListener('adaptation', this.logActiveQuality);
     this.player.configure({
       streaming: {
