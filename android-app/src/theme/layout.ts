@@ -1,4 +1,4 @@
-export const MAIN_CONTENT_INSET_LEFT = 116;
+export const MAIN_CONTENT_INSET_LEFT = 78;
 export const MAIN_CONTENT_INSET_RIGHT = 44;
 export const MEDIA_CAROUSEL_ITEM_SPACING = 16;
 

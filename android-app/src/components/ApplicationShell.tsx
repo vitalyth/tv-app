@@ -17,6 +17,7 @@ import {
 } from '../theme/layout';
 import { IntroRegion } from './IntroRegion';
 import { MediaLayer } from './MediaLayer';
+import type { MediaItem } from '../media/player';
 import { MediaControllerProvider } from '../media/MediaController';
 import { PageContent, type PageContentHandle } from './PageContent';
 import { SideMenu } from './SideMenu';
@@ -25,6 +26,9 @@ export function ApplicationShell() {
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [menuFocusDestination, setMenuFocusDestination] =
     useState<FocusDestination>(null);
+  const [focusedMediaItem, setFocusedMediaItem] = useState<MediaItem | null>(
+    null,
+  );
   const pageContentRef = useRef<PageContentHandle>(null);
   const activeRoute = getRoute(state.activeRoute);
 
@@ -68,6 +72,7 @@ export function ApplicationShell() {
   }, [state.menuExpanded]);
 
   const selectRoute = useCallback((route: RootRoute) => {
+    setFocusedMediaItem(null);
     dispatch({ type: 'select-route', route });
     pageContentRef.current?.focusFirst();
   }, []);
@@ -90,13 +95,14 @@ export function ApplicationShell() {
               <Text style={styles.platform}>{tvPlatform.displayName}</Text>
               <Text style={styles.clock}>20:45</Text>
             </View>
-            <IntroRegion route={activeRoute} />
+            <IntroRegion route={activeRoute} focusedItem={focusedMediaItem} />
             <PageContent
               ref={pageContentRef}
               route={activeRoute}
               active={!state.menuExpanded}
               menuFocusDestination={menuFocusDestination}
               onContentFocus={handleContentFocus}
+              onItemFocused={setFocusedMediaItem}
             />
           </View>
           <SideMenu

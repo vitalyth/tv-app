@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Image, StyleSheet, View } from 'react-native';
 import { useMediaController } from '../media/MediaController';
 import { MediaSurface } from '../media/MediaSurface';
 import { RemoteImage } from './RemoteImage';
+
+const scrimComposite = require('../assets/scrim_composite.png');
 
 interface HeroBackdropImageProps {
   uri: string;
@@ -54,30 +56,35 @@ export function MediaLayer() {
       style={styles.layer}
       testID="persistent-media-layer"
     >
-      {item && stream && presentation !== 'background-image' ? (
-        <MediaSurface
-          streamUrl={stream.url}
-          streamType={stream.type}
-          fallbackStreamUrl={stream.fallbackUrl}
-          fallbackStreamType={stream.fallbackType}
-          onFirstFrame={markPlaying}
-          onError={markError}
-        />
-      ) : (
-        <>
-          <View style={styles.light} />
-          <View style={styles.horizon} />
-        </>
-      )}
-      {(item?.backdropUrl || item?.imageUrl) &&
-      (presentation === 'background-image' || status !== 'playing') ? (
+      {item?.backdropUrl || item?.imageUrl ? (
         <HeroBackdropImage
           key={item.backdropUrl ?? item.imageUrl!}
           uri={item.backdropUrl ?? item.imageUrl!}
           fallbackUri={item.fallbackImageUrl}
         />
       ) : null}
-      <View style={styles.scrim} />
+      {item && stream && presentation !== 'background-image' ? (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            status === 'playing' ? styles.videoVisible : styles.videoHidden,
+          ]}
+        >
+          <MediaSurface
+            streamUrl={stream.url}
+            streamType={stream.type}
+            fallbackStreamUrl={stream.fallbackUrl}
+            fallbackStreamType={stream.fallbackType}
+            onFirstFrame={markPlaying}
+            onError={markError}
+          />
+        </View>
+      ) : null}
+      <Image
+        source={scrimComposite}
+        style={StyleSheet.absoluteFill}
+        resizeMode="stretch"
+      />
     </View>
   );
 }
@@ -85,29 +92,10 @@ export function MediaLayer() {
 const styles = StyleSheet.create({
   layer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#111b25',
+    backgroundColor: '#07111c',
     overflow: 'hidden',
   },
-  light: {
-    position: 'absolute',
-    right: -80,
-    top: -120,
-    width: '58%',
-    height: '78%',
-    borderRadius: 320,
-    backgroundColor: '#294d60',
-    opacity: 0.5,
-  },
-  horizon: {
-    position: 'absolute',
-    bottom: 0,
-    width: '100%',
-    height: '46%',
-    backgroundColor: '#12232e',
-  },
   poster: { ...StyleSheet.absoluteFillObject },
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(2, 8, 14, 0.48)',
-  },
+  videoVisible: { opacity: 1 },
+  videoHidden: { opacity: 0 },
 });

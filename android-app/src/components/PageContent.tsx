@@ -33,6 +33,7 @@ import {
   MAIN_CONTENT_INSET_RIGHT,
   MEDIA_CAROUSEL_ITEM_SPACING,
 } from '../theme/layout';
+import { HomeScreen, type HomeScreenHandle } from '../screens/HomeScreen';
 
 const VISIBLE_CARD_COUNT = 4;
 const CARD_ASPECT_RATIO = 16 / 9;
@@ -53,10 +54,15 @@ const ChannelCard = memo(function ChannelCardView({
   height,
   focused,
 }: ChannelCardProps) {
+  const hasLogo = Boolean(channel.fallbackImageUrl);
   return (
     <View
       accessibilityLabel={`${routeLabel}: ${channel.title}`}
-      style={[styles.cardContainer, { width, height }]}
+      style={[
+        styles.cardContainer,
+        { width, height },
+        focused && styles.cardContainerFocused,
+      ]}
     >
       <View style={styles.cardSurface}>
         {channel.imageUrl ? (
@@ -68,14 +74,32 @@ const ChannelCard = memo(function ChannelCardView({
           />
         ) : null}
         <View style={styles.cardShade} />
-        <Text style={styles.cardKicker}>LIVE</Text>
+        <View style={styles.kickerRow}>
+          <View style={styles.kickerLeft}>
+            {hasLogo ? (
+              <View style={styles.logoBadge}>
+                <RemoteImage
+                  uri={channel.fallbackImageUrl!}
+                  resizeMode="cover"
+                  style={styles.logoBadgeImage}
+                />
+              </View>
+            ) : null}
+            <Text style={styles.cardKicker}>LIVE</Text>
+          </View>
+          {channel.timeRange ? (
+            <Text style={styles.timeRange}>{channel.timeRange}</Text>
+          ) : null}
+        </View>
         <Text numberOfLines={1} style={styles.cardTitle}>
           {channel.title}
         </Text>
-        <Text numberOfLines={1} style={styles.cardCaption}>
-          {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
-          {channel.channelName}
-        </Text>
+        {!hasLogo ? (
+          <Text numberOfLines={1} style={styles.cardCaption}>
+            {channel.channelNumber ? `${channel.channelNumber}  ` : ''}
+            {channel.channelName}
+          </Text>
+        ) : null}
       </View>
       {focused ? (
         <View pointerEvents="none" style={styles.focusBorder} />
@@ -95,11 +119,12 @@ interface PageContentProps {
   active: boolean;
   menuFocusDestination: FocusDestination;
   onContentFocus: () => void;
+  onItemFocused?: (item: MediaItem) => void;
 }
 
-export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
-  function PageContentImpl(
-    { route, active, menuFocusDestination, onContentFocus },
+const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
+  function FallbackRouteContentImpl(
+    { route, active, menuFocusDestination, onContentFocus, onItemFocused },
     ref,
   ) {
     const [channels, setChannels] = useState<MediaItem[]>([]);
@@ -133,6 +158,7 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
             setLoadFailed(items.length === 0);
             if (items[0]) {
               previewEngine.focusMediaItem(items[0]);
+              onItemFocused?.(items[0]);
             }
           }
         })
@@ -142,7 +168,7 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
         mounted = false;
         previewEngine.clearPreview();
       };
-    }, [previewEngine]);
+    }, [onItemFocused, previewEngine]);
 
     useImperativeHandle(ref, () => ({
       canExitToMenu() {
@@ -272,6 +298,24 @@ export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
   },
 );
 
+export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
+  function PageContentImpl(props, ref) {
+    if (props.route.id === 'home') {
+      return (
+        <HomeScreen
+          ref={ref as unknown as React.Ref<HomeScreenHandle>}
+          route={props.route}
+          active={props.active}
+          menuFocusDestination={props.menuFocusDestination}
+          onContentFocus={props.onContentFocus}
+          onItemFocused={props.onItemFocused}
+        />
+      );
+    }
+    return <FallbackRouteContent ref={ref} {...props} />;
+  },
+);
+
 const styles = StyleSheet.create({
   root: { flex: 1, marginTop: 22, overflow: 'visible' },
   heading: {
@@ -285,13 +329,24 @@ const styles = StyleSheet.create({
   cardContainer: {
     position: 'relative',
     overflow: 'visible',
+    borderRadius: 8,
+    backgroundColor: '#0f1f2b',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.6,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  cardContainerFocused: {
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.85,
+    shadowRadius: 14,
+    elevation: 14,
   },
   cardSurface: {
     width: '100%',
     height: '100%',
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: 8,
     backgroundColor: '#0f1f2b',
     padding: 12,
     justifyContent: 'flex-end',
@@ -304,7 +359,7 @@ const styles = StyleSheet.create({
     bottom: -3,
     left: -3,
     borderColor: '#ffffff',
-    borderRadius: 9,
+    borderRadius: 11,
     borderWidth: 3,
   },
   cardImage: {
@@ -316,13 +371,42 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(2, 8, 14, 0.5)',
   },
-  cardKicker: {
+  kickerRow: {
     position: 'absolute',
     top: 10,
     left: 12,
+    right: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  kickerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  logoBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoBadgeImage: {
+    width: '100%',
+    height: '100%',
+  },
+  cardKicker: {
     color: '#ff626c',
     fontSize: 11,
     fontWeight: '800',
+  },
+  timeRange: {
+    color: '#c4d4e0',
+    fontSize: 11,
+    fontWeight: '600',
   },
   cardTitle: {
     color: '#ffffff',

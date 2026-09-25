@@ -21,6 +21,7 @@ interface ApiProgram {
 interface ApiChannel {
   id?: unknown;
   channelID?: unknown;
+  index?: unknown;
   name?: unknown;
   channelNumber?: unknown;
   logo?: unknown;
@@ -31,6 +32,7 @@ interface ApiChannel {
   programs?: unknown;
   type?: unknown;
   module?: unknown;
+  sources?: unknown[];
 }
 
 const VPN_RESOLVER_MODULES = new Set(['kan', 'reshet']);
@@ -255,30 +257,55 @@ function channelLogoUrl(logo: unknown) {
     : `${SERVICE_BASE_URL}/ch/${logoPath.replace(/^\//, '')}`;
 }
 
-function proxiedImageUrl(rawUrl: string) {
+export function proxiedImageUrl(rawUrl: string) {
   if (!/^https?:\/\//.test(rawUrl) || rawUrl.startsWith(SERVICE_BASE_URL)) {
     return rawUrl.startsWith('/') ? `${SERVICE_BASE_URL}${rawUrl}` : rawUrl;
   }
-  let referer = SERVICE_REFERER;
-  if (rawUrl.includes('kan.org.il')) {
-    referer = 'https://www.kan.org.il/';
-  } else if (rawUrl.includes('mako.co.il')) {
-    referer = 'https://www.mako.co.il/';
-  } else if (rawUrl.includes('13tv.co.il') || rawUrl.includes('reshet')) {
-    referer = 'https://13tv.co.il/';
+  return `${API_BASE_URL}/image_proxy?url=${encodeURIComponent(rawUrl)}`;
+}
+
+function formatProgramTime(timestampMs: number): string {
+  const d = new Date(timestampMs);
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+export function formatProgramTimeRange(
+  startMs?: number,
+  endMs?: number,
+): string | undefined {
+  if (!startMs || !endMs) {
+    return undefined;
   }
-  return `${API_BASE_URL}/proxy?url=${encodeURIComponent(
-    rawUrl,
-  )}&referer=${encodeURIComponent(referer)}`;
+  return `${formatProgramTime(startMs)} - ${formatProgramTime(endMs)}`;
+}
+
+export function calculateProgramProgress(
+  startMs?: number,
+  endMs?: number,
+): number | undefined {
+  if (!startMs || !endMs || endMs <= startMs) {
+    return undefined;
+  }
+  const now = Date.now();
+  if (now < startMs) return 0;
+  if (now >= endMs) return 100;
+  return Math.round(((now - startMs) / (endMs - startMs)) * 100);
 }
 
 function toMediaItem(channel: ApiChannel): MediaItem | undefined {
-  const id = text(channel.id);
+  const id = text(channel.id) ?? text(channel.channelID);
   const channelName = text(channel.name);
   if (!id || !channelName) {
     return undefined;
   }
   const program = currentProgram(channel.programs);
+  const startMs = program ? timestamp(program.start) : undefined;
+  const endMs = program ? timestamp(program.end) : undefined;
+  const timeRange = formatProgramTimeRange(startMs, endMs);
+  const progressPercentage = calculateProgramProgress(startMs, endMs);
+
   const backdropUrl = resolveBackdropUrl(program, channel);
   const posterUrl = resolvePosterUrl(program, channel);
   const fallbackImageUrl = channelLogoUrl(channel.logo);
@@ -295,6 +322,9 @@ function toMediaItem(channel: ApiChannel): MediaItem | undefined {
       typeof channel.channelNumber === 'number'
         ? String(channel.channelNumber)
         : text(channel.channelNumber),
+    timeRange,
+    progressPercentage,
+    isLive: true,
     sourcePayload: channel,
   };
 }
@@ -330,19 +360,25 @@ function playbackProxyUrl(streamUrl: string, channel: ApiChannel) {
   return `${API_BASE_URL}${endpoint}?url=${url}&referer=${referer}${vpn}`;
 }
 
-function mediaStreamType(streamUrl: string): MediaStreamType | undefined {
+function mediaStreamType(streamUrl: string): MediaStreamType {
   const normalized = streamUrl.toLowerCase();
-  if (normalized.includes('.m3u8')) {
+  if (
+    normalized.includes('.m3u8') ||
+    normalized.includes('mpegurl') ||
+    normalized.includes('/livehls/') ||
+    normalized.includes('/hls/')
+  ) {
     return 'm3u8';
   }
   if (
     normalized.includes('.mpd') ||
-    normalized.includes('/livedash/') ||
-    /\.livx(?:\?|$)/.test(normalized)
+    normalized.includes('application/dash+xml') ||
+    (normalized.includes('/livedash/') && !normalized.includes('.m3u8')) ||
+    (normalized.includes('.livx') && !normalized.includes('.m3u8'))
   ) {
     return 'mpd';
   }
-  return undefined;
+  return 'm3u8';
 }
 
 function redgeHlsFallback(streamUrl: string): string | undefined {
@@ -366,20 +402,78 @@ export async function getLiveChannelCount(): Promise<number> {
   return channels.length;
 }
 
-export async function getPlayableLiveChannels(): Promise<MediaItem[]> {
+export function distinctLogicalChannels(rawChannels: unknown[]): ApiChannel[] {
+  const tvChannels = rawChannels.filter(
+    ch =>
+      ch &&
+      typeof ch === 'object' &&
+      text((ch as ApiChannel).type)?.toLowerCase() === 'tv',
+  ) as ApiChannel[];
+
+  const distinctList: ApiChannel[] = [];
+  const seenKeys = new Map<string, ApiChannel>();
+
+  const cloneWithoutSources = (ch: ApiChannel): ApiChannel => {
+    const copy = { ...ch };
+    delete copy.sources;
+    return copy;
+  };
+
+  for (const channel of tvChannels) {
+    const rawIndex = Number(channel.index);
+    const indexKey =
+      Number.isFinite(rawIndex) && rawIndex > 0 ? `idx:${rawIndex}` : undefined;
+    const numKey = channel.channelNumber
+      ? `num:${String(channel.channelNumber).trim()}`
+      : undefined;
+    const nameKey = text(channel.name)
+      ? `name:${text(channel.name)?.toLowerCase().trim()}`
+      : undefined;
+    const idKey = text(channel.channelID) ?? text(channel.id) ?? '';
+
+    // Primary unique key: prefer indexKey, then numKey, then nameKey, then idKey
+    const logicalKey = indexKey ?? numKey ?? nameKey ?? idKey;
+
+    const existing = seenKeys.get(logicalKey);
+    if (existing) {
+      if (!Array.isArray(existing.sources)) {
+        existing.sources = [cloneWithoutSources(existing)];
+      }
+      existing.sources.push(cloneWithoutSources(channel));
+      if (
+        (!existing.programs ||
+          !Array.isArray(existing.programs) ||
+          existing.programs.length === 0) &&
+        channel.programs &&
+        Array.isArray(channel.programs) &&
+        channel.programs.length > 0
+      ) {
+        existing.programs = channel.programs;
+      }
+    } else {
+      const distinctChannel: ApiChannel = { ...channel };
+      distinctChannel.sources = [cloneWithoutSources(channel)];
+      seenKeys.set(logicalKey, distinctChannel);
+      distinctList.push(distinctChannel);
+    }
+  }
+
+  return distinctList;
+}
+
+export async function getDistinctLiveChannels(): Promise<MediaItem[]> {
   const channels = await getJson<unknown>('/live_channels');
   if (!Array.isArray(channels)) {
     throw new Error('Unexpected live channels response');
   }
-  return channels
-    .map(channel =>
-      channel &&
-      typeof channel === 'object' &&
-      text((channel as ApiChannel).type)?.toLowerCase() === 'tv'
-        ? toMediaItem(channel as ApiChannel)
-        : undefined,
-    )
+  const distinct = distinctLogicalChannels(channels);
+  return distinct
+    .map(channel => toMediaItem(channel))
     .filter((item): item is MediaItem => item !== undefined);
+}
+
+export async function getPlayableLiveChannels(): Promise<MediaItem[]> {
+  return getDistinctLiveChannels();
 }
 
 export async function resolveLiveChannelStream(
@@ -394,13 +488,15 @@ export async function resolveLiveChannelStream(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
+    const channelPayload = { ...channel };
+    delete channelPayload.sources;
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify(channel),
+      body: JSON.stringify(channelPayload),
       signal: controller.signal,
     });
     if (!response.ok) {

@@ -1,3 +1,4 @@
+import type { StyleProp, ViewStyle } from 'react-native';
 import type { MediaStreamType } from './player';
 
 export interface MediaSurfaceProps {
@@ -5,6 +6,8 @@ export interface MediaSurfaceProps {
   streamType?: MediaStreamType;
   fallbackStreamUrl?: string;
   fallbackStreamType?: MediaStreamType;
+  isMuted?: boolean;
+  style?: StyleProp<ViewStyle>;
   onFirstFrame: () => void;
   onError: () => void;
 }

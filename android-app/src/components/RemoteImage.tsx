@@ -6,10 +6,24 @@ interface RemoteImageProps extends Omit<ImageProps, 'source'> {
   fallbackUri?: string;
 }
 
-export function RemoteImage({uri, fallbackUri, ...props}: RemoteImageProps) {
-  const [sourceUri, setSourceUri] = useState(uri);
+function sanitizeImageUri(uri: string, fallbackUri?: string): string {
+  if (uri && uri.toLowerCase().includes('.svg')) {
+    if (fallbackUri && !fallbackUri.toLowerCase().includes('.svg')) {
+      return fallbackUri;
+    }
+    return uri.replace(/\.svg(\?.*)?$/i, '.png$1');
+  }
+  return uri;
+}
 
-  useEffect(() => setSourceUri(uri), [uri]);
+export function RemoteImage({uri, fallbackUri, ...props}: RemoteImageProps) {
+  const [sourceUri, setSourceUri] = useState(() =>
+    sanitizeImageUri(uri, fallbackUri),
+  );
+
+  useEffect(() => {
+    setSourceUri(sanitizeImageUri(uri, fallbackUri));
+  }, [fallbackUri, uri]);
 
   return (
     <Image
@@ -18,9 +32,11 @@ export function RemoteImage({uri, fallbackUri, ...props}: RemoteImageProps) {
         uri: sourceUri,
         headers: {'User-Agent': 'okhttp/4.12.0'},
       }}
-      onError={() => {
+      onError={e => {
         if (fallbackUri && sourceUri !== fallbackUri) {
           setSourceUri(fallbackUri);
+        } else {
+          props.onError?.(e);
         }
       }}
     />

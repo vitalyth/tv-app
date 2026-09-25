@@ -12,9 +12,9 @@ describe('shellReducer', () => {
   it('changes routes and collapses the menu atomically', () => {
     const expanded = { ...initialShellState, menuExpanded: true };
     expect(
-      shellReducer(expanded, { type: 'select-route', route: 'guide' }),
+      shellReducer(expanded, { type: 'select-route', route: 'series' }),
     ).toEqual({
-      activeRoute: 'guide',
+      activeRoute: 'series',
       menuExpanded: false,
     });
   });

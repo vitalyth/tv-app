@@ -6,7 +6,6 @@ import {
 import {
   API_BASE_URL,
   SERVICE_BASE_URL,
-  SERVICE_REFERER,
 } from '../src/config/api';
 
 describe('Image resolution priority ladder', () => {
@@ -19,9 +18,9 @@ describe('Image resolution priority ladder', () => {
       { artwork: 'https://example.com/artwork.jpg', logo: 'logo.png' },
     );
     expect(backdrop).toBe(
-      `${API_BASE_URL}/proxy?url=${encodeURIComponent(
+      `${API_BASE_URL}/image_proxy?url=${encodeURIComponent(
         'https://example.com/backdrop.jpg',
-      )}&referer=${encodeURIComponent(SERVICE_REFERER)}`,
+      )}`,
     );
   });
 
@@ -31,9 +30,9 @@ describe('Image resolution priority ladder', () => {
       { artwork: 'https://example.com/artwork.jpg', logo: 'logo.png' },
     );
     expect(backdrop).toBe(
-      `${API_BASE_URL}/proxy?url=${encodeURIComponent(
+      `${API_BASE_URL}/image_proxy?url=${encodeURIComponent(
         'https://example.com/backdrop2.jpg',
-      )}&referer=${encodeURIComponent(SERVICE_REFERER)}`,
+      )}`,
     );
   });
 
@@ -43,9 +42,9 @@ describe('Image resolution priority ladder', () => {
       { artwork: 'https://example.com/artwork.jpg', logo: 'logo.png' },
     );
     expect(backdrop).toBe(
-      `${API_BASE_URL}/proxy?url=${encodeURIComponent(
+      `${API_BASE_URL}/image_proxy?url=${encodeURIComponent(
         'https://example.com/prog-image.jpg',
-      )}&referer=${encodeURIComponent(SERVICE_REFERER)}`,
+      )}`,
     );
   });
 

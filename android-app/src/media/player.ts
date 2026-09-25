@@ -32,6 +32,9 @@ export interface MediaItem {
   description?: string;
   channelName?: string;
   channelNumber?: string;
+  timeRange?: string;
+  progressPercentage?: number;
+  isLive?: boolean;
   sourcePayload?: unknown;
 }
 
