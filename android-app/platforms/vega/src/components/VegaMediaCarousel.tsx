@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   type ReactElement,
   type Ref,
 } from 'react';
@@ -63,11 +64,14 @@ function VegaMediaCarouselInner<ItemT>(
   const carouselRef = useRef<CarouselRef<string>>(null);
   const itemRefs = useRef<Record<number, FocusableView | null>>({});
   const selectedIndexRef = useRef(0);
+  // Kepler only reacts when hasPreferredFocus changes. Keep the initial claim
+  // temporary so later restores can produce a fresh false -> true transition.
+  const [isFocusClaiming, setIsFocusClaiming] = useState(preferredFocus);
 
   const notifyItemFocus = useCallback(
     (index: number) => {
       const item = items[index];
-      if (!item || selectedIndexRef.current === index) {
+      if (!item) {
         return;
       }
       selectedIndexRef.current = index;
@@ -76,12 +80,25 @@ function VegaMediaCarouselInner<ItemT>(
     [items, onItemFocus],
   );
 
+  const selectCurrentItem = useCallback(() => {
+    const index = selectedIndexRef.current;
+    const selectedItem = items[index];
+    if (selectedItem) {
+      onItemSelect?.(selectedItem, index);
+    }
+  }, [items, onItemSelect]);
+
   const focusIndex = useCallback(
     (requestedIndex: number) => {
       const index = Math.max(0, Math.min(requestedIndex, items.length - 1));
       selectedIndexRef.current = index;
       carouselRef.current?.scrollTo(index, false);
-      requestAnimationFrame(() => itemRefs.current[index]?.requestTVFocus?.());
+      carouselRef.current?.enableDpad(true);
+      requestAnimationFrame(() => {
+        itemRefs.current[index]?.requestTVFocus?.();
+      });
+      // Claim focus via hasPreferredFocus, then release it after 200ms
+      setIsFocusClaiming(true);
     },
     [items.length],
   );
@@ -95,6 +112,30 @@ function VegaMediaCarouselInner<ItemT>(
       focusIndex(selectedIndexRef.current);
     },
   }));
+
+  // Reset isFocusClaiming shortly after it was set, so the Carousel doesn't
+  // perpetually steal focus on future unrelated renders.
+  useEffect(() => {
+    if (!isFocusClaiming) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setIsFocusClaiming(false);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [isFocusClaiming]);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+
+    carouselRef.current?.enableDpad(true);
+    const frame = requestAnimationFrame(() => {
+      carouselRef.current?.enableDpad(true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active]);
 
   const dataChangeCallbackRef = useRef<
     ((changes: CarouselDataChange[]) => void) | null
@@ -211,7 +252,7 @@ function VegaMediaCarouselInner<ItemT>(
               selectedIndexRef.current = index;
               onItemFocus?.(item, index);
             }}
-            onPress={() => onItemSelect?.(item, index)}>
+            onPress={selectCurrentItem}>
             {renderItem(item, index, false)}
           </TouchableOpacity>
         )}
@@ -221,7 +262,7 @@ function VegaMediaCarouselInner<ItemT>(
         renderedItemsCount={Math.min(8, items.length)}
         numOffsetItems={Math.min(2, Math.max(0, items.length - 1))}
         navigableScrollAreaMargin={leadingInset}
-        hasPreferredFocus={preferredFocus}
+        hasPreferredFocus={isFocusClaiming}
         initialStartIndex={0}
         trapSelectionOnOrientation={false}
         containerStyle={styles.carousel}

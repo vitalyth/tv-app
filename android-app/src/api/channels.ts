@@ -37,6 +37,22 @@ interface ApiChannel {
 
 const VPN_RESOLVER_MODULES = new Set(['kan', 'reshet']);
 const VPN_STREAM_HOST_SUFFIXES = ['cdn-redge.media', 'g-mana.live'];
+let serverClockOffsetMs: number | undefined;
+
+function syncServerClock(response: Response): void {
+  const serverDate = response.headers?.get?.('date');
+  if (!serverDate) {
+    return;
+  }
+  const serverTime = Date.parse(serverDate);
+  if (Number.isFinite(serverTime)) {
+    serverClockOffsetMs = serverTime - Date.now();
+  }
+}
+
+function currentTimeMs(): number {
+  return Date.now() + (serverClockOffsetMs ?? 0);
+}
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -54,7 +70,7 @@ function currentProgram(programs: unknown): ApiProgram | undefined {
   if (!Array.isArray(programs)) {
     return undefined;
   }
-  const now = Date.now();
+  const now = currentTimeMs();
   return programs.find(program => {
     if (!program || typeof program !== 'object') {
       return false;
@@ -120,7 +136,10 @@ export function upgradeImageResolution(
         .replace(/\/height\/\d+/gi, `/height/${targetHeight}`)
         .replace(/\/quality\/\d+/gi, `/quality/${targetQuality}`);
       if (!/\/width\/\d+/i.test(path)) {
-        path = `${path.replace(/\/+$/, '')}/width/${targetWidth}/height/${targetHeight}`;
+        path = `${path.replace(
+          /\/+$/,
+          '',
+        )}/width/${targetWidth}/height/${targetHeight}`;
       }
       if (!/\/quality\/\d+/i.test(path)) {
         path = `${path.replace(/\/+$/, '')}/quality/${targetQuality}`;
@@ -288,7 +307,7 @@ export function calculateProgramProgress(
   if (!startMs || !endMs || endMs <= startMs) {
     return undefined;
   }
-  const now = Date.now();
+  const now = currentTimeMs();
   if (now < startMs) return 0;
   if (now >= endMs) return 100;
   return Math.round(((now - startMs) / (endMs - startMs)) * 100);
@@ -407,7 +426,9 @@ function redgeHlsFallback(streamUrl: string): string | undefined {
 }
 
 export async function getLiveChannelCount(): Promise<number> {
-  const channels = await getJson<unknown>('/live_channels');
+  const channels = await getJson<unknown>('/live_channels', {
+    onResponse: syncServerClock,
+  });
   if (!Array.isArray(channels)) {
     throw new Error('Unexpected live channels response');
   }
@@ -476,7 +497,9 @@ export function distinctLogicalChannels(rawChannels: unknown[]): ApiChannel[] {
 export async function getDistinctLiveChannels(
   options: LiveChannelOptions = { requireEpg: true },
 ): Promise<MediaItem[]> {
-  const channels = await getJson<unknown>('/live_channels');
+  const channels = await getJson<unknown>('/live_channels', {
+    onResponse: syncServerClock,
+  });
   if (!Array.isArray(channels)) {
     throw new Error('Unexpected live channels response');
   }
@@ -510,8 +533,10 @@ export function refreshMediaItemEpg(item: MediaItem): MediaItem {
     ...item,
     title: programTitle,
     description: text(program.description),
-    imageUrl: posterUrl ?? backdropUrl ?? item.fallbackImageUrl ?? item.imageUrl,
-    backdropUrl: backdropUrl ?? posterUrl ?? item.fallbackImageUrl ?? item.backdropUrl,
+    imageUrl:
+      posterUrl ?? backdropUrl ?? item.fallbackImageUrl ?? item.imageUrl,
+    backdropUrl:
+      backdropUrl ?? posterUrl ?? item.fallbackImageUrl ?? item.backdropUrl,
     timeRange: timeRange ?? item.timeRange,
     progressPercentage: progressPercentage ?? item.progressPercentage,
   };

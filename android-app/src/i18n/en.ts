@@ -15,9 +15,9 @@ export const en = {
   // Home Screen & Sections
   homeContentUnavailable: 'Home content is currently unavailable',
   continueWatching: 'Continue Watching',
-  continueWatchingHeading: 'Continue Watching · {count} items',
-  nowOnLiveTvHeading: 'Now on Live TV · {count} channels',
-  newOnVodHeading: 'New on VOD · {count} titles',
+  continueWatchingHeading: 'Continue Watching',
+  nowOnLiveTvHeading: 'Now on Live TV',
+  newOnVodHeading: 'New on VOD',
 
   // Badges & Labels
   liveBadge: 'LIVE',

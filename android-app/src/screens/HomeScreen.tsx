@@ -30,7 +30,7 @@ import {
   type ContinueWatchingItem,
 } from '../services/watchProgress';
 import { RecentChannelsService } from '../services/recentChannels';
-import { useMediaActions } from '../media/MediaController';
+import { useMediaActions, useMediaController } from '../media/MediaController';
 import { useMediaPreviewEngine } from '../media/MediaPreviewEngine';
 import type { MediaItem, MediaStream } from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
@@ -54,7 +54,7 @@ const FOCUS_VERTICAL_SPACE = 8;
 export interface HomeScreenHandle {
   canExitToMenu: () => boolean;
   focusFirst: () => void;
-  restoreFocus: () => void;
+  restoreFocus: (itemId?: string) => void;
 }
 
 interface HomeScreenProps {
@@ -124,7 +124,9 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     const lastFocusedRowRef = useRef<RowKey>('live');
     const [focusedRow, setFocusedRow] = useState<RowKey>('live');
 
-    const { play, markError } = useMediaActions();
+    const { item: currentMediaItem, status: currentMediaStatus } =
+      useMediaController();
+    const { enterFullscreen, openFullscreen } = useMediaActions();
 
     // Unified stream resolver supporting live and vod media items
     const streamResolver = useCallback(
@@ -181,23 +183,12 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
         continueOpacity = 0;
         liveOpacity = 0;
         vodOpacity = 1;
-      } else if (focusedRow === 'live') {
-        if (hasContinue) {
-          const liveOffset = rowOffsets.current.live ?? (cardHeight + 56);
-          targetY = -liveOffset;
-          continueOpacity = 0;
-          liveOpacity = 1;
-          vodOpacity = 1;
-        } else {
-          targetY = 0;
-          continueOpacity = 1;
-          liveOpacity = 1;
-          vodOpacity = 1;
-        }
-      } else {
-        targetY = 0;
+      } else if (focusedRow === 'continue') {
+        const continueOffset =
+          rowOffsets.current.continue ?? (cardHeight + 56);
+        targetY = -continueOffset;
         continueOpacity = 1;
-        liveOpacity = 1;
+        liveOpacity = 0;
         vodOpacity = 1;
       }
 
@@ -228,7 +219,6 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
       cardHeight,
       continueOpacityAnim,
       focusedRow,
-      hasContinue,
       liveOpacityAnim,
       translateYAnim,
       vodOpacityAnim,
@@ -244,6 +234,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
           imageUrl: item.imageUrl ?? undefined,
           backdropUrl: item.backdropUrl ?? item.imageUrl ?? undefined,
           progressPercentage: item.progressPercentage,
+          resumePositionMs: item.positionMs,
           sourcePayload: item.sourcePayload ?? {
             episodeId: item.episodeId,
             streamUrl: item.streamUrl,
@@ -291,12 +282,18 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
 
           // Initial focus determination
           const initialRow: RowKey =
-            resolvedContinue.length > 0 ? 'continue' : 'live';
+            resolvedLive.length > 0
+              ? 'live'
+              : resolvedContinue.length > 0
+                ? 'continue'
+                : 'vod';
           lastFocusedRowRef.current = initialRow;
           setFocusedRow(initialRow);
 
           let firstItem: MediaItem | undefined;
-          if (resolvedContinue.length > 0 && resolvedContinue[0]) {
+          if (resolvedLive.length > 0) {
+            firstItem = resolvedLive[0];
+          } else if (resolvedContinue.length > 0 && resolvedContinue[0]) {
             const c = resolvedContinue[0];
             firstItem = {
               id: c.id,
@@ -312,7 +309,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
               },
             };
           } else {
-            firstItem = resolvedLive[0] ?? resolvedVod[0];
+            firstItem = resolvedVod[0];
           }
 
           currentlyFocusedItemRef.current = firstItem;
@@ -345,9 +342,11 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
                 return;
               }
               const targetCarousel =
-                initialRow === 'continue'
-                  ? continueCarouselRef
-                  : liveCarouselRef;
+                initialRow === 'live'
+                  ? liveCarouselRef
+                  : initialRow === 'continue'
+                    ? continueCarouselRef
+                    : vodCarouselRef;
               targetCarousel.current?.focusIndex(0);
             }, 60);
           });
@@ -429,6 +428,26 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
       };
     }, [active, contentReady]);
 
+    // Refresh Continue Watching whenever the user returns to the Home Screen
+    // (e.g. after exiting fullscreen). contentReady guards against running before
+    // the initial data load completes.
+    const prevActiveRef = useRef(active);
+    useEffect(() => {
+      const wasActive = prevActiveRef.current;
+      prevActiveRef.current = active;
+      // Only refresh when transitioning from inactive → active (returned from fullscreen)
+      if (!wasActive && active && contentReady) {
+        WatchProgressService.getContinueWatching()
+          .then(items => {
+            setContinueItems(items);
+            // If we now have continue items and the row wasn't previously visible,
+            // update focusedRow to 'continue' so the animation plays correctly.
+            // Focus restoration is handled by ApplicationShell; no immediate focus change needed.
+          })
+          .catch(() => {});
+      }
+    }, [active, contentReady]);
+
     const getActiveCarousel = useCallback(() => {
       switch (lastFocusedRowRef.current) {
         case 'continue':
@@ -448,20 +467,52 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
       },
       focusFirst() {
         const targetRow: RowKey =
-          continueItems.length > 0 ? 'continue' : 'live';
+          liveChannels.length > 0
+            ? 'live'
+            : continueItems.length > 0
+              ? 'continue'
+              : 'vod';
         lastFocusedRowRef.current = targetRow;
         setFocusedRow(targetRow);
         const targetCarousel =
-          targetRow === 'continue' ? continueCarouselRef : liveCarouselRef;
+          targetRow === 'live'
+            ? liveCarouselRef
+            : targetRow === 'continue'
+              ? continueCarouselRef
+              : vodCarouselRef;
         targetCarousel.current?.focusIndex(0);
       },
-      restoreFocus() {
-        getActiveCarousel().current?.restoreFocus();
+      restoreFocus(itemId) {
+        const row = lastFocusedRowRef.current;
+        const rowItems =
+          row === 'continue'
+            ? continueWatchingMediaItems
+            : row === 'live'
+              ? liveChannels
+              : vodItems;
+        const itemIndex = itemId
+          ? rowItems.findIndex(item => item.id === itemId)
+          : -1;
+
+        if (itemIndex >= 0) {
+          getActiveCarousel().current?.focusIndex(itemIndex);
+        } else {
+          getActiveCarousel().current?.restoreFocus();
+        }
       },
-    }));
+    }), [
+      continueItems.length,
+      continueWatchingMediaItems,
+      getActiveCarousel,
+      liveChannels,
+      vodItems,
+    ]);
 
     const handleFocused = useCallback(
       (row: RowKey, item: MediaItem) => {
+        if (!active) {
+          return;
+        }
         lastFocusedRowRef.current = row;
         setFocusedRow(current => (current === row ? current : row));
         currentlyFocusedItemRef.current = item;
@@ -470,7 +521,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
         onItemFocusedRef.current?.(item);
         onContentFocus();
       },
-      [onContentFocus],
+      [active, onContentFocus],
     );
 
     const handleContinueFocus = useCallback(
@@ -491,15 +542,26 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
         if (item.kind === 'live') {
           RecentChannelsService.recordChannelWatched(item.id).catch(() => {});
         }
-        streamResolver(item)
-          .then(stream => {
-            play(item, stream);
-          })
-          .catch(() => {
-            markError();
-          });
+
+        // Reuse existing preview state if the focused item is already playing or loading
+        if (
+          currentMediaItem?.id === item.id &&
+          (currentMediaStatus === 'playing' || currentMediaStatus === 'loading')
+        ) {
+          previewEngineRef.current.clearPreview({ stopMedia: false });
+          enterFullscreen();
+          return;
+        }
+
+        previewEngineRef.current.clearPreview({ stopMedia: true });
+        openFullscreen(item);
       },
-      [markError, play, streamResolver],
+      [
+        currentMediaItem?.id,
+        currentMediaStatus,
+        enterFullscreen,
+        openFullscreen,
+      ],
     );
 
     const renderContinueCard = useCallback(
@@ -572,49 +634,14 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
               },
             ]}
           >
-          {/* שורה 1: המשך צפייה (מוסתרת כשרעיונית אין פריטים) */}
-          {hasContinue ? (
-            <Animated.View
-              onLayout={onRowLayout('continue')}
-              style={[styles.row, { opacity: continueOpacityAnim }]}
-            >
-              <Text style={styles.heading}>
-                {t('continueWatchingHeading', { count: continueItems.length })}
-              </Text>
-              <MediaCarousel
-                id={`${route.id}-continue`}
-                ref={continueCarouselRef}
-                items={continueWatchingMediaItems}
-                itemWidth={cardWidth}
-                height={carouselHeight}
-                leadingInset={MAIN_CONTENT_INSET_LEFT}
-                trailingInset={MAIN_CONTENT_INSET_RIGHT}
-                active={active && focusedRow === 'continue'}
-                preferredFocus
-                trapFocusUp
-                trapFocusDown={!hasLive && !hasVod}
-                leftFocusDestination={menuFocusDestination}
-                keyExtractor={item => item.id}
-                renderItem={renderContinueCard}
-                onItemFocus={handleContinueFocus}
-                onItemSelect={handleActivate}
-              />
-            </Animated.View>
-          ) : null}
-
-          {/* שורה 2: משודר עכשיו בלייב */}
+          {/* שורה 1: משודר עכשיו בלייב */}
           {hasLive ? (
             <Animated.View
               onLayout={onRowLayout('live')}
               style={[styles.row, { opacity: liveOpacityAnim }]}
             >
-              <Text
-                style={[
-                  styles.heading,
-                  hasContinue && styles.secondaryHeading,
-                ]}
-              >
-                {t('nowOnLiveTvHeading', { count: liveChannels.length })}
+              <Text style={styles.heading}>
+                {t('nowOnLiveTvHeading')}
               </Text>
               <MediaCarousel
                 id={`${route.id}-live`}
@@ -625,13 +652,48 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
                 leadingInset={MAIN_CONTENT_INSET_LEFT}
                 trailingInset={MAIN_CONTENT_INSET_RIGHT}
                 active={active && focusedRow === 'live'}
-                preferredFocus={!hasContinue}
-                trapFocusUp={!hasContinue}
-                trapFocusDown={!hasVod}
+                preferredFocus
+                trapFocusUp
+                trapFocusDown={!hasContinue && !hasVod}
                 leftFocusDestination={menuFocusDestination}
                 keyExtractor={item => item.id}
                 renderItem={renderLiveCard}
                 onItemFocus={handleLiveFocus}
+                onItemSelect={handleActivate}
+              />
+            </Animated.View>
+          ) : null}
+
+          {/* שורה 2: המשך צפייה (מוסתרת כשאין פריטים) */}
+          {hasContinue ? (
+            <Animated.View
+              onLayout={onRowLayout('continue')}
+              style={[styles.row, { opacity: continueOpacityAnim }]}
+            >
+              <Text
+                style={[
+                  styles.heading,
+                  hasLive && styles.secondaryHeading,
+                ]}
+              >
+                {t('continueWatchingHeading')}
+              </Text>
+              <MediaCarousel
+                id={`${route.id}-continue`}
+                ref={continueCarouselRef}
+                items={continueWatchingMediaItems}
+                itemWidth={cardWidth}
+                height={carouselHeight}
+                leadingInset={MAIN_CONTENT_INSET_LEFT}
+                trailingInset={MAIN_CONTENT_INSET_RIGHT}
+                active={active && focusedRow === 'continue'}
+                preferredFocus={!hasLive}
+                trapFocusUp={!hasLive}
+                trapFocusDown={!hasVod}
+                leftFocusDestination={menuFocusDestination}
+                keyExtractor={item => item.id}
+                renderItem={renderContinueCard}
+                onItemFocus={handleContinueFocus}
                 onItemSelect={handleActivate}
               />
             </Animated.View>
@@ -649,7 +711,7 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
                   (hasContinue || hasLive) && styles.secondaryHeading,
                 ]}
               >
-                {t('newOnVodHeading', { count: vodItems.length })}
+                {t('newOnVodHeading')}
               </Text>
               <MediaCarousel
                 id={`${route.id}-vod`}
@@ -693,4 +755,3 @@ const styles = StyleSheet.create({
   secondaryHeading: { marginTop: 10 },
   error: { color: '#ffb4b9', fontSize: 16, height: 150 },
 });
-

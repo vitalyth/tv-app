@@ -1,4 +1,11 @@
-import { memo, useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import {
   BackHandler,
   StyleSheet,
@@ -18,9 +25,14 @@ import {
 import { IntroRegion } from './IntroRegion';
 import { MediaLayer } from './MediaLayer';
 import type { MediaItem } from '../media/player';
-import { MediaControllerProvider } from '../media/MediaController';
+import {
+  MediaControllerProvider,
+  useMediaActions,
+  useMediaController,
+} from '../media/MediaController';
 import { PageContent, type PageContentHandle } from './PageContent';
 import { SideMenu } from './SideMenu';
+import { FullScreenPlayer } from './player/FullScreenPlayer';
 
 function getFormattedTime(): string {
   const now = new Date();
@@ -36,22 +48,65 @@ const LiveClock = memo(function LiveClockView() {
     const update = () => setTime(getFormattedTime());
     update();
     const interval = setInterval(update, 1000);
-    (interval as unknown as { unref?: () => void }).unref?.();
     return () => clearInterval(interval);
   }, []);
 
   return <Text style={styles.clock}>{time}</Text>;
 });
 
-export function ApplicationShell() {
-  const [state, dispatch] = useReducer(shellReducer, initialShellState);
-  const [menuFocusDestination, setMenuFocusDestination] =
-    useState<FocusDestination>(null);
-  const [focusedMediaItem, setFocusedMediaItem] = useState<MediaItem | null>(
-    null,
-  );
-  const pageContentRef = useRef<PageContentHandle>(null);
+const MENU_FOCUS_RESTORE_DELAY_MS = 160;
+
+function ShellContent({
+  state,
+  dispatch,
+  menuFocusDestination,
+  setMenuFocusDestination,
+  focusedMediaItem,
+  setFocusedMediaItem,
+  pageContentRef,
+}: {
+  state: ReturnType<typeof shellReducer> extends never ? never : any;
+  dispatch: React.Dispatch<any>;
+  menuFocusDestination: FocusDestination;
+  setMenuFocusDestination: (dest: FocusDestination) => void;
+  focusedMediaItem: MediaItem | null;
+  setFocusedMediaItem: (item: MediaItem | null) => void;
+  pageContentRef: React.RefObject<PageContentHandle | null>;
+}) {
+  const { item: playingItem, presentation } = useMediaController();
+  const { exitFullscreen } = useMediaActions();
   const activeRoute = getRoute(state.activeRoute);
+  const isFullscreen = presentation === 'fullscreen';
+  const focusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleContentFocus = useCallback(
+    (itemId?: string, delay = MENU_FOCUS_RESTORE_DELAY_MS) => {
+      if (focusRestoreTimerRef.current) {
+        clearTimeout(focusRestoreTimerRef.current);
+      }
+      focusRestoreTimerRef.current = setTimeout(() => {
+        focusRestoreTimerRef.current = null;
+        pageContentRef.current?.restoreFocus(itemId);
+      }, delay);
+    },
+    [pageContentRef],
+  );
+
+  useEffect(
+    () => () => {
+      if (focusRestoreTimerRef.current) {
+        clearTimeout(focusRestoreTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const handleExitFullscreen = useCallback(() => {
+    // Exit fullscreen first so the overlay becomes focusable (pointerEvents re-enabled)
+    exitFullscreen();
+    // Then restore focus to the exact card that opened the player.
+    scheduleContentFocus(playingItem?.id, 50);
+  }, [exitFullscreen, playingItem?.id, scheduleContentFocus]);
 
   useTVEventHandler(event => {
     if (event.eventKeyAction === 1) {
@@ -60,7 +115,7 @@ export function ApplicationShell() {
 
     if (event.eventType === 'right' && state.menuExpanded) {
       dispatch({ type: 'collapse-menu' });
-      pageContentRef.current?.restoreFocus();
+      scheduleContentFocus();
       return;
     }
 
@@ -85,32 +140,39 @@ export function ApplicationShell() {
           return false;
         }
         dispatch({ type: 'collapse-menu' });
-        pageContentRef.current?.restoreFocus();
+        scheduleContentFocus();
         return true;
       },
     );
     return () => subscription.remove();
-  }, [state.menuExpanded]);
+  }, [state.menuExpanded, dispatch, scheduleContentFocus]);
 
-  const selectRoute = useCallback((route: RootRoute) => {
-    setFocusedMediaItem(null);
-    dispatch({ type: 'select-route', route });
-    pageContentRef.current?.focusFirst();
-  }, []);
+  const selectRoute = useCallback(
+    (route: RootRoute) => {
+      setFocusedMediaItem(null);
+      dispatch({ type: 'select-route', route });
+      pageContentRef.current?.focusFirst();
+    },
+    [dispatch, setFocusedMediaItem, pageContentRef],
+  );
 
   const handleMenuFocus = useCallback(() => {
     dispatch({ type: 'focus-menu' });
-  }, []);
+  }, [dispatch]);
 
   const handleContentFocus = useCallback(() => {
     dispatch({ type: 'focus-content' });
-  }, []);
+  }, [dispatch]);
 
   return (
-    <MediaControllerProvider>
-      <View style={styles.screen}>
-        <MediaLayer />
-        <View style={styles.overlay}>
+    <View style={styles.screen}>
+      <MediaLayer />
+      <View
+        accessibilityElementsHidden={isFullscreen}
+        importantForAccessibility={isFullscreen ? 'no-hide-descendants' : 'auto'}
+        pointerEvents={isFullscreen ? 'none' : 'auto'}
+        style={[styles.overlay, isFullscreen && styles.overlayHidden]}
+      >
           <View style={styles.mainArea}>
             <View style={styles.topBar}>
               <Text style={styles.platform}>{tvPlatform.displayName}</Text>
@@ -120,7 +182,7 @@ export function ApplicationShell() {
             <PageContent
               ref={pageContentRef}
               route={activeRoute}
-              active={!state.menuExpanded}
+              active={!isFullscreen && !state.menuExpanded}
               menuFocusDestination={menuFocusDestination}
               onContentFocus={handleContentFocus}
               onItemFocused={setFocusedMediaItem}
@@ -133,8 +195,37 @@ export function ApplicationShell() {
             onActiveItemChange={setMenuFocusDestination}
             onSelectRoute={selectRoute}
           />
-        </View>
       </View>
+      {/* FullScreenPlayer AFTER overlay so it renders on top (React Native z-order) */}
+      {isFullscreen ? (
+        <View style={StyleSheet.absoluteFill}>
+          <FullScreenPlayer onExit={handleExitFullscreen} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function ApplicationShell() {
+  const [state, dispatch] = useReducer(shellReducer, initialShellState);
+  const [menuFocusDestination, setMenuFocusDestination] =
+    useState<FocusDestination>(null);
+  const [focusedMediaItem, setFocusedMediaItem] = useState<MediaItem | null>(
+    null,
+  );
+  const pageContentRef = useRef<PageContentHandle>(null);
+
+  return (
+    <MediaControllerProvider>
+      <ShellContent
+        state={state}
+        dispatch={dispatch}
+        menuFocusDestination={menuFocusDestination}
+        setMenuFocusDestination={setMenuFocusDestination}
+        focusedMediaItem={focusedMediaItem}
+        setFocusedMediaItem={setFocusedMediaItem}
+        pageContentRef={pageContentRef}
+      />
     </MediaControllerProvider>
   );
 }
@@ -142,6 +233,7 @@ export function ApplicationShell() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#07111c' },
   overlay: { flex: 1 },
+  overlayHidden: { opacity: 0 },
   mainArea: {
     flex: 1,
     paddingLeft: MAIN_CONTENT_INSET_LEFT,
@@ -168,4 +260,3 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
-

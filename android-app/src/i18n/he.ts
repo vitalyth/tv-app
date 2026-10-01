@@ -15,9 +15,9 @@ export const he = {
   // Home Screen & Sections
   homeContentUnavailable: 'תוכן עמוד הבית אינו זמין כעת',
   continueWatching: 'המשך צפייה',
-  continueWatchingHeading: 'המשך צפייה · {count} פריטים',
-  nowOnLiveTvHeading: 'משודר עכשיו בלייב · {count} ערוצים',
-  newOnVodHeading: 'חדש ב-VOD · {count} תכנים',
+  continueWatchingHeading: 'המשך צפייה',
+  nowOnLiveTvHeading: 'משודר עכשיו בלייב',
+  newOnVodHeading: 'חדש ב-VOD',
 
   // Badges & Labels
   liveBadge: 'LIVE',
@@ -37,4 +37,3 @@ export const he = {
   navSearch: 'חיפוש',
   navSettings: 'הגדרות',
 } as const;
-

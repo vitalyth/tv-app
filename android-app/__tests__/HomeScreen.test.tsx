@@ -21,6 +21,11 @@ const mockRoute: RouteDefinition = {
     'Continue watching, return to live television, or discover something new.',
 };
 
+const mockCarouselHandles = new Map<
+  string,
+  { focusIndex: jest.Mock; restoreFocus: jest.Mock }
+>();
+
 jest.mock('../src/components/MediaCarousel', () => {
   const ReactModule = require('react');
   const { View } = require('react-native');
@@ -29,11 +34,13 @@ jest.mock('../src/components/MediaCarousel', () => {
       props: any,
       ref: any,
     ) {
-      ReactModule.useImperativeHandle(ref, () => ({
+      const handle = {
         focusIndex: jest.fn(),
         getSelectedIndex: () => 0,
         restoreFocus: jest.fn(),
-      }));
+      };
+      mockCarouselHandles.set(props.id, handle);
+      ReactModule.useImperativeHandle(ref, () => handle);
       return (
         <View testID={`carousel-${props.id}`}>
           {props.items.map((item: any, idx: number) => (
@@ -55,6 +62,7 @@ describe('HomeScreen', () => {
   beforeEach(() => {
     resetWatchProgressMemoryStore();
     jest.clearAllMocks();
+    mockCarouselHandles.clear();
   });
 
   afterEach(() => {
@@ -198,9 +206,22 @@ describe('HomeScreen', () => {
     expect(root.findAllByProps({ id: 'home-live' })).toHaveLength(1);
     expect(root.findAllByProps({ id: 'home-vod' })).toHaveLength(1);
 
-    // Initial focus on Continue Watching item
+    const rowOrder = root
+      .findAll(
+        node =>
+          node.props.id === 'home-live' ||
+          node.props.id === 'home-continue' ||
+          node.props.id === 'home-vod',
+      )
+      .map(node => node.props.id);
+    expect(rowOrder).toEqual(['home-live', 'home-continue', 'home-vod']);
+
+    const continueCarousel = root.findByProps({ id: 'home-continue' });
+    expect(continueCarousel.props.items[0].resumePositionMs).toBe(60000);
+
+    // Live remains the first and initially focused row.
     expect(onItemFocused).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'cw-1' }),
+      expect.objectContaining({ id: 'ch-11' }),
     );
 
     // Imperative handle methods
@@ -223,6 +244,41 @@ describe('HomeScreen', () => {
       'ch-12',
       'ch-14',
     ]);
+  });
+
+  it('restores focus to the exact item that opened fullscreen', async () => {
+    jest
+      .spyOn(channelsApi, 'getDistinctLiveChannels')
+      .mockResolvedValue(mockLiveChannels);
+    jest.spyOn(vodApi, 'getRecentVodItems').mockResolvedValue(mockVodItems);
+    jest
+      .spyOn(WatchProgressService, 'getContinueWatching')
+      .mockResolvedValue([]);
+
+    const homeRef = createRef<HomeScreenHandle>();
+
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <HomeScreen
+            ref={homeRef}
+            route={mockRoute}
+            active={true}
+            menuFocusDestination={null}
+            onContentFocus={jest.fn()}
+          />
+        </MediaControllerProvider>,
+      );
+      await new Promise(r => setTimeout(() => r(null), 600));
+    });
+
+    act(() => {
+      homeRef.current?.restoreFocus('ch-12');
+    });
+
+    expect(
+      mockCarouselHandles.get('home-live')?.focusIndex,
+    ).toHaveBeenCalledWith(1);
   });
 
   it('renders live channels with recent channels prioritized on mount', async () => {

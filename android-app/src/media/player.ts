@@ -22,6 +22,15 @@ export interface MediaStream {
   fallbackType?: MediaStreamType;
 }
 
+export interface VideoQualityOption {
+  id: string;
+  label: string;
+  height?: number;
+  width?: number;
+  bitrate?: number;
+  active?: boolean;
+}
+
 export interface MediaItem {
   id: string;
   kind: MediaKind;
@@ -37,6 +46,7 @@ export interface MediaItem {
   channelNumber?: string;
   timeRange?: string;
   progressPercentage?: number;
+  resumePositionMs?: number;
   isLive?: boolean;
   sourcePayload?: unknown;
 }

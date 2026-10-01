@@ -20,7 +20,7 @@ import {
   getPlayableLiveChannels,
   resolveLiveChannelStream,
 } from '../api/channels';
-import { useMediaActions } from '../media/MediaController';
+import { useMediaActions, useMediaController } from '../media/MediaController';
 import { useMediaPreviewEngine } from '../media/MediaPreviewEngine';
 import type { MediaItem } from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
@@ -111,7 +111,7 @@ const ChannelCard = memo(function ChannelCardView({
 export interface PageContentHandle {
   canExitToMenu: () => boolean;
   focusFirst: () => void;
-  restoreFocus: () => void;
+  restoreFocus: (itemId?: string) => void;
 }
 
 interface PageContentProps {
@@ -137,7 +137,9 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
     const [focusedRow, setFocusedRow] = useState<'primary' | 'secondary'>(
       'primary',
     );
-    const { markError, play } = useMediaActions();
+    const { item: currentMediaItem, status: currentMediaStatus } =
+      useMediaController();
+    const { markError, playFullscreen, enterFullscreen } = useMediaActions();
     const previewEngine = useMediaPreviewEngine();
 
     const contentWidth =
@@ -183,12 +185,21 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
         setFocusedRow('primary');
         primaryCarouselRef.current?.focusIndex(0);
       },
-      restoreFocus() {
+      restoreFocus(itemId) {
+        const preferredRow = lastFocusedRowRef.current;
+        const preferredItems =
+          preferredRow === 'primary' ? channels : secondaryChannels;
+        const itemIndex = itemId
+          ? preferredItems.findIndex(item => item.id === itemId)
+          : -1;
         const target =
-          lastFocusedRowRef.current === 'primary'
-            ? primaryCarouselRef
-            : secondaryCarouselRef;
-        target.current?.restoreFocus();
+          preferredRow === 'primary' ? primaryCarouselRef : secondaryCarouselRef;
+
+        if (itemIndex >= 0) {
+          target.current?.focusIndex(itemIndex);
+        } else {
+          target.current?.restoreFocus();
+        }
       },
     }));
 
@@ -198,22 +209,39 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
         setFocusedRow(current => (current === row ? current : row));
         playFocusSound();
         previewEngine.focusMediaItem(channel);
+        onItemFocused?.(channel);
         onContentFocus();
       },
-      [onContentFocus, previewEngine],
+      [onContentFocus, onItemFocused, previewEngine],
     );
 
     const handleActivate = useCallback(
       (channel: MediaItem) => {
+        previewEngine.clearPreview({ stopMedia: false });
+        if (
+          currentMediaItem?.id === channel.id &&
+          (currentMediaStatus === 'playing' || currentMediaStatus === 'loading')
+        ) {
+          enterFullscreen();
+          return;
+        }
+
         resolveLiveChannelStream(channel)
           .then(stream => {
-            play(channel, stream);
+            playFullscreen(channel, stream);
           })
           .catch(() => {
             markError();
           });
       },
-      [markError, play],
+      [
+        currentMediaItem?.id,
+        currentMediaStatus,
+        enterFullscreen,
+        markError,
+        playFullscreen,
+        previewEngine,
+      ],
     );
 
     const secondaryChannels = useMemo(

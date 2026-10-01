@@ -32,6 +32,10 @@ id = "com.amazon.audio.privilege.settings.control"
 [[needs.module]]
 id = "/com.amazon.kepler.audio_lib_2@IAudioLib_0"
 
+[[needs.module]]
+id = "/com.amazon.kepler.async_storage__async_storage_2@IAsyncStorage__AsyncStorage_1"
+
+
 
 [wants]
 [[wants.service]]

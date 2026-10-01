@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from 'react';
@@ -11,29 +12,53 @@ import type {
   MediaPresentation,
   MediaStream,
   PlaybackStatus,
+  VideoQualityOption,
 } from './player';
 
-interface MediaControllerValue {
+export interface MediaControllerValue {
   item?: MediaItem;
   stream?: MediaStream;
   presentation: MediaPresentation;
   status: PlaybackStatus;
+  paused: boolean;
+  currentTime: number;
+  duration: number;
+  videoQualities: VideoQualityOption[];
+  selectedQualityId: string;
   play: (item: MediaItem, stream: MediaStream) => void;
+  playFullscreen: (item: MediaItem, stream: MediaStream) => void;
+  openFullscreen: (item: MediaItem) => void;
+  enterFullscreen: () => void;
+  exitFullscreen: () => void;
   showImage: (item: MediaItem) => void;
   stopVideo: () => void;
   stopAll: () => void;
   markPlaying: () => void;
   markError: () => void;
+  setPaused: (paused: boolean) => void;
+  togglePlayPause: () => void;
+  updateProgress: (currentTime: number, duration: number) => void;
+  setAvailableQualities: (qualities: VideoQualityOption[]) => void;
+  setSelectedQuality: (qualityId: string) => void;
 }
 
-type MediaControllerActions = Pick<
+export type MediaControllerActions = Pick<
   MediaControllerValue,
   | 'play'
+  | 'playFullscreen'
+  | 'openFullscreen'
+  | 'enterFullscreen'
+  | 'exitFullscreen'
   | 'showImage'
   | 'stopVideo'
   | 'stopAll'
   | 'markPlaying'
   | 'markError'
+  | 'setPaused'
+  | 'togglePlayPause'
+  | 'updateProgress'
+  | 'setAvailableQualities'
+  | 'setSelectedQuality'
 >;
 
 const MediaControllerContext = createContext<MediaControllerValue | null>(null);
@@ -42,36 +67,138 @@ const MediaControllerActionsContext =
 
 export function MediaControllerProvider({ children }: PropsWithChildren) {
   const [item, setItem] = useState<MediaItem>();
-  const [stream, setStream] = useState<MediaStream>();
-  const [presentation, setPresentation] =
+  const [streamSource, setStreamSource] = useState<{
+    itemId: string;
+    stream: MediaStream;
+  }>();
+  const stream = streamSource && streamSource.itemId === item?.id
+    ? streamSource.stream
+    : undefined;
+  const [presentation, setPresentationState] =
     useState<MediaPresentation>('background-image');
+  const presentationRef = useRef<MediaPresentation>('background-image');
+
+  const setPresentation = useCallback((nextPresentation: MediaPresentation) => {
+    presentationRef.current = nextPresentation;
+    setPresentationState(nextPresentation);
+  }, []);
+
   const [status, setStatus] = useState<PlaybackStatus>('idle');
+  const [paused, setPausedState] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const [videoQualities, setVideoQualities] = useState<VideoQualityOption[]>([]);
+  const [selectedQualityId, setSelectedQualityId] = useState<string>('auto');
 
   const play = useCallback((nextItem: MediaItem, nextStream: MediaStream) => {
+    if (presentationRef.current === 'fullscreen') {
+      return;
+    }
     setStatus('loading');
     setPresentation('single-video');
     setItem(nextItem);
-    setStream(nextStream);
-  }, []);
+    setStreamSource({ itemId: nextItem.id, stream: nextStream });
+    setPausedState(false);
+    setCurrentTime(0);
+    setDuration(0);
+  }, [setPresentation]);
+
+  const playFullscreen = useCallback((nextItem: MediaItem, nextStream: MediaStream) => {
+    setStatus('loading');
+    setPresentation('fullscreen');
+    setItem(nextItem);
+    setStreamSource({ itemId: nextItem.id, stream: nextStream });
+    setPausedState(false);
+    setCurrentTime(0);
+    setDuration(0);
+  }, [setPresentation]);
+
+  const openFullscreen = useCallback((nextItem: MediaItem) => {
+    setStatus('loading');
+    setPresentation('fullscreen');
+    setItem(nextItem);
+    setStreamSource(undefined);
+    setPausedState(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setVideoQualities([]);
+  }, [setPresentation]);
+
+  const enterFullscreen = useCallback(() => {
+    setPresentation('fullscreen');
+    setPausedState(false);
+  }, [setPresentation]);
+
+  const exitFullscreen = useCallback(() => {
+    setPresentation('single-video');
+  }, [setPresentation]);
+
   const showImage = useCallback((nextItem: MediaItem) => {
+    if (presentationRef.current === 'fullscreen') {
+      return;
+    }
     setStatus('idle');
     setPresentation('background-image');
     setItem(nextItem);
-    setStream(undefined);
-  }, []);
+    setStreamSource(undefined);
+    setPausedState(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setVideoQualities([]);
+  }, [setPresentation]);
+
   const stopVideo = useCallback(() => {
+    if (presentationRef.current === 'fullscreen') {
+      return;
+    }
     setStatus('idle');
     setPresentation('background-image');
-    setStream(undefined);
-  }, []);
+    setStreamSource(undefined);
+    setPausedState(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setVideoQualities([]);
+  }, [setPresentation]);
+
   const stopAll = useCallback(() => {
+    if (presentationRef.current === 'fullscreen') {
+      return;
+    }
     setStatus('idle');
     setPresentation('background-image');
     setItem(undefined);
-    setStream(undefined);
-  }, []);
+    setStreamSource(undefined);
+    setPausedState(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setVideoQualities([]);
+  }, [setPresentation]);
+
   const markPlaying = useCallback(() => setStatus('playing'), []);
   const markError = useCallback(() => setStatus('error'), []);
+
+  const setPaused = useCallback((nextPaused: boolean) => {
+    setPausedState(nextPaused);
+  }, []);
+
+  const togglePlayPause = useCallback(() => {
+    setPausedState(prev => !prev);
+  }, []);
+
+  const updateProgress = useCallback((nextCurrentTime: number, nextDuration: number) => {
+    setCurrentTime(nextCurrentTime);
+    if (nextDuration > 0) {
+      setDuration(nextDuration);
+    }
+  }, []);
+
+  const setAvailableQualities = useCallback((qualities: VideoQualityOption[]) => {
+    setVideoQualities(qualities);
+  }, []);
+
+  const setSelectedQuality = useCallback((qualityId: string) => {
+    setSelectedQualityId(qualityId);
+  }, []);
 
   const value = useMemo<MediaControllerValue>(
     () => ({
@@ -79,29 +206,90 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       stream,
       presentation,
       status,
+      paused,
+      currentTime,
+      duration,
+      videoQualities,
+      selectedQualityId,
       play,
+      playFullscreen,
+      openFullscreen,
+      enterFullscreen,
+      exitFullscreen,
       showImage,
       stopVideo,
       stopAll,
       markPlaying,
       markError,
+      setPaused,
+      togglePlayPause,
+      updateProgress,
+      setAvailableQualities,
+      setSelectedQuality,
     }),
     [
+      currentTime,
+      duration,
+      enterFullscreen,
+      exitFullscreen,
       item,
       markError,
       markPlaying,
+      openFullscreen,
+      paused,
       play,
+      playFullscreen,
       presentation,
+      selectedQualityId,
+      setAvailableQualities,
+      setPaused,
+      setSelectedQuality,
       showImage,
       status,
       stopAll,
       stopVideo,
       stream,
+      togglePlayPause,
+      updateProgress,
+      videoQualities,
     ],
   );
+
   const actions = useMemo<MediaControllerActions>(
-    () => ({ play, showImage, stopVideo, stopAll, markPlaying, markError }),
-    [markError, markPlaying, play, showImage, stopAll, stopVideo],
+    () => ({
+      play,
+      playFullscreen,
+      openFullscreen,
+      enterFullscreen,
+      exitFullscreen,
+      showImage,
+      stopVideo,
+      stopAll,
+      markPlaying,
+      markError,
+      setPaused,
+      togglePlayPause,
+      updateProgress,
+      setAvailableQualities,
+      setSelectedQuality,
+    }),
+    [
+      enterFullscreen,
+      exitFullscreen,
+      markError,
+      markPlaying,
+      openFullscreen,
+      play,
+      playFullscreen,
+      setAvailableQualities,
+      setPaused,
+      setSelectedQuality,
+      showImage,
+      stopAll,
+      stopVideo,
+      togglePlayPause,
+      updateProgress,
+    ],
   );
 
   return (

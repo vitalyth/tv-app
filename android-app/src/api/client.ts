@@ -1,4 +1,4 @@
-import {API_BASE_URL, API_TIMEOUT_MS} from '../config/api';
+import { API_BASE_URL, API_TIMEOUT_MS } from '../config/api';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -7,17 +7,28 @@ export class ApiError extends Error {
   }
 }
 
-export async function getJson<T>(path: string): Promise<T> {
+interface GetJsonOptions {
+  onResponse?: (response: Response) => void;
+}
+
+export async function getJson<T>(
+  path: string,
+  options: GetJsonOptions = {},
+): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
-      headers: {Accept: 'application/json'},
+      headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
     if (!response.ok) {
-      throw new ApiError(`API request failed (${response.status})`, response.status);
+      throw new ApiError(
+        `API request failed (${response.status})`,
+        response.status,
+      );
     }
+    options.onResponse?.(response);
     return (await response.json()) as T;
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {

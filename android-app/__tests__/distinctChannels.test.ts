@@ -2,6 +2,7 @@ import {
   distinctLogicalChannels,
   formatProgramTimeRange,
   calculateProgramProgress,
+  getDistinctLiveChannels,
 } from '../src/api/channels';
 
 describe('Channels deduplication and time formatting', () => {
@@ -101,25 +102,92 @@ describe('Channels deduplication and time formatting', () => {
     dateSpy.mockRestore();
   });
 
+  it('uses server time for current EPG when the TV clock is stale', async () => {
+    const deviceNow = Date.parse('2026-09-26T19:00:00Z');
+    const serverNow = Date.parse('2026-09-28T19:00:00Z');
+    const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(deviceNow);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'date'
+            ? new Date(serverNow).toUTCString()
+            : null,
+      },
+      json: async () => [
+        {
+          id: 'ch-1',
+          name: 'Channel 1',
+          type: 'tv',
+          programs: [
+            {
+              name: 'Evening News',
+              start: (serverNow - 30_000) / 1000,
+              end: (serverNow + 30_000) / 1000,
+            },
+          ],
+        },
+      ],
+    } as unknown as Response);
+
+    await expect(
+      getDistinctLiveChannels({ requireEpg: true }),
+    ).resolves.toEqual([expect.objectContaining({ title: 'Evening News' })]);
+    dateSpy.mockRestore();
+    jest.restoreAllMocks();
+  });
+
   it('merges live channels updates while strictly preserving order', () => {
     const { mergeLiveChannelsPreservingOrder } = require('../src/api/channels');
     const existing = [
-      { id: 'ch-12', kind: 'live', title: 'Old 12', timeRange: '10:00 - 11:00' },
-      { id: 'ch-11', kind: 'live', title: 'Old 11', timeRange: '10:00 - 11:00' },
-      { id: 'ch-13', kind: 'live', title: 'Old 13', timeRange: '10:00 - 11:00' },
+      {
+        id: 'ch-12',
+        kind: 'live',
+        title: 'Old 12',
+        timeRange: '10:00 - 11:00',
+      },
+      {
+        id: 'ch-11',
+        kind: 'live',
+        title: 'Old 11',
+        timeRange: '10:00 - 11:00',
+      },
+      {
+        id: 'ch-13',
+        kind: 'live',
+        title: 'Old 13',
+        timeRange: '10:00 - 11:00',
+      },
     ];
 
     const fresh = [
-      { id: 'ch-11', kind: 'live', title: 'New 11', timeRange: '11:00 - 12:00' },
-      { id: 'ch-13', kind: 'live', title: 'New 13', timeRange: '11:00 - 12:00' },
-      { id: 'ch-12', kind: 'live', title: 'New 12', timeRange: '11:00 - 12:00' },
+      {
+        id: 'ch-11',
+        kind: 'live',
+        title: 'New 11',
+        timeRange: '11:00 - 12:00',
+      },
+      {
+        id: 'ch-13',
+        kind: 'live',
+        title: 'New 13',
+        timeRange: '11:00 - 12:00',
+      },
+      {
+        id: 'ch-12',
+        kind: 'live',
+        title: 'New 12',
+        timeRange: '11:00 - 12:00',
+      },
     ];
 
-    const merged = mergeLiveChannelsPreservingOrder(existing as any, fresh as any);
+    const merged = mergeLiveChannelsPreservingOrder(
+      existing as any,
+      fresh as any,
+    );
     expect(merged.map((c: any) => c.id)).toEqual(['ch-12', 'ch-11', 'ch-13']);
     expect(merged[0].title).toBe('New 12');
     expect(merged[1].title).toBe('New 11');
     expect(merged[2].title).toBe('New 13');
   });
 });
-

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { VegaShakaPlayer } from '../../platforms/vega/src/media/vega/VegaShakaPlayer';
-import type { MediaStreamType } from './player';
+import type { MediaStreamType, VideoQualityOption } from './player';
 import type { MediaSurfaceProps } from './MediaSurface.types';
 
 declare const require: (moduleName: string) => any;
@@ -19,8 +19,17 @@ const { VideoPlayer } = require(
 interface SurfaceEngineProps {
   url: string;
   type?: MediaStreamType;
+  paused?: boolean;
+  startPositionSeconds?: number;
+  selectedQualityId?: string;
   onFirstFrame: () => void;
   onError: () => void;
+  onProgress?: (data: {
+    currentTime: number;
+    playableDuration: number;
+    seekableDuration: number;
+  }) => void;
+  onVideoTracks?: (tracks: VideoQualityOption[]) => void;
 }
 
 const MEDIA_RELEASE_DELAY_MS = 700;
@@ -49,25 +58,59 @@ async function waitForMediaRelease() {
 
 function NativeHlsSurface({
   url,
+  paused = false,
+  startPositionSeconds,
   onFirstFrame,
   onError,
+  onProgress,
 }: SurfaceEngineProps) {
   const videoRef = useRef<any>(null);
+  const videoInstance = useRef<any>(null);
   const firstFrameReported = useRef(false);
 
+  const handleRef = useCallback((node: any) => {
+    videoRef.current = node;
+    if (node) {
+      videoInstance.current = node;
+    }
+  }, []);
+
   const handleTimeUpdate = () => {
-    if (
-      !firstFrameReported.current &&
-      (videoRef.current?.currentTime ?? 0) > 0
-    ) {
+    const cur = videoRef.current?.currentTime ?? 0;
+    const dur = videoRef.current?.duration ?? 0;
+    if (!firstFrameReported.current && cur > 0) {
       firstFrameReported.current = true;
       onFirstFrame();
     }
+    onProgress?.({
+      currentTime: cur,
+      playableDuration: cur,
+      seekableDuration: dur,
+    });
   };
+
+  useEffect(() => {
+    if (videoRef.current) {
+      if (paused) {
+        videoRef.current.pause?.();
+      } else {
+        videoRef.current.play?.();
+      }
+    }
+  }, [paused]);
 
   useEffect(
     () => () => {
-      videoRef.current?.pause?.();
+      const video = videoInstance.current;
+      videoInstance.current = null;
+      if (video) {
+        try {
+          video.pause?.();
+          video.muted = true;
+        } catch {
+          // ignore
+        }
+      }
       registerMediaTeardown();
     },
     [],
@@ -75,12 +118,17 @@ function NativeHlsSurface({
 
   return (
     <Video
-      ref={videoRef}
+      ref={handleRef}
       width={1920}
       height={1080}
       src={url}
+      currentTime={
+        startPositionSeconds && startPositionSeconds > 0
+          ? startPositionSeconds
+          : undefined
+      }
       controls={false}
-      autoplay
+      autoplay={!paused}
       muted={false}
       loop={false}
       scalingmode="fill"
@@ -94,8 +142,13 @@ function NativeHlsSurface({
 function ShakaPlayerSurface({
   url,
   type = 'mpd',
+  paused = false,
+  startPositionSeconds,
+  selectedQualityId = 'auto',
   onFirstFrame,
   onError,
+  onProgress,
+  onVideoTracks,
 }: SurfaceEngineProps) {
   const videoPlayer = useRef<any>(null);
   const shakaPlayer = useRef<VegaShakaPlayer | null>(null);
@@ -155,10 +208,17 @@ function ShakaPlayerSurface({
       player.setSurfaceHandle(handle);
       player.autoplay = true;
       player.addEventListener('timeupdate', () => {
-        if (!firstFrameReported.current && player.currentTime > 0) {
+        const cur = player.currentTime ?? 0;
+        const dur = player.duration ?? 0;
+        if (!firstFrameReported.current && cur > 0) {
           firstFrameReported.current = true;
           onFirstFrame();
         }
+        onProgress?.({
+          currentTime: cur,
+          playableDuration: cur,
+          seekableDuration: dur,
+        });
       });
       player.addEventListener('error', onError);
       const shaka = new VegaShakaPlayer(player, onError);
@@ -171,6 +231,16 @@ function ShakaPlayerSurface({
           url: url.slice(0, 100),
         });
         await shaka.load(url, streamType);
+        if (startPositionSeconds && startPositionSeconds > 0) {
+          const duration = player.duration ?? 0;
+          player.currentTime = duration > 0
+            ? Math.min(startPositionSeconds, duration - 1)
+            : startPositionSeconds;
+        }
+        if (shakaPlayer.current) {
+          const qualities = shaka.getQualities();
+          onVideoTracks?.(qualities);
+        }
       } catch (err) {
         console.warn('[MediaSurface] Vega Shaka load failed:', err);
         if (!destroyed.current) {
@@ -178,8 +248,32 @@ function ShakaPlayerSurface({
         }
       }
     },
-    [onError, onFirstFrame, type, url],
+    [
+      onError,
+      onFirstFrame,
+      onProgress,
+      onVideoTracks,
+      startPositionSeconds,
+      type,
+      url,
+    ],
   );
+
+  useEffect(() => {
+    if (videoPlayer.current) {
+      if (paused) {
+        videoPlayer.current.pause?.();
+      } else {
+        videoPlayer.current.play?.();
+      }
+    }
+  }, [paused]);
+
+  useEffect(() => {
+    if (shakaPlayer.current && selectedQualityId) {
+      shakaPlayer.current.selectQuality(selectedQualityId);
+    }
+  }, [selectedQualityId]);
 
   useEffect(
     () => () => {
@@ -234,8 +328,13 @@ export function MediaSurface({
   streamType,
   fallbackStreamUrl,
   fallbackStreamType,
+  paused = false,
+  startPositionSeconds,
+  selectedQualityId = 'auto',
   onFirstFrame,
   onError,
+  onProgress,
+  onVideoTracks,
 }: MediaSurfaceProps) {
   const [activeSource, setActiveSource] = useState({
     url: streamUrl,
@@ -308,8 +407,13 @@ export function MediaSurface({
         key={`${mountedSource.url}-${useShaka ? 'shaka' : 'native'}`}
         url={mountedSource.url}
         type={mountedSource.type}
+        paused={paused}
+        startPositionSeconds={startPositionSeconds}
+        selectedQualityId={selectedQualityId}
         onFirstFrame={onFirstFrame}
         onError={handleError}
+        onProgress={onProgress}
+        onVideoTracks={onVideoTracks}
       />
     </View>
   );

@@ -47,7 +47,6 @@ export const ContinueWatchingCard = memo(function ContinueWatchingCardView({
         />
 
         <View style={styles.kickerRow}>
-          <Text style={styles.cardKicker}>{t('continueWatching')}</Text>
           <Text style={styles.percentText}>{percent}%</Text>
         </View>
 
@@ -119,17 +118,8 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-  },
-  cardKicker: {
-    color: '#a78bfa',
-    fontSize: 11,
-    fontWeight: '800',
-    backgroundColor: 'rgba(167, 139, 250, 0.15)',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 3,
   },
   percentText: {
     color: '#ddd6fe',
@@ -164,4 +154,3 @@ const styles = StyleSheet.create({
     backgroundColor: '#a78bfa',
   },
 });
-

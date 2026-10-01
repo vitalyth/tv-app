@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, StyleSheet, View } from 'react-native';
 import { useMediaController } from '../media/MediaController';
 import { MediaSurface } from '../media/MediaSurface';
 import { RemoteImage } from './RemoteImage';
@@ -47,8 +47,20 @@ function HeroBackdropImage({ uri, fallbackUri }: HeroBackdropImageProps) {
 }
 
 export function MediaLayer() {
-  const { item, stream, presentation, status, markError, markPlaying } =
-    useMediaController();
+  const {
+    item,
+    stream,
+    presentation,
+    status,
+    paused,
+    selectedQualityId,
+    markError,
+    markPlaying,
+    updateProgress,
+    setAvailableQualities,
+  } = useMediaController();
+
+  const isFullscreen = presentation === 'fullscreen';
 
   return (
     <View
@@ -56,13 +68,22 @@ export function MediaLayer() {
       style={styles.layer}
       testID="persistent-media-layer"
     >
-      {item?.backdropUrl || item?.imageUrl ? (
+      {/* Backdrop image only on Home Screen / non-fullscreen mode */}
+      {!isFullscreen && (item?.backdropUrl || item?.imageUrl) ? (
         <HeroBackdropImage
           key={item.backdropUrl ?? item.imageUrl!}
           uri={item.backdropUrl ?? item.imageUrl!}
           fallbackUri={item.fallbackImageUrl}
         />
       ) : null}
+
+      {/* Centered Loading Spinner in Full Screen mode when video is not yet playing */}
+      {isFullscreen && status !== 'playing' ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#38bdf8" />
+        </View>
+      ) : null}
+
       {item && stream && presentation !== 'background-image' ? (
         <View
           style={[
@@ -71,20 +92,36 @@ export function MediaLayer() {
           ]}
         >
           <MediaSurface
+            key={`${item.id}:${stream.url}`}
             streamUrl={stream.url}
             streamType={stream.type}
             fallbackStreamUrl={stream.fallbackUrl}
             fallbackStreamType={stream.fallbackType}
+            paused={paused}
+            startPositionSeconds={
+              item.kind === 'vod' && item.resumePositionMs
+                ? item.resumePositionMs / 1000
+                : undefined
+            }
+            selectedQualityId={selectedQualityId}
             onFirstFrame={markPlaying}
             onError={markError}
+            onProgress={({ currentTime, seekableDuration }) => {
+              updateProgress(currentTime, seekableDuration);
+            }}
+            onVideoTracks={tracks => {
+              setAvailableQualities(tracks);
+            }}
           />
         </View>
       ) : null}
-      <Image
-        source={scrimComposite}
-        style={StyleSheet.absoluteFill}
-        resizeMode="stretch"
-      />
+      {!isFullscreen ? (
+        <Image
+          source={scrimComposite}
+          style={StyleSheet.absoluteFill}
+          resizeMode="stretch"
+        />
+      ) : null}
     </View>
   );
 }
@@ -98,4 +135,10 @@ const styles = StyleSheet.create({
   poster: { ...StyleSheet.absoluteFillObject },
   videoVisible: { opacity: 1 },
   videoHidden: { opacity: 0 },
+  loadingContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#07111c',
+  },
 });

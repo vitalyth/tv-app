@@ -16,7 +16,7 @@ export interface MediaPreviewEngineOptions {
 
 export interface MediaPreviewEngine {
   focusMediaItem: (item: MediaItem) => void;
-  clearPreview: () => void;
+  clearPreview: (options?: { stopMedia?: boolean }) => void;
   getCurrentItem: () => MediaItem | null;
 }
 
@@ -116,12 +116,17 @@ export function useMediaPreviewEngine(
     ],
   );
 
-  const clearPreview = useCallback(() => {
-    clearTimers();
-    sequenceIdRef.current += 1;
-    currentFocusedItemRef.current = null;
-    stopAll();
-  }, [clearTimers, stopAll]);
+  const clearPreview = useCallback(
+    (clearOptions?: { stopMedia?: boolean }) => {
+      clearTimers();
+      sequenceIdRef.current += 1;
+      currentFocusedItemRef.current = null;
+      if (clearOptions?.stopMedia ?? true) {
+        stopAll();
+      }
+    },
+    [clearTimers, stopAll],
+  );
 
   const getCurrentItem = useCallback(() => currentFocusedItemRef.current, []);
 

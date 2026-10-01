@@ -142,6 +142,58 @@ export class VegaShakaPlayer {
     await this.mediaElement.play();
   }
 
+  getQualities() {
+    const tracks = this.player?.getVariantTracks?.() ?? [];
+    const seenHeights = new Set<number>();
+    const qualities = tracks
+      .filter((track: any) => Number(track.height) > 0)
+      .sort((left: any, right: any) => Number(right.height) - Number(left.height))
+      .filter((track: any) => {
+        const height = Number(track.height);
+        if (seenHeights.has(height)) {
+          return false;
+        }
+        seenHeights.add(height);
+        return true;
+      })
+      .map((track: any) => ({
+        id: String(track.height),
+        label: `${track.height}p`,
+        height: track.height,
+        width: track.width,
+        bitrate: track.bandwidth,
+        active: Boolean(track.active),
+      }));
+
+    return [
+      {id: 'auto', label: 'Auto (HD)', active: this.player?.getConfiguration?.().abr?.enabled !== false},
+      ...qualities,
+    ];
+  }
+
+  selectQuality(qualityId: string) {
+    if (!this.player) {
+      return;
+    }
+
+    if (!qualityId || qualityId === 'auto') {
+      this.player.configure({abr: {enabled: true}});
+      return;
+    }
+
+    const targetHeight = Number(qualityId);
+    const track = this.player
+      .getVariantTracks?.()
+      ?.find((candidate: any) => Number(candidate.height) === targetHeight);
+    if (!track) {
+      return;
+    }
+
+    this.player.configure({abr: {enabled: false}});
+    this.player.selectVariantTrack(track, true);
+    this.logActiveQuality();
+  }
+
   async destroy() {
     await this.player.destroy();
     this.player = null;

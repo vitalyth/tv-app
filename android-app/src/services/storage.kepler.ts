@@ -1,4 +1,4 @@
-import * as ReactNative from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface StorageAdapter {
   getItem: (key: string) => Promise<string | null>;
@@ -6,32 +6,32 @@ export interface StorageAdapter {
   removeItem: (key: string) => Promise<void>;
 }
 
-interface KeplerAsyncStorage {
-  getItem: (key: string) => Promise<string | null>;
-  setItem: (key: string, value: string) => Promise<void>;
-  removeItem: (key: string) => Promise<void>;
-}
-
-const keplerStorage = (ReactNative as unknown as { AsyncStorage?: KeplerAsyncStorage }).AsyncStorage;
-
 export const appStorage: StorageAdapter = {
   getItem: async (key: string): Promise<string | null> => {
-    if (keplerStorage) {
-      return keplerStorage.getItem(key);
+    try {
+      const value = await AsyncStorage.getItem(key);
+      return value ?? null;
+    } catch (error) {
+      console.warn('[storage.kepler] getItem error:', error);
+      throw error;
     }
-    return null;
   },
   setItem: async (key: string, value: string): Promise<void> => {
-    if (keplerStorage) {
-      await keplerStorage.setItem(key, value);
+    try {
+      await AsyncStorage.setItem(key, value);
+    } catch (error) {
+      console.warn('[storage.kepler] setItem error:', error);
+      throw error;
     }
   },
   removeItem: async (key: string): Promise<void> => {
-    if (keplerStorage) {
-      await keplerStorage.removeItem(key);
+    try {
+      await AsyncStorage.removeItem(key);
+    } catch (error) {
+      console.warn('[storage.kepler] removeItem error:', error);
+      throw error;
     }
   },
 };
 
 export default appStorage;
-
