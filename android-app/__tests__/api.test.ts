@@ -5,6 +5,7 @@ import {
 } from '../src/api/channels';
 import { API_BASE_URL } from '../src/config/api';
 import type { MediaItem } from '../src/media/player';
+import { LiveSourcePreferencesService } from '../src/services/liveSourcePreferences';
 
 describe('getLiveChannelCount', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -125,6 +126,46 @@ describe('resolveLiveChannelStream', () => {
     expect(stream.fallbackUrl).toContain(
       encodeURIComponent('/livehls/live/kan11/live.livx/playlist.m3u8'),
     );
+  });
+
+  it('uses the persisted source when resolving a channel in a later session', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ stream: 'https://example.com/backup-live.m3u8' }),
+    } as Response);
+    const liveItem: MediaItem = {
+      id: 'ch_12',
+      kind: 'live',
+      title: 'Current program',
+      sourcePayload: {
+        id: 'ch_12',
+        name: 'קשת 12',
+        linkDetails: { link: 'primary' },
+        sources: [
+          {
+            id: 'ch_12',
+            name: 'קשת 12',
+            linkDetails: { link: 'primary' },
+          },
+          {
+            id: 'ch_12b',
+            name: 'קשת 12 - גיבוי',
+            linkDetails: { link: 'backup' },
+          },
+        ],
+      },
+    };
+    await LiveSourcePreferencesService.setSourceId('ch_12', 'ch_12b');
+
+    const stream = await resolveLiveChannelStream(liveItem);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/live_channel'),
+      expect.objectContaining({
+        body: expect.stringContaining('ch_12b'),
+      }),
+    );
+    expect(stream.sourceId).toBe('ch_12b');
   });
 });
 

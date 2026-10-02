@@ -6,6 +6,7 @@ import {
 } from '../config/api';
 import { getJson } from './client';
 import type { MediaItem, MediaStream, MediaStreamType } from '../media/player';
+import { LiveSourcePreferencesService } from '../services/liveSourcePreferences';
 
 interface ApiProgram {
   start?: unknown;
@@ -33,6 +34,12 @@ interface ApiChannel {
   type?: unknown;
   module?: unknown;
   sources?: unknown[];
+}
+
+export interface LiveChannelSourceOption {
+  id: string;
+  label: string;
+  selected: boolean;
 }
 
 const VPN_RESOLVER_MODULES = new Set(['kan', 'reshet']);
@@ -452,6 +459,35 @@ export function distinctLogicalChannels(rawChannels: unknown[]): ApiChannel[] {
     return copy;
   };
 
+  const isAlternateSource = (
+    primary: ApiChannel,
+    candidate: ApiChannel,
+  ): boolean => {
+    const primaryNumber = text(primary.channelNumber);
+    const candidateNumber = text(candidate.channelNumber);
+    if (primaryNumber && candidateNumber) {
+      return primaryNumber === candidateNumber;
+    }
+
+    const primaryId = text(primary.channelID) ?? text(primary.id);
+    const candidateId = text(candidate.channelID) ?? text(candidate.id);
+    if (primaryId && candidateId && primaryId === candidateId) {
+      return true;
+    }
+
+    const primaryName = text(primary.name)?.toLowerCase();
+    const candidateName = text(candidate.name)?.toLowerCase();
+    if (!primaryName || !candidateName) {
+      return false;
+    }
+    if (primaryName === candidateName) {
+      return true;
+    }
+
+    const suffix = candidateName.slice(primaryName.length);
+    return candidateName.startsWith(primaryName) && /^\s*[-–—(]/.test(suffix);
+  };
+
   for (const channel of tvChannels) {
     const rawIndex = Number(channel.index);
     const indexKey =
@@ -469,6 +505,12 @@ export function distinctLogicalChannels(rawChannels: unknown[]): ApiChannel[] {
 
     const existing = seenKeys.get(logicalKey);
     if (existing) {
+      // The backend occasionally reuses an index for unrelated channels. The
+      // legacy app kept the first entry in that case; only merge clear source
+      // variants such as backups or accessibility feeds.
+      if (!isAlternateSource(existing, channel)) {
+        continue;
+      }
       if (!Array.isArray(existing.sources)) {
         existing.sources = [cloneWithoutSources(existing)];
       }
@@ -573,10 +615,84 @@ export async function getPlayableLiveChannels(): Promise<MediaItem[]> {
   return getDistinctLiveChannels({ requireEpg: false });
 }
 
+function channelSourceId(channel: ApiChannel, index = 0): string {
+  return (
+    text(channel.id) ??
+    text(channel.channelID) ??
+    `source-${index + 1}`
+  );
+}
+
+export function getLiveChannelSourceOptions(
+  item: MediaItem,
+  activeSourceId?: string,
+): LiveChannelSourceOption[] {
+  const channel = item.sourcePayload as ApiChannel | undefined;
+  if (!channel) {
+    return [];
+  }
+
+  const sources = Array.isArray(channel.sources) && channel.sources.length > 0
+    ? channel.sources.filter(
+        (source): source is ApiChannel =>
+          Boolean(source) && typeof source === 'object',
+      )
+    : [channel];
+  const selectedId = activeSourceId ?? channelSourceId(channel);
+
+  return sources.map((source, index) => ({
+    id: channelSourceId(source, index),
+    label: text(source.name) ?? `מקור ${index + 1}`,
+    selected: channelSourceId(source, index) === selectedId,
+  }));
+}
+
+export function selectLiveChannelSource(
+  item: MediaItem,
+  sourceId: string,
+): MediaItem | undefined {
+  const channel = item.sourcePayload as ApiChannel | undefined;
+  if (!channel) {
+    return undefined;
+  }
+
+  const sources = Array.isArray(channel.sources) && channel.sources.length > 0
+    ? channel.sources.filter(
+        (source): source is ApiChannel =>
+          Boolean(source) && typeof source === 'object',
+      )
+    : [channel];
+  const selectedIndex = sources.findIndex(
+    (source, index) => channelSourceId(source, index) === sourceId,
+  );
+  if (selectedIndex < 0) {
+    return undefined;
+  }
+
+  return {
+    ...item,
+    sourcePayload: {
+      ...sources[selectedIndex],
+      sources,
+    },
+  };
+}
+
 export async function resolveLiveChannelStream(
   item: MediaItem,
+  options: { useSavedSource?: boolean } = {},
 ): Promise<MediaStream> {
-  const channel = item.sourcePayload as ApiChannel | undefined;
+  let playbackItem = item;
+  if (options.useSavedSource !== false) {
+    const preferredSourceId = await LiveSourcePreferencesService.getSourceId(
+      item.id,
+    );
+    if (preferredSourceId) {
+      playbackItem = selectLiveChannelSource(item, preferredSourceId) ?? item;
+    }
+  }
+
+  const channel = playbackItem.sourcePayload as ApiChannel | undefined;
   if (!channel) {
     throw new Error('Live channel payload is missing');
   }
@@ -612,6 +728,7 @@ export async function resolveLiveChannelStream(
         ? playbackProxyUrl(fallbackStream, channel)
         : undefined,
       fallbackType: fallbackStream ? 'm3u8' : undefined,
+      sourceId: channelSourceId(channel),
     };
   } finally {
     clearTimeout(timeout);

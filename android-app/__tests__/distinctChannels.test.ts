@@ -2,7 +2,9 @@ import {
   distinctLogicalChannels,
   formatProgramTimeRange,
   calculateProgramProgress,
+  getLiveChannelSourceOptions,
   getDistinctLiveChannels,
+  selectLiveChannelSource,
 } from '../src/api/channels';
 
 describe('Channels deduplication and time formatting', () => {
@@ -45,6 +47,100 @@ describe('Channels deduplication and time formatting', () => {
     expect(distinct[0].sources).toHaveLength(2);
     expect(() => JSON.stringify(distinct[0])).not.toThrow();
     expect(distinct[1].id).toBe('ch_12');
+  });
+
+  it('exposes alternate sources and preserves them when one is selected', () => {
+    const [channel] = distinctLogicalChannels([
+      {
+        id: 'ch_11',
+        name: 'כאן 11',
+        channelNumber: '11',
+        index: 1,
+        type: 'tv',
+        linkDetails: { link: 'https://primary.example/live.m3u8' },
+      },
+      {
+        id: 'ch_11b',
+        name: 'כאן 11 - גיבוי',
+        channelNumber: '11',
+        index: 1,
+        type: 'tv',
+        linkDetails: { link: 'https://backup.example/live.m3u8' },
+      },
+    ]);
+    const item = {
+      id: 'ch_11',
+      kind: 'live' as const,
+      title: 'חדשות',
+      channelName: 'כאן 11',
+      sourcePayload: channel,
+    };
+
+    expect(getLiveChannelSourceOptions(item)).toEqual([
+      { id: 'ch_11', label: 'כאן 11', selected: true },
+      { id: 'ch_11b', label: 'כאן 11 - גיבוי', selected: false },
+    ]);
+
+    const selected = selectLiveChannelSource(item, 'ch_11b');
+    expect(selected?.sourcePayload).toEqual(
+      expect.objectContaining({
+        id: 'ch_11b',
+        sources: expect.arrayContaining([
+          expect.objectContaining({ id: 'ch_11' }),
+          expect.objectContaining({ id: 'ch_11b' }),
+        ]),
+      }),
+    );
+    expect(getLiveChannelSourceOptions(selected!)).toEqual([
+      { id: 'ch_11', label: 'כאן 11', selected: false },
+      { id: 'ch_11b', label: 'כאן 11 - גיבוי', selected: true },
+    ]);
+  });
+
+  it('does not merge unrelated channels that reuse the same backend index', () => {
+    const distinct = distinctLogicalChannels([
+      {
+        id: 'ch_9',
+        name: 'ערוץ 9',
+        channelNumber: '9',
+        index: 17,
+        type: 'tv',
+      },
+      {
+        id: 'ch_891',
+        name: 'Первое Радио 89.1FM',
+        index: 17,
+        type: 'tv',
+      },
+    ]);
+
+    expect(distinct).toHaveLength(1);
+    expect(distinct[0]).toEqual(
+      expect.objectContaining({
+        id: 'ch_9',
+        sources: [expect.objectContaining({ id: 'ch_9' })],
+      }),
+    );
+  });
+
+  it('keeps a named backup as a source when its channel number is missing', () => {
+    const [channel] = distinctLogicalChannels([
+      {
+        id: 'ch_24',
+        name: 'ערוץ 24',
+        channelNumber: '24',
+        index: 7,
+        type: 'tv',
+      },
+      {
+        id: 'ch_24b',
+        name: 'ערוץ 24 - גיבוי',
+        index: 7,
+        type: 'tv',
+      },
+    ]);
+
+    expect(channel.sources).toHaveLength(2);
   });
 
   it('formats program time range correctly', () => {

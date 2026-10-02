@@ -25,6 +25,7 @@ interface PlayerBottomControlsProps {
   duration: number;
   selectedQualityId: string;
   videoQualities: VideoQualityOption[];
+  hasAlternateSources: boolean;
   lastFocusedControl: ControlId;
   onFocusControl: (id: ControlId) => void;
   onTogglePlayPause: () => void;
@@ -54,6 +55,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   duration,
   selectedQualityId,
   videoQualities,
+  hasAlternateSources,
   lastFocusedControl,
   onFocusControl,
   onTogglePlayPause,
@@ -62,6 +64,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   onOpenMultiView,
 }: PlayerBottomControlsProps) {
   const isLive = item.kind === 'live';
+  const showSources = isLive && hasAlternateSources;
 
   // Calculate timeline percentage
   let progressPct = 0;
@@ -102,7 +105,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     const targetRef =
       lastFocusedControl === 'quality'
         ? qualityRef
-        : lastFocusedControl === 'sources'
+        : lastFocusedControl === 'sources' && showSources
         ? sourcesRef
         : lastFocusedControl === 'multiview'
         ? multiviewRef
@@ -111,7 +114,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       targetRef.current?.requestTVFocus?.();
     }, 50);
     return () => clearTimeout(timer);
-  }, [lastFocusedControl]);
+  }, [lastFocusedControl, showSources]);
 
   // Handle remote DPAD left/right explicitly to bridge the flexSpacer gap seamlessly
   useTVEventHandler(event => {
@@ -121,9 +124,14 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 
     if (event.eventType === 'right') {
       if (lastFocusedControl === 'play-pause') {
-        const next = isLive ? 'sources' : 'quality';
+        const next = showSources ? 'sources' : isLive ? 'multiview' : 'quality';
         onFocusControl(next);
-        const target = next === 'sources' ? sourcesRef : qualityRef;
+        const target =
+          next === 'sources'
+            ? sourcesRef
+            : next === 'multiview'
+            ? multiviewRef
+            : qualityRef;
         target.current?.requestTVFocus?.();
       } else if (lastFocusedControl === 'sources') {
         onFocusControl('multiview');
@@ -139,8 +147,10 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         const target = prev === 'multiview' ? multiviewRef : playRef;
         target.current?.requestTVFocus?.();
       } else if (lastFocusedControl === 'multiview') {
-        onFocusControl('sources');
-        sourcesRef.current?.requestTVFocus?.();
+        const previous = showSources ? 'sources' : 'play-pause';
+        onFocusControl(previous);
+        const target = showSources ? sourcesRef : playRef;
+        target.current?.requestTVFocus?.();
       } else if (lastFocusedControl === 'sources') {
         onFocusControl('play-pause');
         playRef.current?.requestTVFocus?.();
@@ -181,8 +191,10 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           focusable={true}
           hasTVPreferredFocus={lastFocusedControl === 'play-pause'}
           nextFocusRight={
-            isLive
+            showSources
               ? (sourcesRef.current as any)
+              : isLive
+              ? (multiviewRef.current as any)
               : (qualityRef.current as any)
           }
           onFocus={() => onFocusControl('play-pause')}
@@ -217,7 +229,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         <View style={styles.flexSpacer} />
 
         {/* LIVE ONLY: Other Sources */}
-        {isLive ? (
+        {showSources ? (
           <Pressable
             ref={sourcesRef}
             testID="sources-button"
@@ -262,7 +274,11 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             testID="multiview-button"
             focusable={true}
             hasTVPreferredFocus={lastFocusedControl === 'multiview'}
-            nextFocusLeft={sourcesRef.current as any}
+            nextFocusLeft={
+              showSources
+                ? (sourcesRef.current as any)
+                : (playRef.current as any)
+            }
             nextFocusRight={qualityRef.current as any}
             onFocus={() => onFocusControl('multiview')}
             onPress={onOpenMultiView}

@@ -20,6 +20,7 @@ export interface MediaStream {
   type?: MediaStreamType;
   fallbackUrl?: string;
   fallbackType?: MediaStreamType;
+  sourceId?: string;
 }
 
 export interface VideoQualityOption {

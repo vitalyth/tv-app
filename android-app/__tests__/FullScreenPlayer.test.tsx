@@ -8,6 +8,7 @@ import {
 } from '../src/media/MediaController';
 import type { MediaItem, MediaStream } from '../src/media/player';
 import { WatchProgressService } from '../src/services/watchProgress';
+import { SourceDialog } from '../src/components/player/SourceDialog';
 
 jest.mock('../src/components/RemoteImage', () => ({
   RemoteImage: () => 'RemoteImage',
@@ -46,6 +47,23 @@ describe('FullScreenPlayer', () => {
     timeRange: '20:00 – 21:00',
     progressPercentage: 45,
     description: 'מהדורת החדשות המרכזית של כאן 11',
+    sourcePayload: {
+      id: 'ch-11',
+      name: 'כאן 11',
+      linkDetails: { link: 'https://example.com/primary.m3u8' },
+      sources: [
+        {
+          id: 'ch-11',
+          name: 'כאן 11',
+          linkDetails: { link: 'https://example.com/primary.m3u8' },
+        },
+        {
+          id: 'ch-11-backup',
+          name: 'כאן 11 - גיבוי',
+          linkDetails: { link: 'https://example.com/backup.m3u8' },
+        },
+      ],
+    },
   };
 
   const mockVodItem: MediaItem = {
@@ -61,6 +79,36 @@ describe('FullScreenPlayer', () => {
     url: 'https://example.com/stream.m3u8',
     type: 'm3u8',
   };
+
+  it('gives preferred focus only to the selected source', async () => {
+    await act(async () => {
+      activeRenderer = ReactTestRenderer.create(
+        <SourceDialog
+          sources={[
+            { id: 'primary', label: 'ראשי', selected: false },
+            { id: 'backup-1', label: 'גיבוי 1', selected: false },
+            { id: 'backup-2', label: 'גיבוי 2', selected: true },
+          ]}
+          onSelectSource={jest.fn()}
+        />,
+      );
+    });
+
+    const sourceOptions = activeRenderer!.root.findAll(
+      node => typeof node.props.testID === 'string' &&
+        node.props.testID.startsWith('source-option-'),
+    );
+    const preferredSourceIds = new Set(
+      sourceOptions
+        .filter(node => node.props.hasTVPreferredFocus)
+        .map(node => node.props.testID),
+    );
+    expect([...preferredSourceIds]).toEqual(['source-option-backup-2']);
+    expect(
+      activeRenderer!.root.findByProps({ testID: 'source-option-backup-2' })
+        .props.hasTVPreferredFocus,
+    ).toBe(true);
+  });
 
   function PlayerTestHarness({
     item,
@@ -128,6 +176,34 @@ describe('FullScreenPlayer', () => {
     expect(textContents).not.toContain('צפייה מפוצלת');
   });
 
+  it('hides the Sources button for a live channel with no alternatives', async () => {
+    const singleSourceItem: MediaItem = {
+      ...mockLiveItem,
+      id: 'ch-9',
+      channelName: 'ערוץ 9',
+      sourcePayload: {
+        id: 'ch-9',
+        name: 'ערוץ 9',
+        sources: [{ id: 'ch-9', name: 'ערוץ 9' }],
+      },
+    };
+
+    await act(async () => {
+      activeRenderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <PlayerTestHarness item={singleSourceItem} onExit={jest.fn()} />
+        </MediaControllerProvider>,
+      );
+    });
+
+    expect(
+      activeRenderer!.root.findAllByProps({ testID: 'sources-button' }),
+    ).toHaveLength(0);
+    expect(
+      activeRenderer!.root.findByProps({ testID: 'multiview-button' }),
+    ).toBeDefined();
+  });
+
   it('implements 3-tier Back key hierarchy: Dialog -> Controls -> Exit', async () => {
     const onExit = jest.fn();
 
@@ -175,8 +251,12 @@ describe('FullScreenPlayer', () => {
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
-  it('opens and closes Other Sources placeholder dialog', async () => {
+  it('opens the source picker and switches to the selected live source', async () => {
     const onExit = jest.fn();
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ stream: 'https://example.com/resolved-backup.m3u8' }),
+    } as Response);
 
     await act(async () => {
       activeRenderer = ReactTestRenderer.create(
@@ -196,13 +276,59 @@ describe('FullScreenPlayer', () => {
     expect(root.findByProps({ testID: 'player-dialog-card' })).toBeDefined();
     const textNodes = root.findAllByType('Text' as any);
     const textContents = textNodes.map(node => node.props.children).flat();
-    expect(textContents).toContain('מקורות נוספים');
+    expect(textContents).toContain('מקורות שידור');
+    expect(textContents).toContain('כאן 11 - גיבוי');
+    expect(textContents).toContain('מוצג');
+    expect(textContents).toContain('זמין');
 
-    // Close dialog
+    await act(async () => {
+      root.findByProps({ testID: 'source-option-ch-11-backup' }).props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/live_channel'),
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('ch-11-backup'),
+      }),
+    );
+    expect(root.findAllByProps({ testID: 'player-dialog-card' }).length).toBe(0);
+  });
+
+  it('reveals player panels on the first press and opens a dialog on the second', async () => {
+    const onExit = jest.fn();
+    let now = 1_000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+
+    await act(async () => {
+      activeRenderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <PlayerTestHarness item={mockLiveItem} onExit={onExit} />
+        </MediaControllerProvider>,
+      );
+    });
+
+    const root = activeRenderer!.root;
     await act(async () => {
       backPressHandler?.();
     });
-    expect(root.findAllByProps({ testID: 'player-dialog-card' }).length).toBe(0);
+
+    await act(async () => {
+      root
+        .findByProps({ testID: 'fullscreen-controls-activator' })
+        .props.onPress();
+    });
+    await act(async () => {
+      root.findByProps({ testID: 'sources-button' }).props.onPress();
+    });
+    expect(root.findAllByProps({ testID: 'player-dialog-card' })).toHaveLength(0);
+
+    now += 600;
+    await act(async () => {
+      root.findByProps({ testID: 'sources-button' }).props.onPress();
+    });
+    expect(root.findByProps({ testID: 'player-dialog-card' })).toBeDefined();
   });
 
   it('opens and closes Multi View placeholder dialog', async () => {
