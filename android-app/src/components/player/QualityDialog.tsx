@@ -1,8 +1,15 @@
-import { memo, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useRef } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TVFocusGuideView,
+  View,
+} from 'react-native';
 import { PlayerDialog } from './PlayerDialog';
 import type { VideoQualityOption } from '../../media/player';
 import { t } from '../../i18n';
+import { getAutoQualityLabel } from './qualityDisplay';
 
 interface QualityDialogProps {
   qualities: VideoQualityOption[];
@@ -12,7 +19,7 @@ interface QualityDialogProps {
 }
 
 const DEFAULT_QUALITIES: VideoQualityOption[] = [
-  { id: 'auto', label: 'Auto (HD)' },
+  { id: 'auto', label: 'Auto' },
   { id: '1080', label: '1080p' },
   { id: '720', label: '720p' },
   { id: '480', label: '480p' },
@@ -26,6 +33,7 @@ export const QualityDialog = memo(function QualityDialogView({
 }: QualityDialogProps) {
   const options =
     qualities && qualities.length > 0 ? qualities : DEFAULT_QUALITIES;
+  const optionRefs = useRef<Array<View | null>>([]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -37,17 +45,35 @@ export const QualityDialog = memo(function QualityDialogView({
 
   return (
     <PlayerDialog title={t('playerVideoQuality')}>
-      <View style={styles.list}>
+      <TVFocusGuideView trapFocusUp trapFocusDown style={styles.list}>
         {options.map((option, index) => {
           const isSelected =
             selectedQualityId === option.id ||
             (!selectedQualityId && option.id === 'auto');
+          const label =
+            option.id === 'auto'
+              ? getAutoQualityLabel(option, options)
+              : option.label;
 
           return (
             <Pressable
               key={option.id}
+              ref={ref => {
+                optionRefs.current[index] = ref;
+              }}
+              testID={`quality-option-${option.id}`}
               focusable={true}
-              hasTVPreferredFocus={index === 0}
+              hasTVPreferredFocus={
+                isSelected || (!selectedQualityId && index === 0)
+              }
+              nextFocusUp={
+                index > 0 ? (optionRefs.current[index - 1] as any) : undefined
+              }
+              nextFocusDown={
+                index < options.length - 1
+                  ? (optionRefs.current[index + 1] as any)
+                  : undefined
+              }
               onPress={() => handleSelect(option.id)}
               style={({ focused }) => [
                 styles.item,
@@ -63,7 +89,7 @@ export const QualityDialog = memo(function QualityDialogView({
                       focused && styles.itemLabelFocused,
                     ]}
                   >
-                    {option.label}
+                    {label}
                   </Text>
                   {isSelected ? (
                     <Text
@@ -80,7 +106,7 @@ export const QualityDialog = memo(function QualityDialogView({
             </Pressable>
           );
         })}
-      </View>
+      </TVFocusGuideView>
     </PlayerDialog>
   );
 });

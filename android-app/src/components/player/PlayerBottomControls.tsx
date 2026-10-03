@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -10,10 +10,10 @@ import {
 } from 'react-native';
 import type { MediaItem, VideoQualityOption } from '../../media/player';
 import { t } from '../../i18n';
+import { getDisplayedQualityLabel } from './qualityDisplay';
 
 const playIcon = require('../../assets/icons/play.png');
 const pauseIcon = require('../../assets/icons/pause.png');
-const settingsIcon = require('../../assets/icons/settings.png');
 const sourcesIcon = require('../../assets/icons/sources.png');
 const multiviewIcon = require('../../assets/icons/multiview.png');
 
@@ -126,31 +126,48 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     progressPct = Math.min(100, Math.max(0, (displayedTime / duration) * 100));
   }
 
-  // Derive resolution badge (SD / HD / FHD)
-  let resolutionBadge = 'SD';
-  const numericId = parseInt(selectedQualityId, 10);
-  if (selectedQualityId === '1080' || numericId >= 1080) {
-    resolutionBadge = 'HD';
-  } else if (selectedQualityId === '720' || numericId >= 720) {
-    resolutionBadge = 'HD';
-  } else if (selectedQualityId === 'auto') {
-    // Check if HD options exist in available qualities
-    const hasHd = videoQualities.some(q => {
-      const h = parseInt(q.id, 10);
-      return h >= 720;
-    });
-    resolutionBadge = hasHd ? 'HD' : 'SD';
-  } else {
-    resolutionBadge = 'SD';
-  }
+  const qualityValue = getDisplayedQualityLabel(
+    selectedQualityId,
+    videoQualities,
+  );
 
   const playRef = useRef<View>(null);
   const sourcesRef = useRef<View>(null);
   const multiviewRef = useRef<View>(null);
   const qualityRef = useRef<View>(null);
   const timelineRef = useRef<View>(null);
+  const focusRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const requestControlFocus = useCallback(
+    (id: ControlId) => {
+      const target =
+        id === 'timeline'
+          ? timelineRef
+          : id === 'quality'
+          ? qualityRef
+          : id === 'sources' && showSources
+          ? sourcesRef
+          : id === 'multiview' && isLive
+          ? multiviewRef
+          : playRef;
+      target.current?.requestTVFocus?.();
+    },
+    [isLive, showSources],
+  );
+
+  const clearFocusRecovery = useCallback(() => {
+    if (focusRecoveryTimerRef.current !== null) {
+      clearTimeout(focusRecoveryTimerRef.current);
+      focusRecoveryTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearFocusRecovery, [clearFocusRecovery]);
 
   const handleFocus = (id: ControlId) => {
+    clearFocusRecovery();
     focusedControlRef.current = id;
     if (id !== 'timeline') {
       previousRowControlRef.current = id;
@@ -158,23 +175,30 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     onFocusControl(id);
   };
 
-  // Focus restoration when lastFocusedControl changes
+  const handleBlur = (id: ControlId) => {
+    if (focusedControlRef.current === id) {
+      focusedControlRef.current = null;
+      clearFocusRecovery();
+      // A normal focus transfer cancels recovery through the next onFocus event.
+      focusRecoveryTimerRef.current = setTimeout(() => {
+        focusRecoveryTimerRef.current = null;
+        if (focusedControlRef.current === null) {
+          requestControlFocus(id);
+        }
+      }, 80);
+    }
+  };
+
+  // Restore focus when controls reappear without refocusing an active control.
   useEffect(() => {
-    const targetRef =
-      lastFocusedControl === 'timeline'
-        ? timelineRef
-        : lastFocusedControl === 'quality'
-        ? qualityRef
-        : lastFocusedControl === 'sources' && showSources
-        ? sourcesRef
-        : lastFocusedControl === 'multiview'
-        ? multiviewRef
-        : playRef;
+    if (focusedControlRef.current === lastFocusedControl) {
+      return;
+    }
     const timer = setTimeout(() => {
-      targetRef.current?.requestTVFocus?.();
+      requestControlFocus(lastFocusedControl);
     }, 50);
     return () => clearTimeout(timer);
-  }, [lastFocusedControl, showSources]);
+  }, [lastFocusedControl, requestControlFocus]);
 
   // Handle remote DPAD left/right explicitly to bridge the flexSpacer gap seamlessly
   useTVEventHandler(event => {
@@ -184,6 +208,10 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 
     const focusedControl = focusedControlRef.current;
     if (!focusedControl) {
+      if (['up', 'down', 'left', 'right'].includes(event.eventType)) {
+        clearFocusRecovery();
+        requestControlFocus(lastFocusedControl);
+      }
       return;
     }
     if (event.eventType === 'up' && focusedControl !== 'timeline') {
@@ -212,9 +240,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     }
 
     if (event.eventType === 'right') {
-      if (lastFocusedControl === 'play-pause') {
+      if (focusedControl === 'play-pause') {
         const next = showSources ? 'sources' : isLive ? 'multiview' : 'quality';
-        onFocusControl(next);
         const target =
           next === 'sources'
             ? sourcesRef
@@ -222,33 +249,37 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             ? multiviewRef
             : qualityRef;
         target.current?.requestTVFocus?.();
-      } else if (lastFocusedControl === 'sources') {
-        onFocusControl('multiview');
+      } else if (focusedControl === 'sources') {
         multiviewRef.current?.requestTVFocus?.();
-      } else if (lastFocusedControl === 'multiview') {
-        onFocusControl('quality');
+      } else if (focusedControl === 'multiview') {
+        qualityRef.current?.requestTVFocus?.();
+      } else if (focusedControl === 'quality') {
         qualityRef.current?.requestTVFocus?.();
       }
     } else if (event.eventType === 'left') {
-      if (lastFocusedControl === 'quality') {
+      if (focusedControl === 'quality') {
         const prev = isLive ? 'multiview' : 'play-pause';
-        onFocusControl(prev);
         const target = prev === 'multiview' ? multiviewRef : playRef;
         target.current?.requestTVFocus?.();
-      } else if (lastFocusedControl === 'multiview') {
-        const previous = showSources ? 'sources' : 'play-pause';
-        onFocusControl(previous);
+      } else if (focusedControl === 'multiview') {
         const target = showSources ? sourcesRef : playRef;
         target.current?.requestTVFocus?.();
-      } else if (lastFocusedControl === 'sources') {
-        onFocusControl('play-pause');
+      } else if (focusedControl === 'sources') {
+        playRef.current?.requestTVFocus?.();
+      } else if (focusedControl === 'play-pause') {
         playRef.current?.requestTVFocus?.();
       }
     }
   });
 
   return (
-    <TVFocusGuideView trapFocusUp trapFocusDown style={styles.container}>
+    <TVFocusGuideView
+      trapFocusUp
+      trapFocusDown
+      trapFocusLeft
+      trapFocusRight
+      style={styles.container}
+    >
       {/* 1. Timeline Progress Bar */}
       <TVFocusGuideView trapFocusLeft trapFocusRight>
         <Pressable
@@ -272,24 +303,31 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             }
           }}
           onFocus={() => handleFocus('timeline')}
-          onBlur={() => {
-            focusedControlRef.current = null;
-          }}
-          style={({ focused }) => [
-            styles.timelineContainer,
-            focused && styles.timelineFocused,
-          ]}
+          onBlur={() => handleBlur('timeline')}
+          style={styles.timelineContainer}
         >
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
-            <View style={[styles.progressThumb, { left: `${progressPct}%` }]} />
-          </View>
+          {({ focused }) => (
+            <View style={styles.progressTrack}>
+              <View
+                style={[styles.progressFill, { width: `${progressPct}%` }]}
+              />
+              <View
+                style={[
+                  styles.progressThumb,
+                  { left: `${progressPct}%` },
+                  focused && styles.progressThumbFocused,
+                ]}
+              />
+            </View>
+          )}
         </Pressable>
       </TVFocusGuideView>
 
       {/* 2. Bottom Controls Row */}
       <TVFocusGuideView
         trapFocusDown
+        trapFocusLeft
+        trapFocusRight
         destinations={
           [
             playRef.current,
@@ -314,9 +352,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
               : (qualityRef.current as any)
           }
           onFocus={() => handleFocus('play-pause')}
-          onBlur={() => {
-            focusedControlRef.current = null;
-          }}
+          onBlur={() => handleBlur('play-pause')}
           onPress={onTogglePlayPause}
           style={({ focused }) => [
             styles.playButton,
@@ -357,9 +393,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             nextFocusLeft={playRef.current as any}
             nextFocusRight={multiviewRef.current as any}
             onFocus={() => handleFocus('sources')}
-            onBlur={() => {
-              focusedControlRef.current = null;
-            }}
+            onBlur={() => handleBlur('sources')}
             onPress={onOpenSources}
             style={({ focused }) => [
               styles.actionCard,
@@ -403,9 +437,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             }
             nextFocusRight={qualityRef.current as any}
             onFocus={() => handleFocus('multiview')}
-            onBlur={() => {
-              focusedControlRef.current = null;
-            }}
+            onBlur={() => handleBlur('multiview')}
             onPress={onOpenMultiView}
             style={({ focused }) => [
               styles.actionCard,
@@ -445,9 +477,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             isLive ? (multiviewRef.current as any) : (playRef.current as any)
           }
           onFocus={() => handleFocus('quality')}
-          onBlur={() => {
-            focusedControlRef.current = null;
-          }}
+          onBlur={() => handleBlur('quality')}
           onPress={onOpenQuality}
           style={({ focused }) => [
             styles.actionCard,
@@ -456,22 +486,23 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         >
           {({ focused }) => (
             <>
-              <Image
-                source={settingsIcon}
-                style={[styles.actionIcon, focused && styles.actionIconFocused]}
-                resizeMode="contain"
-              />
               <Text
                 style={[styles.actionText, focused && styles.actionTextFocused]}
               >
                 {t('playerQuality')}
               </Text>
+              <Text
+                testID="quality-value"
+                style={[
+                  styles.qualityValueText,
+                  focused && styles.qualityValueTextFocused,
+                ]}
+              >
+                {qualityValue}
+              </Text>
             </>
           )}
         </Pressable>
-
-        {/* Stream Resolution Badge */}
-        <Text style={styles.resolutionBadgeText}>{resolutionBadge}</Text>
       </TVFocusGuideView>
     </TVFocusGuideView>
   );
@@ -486,15 +517,8 @@ const styles = StyleSheet.create({
   },
   timelineContainer: {
     width: '100%',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    borderRadius: 6,
-  },
-  timelineFocused: {
-    borderColor: '#38bdf8',
-    backgroundColor: 'rgba(14, 165, 233, 0.22)',
+    paddingVertical: 14,
+    paddingHorizontal: 10,
   },
   progressTrack: {
     width: '100%',
@@ -524,6 +548,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 3,
     elevation: 4,
+  },
+  progressThumbFocused: {
+    transform: [{ scale: 1.7 }],
+    borderColor: '#38bdf8',
   },
   controlsRow: {
     flexDirection: 'row',
@@ -618,11 +646,13 @@ const styles = StyleSheet.create({
     color: '#38bdf8',
     fontWeight: '700',
   },
-  resolutionBadgeText: {
+  qualityValueText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
-    marginLeft: 4,
-    paddingHorizontal: 4,
+    marginTop: 1,
+  },
+  qualityValueTextFocused: {
+    color: '#38bdf8',
   },
 });

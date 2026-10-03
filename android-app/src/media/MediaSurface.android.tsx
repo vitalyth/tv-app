@@ -73,7 +73,7 @@ export function MediaSurface({
       const trackOptions: VideoQualityOption[] = [
         {
           id: 'auto',
-          label: 'Auto (HD)',
+          label: 'Auto',
           active: selectedQualityId === 'auto',
         },
       ];

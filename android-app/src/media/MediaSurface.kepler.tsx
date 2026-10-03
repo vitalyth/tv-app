@@ -6,15 +6,15 @@ import type { MediaSurfaceProps } from './MediaSurface.types';
 
 declare const require: (moduleName: string) => any;
 
-const { Video } = require(
-  '@amazon-devices/react-native-w3cmedia/dist/interface/Video',
-);
-const { KeplerVideoSurfaceView } = require(
-  '@amazon-devices/react-native-w3cmedia/dist/interface/KeplerVideoSurfaceView',
-);
-const { VideoPlayer } = require(
-  '@amazon-devices/react-native-w3cmedia/dist/headless',
-);
+const {
+  Video,
+} = require('@amazon-devices/react-native-w3cmedia/dist/interface/Video');
+const {
+  KeplerVideoSurfaceView,
+} = require('@amazon-devices/react-native-w3cmedia/dist/interface/KeplerVideoSurfaceView');
+const {
+  VideoPlayer,
+} = require('@amazon-devices/react-native-w3cmedia/dist/headless');
 
 interface SurfaceEngineProps {
   url: string;
@@ -205,9 +205,7 @@ function ShakaPlayerSurface({
       } finally {
         if (player) {
           player.pause?.();
-          const result = player.deinitializeSync(
-            MEDIA_DEINITIALIZE_TIMEOUT_MS,
-          );
+          const result = player.deinitializeSync(MEDIA_DEINITIALIZE_TIMEOUT_MS);
           if (result !== 'success') {
             console.warn('[MediaSurface] Vega media deinitialize:', result);
           }
@@ -259,13 +257,19 @@ function ShakaPlayerSurface({
         await shaka.load(url, streamType);
         if (startPositionSeconds && startPositionSeconds > 0) {
           const duration = player.duration ?? 0;
-          player.currentTime = duration > 0
-            ? Math.min(startPositionSeconds, duration - 1)
-            : startPositionSeconds;
+          player.currentTime =
+            duration > 0
+              ? Math.min(startPositionSeconds, duration - 1)
+              : startPositionSeconds;
         }
         if (shakaPlayer.current) {
           const qualities = shaka.getQualities();
           onVideoTracks?.(qualities);
+          setTimeout(() => {
+            if (!destroyed.current && shakaPlayer.current === shaka) {
+              onVideoTracks?.(shaka.getQualities());
+            }
+          }, 1500);
         }
       } catch (err) {
         console.warn('[MediaSurface] Vega Shaka load failed:', err);

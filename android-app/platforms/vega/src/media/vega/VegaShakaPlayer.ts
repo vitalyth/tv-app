@@ -52,7 +52,7 @@ function installPolyfills(mediaElement: any) {
   runtime.window.fetch = fetch;
   runtime.window.XMLHttpRequest ??= runtime.XMLHttpRequest;
   if (typeof runtime.TextEncoder === 'undefined') {
-    const { TextEncoder: TE } = require('fastestsmallesttextencoderdecoder');
+    const {TextEncoder: TE} = require('fastestsmallesttextencoderdecoder');
     runtime.TextEncoder = runtime.window.TextEncoder = TE;
   }
   runtime.window.crypto = WebCrypto;
@@ -144,29 +144,49 @@ export class VegaShakaPlayer {
 
   getQualities() {
     const tracks = this.player?.getVariantTracks?.() ?? [];
-    const seenHeights = new Set<number>();
-    const qualities = tracks
+    const statsHeight = Number(this.player?.getStats?.()?.height);
+    const mediaHeight = Number(this.mediaElement?.videoHeight);
+    const activeHeight =
+      Number.isFinite(statsHeight) && statsHeight > 0
+        ? statsHeight
+        : mediaHeight;
+    const qualityByHeight = new Map<number, any>();
+
+    tracks
       .filter((track: any) => Number(track.height) > 0)
-      .sort((left: any, right: any) => Number(right.height) - Number(left.height))
-      .filter((track: any) => {
+      .forEach((track: any) => {
         const height = Number(track.height);
-        if (seenHeights.has(height)) {
-          return false;
+        const existing = qualityByHeight.get(height);
+        if (
+          !existing ||
+          (!existing.active && track.active) ||
+          (!existing.active &&
+            !track.active &&
+            Number(track.bandwidth) > Number(existing.bandwidth))
+        ) {
+          qualityByHeight.set(height, track);
         }
-        seenHeights.add(height);
-        return true;
-      })
+      });
+
+    const qualities = [...qualityByHeight.values()]
+      .sort(
+        (left: any, right: any) => Number(right.height) - Number(left.height),
+      )
       .map((track: any) => ({
         id: String(track.height),
         label: `${track.height}p`,
         height: track.height,
         width: track.width,
         bitrate: track.bandwidth,
-        active: Boolean(track.active),
+        active: Boolean(track.active) || Number(track.height) === activeHeight,
       }));
 
     return [
-      {id: 'auto', label: 'Auto (HD)', active: this.player?.getConfiguration?.().abr?.enabled !== false},
+      {
+        id: 'auto',
+        label: 'Auto',
+        active: this.player?.getConfiguration?.().abr?.enabled !== false,
+      },
       ...qualities,
     ];
   }

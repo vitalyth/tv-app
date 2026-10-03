@@ -5,7 +5,7 @@ import {
   PlayerBottomControls,
   type ControlId,
 } from '../src/components/player/PlayerBottomControls';
-import type { MediaItem } from '../src/media/player';
+import type { MediaItem, VideoQualityOption } from '../src/media/player';
 
 jest.mock('react-native/Libraries/Components/TV/useTVEventHandler', () => ({
   __esModule: true,
@@ -56,6 +56,8 @@ describe('PlayerBottomControls timeline', () => {
     kind: MediaItem['kind'] = 'vod',
     currentTime = 120,
     duration = 300,
+    selectedQualityId = 'auto',
+    videoQualities: VideoQualityOption[] = [],
   ) {
     function Harness() {
       const [focused, setFocused] = React.useState<ControlId>('play-pause');
@@ -65,8 +67,8 @@ describe('PlayerBottomControls timeline', () => {
           paused={false}
           currentTime={currentTime}
           duration={duration}
-          selectedQualityId="auto"
-          videoQualities={[]}
+          selectedQualityId={selectedQualityId}
+          videoQualities={videoQualities}
           hasAlternateSources={false}
           lastFocusedControl={focused}
           onFocusControl={setFocused}
@@ -128,6 +130,101 @@ describe('PlayerBottomControls timeline', () => {
       renderer.root.findByProps({ testID: 'player-timeline' }).props
         .accessibilityValue.now,
     ).toBe(130);
+  });
+
+  it.each([
+    ['', [{ id: '1080', label: '1080p', height: 1080, active: true }], '1080p'],
+    ['auto', [{ id: '720', label: '720p', active: true }], '720p'],
+    ['auto', [{ id: '1080', label: '1080p', height: 1080 }], 'Auto'],
+  ] as const)(
+    'shows %s auto quality as %s when tracks are %j',
+    async (selectedQualityId, videoQualities, expectedBadge) => {
+      await render('live', 120, 300, selectedQualityId, [
+        { id: 'auto', label: 'Auto (HD)' },
+        ...videoQualities,
+      ]);
+      expect(
+        renderer.root.findByProps({ testID: 'quality-value' }).props.children,
+      ).toBe(expectedBadge);
+    },
+  );
+
+  it.each(['vod', 'live'] as const)(
+    'retains %s focus at both row boundaries',
+    async kind => {
+      await render(kind);
+      await focus('play-pause-button');
+      await press('up');
+      await focus('player-timeline');
+      await press('down');
+      await focus('play-pause-button');
+      await press('left');
+      await press('left');
+      expect(focusRequests.get('play-pause-button')).toHaveBeenCalledTimes(3);
+      await focus('quality-button');
+      await press('right');
+      await press('right');
+      expect(focusRequests.get('quality-button')).toHaveBeenCalledTimes(2);
+      await press('left');
+      expect(
+        focusRequests.get(
+          kind === 'live' ? 'multiview-button' : 'play-pause-button',
+        ),
+      ).toHaveBeenCalled();
+      await press('up');
+      expect(focusRequests.get('player-timeline')).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('ignores a delayed blur from the previous control', async () => {
+    await render();
+    await focus('play-pause-button');
+    await focus('quality-button');
+    await act(async () =>
+      renderer.root.findByProps({ testID: 'play-pause-button' }).props.onBlur(),
+    );
+    await press('left');
+    expect(focusRequests.get('play-pause-button')).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule another focus request for an already focused control', async () => {
+    await render();
+    await focus('quality-button');
+    await act(async () => jest.advanceTimersByTime(100));
+    expect(focusRequests.get('quality-button')).not.toHaveBeenCalled();
+  });
+
+  it('recovers the last control when a blur has no destination', async () => {
+    await render();
+    await focus('quality-button');
+    await act(async () =>
+      renderer.root.findByProps({ testID: 'quality-button' }).props.onBlur(),
+    );
+    await act(async () => jest.advanceTimersByTime(80));
+    expect(focusRequests.get('quality-button')).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels recovery when another control receives focus', async () => {
+    await render();
+    await focus('quality-button');
+    await act(async () =>
+      renderer.root.findByProps({ testID: 'quality-button' }).props.onBlur(),
+    );
+    await focus('play-pause-button');
+    await act(async () => jest.advanceTimersByTime(100));
+    expect(focusRequests.get('quality-button')).not.toHaveBeenCalled();
+  });
+
+  it('cancels recovery when controls are hidden or a dialog opens', async () => {
+    await render();
+    await focus('quality-button');
+    await act(async () =>
+      renderer.root.findByProps({ testID: 'quality-button' }).props.onBlur(),
+    );
+    const requestFocus = focusRequests.get('quality-button');
+    await act(async () => renderer.unmount());
+    await act(async () => jest.advanceTimersByTime(100));
+    expect(requestFocus).not.toHaveBeenCalled();
   });
 
   it('clamps seeking to the media boundaries', async () => {
