@@ -8,6 +8,37 @@ import type { MediaControllerValue } from '../src/media/MediaController';
 import type { MediaItem, MediaStream } from '../src/media/player';
 
 describe('MediaController', () => {
+  it('routes seeks to the active adapter and releases its handler on teardown', () => {
+    let controller!: MediaControllerValue;
+    function Harness() {
+      controller = useMediaController();
+      return null;
+    }
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <Harness />
+        </MediaControllerProvider>,
+      );
+    });
+    const oldAdapter = jest.fn();
+    const activeAdapter = jest.fn();
+    const releaseOld = controller.registerSeekHandler(oldAdapter);
+    const releaseActive = controller.registerSeekHandler(activeAdapter);
+    releaseOld();
+    controller.seekTo(130);
+    controller.seekTo(NaN);
+    controller.seekTo(Infinity);
+    controller.seekTo(-10);
+    expect(oldAdapter).not.toHaveBeenCalled();
+    expect(activeAdapter.mock.calls).toEqual([[130]]);
+    releaseActive();
+    controller.seekTo(140);
+    expect(activeAdapter).toHaveBeenCalledTimes(1);
+    act(() => renderer.unmount());
+  });
+
   it('never exposes a stream that belongs to a different media item', () => {
     let controller!: MediaControllerValue;
 

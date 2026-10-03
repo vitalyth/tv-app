@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import {
   Image,
   Pressable,
@@ -17,7 +17,12 @@ const settingsIcon = require('../../assets/icons/settings.png');
 const sourcesIcon = require('../../assets/icons/sources.png');
 const multiviewIcon = require('../../assets/icons/multiview.png');
 
-export type ControlId = 'play-pause' | 'sources' | 'multiview' | 'quality';
+export type ControlId =
+  | 'timeline'
+  | 'play-pause'
+  | 'sources'
+  | 'multiview'
+  | 'quality';
 
 interface PlayerBottomControlsProps {
   item: MediaItem;
@@ -30,6 +35,7 @@ interface PlayerBottomControlsProps {
   lastFocusedControl: ControlId;
   onFocusControl: (id: ControlId) => void;
   onTogglePlayPause: () => void;
+  onSeek: (seconds: number) => void;
   onOpenQuality: () => void;
   onOpenSources: () => void;
   onOpenMultiView: () => void;
@@ -44,7 +50,10 @@ function formatDuration(seconds: number): string {
   const mins = Math.floor((total % 3600) / 60);
   const secs = total % 60;
   if (hrs > 0) {
-    return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(
+      2,
+      '0',
+    )}`;
   }
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
@@ -60,12 +69,51 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   lastFocusedControl,
   onFocusControl,
   onTogglePlayPause,
+  onSeek,
   onOpenQuality,
   onOpenSources,
   onOpenMultiView,
 }: PlayerBottomControlsProps) {
   const isLive = item.kind === 'live';
   const showSources = isLive && hasAlternateSources;
+  const canSeek = !isLive && Number.isFinite(duration) && duration > 0;
+  const [seekPosition, setSeekPosition] = useState<number | null>(null);
+  const seekPositionRef = useRef<number | null>(null);
+  const focusedControlRef = useRef<ControlId | null>(null);
+  const previousRowControlRef = useRef<ControlId>('play-pause');
+  const displayedTime = seekPosition ?? currentTime;
+
+  // Keep repeated remote presses cumulative until playback acknowledges the seek.
+  useEffect(() => {
+    if (seekPosition !== null && Math.abs(currentTime - seekPosition) < 2) {
+      seekPositionRef.current = null;
+      setSeekPosition(null);
+    }
+  }, [currentTime, seekPosition]);
+
+  useEffect(() => {
+    if (seekPosition === null) {
+      return;
+    }
+    const timeout = setTimeout(() => {
+      seekPositionRef.current = null;
+      setSeekPosition(null);
+    }, 3000);
+    return () => clearTimeout(timeout);
+  }, [seekPosition]);
+
+  const seekBy = (offset: number) => {
+    if (!canSeek) {
+      return;
+    }
+    const position = Math.min(
+      duration,
+      Math.max(0, (seekPositionRef.current ?? currentTime) + offset),
+    );
+    seekPositionRef.current = position;
+    setSeekPosition(position);
+    onSeek(position);
+  };
 
   // Calculate timeline percentage
   let progressPct = 0;
@@ -75,7 +123,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         ? Math.min(100, Math.max(0, item.progressPercentage))
         : 100;
   } else if (duration > 0) {
-    progressPct = Math.min(100, Math.max(0, (currentTime / duration) * 100));
+    progressPct = Math.min(100, Math.max(0, (displayedTime / duration) * 100));
   }
 
   // Derive resolution badge (SD / HD / FHD)
@@ -100,11 +148,22 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   const sourcesRef = useRef<View>(null);
   const multiviewRef = useRef<View>(null);
   const qualityRef = useRef<View>(null);
+  const timelineRef = useRef<View>(null);
+
+  const handleFocus = (id: ControlId) => {
+    focusedControlRef.current = id;
+    if (id !== 'timeline') {
+      previousRowControlRef.current = id;
+    }
+    onFocusControl(id);
+  };
 
   // Focus restoration when lastFocusedControl changes
   useEffect(() => {
     const targetRef =
-      lastFocusedControl === 'quality'
+      lastFocusedControl === 'timeline'
+        ? timelineRef
+        : lastFocusedControl === 'quality'
         ? qualityRef
         : lastFocusedControl === 'sources' && showSources
         ? sourcesRef
@@ -120,6 +179,35 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   // Handle remote DPAD left/right explicitly to bridge the flexSpacer gap seamlessly
   useTVEventHandler(event => {
     if (event.eventKeyAction === 1) {
+      return;
+    }
+
+    const focusedControl = focusedControlRef.current;
+    if (!focusedControl) {
+      return;
+    }
+    if (event.eventType === 'up' && focusedControl !== 'timeline') {
+      timelineRef.current?.requestTVFocus?.();
+      return;
+    }
+    if (focusedControl === 'timeline') {
+      if (event.eventType === 'down') {
+        const previous = previousRowControlRef.current;
+        const target =
+          previous === 'quality'
+            ? qualityRef
+            : previous === 'sources' && showSources
+            ? sourcesRef
+            : previous === 'multiview' && isLive
+            ? multiviewRef
+            : playRef;
+        target.current?.requestTVFocus?.();
+      } else if (
+        canSeek &&
+        (event.eventType === 'left' || event.eventType === 'right')
+      ) {
+        seekBy(event.eventType === 'right' ? 10 : -10);
+      }
       return;
     }
 
@@ -160,29 +248,56 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   });
 
   return (
-    <View style={styles.container}>
+    <TVFocusGuideView trapFocusUp trapFocusDown style={styles.container}>
       {/* 1. Timeline Progress Bar */}
-      <View style={styles.timelineContainer}>
-        <View style={styles.progressTrack}>
-          <View
-            style={[styles.progressFill, { width: `${progressPct}%` }]}
-          />
-          <View
-            style={[styles.progressThumb, { left: `${progressPct}%` }]}
-          />
-        </View>
-      </View>
+      <TVFocusGuideView trapFocusLeft trapFocusRight>
+        <Pressable
+          ref={timelineRef}
+          testID="player-timeline"
+          focusable
+          hasTVPreferredFocus={lastFocusedControl === 'timeline'}
+          accessibilityRole={canSeek ? 'adjustable' : 'progressbar'}
+          accessibilityLabel="Playback position"
+          accessibilityValue={
+            canSeek ? { min: 0, max: duration, now: displayedTime } : undefined
+          }
+          accessibilityActions={
+            canSeek ? [{ name: 'increment' }, { name: 'decrement' }] : undefined
+          }
+          onAccessibilityAction={({ nativeEvent }) => {
+            if (nativeEvent.actionName === 'increment') {
+              seekBy(10);
+            } else if (nativeEvent.actionName === 'decrement') {
+              seekBy(-10);
+            }
+          }}
+          onFocus={() => handleFocus('timeline')}
+          onBlur={() => {
+            focusedControlRef.current = null;
+          }}
+          style={({ focused }) => [
+            styles.timelineContainer,
+            focused && styles.timelineFocused,
+          ]}
+        >
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
+            <View style={[styles.progressThumb, { left: `${progressPct}%` }]} />
+          </View>
+        </Pressable>
+      </TVFocusGuideView>
 
       {/* 2. Bottom Controls Row */}
       <TVFocusGuideView
-        trapFocusUp
         trapFocusDown
-        destinations={[
-          playRef.current,
-          sourcesRef.current,
-          multiviewRef.current,
-          qualityRef.current,
-        ].filter(Boolean) as any}
+        destinations={
+          [
+            playRef.current,
+            sourcesRef.current,
+            multiviewRef.current,
+            qualityRef.current,
+          ].filter(Boolean) as any
+        }
         style={styles.controlsRow}
       >
         {/* Play / Pause Button */}
@@ -198,7 +313,10 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
               ? (multiviewRef.current as any)
               : (qualityRef.current as any)
           }
-          onFocus={() => onFocusControl('play-pause')}
+          onFocus={() => handleFocus('play-pause')}
+          onBlur={() => {
+            focusedControlRef.current = null;
+          }}
           onPress={onTogglePlayPause}
           style={({ focused }) => [
             styles.playButton,
@@ -217,7 +335,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         {/* Timestamp / Live Badge */}
         {!isLive ? (
           <Text style={styles.timeText}>
-            {formatDuration(currentTime)} / {formatDuration(duration)}
+            {formatDuration(displayedTime)} / {formatDuration(duration)}
           </Text>
         ) : (
           <View style={styles.liveBadge}>
@@ -238,7 +356,10 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             hasTVPreferredFocus={lastFocusedControl === 'sources'}
             nextFocusLeft={playRef.current as any}
             nextFocusRight={multiviewRef.current as any}
-            onFocus={() => onFocusControl('sources')}
+            onFocus={() => handleFocus('sources')}
+            onBlur={() => {
+              focusedControlRef.current = null;
+            }}
             onPress={onOpenSources}
             style={({ focused }) => [
               styles.actionCard,
@@ -281,7 +402,10 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
                 : (playRef.current as any)
             }
             nextFocusRight={qualityRef.current as any}
-            onFocus={() => onFocusControl('multiview')}
+            onFocus={() => handleFocus('multiview')}
+            onBlur={() => {
+              focusedControlRef.current = null;
+            }}
             onPress={onOpenMultiView}
             style={({ focused }) => [
               styles.actionCard,
@@ -318,11 +442,12 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           focusable={true}
           hasTVPreferredFocus={lastFocusedControl === 'quality'}
           nextFocusLeft={
-            isLive
-              ? (multiviewRef.current as any)
-              : (playRef.current as any)
+            isLive ? (multiviewRef.current as any) : (playRef.current as any)
           }
-          onFocus={() => onFocusControl('quality')}
+          onFocus={() => handleFocus('quality')}
+          onBlur={() => {
+            focusedControlRef.current = null;
+          }}
           onPress={onOpenQuality}
           style={({ focused }) => [
             styles.actionCard,
@@ -333,17 +458,11 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             <>
               <Image
                 source={settingsIcon}
-                style={[
-                  styles.actionIcon,
-                  focused && styles.actionIconFocused,
-                ]}
+                style={[styles.actionIcon, focused && styles.actionIconFocused]}
                 resizeMode="contain"
               />
               <Text
-                style={[
-                  styles.actionText,
-                  focused && styles.actionTextFocused,
-                ]}
+                style={[styles.actionText, focused && styles.actionTextFocused]}
               >
                 {t('playerQuality')}
               </Text>
@@ -354,7 +473,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         {/* Stream Resolution Badge */}
         <Text style={styles.resolutionBadgeText}>{resolutionBadge}</Text>
       </TVFocusGuideView>
-    </View>
+    </TVFocusGuideView>
   );
 });
 
@@ -367,7 +486,15 @@ const styles = StyleSheet.create({
   },
   timelineContainer: {
     width: '100%',
-    paddingVertical: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    borderRadius: 6,
+  },
+  timelineFocused: {
+    borderColor: '#38bdf8',
+    backgroundColor: 'rgba(14, 165, 233, 0.22)',
   },
   progressTrack: {
     width: '100%',

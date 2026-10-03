@@ -40,6 +40,8 @@ export interface MediaControllerValue {
   updateProgress: (currentTime: number, duration: number) => void;
   setAvailableQualities: (qualities: VideoQualityOption[]) => void;
   setSelectedQuality: (qualityId: string) => void;
+  seekTo: (seconds: number) => void;
+  registerSeekHandler: (handler: (seconds: number) => void) => () => void;
 }
 
 export type MediaControllerActions = Pick<
@@ -59,6 +61,8 @@ export type MediaControllerActions = Pick<
   | 'updateProgress'
   | 'setAvailableQualities'
   | 'setSelectedQuality'
+  | 'seekTo'
+  | 'registerSeekHandler'
 >;
 
 const MediaControllerContext = createContext<MediaControllerValue | null>(null);
@@ -89,6 +93,22 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   const [duration, setDuration] = useState<number>(0);
   const [videoQualities, setVideoQualities] = useState<VideoQualityOption[]>([]);
   const [selectedQualityId, setSelectedQualityId] = useState<string>('auto');
+  const seekHandlerRef = useRef<((seconds: number) => void) | null>(null);
+
+  const registerSeekHandler = useCallback((handler: (seconds: number) => void) => {
+    seekHandlerRef.current = handler;
+    return () => {
+      if (seekHandlerRef.current === handler) {
+        seekHandlerRef.current = null;
+      }
+    };
+  }, []);
+
+  const seekTo = useCallback((seconds: number) => {
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      seekHandlerRef.current?.(seconds);
+    }
+  }, []);
 
   const play = useCallback((nextItem: MediaItem, nextStream: MediaStream) => {
     if (presentationRef.current === 'fullscreen') {
@@ -226,6 +246,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       updateProgress,
       setAvailableQualities,
       setSelectedQuality,
+      seekTo,
+      registerSeekHandler,
     }),
     [
       currentTime,
@@ -241,6 +263,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       playFullscreen,
       presentation,
       selectedQualityId,
+      seekTo,
+      registerSeekHandler,
       setAvailableQualities,
       setPaused,
       setSelectedQuality,
@@ -272,6 +296,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       updateProgress,
       setAvailableQualities,
       setSelectedQuality,
+      seekTo,
+      registerSeekHandler,
     }),
     [
       enterFullscreen,
@@ -281,6 +307,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       openFullscreen,
       play,
       playFullscreen,
+      registerSeekHandler,
+      seekTo,
       setAvailableQualities,
       setPaused,
       setSelectedQuality,

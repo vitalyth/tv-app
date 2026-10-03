@@ -58,6 +58,7 @@ export function MediaLayer() {
     markPlaying,
     updateProgress,
     setAvailableQualities,
+    registerSeekHandler,
   } = useMediaController();
 
   const isFullscreen = presentation === 'fullscreen';
@@ -104,6 +105,7 @@ export function MediaLayer() {
                 : undefined
             }
             selectedQualityId={selectedQualityId}
+            registerSeekHandler={registerSeekHandler}
             onFirstFrame={markPlaying}
             onError={markError}
             onProgress={({ currentTime, seekableDuration }) => {

@@ -18,6 +18,7 @@ export function MediaSurface({
   paused = false,
   startPositionSeconds,
   selectedQualityId = 'auto',
+  registerSeekHandler,
   style,
   onFirstFrame,
   onError,
@@ -31,6 +32,10 @@ export function MediaSurface({
   });
   const usingFallback = useRef(false);
   const firstFrameReported = useRef(false);
+
+  useEffect(() => {
+    return registerSeekHandler?.(seconds => videoRef.current?.seek(seconds));
+  }, [registerSeekHandler]);
 
   useEffect(() => {
     usingFallback.current = false;

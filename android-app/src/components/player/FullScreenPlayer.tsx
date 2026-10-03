@@ -79,6 +79,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     selectedQualityId,
     togglePlayPause,
     setSelectedQuality,
+    seekTo,
   } = useMediaController();
   const { playFullscreen, markError } = useMediaActions();
 
@@ -410,6 +411,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
             lastFocusedControl={lastFocusedControl}
             onFocusControl={setLastFocusedControl}
             onTogglePlayPause={handleTogglePlayPause}
+            onSeek={seekTo}
             onOpenQuality={handleOpenQuality}
             onOpenSources={handleOpenSources}
             onOpenMultiView={handleOpenMultiView}

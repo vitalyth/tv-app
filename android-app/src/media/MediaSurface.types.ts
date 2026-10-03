@@ -10,6 +10,7 @@ export interface MediaSurfaceProps {
   paused?: boolean;
   startPositionSeconds?: number;
   selectedQualityId?: string;
+  registerSeekHandler?: (handler: (seconds: number) => void) => () => void;
   style?: StyleProp<ViewStyle>;
   onFirstFrame: () => void;
   onError: () => void;

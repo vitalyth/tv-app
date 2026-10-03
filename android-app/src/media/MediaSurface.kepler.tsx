@@ -22,6 +22,7 @@ interface SurfaceEngineProps {
   paused?: boolean;
   startPositionSeconds?: number;
   selectedQualityId?: string;
+  registerSeekHandler?: MediaSurfaceProps['registerSeekHandler'];
   onFirstFrame: () => void;
   onError: () => void;
   onProgress?: (data: {
@@ -60,6 +61,7 @@ function NativeHlsSurface({
   url,
   paused = false,
   startPositionSeconds,
+  registerSeekHandler,
   onFirstFrame,
   onError,
   onProgress,
@@ -70,6 +72,14 @@ function NativeHlsSurface({
   const callbacksRef = useRef({ onFirstFrame, onProgress });
 
   callbacksRef.current = { onFirstFrame, onProgress };
+
+  useEffect(() => {
+    return registerSeekHandler?.(seconds => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = seconds;
+      }
+    });
+  }, [registerSeekHandler]);
 
   const handleRef = useCallback((node: any) => {
     videoRef.current = node;
@@ -152,6 +162,7 @@ function ShakaPlayerSurface({
   paused = false,
   startPositionSeconds,
   selectedQualityId = 'auto',
+  registerSeekHandler,
   onFirstFrame,
   onError,
   onProgress,
@@ -163,6 +174,14 @@ function ShakaPlayerSurface({
   const firstFrameReported = useRef(false);
   const destroyed = useRef(false);
   const teardown = useRef<Promise<void> | null>(null);
+
+  useEffect(() => {
+    return registerSeekHandler?.(seconds => {
+      if (videoPlayer.current && !destroyed.current) {
+        videoPlayer.current.currentTime = seconds;
+      }
+    });
+  }, [registerSeekHandler]);
 
   const destroyPlayer = useCallback(() => {
     if (destroyed.current) {
@@ -338,6 +357,7 @@ export function MediaSurface({
   paused = false,
   startPositionSeconds,
   selectedQualityId = 'auto',
+  registerSeekHandler,
   onFirstFrame,
   onError,
   onProgress,
@@ -417,6 +437,7 @@ export function MediaSurface({
         paused={paused}
         startPositionSeconds={startPositionSeconds}
         selectedQualityId={selectedQualityId}
+        registerSeekHandler={registerSeekHandler}
         onFirstFrame={onFirstFrame}
         onError={handleError}
         onProgress={onProgress}
