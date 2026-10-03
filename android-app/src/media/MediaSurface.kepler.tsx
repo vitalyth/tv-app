@@ -67,6 +67,9 @@ function NativeHlsSurface({
   const videoRef = useRef<any>(null);
   const videoInstance = useRef<any>(null);
   const firstFrameReported = useRef(false);
+  const callbacksRef = useRef({ onFirstFrame, onProgress });
+
+  callbacksRef.current = { onFirstFrame, onProgress };
 
   const handleRef = useCallback((node: any) => {
     videoRef.current = node;
@@ -75,19 +78,24 @@ function NativeHlsSurface({
     }
   }, []);
 
-  const handleTimeUpdate = () => {
-    const cur = videoRef.current?.currentTime ?? 0;
-    const dur = videoRef.current?.duration ?? 0;
-    if (!firstFrameReported.current && cur > 0) {
-      firstFrameReported.current = true;
-      onFirstFrame();
-    }
-    onProgress?.({
-      currentTime: cur,
-      playableDuration: cur,
-      seekableDuration: dur,
-    });
-  };
+  useEffect(() => {
+    const reportPlaybackState = () => {
+      const cur = videoRef.current?.currentTime ?? 0;
+      const dur = videoRef.current?.duration ?? 0;
+      if (!firstFrameReported.current && cur > 0) {
+        firstFrameReported.current = true;
+        callbacksRef.current.onFirstFrame();
+      }
+      callbacksRef.current.onProgress?.({
+        currentTime: cur,
+        playableDuration: cur,
+        seekableDuration: dur,
+      });
+    };
+
+    const interval = setInterval(reportPlaybackState, 1_000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -132,7 +140,6 @@ function NativeHlsSurface({
       muted={false}
       loop={false}
       scalingmode="fill"
-      onTimeUpdate={handleTimeUpdate}
       onError={onError}
       onEnded={onError}
     />

@@ -26,6 +26,22 @@ export const he = {
   episodeNumber: 'פרק {episode}',
   vodProgram: 'תוכנית VOD',
 
+  // Player
+  playerSources: 'מקורות',
+  playerSourceDialogTitle: 'מקורות שידור',
+  playerNoAlternateSources: 'לא נמצאו מקורות נוספים לערוץ זה.',
+  playerSourceConnecting: 'מתחבר...',
+  playerSourceActive: 'מוצג',
+  playerSourceAvailable: 'זמין',
+  playerSourceUnavailable: 'המקור שנבחר אינו זמין.',
+  playerSourceNumber: 'מקור {number}',
+  playerMultiView: 'צפייה מפוצלת',
+  playerMultiViewUnavailable:
+    'צפייה מפוצלת במספר ערוצים במקביל (Multi View) תהיה זמינה בשלב הבא.',
+  playerQuality: 'איכות',
+  playerVideoQuality: 'איכות וידאו',
+  close: 'סגור',
+
   // Navigation
   navHome: 'בית',
   navLiveTv: 'טלוויזיה חיה',

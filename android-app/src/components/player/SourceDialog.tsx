@@ -8,6 +8,7 @@ import {
   type View as ViewType,
 } from 'react-native';
 import type { LiveChannelSourceOption } from '../../api/channels';
+import { t } from '../../i18n';
 import { PlayerDialog } from './PlayerDialog';
 
 interface SourceDialogProps {
@@ -73,7 +74,7 @@ export const SourceDialog = memo(function SourceDialogView({
   });
 
   return (
-    <PlayerDialog title="מקורות שידור">
+    <PlayerDialog title={t('playerSourceDialogTitle')}>
       <View style={styles.list}>
         {channelLabel ? (
           <Text numberOfLines={1} style={styles.channelLabel}>
@@ -81,7 +82,7 @@ export const SourceDialog = memo(function SourceDialogView({
           </Text>
         ) : null}
         {sources.length === 0 ? (
-          <Text style={styles.message}>לא נמצאו מקורות נוספים לערוץ זה.</Text>
+          <Text style={styles.message}>{t('playerNoAlternateSources')}</Text>
         ) : (
           sources.map((source, index) => {
             const isSwitching = switchingSourceId === source.id;
@@ -115,7 +116,9 @@ export const SourceDialog = memo(function SourceDialogView({
                             styles.itemLabelFocused,
                         ]}
                       >
-                        {isSwitching ? 'מתחבר...' : source.label}
+                        {isSwitching
+                          ? t('playerSourceConnecting')
+                          : source.label}
                       </Text>
                       <Text
                         style={[
@@ -125,7 +128,9 @@ export const SourceDialog = memo(function SourceDialogView({
                             styles.itemStatusFocused,
                         ]}
                       >
-                        {source.selected ? 'מוצג' : 'זמין'}
+                        {source.selected
+                          ? t('playerSourceActive')
+                          : t('playerSourceAvailable')}
                       </Text>
                     </View>
                     {source.selected ? (

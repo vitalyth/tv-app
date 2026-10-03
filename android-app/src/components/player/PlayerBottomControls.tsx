@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import type { MediaItem, VideoQualityOption } from '../../media/player';
+import { t } from '../../i18n';
 
 const playIcon = require('../../assets/icons/play.png');
 const pauseIcon = require('../../assets/icons/pause.png');
@@ -260,7 +261,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
                     focused && styles.actionTextFocused,
                   ]}
                 >
-                  מקורות
+                  {t('playerSources')}
                 </Text>
               </>
             )}
@@ -303,7 +304,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
                     focused && styles.actionTextFocused,
                   ]}
                 >
-                  צפייה מפוצלת
+                  {t('playerMultiView')}
                 </Text>
               </>
             )}
@@ -344,7 +345,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
                   focused && styles.actionTextFocused,
                 ]}
               >
-                Quality
+                {t('playerQuality')}
               </Text>
             </>
           )}

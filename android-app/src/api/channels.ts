@@ -7,6 +7,7 @@ import {
 import { getJson } from './client';
 import type { MediaItem, MediaStream, MediaStreamType } from '../media/player';
 import { LiveSourcePreferencesService } from '../services/liveSourcePreferences';
+import { t } from '../i18n';
 
 interface ApiProgram {
   start?: unknown;
@@ -642,7 +643,7 @@ export function getLiveChannelSourceOptions(
 
   return sources.map((source, index) => ({
     id: channelSourceId(source, index),
-    label: text(source.name) ?? `מקור ${index + 1}`,
+    label: text(source.name) ?? t('playerSourceNumber', { number: index + 1 }),
     selected: channelSourceId(source, index) === selectedId,
   }));
 }

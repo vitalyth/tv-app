@@ -33,6 +33,7 @@ import { PlayerPlaceholderDialog } from './PlayerPlaceholderDialog';
 import { SourceDialog } from './SourceDialog';
 import { WatchProgressService } from '../../services/watchProgress';
 import { LiveSourcePreferencesService } from '../../services/liveSourcePreferences';
+import { t } from '../../i18n';
 
 interface FullScreenPlayerProps {
   onExit: () => void;
@@ -333,7 +334,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
       }
       const selectedItem = selectLiveChannelSource(item, sourceId);
       if (!selectedItem) {
-        setSourceError('המקור שנבחר אינו זמין.');
+        setSourceError(t('playerSourceUnavailable'));
         return;
       }
       const selectedOption = sourceOptions.find(
@@ -440,8 +441,8 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
 
       {activeDialog === 'multiview' ? (
         <PlayerPlaceholderDialog
-          title="צפייה מפוצלת"
-          message="צפייה מפוצלת במספר ערוצים במקביל (Multi View) תהיה זמינה בשלב הבא."
+          title={t('playerMultiView')}
+          message={t('playerMultiViewUnavailable')}
           onClose={handleCloseDialog}
         />
       ) : null}

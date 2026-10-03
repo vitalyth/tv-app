@@ -9,6 +9,7 @@ import {
 import type { MediaItem, MediaStream } from '../src/media/player';
 import { WatchProgressService } from '../src/services/watchProgress';
 import { SourceDialog } from '../src/components/player/SourceDialog';
+import { t } from '../src/i18n';
 
 jest.mock('../src/components/RemoteImage', () => ({
   RemoteImage: () => 'RemoteImage',
@@ -149,8 +150,8 @@ describe('FullScreenPlayer', () => {
     expect(textContents).toContain('20:00 – 21:00');
     expect(textContents).toContain('מהדורת החדשות המרכזית של כאן 11');
     expect(textContents).toContain('LIVE');
-    expect(textContents).toContain('מקורות');
-    expect(textContents).toContain('צפייה מפוצלת');
+    expect(textContents).toContain(t('playerSources'));
+    expect(textContents).toContain(t('playerMultiView'));
   });
 
   it('renders VOD player without Sources or Multi View buttons', async () => {
@@ -172,8 +173,8 @@ describe('FullScreenPlayer', () => {
     expect(textContents).toContain('עונה 4 • פרק 3');
     // Ensure LIVE-only controls are NOT present in VOD
     expect(textContents).not.toContain('LIVE');
-    expect(textContents).not.toContain('מקורות');
-    expect(textContents).not.toContain('צפייה מפוצלת');
+    expect(textContents).not.toContain(t('playerSources'));
+    expect(textContents).not.toContain(t('playerMultiView'));
   });
 
   it('hides the Sources button for a live channel with no alternatives', async () => {
@@ -276,10 +277,10 @@ describe('FullScreenPlayer', () => {
     expect(root.findByProps({ testID: 'player-dialog-card' })).toBeDefined();
     const textNodes = root.findAllByType('Text' as any);
     const textContents = textNodes.map(node => node.props.children).flat();
-    expect(textContents).toContain('מקורות שידור');
+    expect(textContents).toContain(t('playerSourceDialogTitle'));
     expect(textContents).toContain('כאן 11 - גיבוי');
-    expect(textContents).toContain('מוצג');
-    expect(textContents).toContain('זמין');
+    expect(textContents).toContain(t('playerSourceActive'));
+    expect(textContents).toContain(t('playerSourceAvailable'));
 
     await act(async () => {
       root.findByProps({ testID: 'source-option-ch-11-backup' }).props.onPress();
@@ -352,7 +353,7 @@ describe('FullScreenPlayer', () => {
     expect(root.findByProps({ testID: 'player-dialog-card' })).toBeDefined();
     const textNodes = root.findAllByType('Text' as any);
     const textContents = textNodes.map(node => node.props.children).flat();
-    expect(textContents).toContain('צפייה מפוצלת');
+    expect(textContents).toContain(t('playerMultiView'));
 
     // Close dialog
     await act(async () => {

@@ -26,6 +26,23 @@ export const en = {
   episodeNumber: 'Episode {episode}',
   vodProgram: 'VOD Program',
 
+  // Player
+  playerSources: 'Sources',
+  playerSourceDialogTitle: 'Broadcast sources',
+  playerNoAlternateSources:
+    'No additional sources are available for this channel.',
+  playerSourceConnecting: 'Connecting...',
+  playerSourceActive: 'Active',
+  playerSourceAvailable: 'Available',
+  playerSourceUnavailable: 'The selected source is unavailable.',
+  playerSourceNumber: 'Source {number}',
+  playerMultiView: 'Multi View',
+  playerMultiViewUnavailable:
+    'Watching multiple channels in parallel (Multi View) will be available in the next stage.',
+  playerQuality: 'Quality',
+  playerVideoQuality: 'Video quality',
+  close: 'Close',
+
   // Navigation
   navHome: 'Home',
   navLiveTv: 'Live TV',

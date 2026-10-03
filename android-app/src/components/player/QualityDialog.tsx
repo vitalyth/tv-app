@@ -2,6 +2,7 @@ import { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PlayerDialog } from './PlayerDialog';
 import type { VideoQualityOption } from '../../media/player';
+import { t } from '../../i18n';
 
 interface QualityDialogProps {
   qualities: VideoQualityOption[];
@@ -35,7 +36,7 @@ export const QualityDialog = memo(function QualityDialogView({
   );
 
   return (
-    <PlayerDialog title="איכות וידאו">
+    <PlayerDialog title={t('playerVideoQuality')}>
       <View style={styles.list}>
         {options.map((option, index) => {
           const isSelected =

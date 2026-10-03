@@ -2,6 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LiveSourcePreferencesService } from '../src/services/liveSourcePreferences';
 
 describe('LiveSourcePreferencesService', () => {
+  beforeEach(() => {
+    LiveSourcePreferencesService.resetCache();
+  });
+
   it('persists a selected source independently for each channel', async () => {
     await LiveSourcePreferencesService.setSourceId('ch-11', 'ch-11b');
     await LiveSourcePreferencesService.setSourceId('ch-12', 'ch-12b2');

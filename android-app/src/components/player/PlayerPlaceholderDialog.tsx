@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PlayerDialog } from './PlayerDialog';
+import { t } from '../../i18n';
 
 interface PlayerPlaceholderDialogProps {
   title: string;
@@ -34,7 +35,7 @@ export const PlayerPlaceholderDialog = memo(
                   focused && styles.buttonTextFocused,
                 ]}
               >
-                סגור
+                {t('close')}
               </Text>
             )}
           </Pressable>
