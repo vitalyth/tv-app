@@ -29,6 +29,9 @@ id = "/com.amazon.kepler.w3cmedia_2@IW3cmedia_3"
 [[needs.privilege]]
 id = "com.amazon.audio.privilege.settings.control"
 
+[[needs.privilege]]
+id = "com.amazon.power.privilege.wake_lock"
+
 [[needs.module]]
 id = "/com.amazon.kepler.audio_lib_2@IAudioLib_0"
 
@@ -43,6 +46,12 @@ id = "com.amazon.mediametrics.service"
 
 [[wants.privilege]]
 id = "com.amazon.devconf.privilege.accessibility"
+
+[[wants.privilege]]
+id = "com.amazon.power.privilege.stay_awake"
+
+[[wants.privilege]]
+id = "com.amazon.display.privilege.keep_screen_on"
 
 [[wants.service]]
 id = "com.amazon.mediabuffer.service"

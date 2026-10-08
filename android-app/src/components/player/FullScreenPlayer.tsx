@@ -34,6 +34,7 @@ import { SourceDialog } from './SourceDialog';
 import { WatchProgressService } from '../../services/watchProgress';
 import { LiveSourcePreferencesService } from '../../services/liveSourcePreferences';
 import { t } from '../../i18n';
+import { useForegroundPlaybackTimeout } from '../../hooks/useForegroundPlaybackTimeout';
 
 interface FullScreenPlayerProps {
   onExit: () => void;
@@ -82,6 +83,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     seekTo,
   } = useMediaController();
   const { playFullscreen, markError } = useMediaActions();
+  useForegroundPlaybackTimeout(Boolean(item && stream && !paused));
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [activeDialog, setActiveDialog] = useState<DialogType>(null);

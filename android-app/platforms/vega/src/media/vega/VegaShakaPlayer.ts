@@ -65,6 +65,14 @@ function installPolyfills(mediaElement: any) {
     HTMLMediaElement.prototype.getElementsByTagName = () => [];
   }
 
+  if (typeof runtime.navigator.mediaSession === 'undefined') {
+    runtime.navigator.mediaSession = {
+      playbackState: 'none',
+      metadata: null,
+      setActionHandler: () => {},
+    };
+  }
+
   shaka ??= require('./vendor/shaka-player.compiled');
   shaka.polyfill.installAll();
 }
@@ -82,11 +90,56 @@ function mimeType(type?: 'm3u8' | 'mpd') {
 export class VegaShakaPlayer {
   private player: any;
   private mediaElement: any;
+  private activeQualityHeight?: number;
+  private onQualitiesChanged?: (qualities: any[]) => void;
+
+  private getReportedQualityHeight(event?: any): number {
+    const candidates = [
+      event?.height,
+      event?.detail?.height,
+      event?.track?.height,
+      event?.newTrack?.height,
+      event?.mediaQuality?.height,
+      event?.detail?.track?.height,
+      event?.detail?.newTrack?.height,
+      event?.detail?.mediaQuality?.height,
+      this.player?.getStats?.()?.height,
+      this.mediaElement?.videoHeight,
+      this.mediaElement?.naturalVideoHeight,
+    ];
+
+    for (const candidate of candidates) {
+      const height = Number(candidate);
+      if (Number.isFinite(height) && height > 0) {
+        return height;
+      }
+    }
+
+    const activeTrack = this.player
+      ?.getVariantTracks?.()
+      ?.find((track: any) => track.active);
+    const activeTrackHeight = Number(activeTrack?.height);
+    return Number.isFinite(activeTrackHeight) && activeTrackHeight > 0
+      ? activeTrackHeight
+      : 0;
+  }
+
+  private updateActiveQuality = (event?: any) => {
+    const height = this.getReportedQualityHeight(event);
+    if (height > 0) {
+      this.activeQualityHeight = height;
+    }
+    this.onQualitiesChanged?.(this.getQualities());
+    this.logActiveQuality();
+  };
 
   private logActiveQuality = () => {
     const activeTrack = this.player
       ?.getVariantTracks()
-      ?.find((track: any) => track.active);
+      ?.find(
+        (track: any) =>
+          track.active || Number(track.height) === this.activeQualityHeight,
+      );
 
     if (!activeTrack) {
       return;
@@ -101,20 +154,31 @@ export class VegaShakaPlayer {
     });
   };
 
-  constructor(mediaElement: any, onError: () => void) {
+  constructor(
+    mediaElement: any,
+    onError: () => void,
+    onQualitiesChanged?: (qualities: any[]) => void,
+  ) {
     installPolyfills(mediaElement);
     this.mediaElement = mediaElement;
+    this.onQualitiesChanged = onQualitiesChanged;
     this.player = new shaka.Player(mediaElement);
     this.player.addEventListener('error', (event: any) => {
       console.warn('[VegaShakaPlayer] error event:', event?.detail ?? event);
       onError();
     });
-    this.player.addEventListener('adaptation', this.logActiveQuality);
+    this.player.addEventListener('adaptation', this.updateActiveQuality);
+    this.player.addEventListener('variantchanged', this.updateActiveQuality);
+    this.player.addEventListener(
+      'mediaqualitychanged',
+      this.updateActiveQuality,
+    );
     this.player.configure({
       streaming: {
-        bufferingGoal: 10,
-        bufferBehind: 10,
-        rebufferingGoal: 0.01,
+        bufferingGoal: 4,
+        bufferBehind: 2,
+        rebufferingGoal: 1,
+        segmentPrefetchLimit: 0,
         retryParameters: {maxAttempts: 3},
       },
       manifest: {
@@ -140,6 +204,10 @@ export class VegaShakaPlayer {
     await this.player.load(url, undefined, mimeType(type));
     this.logActiveQuality();
     await this.mediaElement.play();
+    const nav = (global as any).navigator;
+    if (nav?.mediaSession) {
+      nav.mediaSession.playbackState = 'playing';
+    }
   }
 
   getQualities() {
@@ -147,7 +215,9 @@ export class VegaShakaPlayer {
     const statsHeight = Number(this.player?.getStats?.()?.height);
     const mediaHeight = Number(this.mediaElement?.videoHeight);
     const activeHeight =
-      Number.isFinite(statsHeight) && statsHeight > 0
+      Number.isFinite(this.activeQualityHeight) && this.activeQualityHeight
+        ? this.activeQualityHeight
+        : Number.isFinite(statsHeight) && statsHeight > 0
         ? statsHeight
         : mediaHeight;
     const qualityByHeight = new Map<number, any>();
@@ -215,6 +285,10 @@ export class VegaShakaPlayer {
   }
 
   async destroy() {
+    const nav = (global as any).navigator;
+    if (nav?.mediaSession) {
+      nav.mediaSession.playbackState = 'none';
+    }
     await this.player.destroy();
     this.player = null;
     this.mediaElement = null;

@@ -140,7 +140,7 @@ export function MediaSurface({
       muted={isMuted}
       volume={1.0}
       repeat={true}
-      useTextureView={true}
+      useTextureView={false}
       shutterColor="transparent"
       playInBackground={false}
       playWhenInactive={false}

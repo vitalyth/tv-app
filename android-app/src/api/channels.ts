@@ -722,13 +722,21 @@ export async function resolveLiveChannelStream(
       throw new Error('Live stream resolver returned no stream');
     }
     const fallbackStream = redgeHlsFallback(stream);
+    if (fallbackStream) {
+      return {
+        url: playbackProxyUrl(fallbackStream, channel),
+        type: 'm3u8',
+        fallbackUrl: playbackProxyUrl(stream, channel),
+        fallbackType: mediaStreamType(stream),
+        sourceId: channelSourceId(channel),
+      };
+    }
+
     return {
       url: playbackProxyUrl(stream, channel),
       type: mediaStreamType(stream),
-      fallbackUrl: fallbackStream
-        ? playbackProxyUrl(fallbackStream, channel)
-        : undefined,
-      fallbackType: fallbackStream ? 'm3u8' : undefined,
+      fallbackUrl: undefined,
+      fallbackType: undefined,
       sourceId: channelSourceId(channel),
     };
   } finally {

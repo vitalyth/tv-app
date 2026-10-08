@@ -158,7 +158,7 @@ function NativeHlsSurface({
 
 function ShakaPlayerSurface({
   url,
-  type = 'mpd',
+  type = 'm3u8',
   paused = false,
   startPositionSeconds,
   selectedQualityId = 'auto',
@@ -245,7 +245,11 @@ function ShakaPlayerSurface({
         });
       });
       player.addEventListener('error', onError);
-      const shaka = new VegaShakaPlayer(player, onError);
+      const shaka = new VegaShakaPlayer(player, onError, qualities => {
+        if (!destroyed.current && shakaPlayer.current === shaka) {
+          onVideoTracks?.(qualities);
+        }
+      });
       shakaPlayer.current = shaka;
       const streamType: 'm3u8' | 'mpd' =
         type === 'mpd' || url.includes('.mpd') ? 'mpd' : 'm3u8';

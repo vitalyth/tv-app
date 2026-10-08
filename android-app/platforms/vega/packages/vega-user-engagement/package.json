@@ -1,0 +1,33 @@
+{
+  "name": "@tvapp/vega-user-engagement",
+  "version": "0.0.1",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "react-native.config.js",
+    "kepler",
+    "CMakeLists.txt",
+    "build/tm-manifest.json",
+    "build/armv7-debug",
+    "build/armv7-release",
+    "build/aarch64-debug",
+    "build/aarch64-release",
+    "build/x86_64-debug",
+    "build/x86_64-release"
+  ],
+  "scripts": {
+    "build:native:debug": "if command -v vega >/dev/null 2>&1; then vega build -b Debug --targets armv7; else kepler build -b Debug --targets armv7; fi",
+    "build:native:release": "if command -v vega >/dev/null 2>&1; then vega build -b Release; else kepler build -b Release; fi"
+  },
+  "dependencies": {
+    "@amazon-devices/keplerscript-turbomodule-api": "^1.0.0"
+  },
+  "kepler": {
+    "projectType": "turbomodule",
+    "targets": [
+      "tv"
+    ]
+  }
+}
