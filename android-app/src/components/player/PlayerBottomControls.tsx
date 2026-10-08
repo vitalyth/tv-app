@@ -84,8 +84,25 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 }: PlayerBottomControlsProps) {
   const isLive = item.kind === 'live';
   const showSources = isLive && hasAlternateSources;
-  const hasTimeshift = isLive && Number.isFinite(duration) && duration > 15;
-  const canSeek = (!isLive && Number.isFinite(duration) && duration > 0) || (isLive && hasTimeshift);
+
+  // Track max observed time to serve as live edge when duration is Infinity or 0
+  const maxObservedTimeRef = useRef<number>(currentTime);
+  if (currentTime > maxObservedTimeRef.current) {
+    maxObservedTimeRef.current = currentTime;
+  }
+
+  const liveEdge =
+    Number.isFinite(duration) && duration > 15
+      ? duration
+      : Math.max(currentTime, maxObservedTimeRef.current);
+
+  const hasTimeshift =
+    isLive &&
+    (liveEdge > 15 || duration === Infinity || !Number.isFinite(duration));
+  const canSeek =
+    (!isLive && Number.isFinite(duration) && duration > 0) ||
+    (isLive && hasTimeshift);
+
   const [seekPosition, setSeekPosition] = useState<number | null>(null);
   const seekPositionRef = useRef<number | null>(null);
   const focusedControlRef = useRef<ControlId | null>(null);
@@ -93,7 +110,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   const displayedTime = seekPosition ?? currentTime;
 
   // Live Timeshift / DVR status
-  const behindSeconds = isLive && hasTimeshift ? Math.max(0, duration - displayedTime) : 0;
+  const behindSeconds = isLive ? Math.max(0, liveEdge - displayedTime) : 0;
   const isAtLiveEdge = !isLive || !hasTimeshift || behindSeconds <= 12;
   const showGoLiveButton = isLive && hasTimeshift && !isAtLiveEdge;
 
@@ -131,28 +148,29 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     if (!canSeek) {
       return;
     }
-    const position = Math.min(
-      duration,
-      Math.max(0, (seekPositionRef.current ?? currentTime) + offset),
-    );
-    seekPositionRef.current = position;
-    setSeekPosition(position);
-    onSeek(position);
+    const currentBase = seekPositionRef.current ?? currentTime;
+    const maxPos = isLive ? liveEdge : duration;
+    const minPos = 0;
+    const targetPos = Math.min(maxPos, Math.max(minPos, currentBase + offset));
+    seekPositionRef.current = targetPos;
+    setSeekPosition(targetPos);
+    onSeek(targetPos);
   };
 
   const handleGoLive = useCallback(() => {
-    if (isLive && hasTimeshift) {
-      seekPositionRef.current = duration;
-      setSeekPosition(duration);
-      onSeek(duration);
+    if (isLive) {
+      const targetPos = liveEdge;
+      seekPositionRef.current = null;
+      setSeekPosition(null);
+      onSeek(targetPos);
     }
-  }, [isLive, hasTimeshift, duration, onSeek]);
+  }, [isLive, liveEdge, onSeek]);
 
   // Calculate timeline percentage
   let progressPct = 0;
   if (isLive) {
-    if (hasTimeshift && duration > 0) {
-      progressPct = Math.min(100, Math.max(0, (displayedTime / duration) * 100));
+    if (hasTimeshift && liveEdge > 0) {
+      progressPct = Math.min(100, Math.max(0, (displayedTime / liveEdge) * 100));
     } else {
       progressPct = 100;
     }
@@ -240,20 +258,32 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       return;
     }
 
+    const eventType = event.eventType;
+
+    // Handle dedicated media rewind/fastforward keys anywhere
+    if (eventType === 'rewind' || eventType === 'mediaRewind') {
+      seekBy(-10);
+      return;
+    }
+    if (eventType === 'fastForward' || eventType === 'mediaFastForward') {
+      seekBy(10);
+      return;
+    }
+
     const focusedControl = focusedControlRef.current;
     if (!focusedControl) {
-      if (['up', 'down', 'left', 'right'].includes(event.eventType)) {
+      if (['up', 'down', 'left', 'right'].includes(eventType)) {
         clearFocusRecovery();
         requestControlFocus(lastFocusedControl);
       }
       return;
     }
-    if (event.eventType === 'up' && focusedControl !== 'timeline') {
+    if (eventType === 'up' && focusedControl !== 'timeline') {
       timelineRef.current?.requestTVFocus?.();
       return;
     }
     if (focusedControl === 'timeline') {
-      if (event.eventType === 'down') {
+      if (eventType === 'down') {
         const previous = previousRowControlRef.current;
         const target =
           previous === 'quality'
@@ -268,14 +298,14 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         target.current?.requestTVFocus?.();
       } else if (
         canSeek &&
-        (event.eventType === 'left' || event.eventType === 'right')
+        (eventType === 'left' || eventType === 'right')
       ) {
-        seekBy(event.eventType === 'right' ? 10 : -10);
+        seekBy(eventType === 'right' ? 10 : -10);
       }
       return;
     }
 
-    if (event.eventType === 'right') {
+    if (eventType === 'right') {
       if (focusedControl === 'play-pause') {
         const next = showGoLiveButton
           ? 'go-live'
@@ -309,7 +339,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       } else if (focusedControl === 'quality') {
         qualityRef.current?.requestTVFocus?.();
       }
-    } else if (event.eventType === 'left') {
+    } else if (eventType === 'left') {
       if (focusedControl === 'quality') {
         const prev = isLive ? 'multiview' : 'play-pause';
         const target = prev === 'multiview' ? multiviewRef : playRef;
@@ -350,7 +380,9 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           accessibilityRole={canSeek ? 'adjustable' : 'progressbar'}
           accessibilityLabel="Playback position"
           accessibilityValue={
-            canSeek ? { min: 0, max: duration, now: displayedTime } : undefined
+            canSeek
+              ? { min: 0, max: isLive ? liveEdge : duration, now: displayedTime }
+              : undefined
           }
           accessibilityActions={
             canSeek ? [{ name: 'increment' }, { name: 'decrement' }] : undefined
@@ -373,7 +405,9 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
                 <Text style={styles.timelineClockText}>
                   {isLive
                     ? hasTimeshift
-                      ? formatWallClock(nowMs - duration * 1000)
+                      ? formatWallClock(
+                          nowMs - (liveEdge - (isLive ? 0 : 0)) * 1000,
+                        )
                       : 'LIVE'
                     : formatDuration(0)}
                 </Text>
