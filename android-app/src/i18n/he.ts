@@ -40,6 +40,8 @@ export const he = {
     'צפייה מפוצלת במספר ערוצים במקביל (Multi View) תהיה זמינה בשלב הבא.',
   playerQuality: 'איכות',
   playerVideoQuality: 'איכות וידאו',
+  playerGoLive: 'חזור ל-LIVE',
+  playerBehindLive: '{time} מאחורי הלייב',
   close: 'סגור',
 
   // Navigation

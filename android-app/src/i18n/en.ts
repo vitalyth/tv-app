@@ -41,6 +41,8 @@ export const en = {
     'Watching multiple channels in parallel (Multi View) will be available in the next stage.',
   playerQuality: 'Quality',
   playerVideoQuality: 'Video quality',
+  playerGoLive: 'Go Live',
+  playerBehindLive: '{time} behind live',
   close: 'Close',
 
   // Navigation

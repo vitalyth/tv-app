@@ -20,6 +20,7 @@ const multiviewIcon = require('../../assets/icons/multiview.png');
 export type ControlId =
   | 'timeline'
   | 'play-pause'
+  | 'go-live'
   | 'sources'
   | 'multiview'
   | 'quality';
@@ -58,6 +59,13 @@ function formatDuration(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
+function formatWallClock(timestampMs: number): string {
+  const d = new Date(timestampMs);
+  const hrs = String(d.getHours()).padStart(2, '0');
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  return `${hrs}:${mins}`;
+}
+
 export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   item,
   paused,
@@ -76,12 +84,29 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 }: PlayerBottomControlsProps) {
   const isLive = item.kind === 'live';
   const showSources = isLive && hasAlternateSources;
-  const canSeek = !isLive && Number.isFinite(duration) && duration > 0;
+  const hasTimeshift = isLive && Number.isFinite(duration) && duration > 15;
+  const canSeek = (!isLive && Number.isFinite(duration) && duration > 0) || (isLive && hasTimeshift);
   const [seekPosition, setSeekPosition] = useState<number | null>(null);
   const seekPositionRef = useRef<number | null>(null);
   const focusedControlRef = useRef<ControlId | null>(null);
   const previousRowControlRef = useRef<ControlId>('play-pause');
   const displayedTime = seekPosition ?? currentTime;
+
+  // Live Timeshift / DVR status
+  const behindSeconds = isLive && hasTimeshift ? Math.max(0, duration - displayedTime) : 0;
+  const isAtLiveEdge = !isLive || !hasTimeshift || behindSeconds <= 12;
+  const showGoLiveButton = isLive && hasTimeshift && !isAtLiveEdge;
+
+  // Current wall clock for timeline bounds
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isLive) {
+      return;
+    }
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [isLive]);
 
   // Keep repeated remote presses cumulative until playback acknowledges the seek.
   useEffect(() => {
@@ -115,13 +140,22 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     onSeek(position);
   };
 
+  const handleGoLive = useCallback(() => {
+    if (isLive && hasTimeshift) {
+      seekPositionRef.current = duration;
+      setSeekPosition(duration);
+      onSeek(duration);
+    }
+  }, [isLive, hasTimeshift, duration, onSeek]);
+
   // Calculate timeline percentage
   let progressPct = 0;
   if (isLive) {
-    progressPct =
-      typeof item.progressPercentage === 'number'
-        ? Math.min(100, Math.max(0, item.progressPercentage))
-        : 100;
+    if (hasTimeshift && duration > 0) {
+      progressPct = Math.min(100, Math.max(0, (displayedTime / duration) * 100));
+    } else {
+      progressPct = 100;
+    }
   } else if (duration > 0) {
     progressPct = Math.min(100, Math.max(0, (displayedTime / duration) * 100));
   }
@@ -132,6 +166,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   );
 
   const playRef = useRef<View>(null);
+  const goLiveRef = useRef<View>(null);
   const sourcesRef = useRef<View>(null);
   const multiviewRef = useRef<View>(null);
   const qualityRef = useRef<View>(null);
@@ -151,10 +186,12 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           ? sourcesRef
           : id === 'multiview' && isLive
           ? multiviewRef
+          : id === 'go-live' && showGoLiveButton
+          ? goLiveRef
           : playRef;
       target.current?.requestTVFocus?.();
     },
-    [isLive, showSources],
+    [isLive, showSources, showGoLiveButton],
   );
 
   const clearFocusRecovery = useCallback(() => {
@@ -179,7 +216,6 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     if (focusedControlRef.current === id) {
       focusedControlRef.current = null;
       clearFocusRecovery();
-      // A normal focus transfer cancels recovery through the next onFocus event.
       focusRecoveryTimerRef.current = setTimeout(() => {
         focusRecoveryTimerRef.current = null;
         if (focusedControlRef.current === null) {
@@ -189,7 +225,6 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     }
   };
 
-  // Restore focus when controls reappear without refocusing an active control.
   useEffect(() => {
     if (focusedControlRef.current === lastFocusedControl) {
       return;
@@ -200,7 +235,6 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     return () => clearTimeout(timer);
   }, [lastFocusedControl, requestControlFocus]);
 
-  // Handle remote DPAD left/right explicitly to bridge the flexSpacer gap seamlessly
   useTVEventHandler(event => {
     if (event.eventKeyAction === 1) {
       return;
@@ -228,6 +262,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             ? sourcesRef
             : previous === 'multiview' && isLive
             ? multiviewRef
+            : previous === 'go-live' && showGoLiveButton
+            ? goLiveRef
             : playRef;
         target.current?.requestTVFocus?.();
       } else if (
@@ -241,6 +277,23 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 
     if (event.eventType === 'right') {
       if (focusedControl === 'play-pause') {
+        const next = showGoLiveButton
+          ? 'go-live'
+          : showSources
+          ? 'sources'
+          : isLive
+          ? 'multiview'
+          : 'quality';
+        const target =
+          next === 'go-live'
+            ? goLiveRef
+            : next === 'sources'
+            ? sourcesRef
+            : next === 'multiview'
+            ? multiviewRef
+            : qualityRef;
+        target.current?.requestTVFocus?.();
+      } else if (focusedControl === 'go-live') {
         const next = showSources ? 'sources' : isLive ? 'multiview' : 'quality';
         const target =
           next === 'sources'
@@ -262,9 +315,16 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         const target = prev === 'multiview' ? multiviewRef : playRef;
         target.current?.requestTVFocus?.();
       } else if (focusedControl === 'multiview') {
-        const target = showSources ? sourcesRef : playRef;
+        const target = showSources
+          ? sourcesRef
+          : showGoLiveButton
+          ? goLiveRef
+          : playRef;
         target.current?.requestTVFocus?.();
       } else if (focusedControl === 'sources') {
+        const target = showGoLiveButton ? goLiveRef : playRef;
+        target.current?.requestTVFocus?.();
+      } else if (focusedControl === 'go-live') {
         playRef.current?.requestTVFocus?.();
       } else if (focusedControl === 'play-pause') {
         playRef.current?.requestTVFocus?.();
@@ -285,7 +345,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         <Pressable
           ref={timelineRef}
           testID="player-timeline"
-          focusable
+          focusable={canSeek}
           hasTVPreferredFocus={lastFocusedControl === 'timeline'}
           accessibilityRole={canSeek ? 'adjustable' : 'progressbar'}
           accessibilityLabel="Playback position"
@@ -307,18 +367,42 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           style={styles.timelineContainer}
         >
           {({ focused }) => (
-            <View style={styles.progressTrack}>
-              <View
-                style={[styles.progressFill, { width: `${progressPct}%` }]}
-              />
-              <View
-                style={[
-                  styles.progressThumb,
-                  { left: `${progressPct}%` },
-                  focused && styles.progressThumbFocused,
-                ]}
-              />
-            </View>
+            <>
+              {/* Timeline Clock Header */}
+              <View style={styles.timelineClockRow}>
+                <Text style={styles.timelineClockText}>
+                  {isLive
+                    ? hasTimeshift
+                      ? formatWallClock(nowMs - duration * 1000)
+                      : 'LIVE'
+                    : formatDuration(0)}
+                </Text>
+                {isLive && hasTimeshift && !isAtLiveEdge ? (
+                  <Text style={styles.timelineBehindText}>
+                    -{formatDuration(behindSeconds)}
+                  </Text>
+                ) : null}
+                <Text style={styles.timelineClockText}>
+                  {isLive ? formatWallClock(nowMs) : formatDuration(duration)}
+                </Text>
+              </View>
+
+              {/* Progress Track */}
+              <View style={styles.progressTrack}>
+                <View
+                  style={[styles.progressFill, { width: `${progressPct}%` }]}
+                />
+                {canSeek ? (
+                  <View
+                    style={[
+                      styles.progressThumb,
+                      { left: `${progressPct}%` },
+                      focused && styles.progressThumbFocused,
+                    ]}
+                  />
+                ) : null}
+              </View>
+            </>
           )}
         </Pressable>
       </TVFocusGuideView>
@@ -331,6 +415,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         destinations={
           [
             playRef.current,
+            goLiveRef.current,
             sourcesRef.current,
             multiviewRef.current,
             qualityRef.current,
@@ -345,7 +430,9 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           focusable={true}
           hasTVPreferredFocus={lastFocusedControl === 'play-pause'}
           nextFocusRight={
-            showSources
+            showGoLiveButton
+              ? (goLiveRef.current as any)
+              : showSources
               ? (sourcesRef.current as any)
               : isLive
               ? (multiviewRef.current as any)
@@ -373,12 +460,55 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           <Text style={styles.timeText}>
             {formatDuration(displayedTime)} / {formatDuration(duration)}
           </Text>
-        ) : (
+        ) : isAtLiveEdge ? (
           <View style={styles.liveBadge}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>LIVE</Text>
           </View>
+        ) : (
+          <View style={styles.behindBadge}>
+            <View style={styles.behindDot} />
+            <Text style={styles.behindText}>
+              -{formatDuration(behindSeconds)}
+            </Text>
+          </View>
         )}
+
+        {/* Go Live Button (Appears when behind LIVE) */}
+        {showGoLiveButton ? (
+          <Pressable
+            ref={goLiveRef}
+            testID="go-live-button"
+            focusable={true}
+            hasTVPreferredFocus={lastFocusedControl === 'go-live'}
+            nextFocusLeft={playRef.current as any}
+            nextFocusRight={
+              showSources
+                ? (sourcesRef.current as any)
+                : isLive
+                ? (multiviewRef.current as any)
+                : (qualityRef.current as any)
+            }
+            onFocus={() => handleFocus('go-live')}
+            onBlur={() => handleBlur('go-live')}
+            onPress={handleGoLive}
+            style={({ focused }) => [
+              styles.goLiveButton,
+              focused && styles.goLiveButtonFocused,
+            ]}
+          >
+            {({ focused }) => (
+              <Text
+                style={[
+                  styles.goLiveText,
+                  focused && styles.goLiveTextFocused,
+                ]}
+              >
+                ● {t('playerGoLive')}
+              </Text>
+            )}
+          </Pressable>
+        ) : null}
 
         {/* Flexible spacer pushing action buttons to the right */}
         <View style={styles.flexSpacer} />
@@ -390,7 +520,11 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             testID="sources-button"
             focusable={true}
             hasTVPreferredFocus={lastFocusedControl === 'sources'}
-            nextFocusLeft={playRef.current as any}
+            nextFocusLeft={
+              showGoLiveButton
+                ? (goLiveRef.current as any)
+                : (playRef.current as any)
+            }
             nextFocusRight={multiviewRef.current as any}
             onFocus={() => handleFocus('sources')}
             onBlur={() => handleBlur('sources')}
@@ -433,6 +567,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             nextFocusLeft={
               showSources
                 ? (sourcesRef.current as any)
+                : showGoLiveButton
+                ? (goLiveRef.current as any)
                 : (playRef.current as any)
             }
             nextFocusRight={qualityRef.current as any}
@@ -517,8 +653,26 @@ const styles = StyleSheet.create({
   },
   timelineContainer: {
     width: '100%',
-    paddingVertical: 14,
+    paddingVertical: 10,
     paddingHorizontal: 10,
+  },
+  timelineClockRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  timelineClockText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  timelineBehindText: {
+    color: '#f97316',
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   progressTrack: {
     width: '100%',
@@ -610,6 +764,52 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.8,
+  },
+  behindBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(249, 115, 22, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.5)',
+    marginLeft: 4,
+  },
+  behindDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#f97316',
+  },
+  behindText: {
+    color: '#f97316',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  goLiveButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(239, 68, 68, 0.6)',
+    marginLeft: 8,
+  },
+  goLiveButtonFocused: {
+    borderColor: '#38bdf8',
+    backgroundColor: 'rgba(239, 68, 68, 0.4)',
+    transform: [{ scale: 1.05 }],
+  },
+  goLiveText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  goLiveTextFocused: {
+    color: '#ffffff',
   },
   actionCard: {
     alignItems: 'center',
