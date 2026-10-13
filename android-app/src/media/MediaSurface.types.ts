@@ -18,6 +18,8 @@ export interface MediaSurfaceProps {
     currentTime: number;
     playableDuration: number;
     seekableDuration: number;
+    seekableStart?: number;
+    seekableEnd?: number;
   }) => void;
   onVideoTracks?: (tracks: VideoQualityOption[]) => void;
 }

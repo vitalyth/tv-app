@@ -29,6 +29,8 @@ interface SurfaceEngineProps {
     currentTime: number;
     playableDuration: number;
     seekableDuration: number;
+    seekableStart?: number;
+    seekableEnd?: number;
   }) => void;
   onVideoTracks?: (tracks: VideoQualityOption[]) => void;
 }
@@ -55,6 +57,28 @@ async function waitForMediaRelease() {
   if (remainingDelay > 0) {
     await new Promise<void>(resolve => setTimeout(resolve, remainingDelay));
   }
+}
+
+function readSeekableRange(media: any): { start?: number; end?: number } {
+  try {
+    const seekable = media?.seekable;
+    const length = Number(seekable?.length ?? 0);
+    if (length > 0) {
+      const start =
+        typeof seekable.start === 'function' ? seekable.start(0) : undefined;
+      const end =
+        typeof seekable.end === 'function'
+          ? seekable.end(length - 1)
+          : undefined;
+      return {
+        start: Number.isFinite(start) ? start : undefined,
+        end: Number.isFinite(end) ? end : undefined,
+      };
+    }
+  } catch {
+    // Some platform media objects expose partial seekable ranges.
+  }
+  return {};
 }
 
 function NativeHlsSurface({
@@ -92,14 +116,20 @@ function NativeHlsSurface({
     const reportPlaybackState = () => {
       const cur = videoRef.current?.currentTime ?? 0;
       const dur = videoRef.current?.duration ?? 0;
-      if (!firstFrameReported.current && cur > 0) {
+      const seekableRange = readSeekableRange(videoRef.current);
+      if (!firstFrameReported.current && (cur > 0 || dur > 0)) {
         firstFrameReported.current = true;
         callbacksRef.current.onFirstFrame();
       }
       callbacksRef.current.onProgress?.({
         currentTime: cur,
         playableDuration: cur,
-        seekableDuration: dur,
+        seekableDuration:
+          seekableRange.end !== undefined && seekableRange.start !== undefined
+            ? Math.max(0, seekableRange.end - seekableRange.start)
+            : dur,
+        seekableStart: seekableRange.start,
+        seekableEnd: seekableRange.end,
       });
     };
 
@@ -150,6 +180,18 @@ function NativeHlsSurface({
       muted={false}
       loop={false}
       scalingmode="fill"
+      onCanPlay={() => {
+        if (!firstFrameReported.current) {
+          firstFrameReported.current = true;
+          onFirstFrame();
+        }
+      }}
+      onPlaying={() => {
+        if (!firstFrameReported.current) {
+          firstFrameReported.current = true;
+          onFirstFrame();
+        }
+      }}
       onError={onError}
       onEnded={onError}
     />
@@ -231,17 +273,31 @@ function ShakaPlayerSurface({
       }
       player.setSurfaceHandle(handle);
       player.autoplay = true;
+      const reportFirstFrame = () => {
+        if (!firstFrameReported.current) {
+          firstFrameReported.current = true;
+          onFirstFrame();
+        }
+      };
+      player.addEventListener('playing', reportFirstFrame);
+      player.addEventListener('loadeddata', reportFirstFrame);
+      player.addEventListener('canplay', reportFirstFrame);
       player.addEventListener('timeupdate', () => {
         const cur = player.currentTime ?? 0;
         const dur = player.duration ?? 0;
-        if (!firstFrameReported.current && cur > 0) {
-          firstFrameReported.current = true;
-          onFirstFrame();
+        const seekableRange = readSeekableRange(player);
+        if (!firstFrameReported.current && (cur > 0 || dur > 0)) {
+          reportFirstFrame();
         }
         onProgress?.({
           currentTime: cur,
           playableDuration: cur,
-          seekableDuration: dur,
+          seekableDuration:
+            seekableRange.end !== undefined && seekableRange.start !== undefined
+              ? Math.max(0, seekableRange.end - seekableRange.start)
+              : dur,
+          seekableStart: seekableRange.start,
+          seekableEnd: seekableRange.end,
         });
       });
       player.addEventListener('error', onError);
@@ -259,6 +315,7 @@ function ShakaPlayerSurface({
           url: url.slice(0, 100),
         });
         await shaka.load(url, streamType);
+        reportFirstFrame();
         if (startPositionSeconds && startPositionSeconds > 0) {
           const duration = player.duration ?? 0;
           player.currentTime =

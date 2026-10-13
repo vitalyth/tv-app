@@ -76,6 +76,8 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     paused,
     currentTime,
     duration,
+    seekableStart,
+    seekableEnd,
     videoQualities,
     selectedQualityId,
     togglePlayPause,
@@ -407,6 +409,8 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
             paused={paused}
             currentTime={currentTime}
             duration={duration}
+            seekableStart={seekableStart}
+            seekableEnd={seekableEnd}
             selectedQualityId={selectedQualityId}
             videoQualities={videoQualities}
             hasAlternateSources={sourceOptions.length > 1}

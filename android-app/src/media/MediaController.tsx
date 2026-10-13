@@ -14,15 +14,19 @@ import type {
   PlaybackStatus,
   VideoQualityOption,
 } from './player';
+import { isSameMediaItem } from './player';
 
 export interface MediaControllerValue {
   item?: MediaItem;
   stream?: MediaStream;
   presentation: MediaPresentation;
+  isFullscreen: boolean;
   status: PlaybackStatus;
   paused: boolean;
   currentTime: number;
   duration: number;
+  seekableStart: number;
+  seekableEnd: number;
   videoQualities: VideoQualityOption[];
   selectedQualityId: string;
   play: (item: MediaItem, stream: MediaStream) => void;
@@ -37,7 +41,12 @@ export interface MediaControllerValue {
   markError: () => void;
   setPaused: (paused: boolean) => void;
   togglePlayPause: () => void;
-  updateProgress: (currentTime: number, duration: number) => void;
+  updateProgress: (
+    currentTime: number,
+    duration: number,
+    seekableStart?: number,
+    seekableEnd?: number,
+  ) => void;
   setAvailableQualities: (qualities: VideoQualityOption[]) => void;
   setSelectedQuality: (qualityId: string) => void;
   seekTo: (seconds: number) => void;
@@ -72,15 +81,16 @@ const MediaControllerActionsContext =
 export function MediaControllerProvider({ children }: PropsWithChildren) {
   const [item, setItem] = useState<MediaItem>();
   const [streamSource, setStreamSource] = useState<{
-    itemId: string;
+    item: MediaItem;
     stream: MediaStream;
   }>();
-  const stream = streamSource && streamSource.itemId === item?.id
+  const stream = streamSource && isSameMediaItem(streamSource.item, item)
     ? streamSource.stream
     : undefined;
   const [presentation, setPresentationState] =
     useState<MediaPresentation>('background-image');
   const presentationRef = useRef<MediaPresentation>('background-image');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const setPresentation = useCallback((nextPresentation: MediaPresentation) => {
     presentationRef.current = nextPresentation;
@@ -91,6 +101,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   const [paused, setPausedState] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
+  const [seekableStart, setSeekableStart] = useState<number>(0);
+  const [seekableEnd, setSeekableEnd] = useState<number>(0);
   const [videoQualities, setVideoQualities] = useState<VideoQualityOption[]>([]);
   const [selectedQualityId, setSelectedQualityId] = useState<string>('auto');
   const seekHandlerRef = useRef<((seconds: number) => void) | null>(null);
@@ -115,41 +127,62 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       return;
     }
     setStatus('loading');
+    setIsFullscreen(false);
     setPresentation('single-video');
     setItem(nextItem);
-    setStreamSource({ itemId: nextItem.id, stream: nextStream });
+    setStreamSource({ item: nextItem, stream: nextStream });
     setPausedState(false);
     setCurrentTime(0);
     setDuration(0);
+    setSeekableStart(0);
+    setSeekableEnd(0);
   }, [setPresentation]);
 
   const playFullscreen = useCallback((nextItem: MediaItem, nextStream: MediaStream) => {
     setStatus('loading');
+    setIsFullscreen(true);
     setPresentation('fullscreen');
     setItem(nextItem);
-    setStreamSource({ itemId: nextItem.id, stream: nextStream });
+    setStreamSource({ item: nextItem, stream: nextStream });
     setPausedState(false);
     setCurrentTime(0);
     setDuration(0);
+    setSeekableStart(0);
+    setSeekableEnd(0);
   }, [setPresentation]);
 
   const openFullscreen = useCallback((nextItem: MediaItem) => {
+    if (isSameMediaItem(item, nextItem) && streamSource?.stream) {
+      setIsFullscreen(true);
+      setItem(nextItem);
+      setStatus(current => (current === 'loading' ? 'playing' : current));
+      setPausedState(false);
+      return;
+    }
+
     setStatus('loading');
+    setIsFullscreen(true);
     setPresentation('fullscreen');
     setItem(nextItem);
     setStreamSource(undefined);
     setPausedState(false);
     setCurrentTime(0);
     setDuration(0);
+    setSeekableStart(0);
+    setSeekableEnd(0);
     setVideoQualities([]);
-  }, [setPresentation]);
+  }, [item, setPresentation, streamSource?.stream]);
 
   const enterFullscreen = useCallback(() => {
-    setPresentation('fullscreen');
+    setIsFullscreen(true);
+    if (streamSource?.stream) {
+      setStatus(current => (current === 'loading' ? 'playing' : current));
+    }
     setPausedState(false);
-  }, [setPresentation]);
+  }, [streamSource?.stream]);
 
   const exitFullscreen = useCallback(() => {
+    setIsFullscreen(false);
     setPresentation('single-video');
   }, [setPresentation]);
 
@@ -164,6 +197,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setPausedState(false);
     setCurrentTime(0);
     setDuration(0);
+    setSeekableStart(0);
+    setSeekableEnd(0);
     setVideoQualities([]);
   }, [setPresentation]);
 
@@ -177,6 +212,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setPausedState(false);
     setCurrentTime(0);
     setDuration(0);
+    setSeekableStart(0);
+    setSeekableEnd(0);
     setVideoQualities([]);
   }, [setPresentation]);
 
@@ -191,6 +228,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setPausedState(false);
     setCurrentTime(0);
     setDuration(0);
+    setSeekableStart(0);
+    setSeekableEnd(0);
     setVideoQualities([]);
   }, [setPresentation]);
 
@@ -205,10 +244,27 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setPausedState(prev => !prev);
   }, []);
 
-  const updateProgress = useCallback((nextCurrentTime: number, nextDuration: number) => {
+  const updateProgress = useCallback((
+    nextCurrentTime: number,
+    nextDuration: number,
+    nextSeekableStart?: number,
+    nextSeekableEnd?: number,
+  ) => {
     setCurrentTime(nextCurrentTime);
     if (nextDuration > 0) {
       setDuration(nextDuration);
+    }
+    if (
+      typeof nextSeekableStart === 'number' &&
+      Number.isFinite(nextSeekableStart)
+    ) {
+      setSeekableStart(nextSeekableStart);
+    }
+    if (
+      typeof nextSeekableEnd === 'number' &&
+      Number.isFinite(nextSeekableEnd)
+    ) {
+      setSeekableEnd(nextSeekableEnd);
     }
   }, []);
 
@@ -225,10 +281,13 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       item,
       stream,
       presentation,
+      isFullscreen,
       status,
       paused,
       currentTime,
       duration,
+      seekableStart,
+      seekableEnd,
       videoQualities,
       selectedQualityId,
       play,
@@ -255,6 +314,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       enterFullscreen,
       exitFullscreen,
       item,
+      isFullscreen,
       markError,
       markPlaying,
       openFullscreen,
@@ -263,6 +323,8 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       playFullscreen,
       presentation,
       selectedQualityId,
+      seekableEnd,
+      seekableStart,
       seekTo,
       registerSeekHandler,
       setAvailableQualities,

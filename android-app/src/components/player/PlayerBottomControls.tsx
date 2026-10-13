@@ -29,6 +29,8 @@ interface PlayerBottomControlsProps {
   paused: boolean;
   currentTime: number;
   duration: number;
+  seekableStart?: number;
+  seekableEnd?: number;
   selectedQualityId: string;
   videoQualities: VideoQualityOption[];
   hasAlternateSources: boolean;
@@ -58,11 +60,55 @@ function formatDuration(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
+function formatClockTime(date: Date): string {
+  return [
+    String(date.getHours()).padStart(2, '0'),
+    String(date.getMinutes()).padStart(2, '0'),
+    String(date.getSeconds()).padStart(2, '0'),
+  ].join(':');
+}
+
+function getLiveTimeDisplay(
+  currentTime: number,
+  duration: number,
+  seekableStart?: number,
+  seekableEnd?: number,
+): string {
+  const hasSeekableRange =
+    typeof seekableStart === 'number' &&
+    typeof seekableEnd === 'number' &&
+    Number.isFinite(seekableStart) &&
+    Number.isFinite(seekableEnd) &&
+    seekableEnd > seekableStart;
+  const liveEdgeTime = hasSeekableRange ? seekableEnd : duration;
+  const playbackTime = hasSeekableRange
+    ? Math.min(Math.max(currentTime, seekableStart), seekableEnd)
+    : currentTime;
+
+  if (
+    !Number.isFinite(playbackTime) ||
+    !Number.isFinite(liveEdgeTime) ||
+    playbackTime <= 0 ||
+    liveEdgeTime <= 0
+  ) {
+    return 'LIVE';
+  }
+
+  const secondsBehindLive = Math.max(0, liveEdgeTime - playbackTime);
+  const liveEdgeMs = Date.now();
+  const currentMs = liveEdgeMs - secondsBehindLive * 1000;
+  return `${formatClockTime(new Date(currentMs))} / ${formatClockTime(
+    new Date(liveEdgeMs),
+  )}`;
+}
+
 export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   item,
   paused,
   currentTime,
   duration,
+  seekableStart,
+  seekableEnd,
   selectedQualityId,
   videoQualities,
   hasAlternateSources,
@@ -82,6 +128,12 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   const focusedControlRef = useRef<ControlId | null>(null);
   const previousRowControlRef = useRef<ControlId>('play-pause');
   const displayedTime = seekPosition ?? currentTime;
+  const liveTimeText = getLiveTimeDisplay(
+    displayedTime,
+    duration,
+    seekableStart,
+    seekableEnd,
+  );
 
   // Keep repeated remote presses cumulative until playback acknowledges the seek.
   useEffect(() => {
@@ -376,7 +428,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         ) : (
           <View style={styles.liveBadge}>
             <View style={styles.liveDot} />
-            <Text style={styles.liveText}>LIVE</Text>
+            <Text style={styles.liveText}>{liveTimeText}</Text>
           </View>
         )}
 

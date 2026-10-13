@@ -51,6 +51,7 @@ export function MediaLayer() {
     item,
     stream,
     presentation,
+    isFullscreen,
     status,
     paused,
     selectedQualityId,
@@ -60,8 +61,7 @@ export function MediaLayer() {
     setAvailableQualities,
     registerSeekHandler,
   } = useMediaController();
-
-  const isFullscreen = presentation === 'fullscreen';
+  const showVideo = status === 'playing' || (isFullscreen && Boolean(stream));
 
   return (
     <View
@@ -79,7 +79,7 @@ export function MediaLayer() {
       ) : null}
 
       {/* Centered Loading Spinner in Full Screen mode when video is not yet playing */}
-      {isFullscreen && status !== 'playing' ? (
+      {isFullscreen && status !== 'playing' && !stream ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#38bdf8" />
         </View>
@@ -89,11 +89,11 @@ export function MediaLayer() {
         <View
           style={[
             StyleSheet.absoluteFill,
-            status === 'playing' ? styles.videoVisible : styles.videoHidden,
+            showVideo ? styles.videoVisible : styles.videoHidden,
           ]}
         >
           <MediaSurface
-            key={`${item.id}:${stream.url}`}
+            key={stream.url}
             streamUrl={stream.url}
             streamType={stream.type}
             fallbackStreamUrl={stream.fallbackUrl}
@@ -108,8 +108,18 @@ export function MediaLayer() {
             registerSeekHandler={registerSeekHandler}
             onFirstFrame={markPlaying}
             onError={markError}
-            onProgress={({ currentTime, seekableDuration }) => {
-              updateProgress(currentTime, seekableDuration);
+            onProgress={({
+              currentTime,
+              seekableDuration,
+              seekableStart,
+              seekableEnd,
+            }) => {
+              updateProgress(
+                currentTime,
+                seekableDuration,
+                seekableStart,
+                seekableEnd,
+              );
             }}
             onVideoTracks={tracks => {
               setAvailableQualities(tracks);

@@ -73,10 +73,9 @@ function ShellContent({
   setFocusedMediaItem: (item: MediaItem | null) => void;
   pageContentRef: React.RefObject<PageContentHandle | null>;
 }) {
-  const { item: playingItem, presentation } = useMediaController();
+  const { item: playingItem, isFullscreen } = useMediaController();
   const { exitFullscreen } = useMediaActions();
   const activeRoute = getRoute(state.activeRoute);
-  const isFullscreen = presentation === 'fullscreen';
   const focusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleContentFocus = useCallback(

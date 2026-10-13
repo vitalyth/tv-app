@@ -724,10 +724,10 @@ export async function resolveLiveChannelStream(
     const fallbackStream = redgeHlsFallback(stream);
     if (fallbackStream) {
       return {
-        url: playbackProxyUrl(fallbackStream, channel),
-        type: 'm3u8',
-        fallbackUrl: playbackProxyUrl(stream, channel),
-        fallbackType: mediaStreamType(stream),
+        url: playbackProxyUrl(stream, channel),
+        type: mediaStreamType(stream),
+        fallbackUrl: playbackProxyUrl(fallbackStream, channel),
+        fallbackType: mediaStreamType(fallbackStream),
         sourceId: channelSourceId(channel),
       };
     }

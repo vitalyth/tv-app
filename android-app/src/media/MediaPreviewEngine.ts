@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import type { MediaItem, MediaStream } from './player';
-import { useMediaActions } from './MediaController';
+import { isSameMediaItem, type MediaItem, type MediaStream } from './player';
+import { useMediaActions, useMediaController } from './MediaController';
 import { resolveLiveChannelStream } from '../api/channels';
 
 export const DEFAULT_IMAGE_DEBOUNCE_MS = 300;
@@ -30,6 +30,11 @@ export function useMediaPreviewEngine(
   } = options;
 
   const { play, showImage, stopAll, markError } = useMediaActions();
+  const {
+    item: activeMediaItem,
+    status: activeMediaStatus,
+    stream: activeMediaStream,
+  } = useMediaController();
 
   const currentFocusedItemRef = useRef<MediaItem | null>(null);
   const sequenceIdRef = useRef<number>(0);
@@ -50,24 +55,33 @@ export function useMediaPreviewEngine(
   const focusMediaItem = useCallback(
     (item: MediaItem) => {
       // If the exact same item is already focused, do nothing
-      if (currentFocusedItemRef.current?.id === item.id) {
+      if (isSameMediaItem(currentFocusedItemRef.current, item)) {
         return;
       }
 
       currentFocusedItemRef.current = item;
+      clearTimers();
+
+      if (
+        isSameMediaItem(activeMediaItem, item) &&
+        activeMediaStream &&
+        (activeMediaStatus === 'playing' || activeMediaStatus === 'loading')
+      ) {
+        sequenceIdRef.current += 1;
+        return;
+      }
 
       // 1. Stop current video and clear previous image immediately
       stopAll();
 
       // 2. Cancel/obsolete pending previous media timers
-      clearTimers();
       const sequence = ++sequenceIdRef.current;
 
       // 3. Display the new image after imageDebounceMs (300ms)
       imageTimerRef.current = setTimeout(() => {
         if (
           sequenceIdRef.current !== sequence ||
-          currentFocusedItemRef.current?.id !== item.id
+          !isSameMediaItem(currentFocusedItemRef.current, item)
         ) {
           return;
         }
@@ -78,7 +92,7 @@ export function useMediaPreviewEngine(
       videoTimerRef.current = setTimeout(async () => {
         if (
           sequenceIdRef.current !== sequence ||
-          currentFocusedItemRef.current?.id !== item.id
+          !isSameMediaItem(currentFocusedItemRef.current, item)
         ) {
           return;
         }
@@ -88,7 +102,7 @@ export function useMediaPreviewEngine(
 
           if (
             sequenceIdRef.current !== sequence ||
-            currentFocusedItemRef.current?.id !== item.id
+            !isSameMediaItem(currentFocusedItemRef.current, item)
           ) {
             return;
           }
@@ -97,7 +111,7 @@ export function useMediaPreviewEngine(
         } catch {
           if (
             sequenceIdRef.current === sequence &&
-            currentFocusedItemRef.current?.id === item.id
+            isSameMediaItem(currentFocusedItemRef.current, item)
           ) {
             markError();
           }
@@ -106,6 +120,9 @@ export function useMediaPreviewEngine(
     },
     [
       clearTimers,
+      activeMediaItem,
+      activeMediaStatus,
+      activeMediaStream,
       imageDebounceMs,
       markError,
       play,

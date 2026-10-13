@@ -59,6 +59,12 @@ export function MediaSurface({
         currentTime: data.currentTime,
         playableDuration: data.playableDuration,
         seekableDuration: data.seekableDuration,
+        seekableStart:
+          data.seekableDuration > 0
+            ? Math.max(0, data.currentTime - data.seekableDuration)
+            : undefined,
+        seekableEnd:
+          data.seekableDuration > 0 ? data.currentTime : undefined,
       });
     },
     [handleFirstFrame, onProgress],

@@ -375,4 +375,124 @@ describe('MediaPreviewEngine', () => {
     expect(controllerRef.presentation).toBe('single-video');
     expect(controllerRef.item?.id).toBe('B');
   });
+
+  it('does not reconnect when focus returns to the item already playing', async () => {
+    let engineRef!: ReturnType<typeof useMediaPreviewEngine>;
+    let controllerRef!: ReturnType<typeof useMediaController>;
+    const streamResolver = jest.fn(
+      async (item: MediaItem): Promise<MediaStream> => ({
+        url: `https://stream.example.com/${item.id}.m3u8`,
+        type: 'm3u8',
+      }),
+    );
+
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <TestHarness
+            onEngineReady={e => {
+              engineRef = e;
+            }}
+            onControllerChange={c => {
+              controllerRef = c;
+            }}
+            streamResolver={streamResolver}
+            imageDebounceMs={300}
+            videoDebounceMs={1000}
+          />
+        </MediaControllerProvider>,
+      );
+    });
+
+    const itemA = createItem('A');
+
+    act(() => {
+      engineRef.focusMediaItem(itemA);
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(streamResolver).toHaveBeenCalledTimes(1);
+    expect(controllerRef.presentation).toBe('single-video');
+
+    act(() => {
+      engineRef.clearPreview({ stopMedia: false });
+      controllerRef.enterFullscreen();
+      controllerRef.exitFullscreen();
+      engineRef.focusMediaItem(itemA);
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(streamResolver).toHaveBeenCalledTimes(1);
+    expect(controllerRef.item?.id).toBe('A');
+    expect(controllerRef.stream?.url).toBe('https://stream.example.com/A.m3u8');
+    expect(controllerRef.presentation).toBe('single-video');
+  });
+
+  it('does not reconnect live channels represented by a refreshed item id', async () => {
+    let engineRef!: ReturnType<typeof useMediaPreviewEngine>;
+    let controllerRef!: ReturnType<typeof useMediaController>;
+    const streamResolver = jest.fn(
+      async (item: MediaItem): Promise<MediaStream> => ({
+        url: `https://stream.example.com/${item.id}.m3u8`,
+        type: 'm3u8',
+      }),
+    );
+
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <TestHarness
+            onEngineReady={e => {
+              engineRef = e;
+            }}
+            onControllerChange={c => {
+              controllerRef = c;
+            }}
+            streamResolver={streamResolver}
+            imageDebounceMs={300}
+            videoDebounceMs={1000}
+          />
+        </MediaControllerProvider>,
+      );
+    });
+
+    const itemA: MediaItem = {
+      ...createItem('channel-13-primary'),
+      channelNumber: '13',
+      sourcePayload: { id: 'reshet-primary', channelID: '13' },
+    };
+    const refreshedItemA: MediaItem = {
+      ...createItem('channel-13-refreshed'),
+      channelName: itemA.channelName,
+      channelNumber: itemA.channelNumber,
+      sourcePayload: { id: 'reshet-updated', channelID: '13' },
+    };
+
+    act(() => {
+      engineRef.focusMediaItem(itemA);
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(streamResolver).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      engineRef.clearPreview({ stopMedia: false });
+      controllerRef.enterFullscreen();
+      controllerRef.exitFullscreen();
+      engineRef.focusMediaItem(refreshedItemA);
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+
+    expect(streamResolver).toHaveBeenCalledTimes(1);
+    expect(controllerRef.item?.id).toBe('channel-13-primary');
+    expect(controllerRef.stream?.url).toBe(
+      'https://stream.example.com/channel-13-primary.m3u8',
+    );
+  });
 });

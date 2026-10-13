@@ -88,4 +88,62 @@ describe('MediaController', () => {
       renderer.unmount();
     });
   });
+
+  it('keeps the current stream when opening fullscreen for the same live channel', () => {
+    let controller!: MediaControllerValue;
+
+    function Harness() {
+      controller = useMediaController();
+      return null;
+    }
+
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <Harness />
+        </MediaControllerProvider>,
+      );
+    });
+
+    const liveItem: MediaItem = {
+      id: 'reshet-primary',
+      kind: 'live',
+      title: 'Program A',
+      channelName: 'Reshet 13',
+      channelNumber: '13',
+      sourcePayload: { id: 'source-a', channelID: '13' },
+    };
+    const refreshedLiveItem: MediaItem = {
+      id: 'reshet-refreshed',
+      kind: 'live',
+      title: 'Program B',
+      channelName: 'Reshet 13',
+      channelNumber: '13',
+      sourcePayload: { id: 'source-b', channelID: '13' },
+    };
+    const liveStream: MediaStream = {
+      url: 'https://example.com/reshet.m3u8',
+      type: 'm3u8',
+    };
+
+    act(() => {
+      controller.play(liveItem, liveStream);
+      controller.markPlaying();
+    });
+
+    act(() => {
+      controller.openFullscreen(refreshedLiveItem);
+    });
+
+    expect(controller.presentation).toBe('single-video');
+    expect(controller.isFullscreen).toBe(true);
+    expect(controller.item?.id).toBe(refreshedLiveItem.id);
+    expect(controller.stream).toEqual(liveStream);
+    expect(controller.status).toBe('playing');
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
 });

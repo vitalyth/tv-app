@@ -18,11 +18,10 @@ import {
 } from 'react-native';
 import {
   getPlayableLiveChannels,
-  resolveLiveChannelStream,
 } from '../api/channels';
 import { useMediaActions, useMediaController } from '../media/MediaController';
 import { useMediaPreviewEngine } from '../media/MediaPreviewEngine';
-import type { MediaItem } from '../media/player';
+import { isSameMediaItem, type MediaItem } from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
 import { playFocusSound } from '../platform/focusSound';
 import { MediaCarousel } from './MediaCarousel';
@@ -137,10 +136,15 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
     const [focusedRow, setFocusedRow] = useState<'primary' | 'secondary'>(
       'primary',
     );
-    const { item: currentMediaItem, status: currentMediaStatus } =
+    const {
+      item: currentMediaItem,
+      stream: currentMediaStream,
+    } =
       useMediaController();
-    const { markError, playFullscreen, enterFullscreen } = useMediaActions();
+    const { enterFullscreen } = useMediaActions();
     const previewEngine = useMediaPreviewEngine();
+    const [pendingFullscreenItem, setPendingFullscreenItem] =
+      useState<MediaItem | null>(null);
 
     const contentWidth =
       windowWidth - MAIN_CONTENT_INSET_LEFT - MAIN_CONTENT_INSET_RIGHT;
@@ -217,29 +221,21 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
 
     const handleActivate = useCallback(
       (channel: MediaItem) => {
-        previewEngine.clearPreview({ stopMedia: false });
-        if (
-          currentMediaItem?.id === channel.id &&
-          (currentMediaStatus === 'playing' || currentMediaStatus === 'loading')
-        ) {
+        if (isSameMediaItem(currentMediaItem, channel) && currentMediaStream) {
+          setPendingFullscreenItem(null);
+          previewEngine.clearPreview({ stopMedia: false });
           enterFullscreen();
           return;
         }
 
-        resolveLiveChannelStream(channel)
-          .then(stream => {
-            playFullscreen(channel, stream);
-          })
-          .catch(() => {
-            markError();
-          });
+        setPendingFullscreenItem(channel);
+        previewEngine.clearPreview({ stopMedia: false });
+        previewEngine.focusMediaItem(channel);
       },
       [
-        currentMediaItem?.id,
-        currentMediaStatus,
+        currentMediaItem,
+        currentMediaStream,
         enterFullscreen,
-        markError,
-        playFullscreen,
         previewEngine,
       ],
     );
@@ -248,6 +244,24 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
       () => [...channels].reverse(),
       [channels],
     );
+
+    useEffect(() => {
+      if (
+        pendingFullscreenItem &&
+        currentMediaStream &&
+        isSameMediaItem(currentMediaItem, pendingFullscreenItem)
+      ) {
+        setPendingFullscreenItem(null);
+        previewEngine.clearPreview({ stopMedia: false });
+        enterFullscreen();
+      }
+    }, [
+      currentMediaItem,
+      currentMediaStream,
+      enterFullscreen,
+      pendingFullscreenItem,
+      previewEngine,
+    ]);
 
     const renderChannelCard = useCallback(
       (channel: MediaItem, _index: number, focused: boolean) => (

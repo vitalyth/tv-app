@@ -58,6 +58,8 @@ describe('PlayerBottomControls timeline', () => {
     duration = 300,
     selectedQualityId = 'auto',
     videoQualities: VideoQualityOption[] = [],
+    seekableStart?: number,
+    seekableEnd?: number,
   ) {
     function Harness() {
       const [focused, setFocused] = React.useState<ControlId>('play-pause');
@@ -67,6 +69,8 @@ describe('PlayerBottomControls timeline', () => {
           paused={false}
           currentTime={currentTime}
           duration={duration}
+          seekableStart={seekableStart}
+          seekableEnd={seekableEnd}
           selectedQualityId={selectedQualityId}
           videoQualities={videoQualities}
           hasAlternateSources={false}
@@ -148,6 +152,30 @@ describe('PlayerBottomControls timeline', () => {
       ).toBe(expectedBadge);
     },
   );
+
+  it('shows live playback time against the live edge', async () => {
+    jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
+    await render('live', 103, 210);
+
+    const liveText = renderer.root
+      .findAllByType('Text' as any)
+      .map(node => node.props.children)
+      .find(children => typeof children === 'string' && children.includes('/'));
+
+    expect(liveText).toBe('13:05:14 / 13:07:01');
+  });
+
+  it('uses the live seekable range when duration is unavailable', async () => {
+    jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
+    await render('live', 190, 0, 'auto', [], 100, 200);
+
+    const liveText = renderer.root
+      .findAllByType('Text' as any)
+      .map(node => node.props.children)
+      .find(children => typeof children === 'string' && children.includes('/'));
+
+    expect(liveText).toBe('13:06:51 / 13:07:01');
+  });
 
   it.each(['vod', 'live'] as const)(
     'retains %s focus at both row boundaries',

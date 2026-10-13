@@ -32,7 +32,11 @@ import {
 import { RecentChannelsService } from '../services/recentChannels';
 import { useMediaActions, useMediaController } from '../media/MediaController';
 import { useMediaPreviewEngine } from '../media/MediaPreviewEngine';
-import type { MediaItem, MediaStream } from '../media/player';
+import {
+  isSameMediaItem,
+  type MediaItem,
+  type MediaStream,
+} from '../media/player';
 import type { RouteDefinition } from '../navigation/routes';
 import { playFocusSound } from '../platform/focusSound';
 import { MediaCarousel } from '../components/MediaCarousel';
@@ -124,7 +128,10 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     const lastFocusedRowRef = useRef<RowKey>('live');
     const [focusedRow, setFocusedRow] = useState<RowKey>('live');
 
-    const { item: currentMediaItem, status: currentMediaStatus } =
+    const {
+      item: currentMediaItem,
+      stream: currentMediaStream,
+    } =
       useMediaController();
     const { enterFullscreen, openFullscreen } = useMediaActions();
 
@@ -144,6 +151,8 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     previewEngineRef.current = previewEngine;
     const onItemFocusedRef = useRef(onItemFocused);
     onItemFocusedRef.current = onItemFocused;
+    const [pendingFullscreenItem, setPendingFullscreenItem] =
+      useState<MediaItem | null>(null);
 
     const contentWidth =
       windowWidth - MAIN_CONTENT_INSET_LEFT - MAIN_CONTENT_INSET_RIGHT;
@@ -157,6 +166,22 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     const hasContinue = continueItems.length > 0;
     const hasLive = liveChannels.length > 0;
     const hasVod = vodItems.length > 0;
+
+    useEffect(() => {
+      if (
+        pendingFullscreenItem &&
+        currentMediaStream &&
+        isSameMediaItem(currentMediaItem, pendingFullscreenItem)
+      ) {
+        setPendingFullscreenItem(null);
+        enterFullscreen();
+      }
+    }, [
+      currentMediaItem,
+      currentMediaStream,
+      enterFullscreen,
+      pendingFullscreenItem,
+    ]);
 
     const translateYAnim = useRef(new Animated.Value(0)).current;
     const continueOpacityAnim = useRef(new Animated.Value(1)).current;
@@ -543,22 +568,27 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
           RecentChannelsService.recordChannelWatched(item.id).catch(() => {});
         }
 
-        // Reuse existing preview state if the focused item is already playing or loading
-        if (
-          currentMediaItem?.id === item.id &&
-          (currentMediaStatus === 'playing' || currentMediaStatus === 'loading')
-        ) {
+        if (item.kind === 'live') {
+          if (isSameMediaItem(currentMediaItem, item) && currentMediaStream) {
+            setPendingFullscreenItem(null);
+            previewEngineRef.current.clearPreview({ stopMedia: false });
+            enterFullscreen();
+            return;
+          }
+
+          setPendingFullscreenItem(item);
           previewEngineRef.current.clearPreview({ stopMedia: false });
-          enterFullscreen();
+          previewEngineRef.current.focusMediaItem(item);
           return;
         }
 
+        setPendingFullscreenItem(null);
         previewEngineRef.current.clearPreview({ stopMedia: true });
         openFullscreen(item);
       },
       [
-        currentMediaItem?.id,
-        currentMediaStatus,
+        currentMediaItem,
+        currentMediaStream,
         enterFullscreen,
         openFullscreen,
       ],
