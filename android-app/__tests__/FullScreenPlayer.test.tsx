@@ -5,11 +5,13 @@ import { FullScreenPlayer } from '../src/components/player/FullScreenPlayer';
 import {
   MediaControllerProvider,
   useMediaActions,
+  useMediaController,
 } from '../src/media/MediaController';
 import type { MediaItem, MediaStream } from '../src/media/player';
 import { WatchProgressService } from '../src/services/watchProgress';
 import { SourceDialog } from '../src/components/player/SourceDialog';
 import { t } from '../src/i18n';
+import * as channelApi from '../src/api/channels';
 
 jest.mock('../src/components/RemoteImage', () => ({
   RemoteImage: () => 'RemoteImage',
@@ -126,6 +128,37 @@ describe('FullScreenPlayer', () => {
 
     return <FullScreenPlayer onExit={onExit} />;
   }
+
+  it('renews a failed live source without exiting fullscreen and limits retries', async () => {
+    let controller!: ReturnType<typeof useMediaController>;
+    function Probe() {
+      controller = useMediaController();
+      return null;
+    }
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream')
+      .mockResolvedValueOnce({ ...mockStream, url: 'https://example.com/fresh-1.m3u8' })
+      .mockResolvedValueOnce({ ...mockStream, url: 'https://example.com/fresh-2.m3u8' });
+    try {
+      await act(async () => {
+        activeRenderer = ReactTestRenderer.create(
+          <MediaControllerProvider>
+            <Probe />
+            <PlayerTestHarness item={mockLiveItem} onExit={jest.fn()} />
+          </MediaControllerProvider>,
+        );
+      });
+      await act(async () => controller.markError());
+      expect(controller.stream?.url).toBe('https://example.com/fresh-1.m3u8');
+      expect(controller.isFullscreen).toBe(true);
+      await act(async () => controller.markError());
+      expect(controller.stream?.url).toBe('https://example.com/fresh-2.m3u8');
+      await act(async () => controller.markError());
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(resolve).toHaveBeenCalledWith(mockLiveItem, { useSavedSource: false });
+    } finally {
+      resolve.mockRestore();
+    }
+  });
 
   it('renders LIVE player overlay with all required information and controls', async () => {
     const onExit = jest.fn();

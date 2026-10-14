@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { ActivityIndicator, Animated, Image, StyleSheet, View } from 'react-native';
+import { useForegroundPlaybackTimeout } from '../hooks/useForegroundPlaybackTimeout';
 import { useMediaController } from '../media/MediaController';
 import { MediaSurface } from '../media/MediaSurface';
 import { RemoteImage } from './RemoteImage';
@@ -62,6 +63,9 @@ export function MediaLayer() {
     registerSeekHandler,
   } = useMediaController();
   const showVideo = status === 'playing' || (isFullscreen && Boolean(stream));
+  useForegroundPlaybackTimeout(
+    Boolean(item && stream && presentation !== 'background-image' && !paused),
+  );
 
   return (
     <View
@@ -96,6 +100,7 @@ export function MediaLayer() {
             key={stream.url}
             streamUrl={stream.url}
             streamType={stream.type}
+            isLive={item.kind === 'live'}
             fallbackStreamUrl={stream.fallbackUrl}
             fallbackStreamType={stream.fallbackType}
             paused={paused}

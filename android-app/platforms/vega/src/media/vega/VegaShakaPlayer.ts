@@ -87,6 +87,24 @@ function mimeType(type?: 'm3u8' | 'mpd') {
   return undefined;
 }
 
+export function getVegaRequestUri(uri: string): string {
+  try {
+    const proxy = new URL(uri);
+    if (!proxy.pathname.endsWith('/proxy') || proxy.pathname.endsWith('/v/proxy')) {
+      return uri;
+    }
+    const upstreamUri = proxy.searchParams.get('url');
+    if (!upstreamUri) { return uri; }
+    const upstream = new URL(upstreamUri);
+    if (upstream.hostname === 'mako-streaming.akamaized.net') {
+      return upstream.href;
+    }
+  } catch {
+    // Keep platform or non-HTTP URIs unchanged.
+  }
+  return uri;
+}
+
 export class VegaShakaPlayer {
   private player: any;
   private mediaElement: any;
@@ -163,9 +181,27 @@ export class VegaShakaPlayer {
     this.mediaElement = mediaElement;
     this.onQualitiesChanged = onQualitiesChanged;
     this.player = new shaka.Player(mediaElement);
+    this.player.getNetworkingEngine().registerRequestFilter((_requestType: number, request: any) => {
+      request.uris = request.uris.map(getVegaRequestUri);
+    });
+    this.player.getNetworkingEngine().registerResponseFilter((requestType: number, response: any) => {
+      if (requestType !== shaka.net.NetworkingEngine.RequestType.MANIFEST) {
+        return;
+      }
+      const originalUri = response.originalUri;
+      if (originalUri?.includes('/proxy?url=')) {
+        // Proxy manifests already contain absolute rewritten child URLs.
+        response.uri = originalUri;
+      }
+    });
     this.player.addEventListener('error', (event: any) => {
       console.warn('[VegaShakaPlayer] error event:', event?.detail ?? event);
-      onError();
+      const detail = event?.detail;
+      const accessDenied = detail?.code === shaka.util.Error.Code.BAD_HTTP_STATUS &&
+        [401, 403].includes(Number(detail?.data?.[1]));
+      if (accessDenied || detail?.severity === shaka.util.Error.Severity.CRITICAL) {
+        onError();
+      }
     });
     this.player.addEventListener('adaptation', this.updateActiveQuality);
     this.player.addEventListener('variantchanged', this.updateActiveQuality);
@@ -175,9 +211,9 @@ export class VegaShakaPlayer {
     );
     this.player.configure({
       streaming: {
-        bufferingGoal: 4,
-        bufferBehind: 2,
-        rebufferingGoal: 1,
+        bufferingGoal: 12,
+        bufferBehind: 10,
+        rebufferingGoal: 3,
         segmentPrefetchLimit: 0,
         retryParameters: {maxAttempts: 3},
       },
@@ -208,6 +244,23 @@ export class VegaShakaPlayer {
     if (nav?.mediaSession) {
       nav.mediaSession.playbackState = 'playing';
     }
+  }
+
+  seekTo(seconds: number) {
+    const range = this.getSeekableRange();
+    const target = this.player.isLive() && range.end !== undefined
+      ? Math.max(range.start, Math.min(seconds, range.end - Math.min(3, (range.end - range.start) / 2)))
+      : seconds;
+    console.info('[PlayerSeek] target', { requested: seconds, target });
+    this.mediaElement.currentTime = target;
+  }
+
+  getSeekableRange() {
+    const range = this.player.seekRange();
+    if (Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start) {
+      return range;
+    }
+    return {};
   }
 
   getQualities() {

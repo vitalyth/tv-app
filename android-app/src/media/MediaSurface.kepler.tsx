@@ -100,6 +100,7 @@ function NativeHlsSurface({
   useEffect(() => {
     return registerSeekHandler?.(seconds => {
       if (videoRef.current) {
+        console.info('[PlayerSeek] native seek', { seconds, current: videoRef.current.currentTime, range: readSeekableRange(videoRef.current) });
         videoRef.current.currentTime = seconds;
       }
     });
@@ -220,7 +221,8 @@ function ShakaPlayerSurface({
   useEffect(() => {
     return registerSeekHandler?.(seconds => {
       if (videoPlayer.current && !destroyed.current) {
-        videoPlayer.current.currentTime = seconds;
+        console.info('[PlayerSeek] shaka seek', { seconds, current: videoPlayer.current.currentTime, range: readSeekableRange(videoPlayer.current) });
+        shakaPlayer.current?.seekTo(seconds);
       }
     });
   }, [registerSeekHandler]);
@@ -285,7 +287,7 @@ function ShakaPlayerSurface({
       player.addEventListener('timeupdate', () => {
         const cur = player.currentTime ?? 0;
         const dur = player.duration ?? 0;
-        const seekableRange = readSeekableRange(player);
+        const seekableRange = shakaPlayer.current?.getSeekableRange() ?? readSeekableRange(player);
         if (!firstFrameReported.current && (cur > 0 || dur > 0)) {
           reportFirstFrame();
         }
@@ -417,6 +419,7 @@ function shouldUseShaka(url?: string, type?: MediaStreamType): boolean {
 export function MediaSurface({
   streamUrl,
   streamType,
+  isLive = false,
   fallbackStreamUrl,
   fallbackStreamType,
   paused = false,
@@ -457,6 +460,7 @@ export function MediaSurface({
 
   const handleError = useCallback(() => {
     if (
+      !isLive &&
       !useShakaFallback &&
       !shouldUseShaka(activeSource.url, activeSource.type)
     ) {
@@ -479,6 +483,7 @@ export function MediaSurface({
     onError();
   }, [
     activeSource,
+    isLive,
     fallbackStreamType,
     fallbackStreamUrl,
     onError,
@@ -490,7 +495,7 @@ export function MediaSurface({
   }
 
   const useShaka =
-    useShakaFallback || shouldUseShaka(mountedSource.url, mountedSource.type);
+    isLive || useShakaFallback || shouldUseShaka(mountedSource.url, mountedSource.type);
   const Engine = useShaka ? ShakaPlayerSurface : NativeHlsSurface;
 
   return (

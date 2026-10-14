@@ -180,7 +180,16 @@ describe('PlayerBottomControls timeline', () => {
 
   it('uses the program time range before live seekable data arrives', async () => {
     jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
-    await render('live', 0, 0, 'auto', [], undefined, undefined, '13:00 - 14:00');
+    await render(
+      'live',
+      0,
+      0,
+      'auto',
+      [],
+      undefined,
+      undefined,
+      '13:00 - 14:00',
+    );
 
     const liveText = renderer.root
       .findAllByType('Text' as any)
@@ -275,6 +284,46 @@ describe('PlayerBottomControls timeline', () => {
     await press('right');
     await press('right');
     expect(onSeek.mock.calls).toEqual([[0], [10], [12]]);
+  });
+
+  it('seeks live within its reported range and returns to the live edge', async () => {
+    await render('live', 200, 0, 'auto', [], 100, 200);
+    await focus('player-timeline');
+    await press('left');
+    await press('left');
+    expect(onSeek.mock.calls).toEqual([[190], [180]]);
+    expect(
+      renderer.root.findByProps({ testID: 'player-timeline' }).props
+        .accessibilityValue,
+    ).toEqual({ min: 100, max: 200, now: 180 });
+    await act(async () =>
+      renderer.root.findByProps({ testID: 'live-button' }).props.onPress(),
+    );
+    expect(onSeek).toHaveBeenLastCalledWith(200);
+  });
+
+  it('clamps live seeks at both ends of a nonzero seekable window', async () => {
+    await render('live', 105, 0, 'auto', [], 100, 115);
+    await focus('player-timeline');
+    await press('left');
+    await press('right');
+    await press('right');
+    expect(onSeek.mock.calls).toEqual([[100], [110], [115]]);
+  });
+
+  it('includes LIVE in remote navigation and restores it from the timeline', async () => {
+    await render('live', 190, 0, 'auto', [], 100, 200);
+    await focus('play-pause-button');
+    await press('right');
+    expect(focusRequests.get('live-button')).toHaveBeenCalled();
+    await focus('live-button');
+    await press('up');
+    await focus('player-timeline');
+    await press('down');
+    expect(focusRequests.get('live-button')).toHaveBeenCalledTimes(2);
+    await focus('live-button');
+    await press('right');
+    expect(focusRequests.get('multiview-button')).toHaveBeenCalled();
   });
 
   it.each([

@@ -20,6 +20,7 @@ const multiviewIcon = require('../../assets/icons/multiview.png');
 export type ControlId =
   | 'timeline'
   | 'play-pause'
+  | 'live'
   | 'sources'
   | 'multiview'
   | 'quality';
@@ -95,11 +96,6 @@ function getLiveTimeDisplay(
   seekableStart?: number,
   seekableEnd?: number,
 ): string {
-  const programWindowText = liveProgramWindowDisplay(timeRange);
-  if (programWindowText) {
-    return programWindowText;
-  }
-
   const hasSeekableRange =
     typeof seekableStart === 'number' &&
     typeof seekableEnd === 'number' &&
@@ -107,14 +103,18 @@ function getLiveTimeDisplay(
     Number.isFinite(seekableEnd) &&
     seekableEnd > seekableStart;
 
+  if (!hasSeekableRange) {
+    const programWindowText = liveProgramWindowDisplay(timeRange);
+    if (programWindowText) {
+      return programWindowText;
+    }
+  }
+
   const rewindWindowSeconds = hasSeekableRange
     ? seekableEnd - seekableStart
     : duration;
 
-  if (
-    !Number.isFinite(rewindWindowSeconds) ||
-    rewindWindowSeconds <= 0
-  ) {
+  if (!Number.isFinite(rewindWindowSeconds) || rewindWindowSeconds <= 0) {
     return 'LIVE';
   }
 
@@ -145,12 +145,22 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 }: PlayerBottomControlsProps) {
   const isLive = item.kind === 'live';
   const showSources = isLive && hasAlternateSources;
-  const canSeek = !isLive && Number.isFinite(duration) && duration > 0;
+  const hasLiveRange =
+    Number.isFinite(seekableStart) &&
+    Number.isFinite(seekableEnd) &&
+    seekableStart! >= 0 &&
+    seekableEnd! > seekableStart!;
+  const rangeStart = isLive && hasLiveRange ? seekableStart! : 0;
+  const rangeEnd = isLive && hasLiveRange ? seekableEnd! : duration;
+  const canSeek = isLive
+    ? hasLiveRange
+    : Number.isFinite(duration) && duration > 0;
   const [seekPosition, setSeekPosition] = useState<number | null>(null);
   const seekPositionRef = useRef<number | null>(null);
   const focusedControlRef = useRef<ControlId | null>(null);
   const previousRowControlRef = useRef<ControlId>('play-pause');
   const displayedTime = seekPosition ?? currentTime;
+  const atLiveEdge = !hasLiveRange || rangeEnd - displayedTime <= 5;
   const liveTimeText = getLiveTimeDisplay(
     displayedTime,
     duration,
@@ -184,8 +194,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       return;
     }
     const position = Math.min(
-      duration,
-      Math.max(0, (seekPositionRef.current ?? currentTime) + offset),
+      rangeEnd,
+      Math.max(rangeStart, (seekPositionRef.current ?? currentTime) + offset),
     );
     seekPositionRef.current = position;
     setSeekPosition(position);
@@ -195,10 +205,15 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   // Calculate timeline percentage
   let progressPct = 0;
   if (isLive) {
-    progressPct =
-      typeof item.progressPercentage === 'number'
-        ? Math.min(100, Math.max(0, item.progressPercentage))
-        : 100;
+    progressPct = hasLiveRange
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            ((displayedTime - rangeStart) / (rangeEnd - rangeStart)) * 100,
+          ),
+        )
+      : 100;
   } else if (duration > 0) {
     progressPct = Math.min(100, Math.max(0, (displayedTime / duration) * 100));
   }
@@ -209,6 +224,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   );
 
   const playRef = useRef<View>(null);
+  const liveRef = useRef<View>(null);
   const sourcesRef = useRef<View>(null);
   const multiviewRef = useRef<View>(null);
   const qualityRef = useRef<View>(null);
@@ -222,6 +238,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       const target =
         id === 'timeline'
           ? timelineRef
+          : id === 'live' && isLive
+          ? liveRef
           : id === 'quality'
           ? qualityRef
           : id === 'sources' && showSources
@@ -299,7 +317,9 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       if (event.eventType === 'down') {
         const previous = previousRowControlRef.current;
         const target =
-          previous === 'quality'
+          previous === 'live' && isLive
+            ? liveRef
+            : previous === 'quality'
             ? qualityRef
             : previous === 'sources' && showSources
             ? sourcesRef
@@ -318,6 +338,10 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 
     if (event.eventType === 'right') {
       if (focusedControl === 'play-pause') {
+        if (isLive) {
+          liveRef.current?.requestTVFocus?.();
+          return;
+        }
         const next = showSources ? 'sources' : isLive ? 'multiview' : 'quality';
         const target =
           next === 'sources'
@@ -326,6 +350,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             ? multiviewRef
             : qualityRef;
         target.current?.requestTVFocus?.();
+      } else if (focusedControl === 'live') {
+        (showSources ? sourcesRef : multiviewRef).current?.requestTVFocus?.();
       } else if (focusedControl === 'sources') {
         multiviewRef.current?.requestTVFocus?.();
       } else if (focusedControl === 'multiview') {
@@ -339,9 +365,11 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         const target = prev === 'multiview' ? multiviewRef : playRef;
         target.current?.requestTVFocus?.();
       } else if (focusedControl === 'multiview') {
-        const target = showSources ? sourcesRef : playRef;
+        const target = showSources ? sourcesRef : liveRef;
         target.current?.requestTVFocus?.();
       } else if (focusedControl === 'sources') {
+        liveRef.current?.requestTVFocus?.();
+      } else if (focusedControl === 'live') {
         playRef.current?.requestTVFocus?.();
       } else if (focusedControl === 'play-pause') {
         playRef.current?.requestTVFocus?.();
@@ -367,7 +395,13 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           accessibilityRole={canSeek ? 'adjustable' : 'progressbar'}
           accessibilityLabel="Playback position"
           accessibilityValue={
-            canSeek ? { min: 0, max: duration, now: displayedTime } : undefined
+            canSeek
+              ? {
+                  min: rangeStart,
+                  max: rangeEnd,
+                  now: Math.min(rangeEnd, Math.max(rangeStart, displayedTime)),
+                }
+              : undefined
           }
           accessibilityActions={
             canSeek ? [{ name: 'increment' }, { name: 'decrement' }] : undefined
@@ -408,6 +442,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         destinations={
           [
             playRef.current,
+            liveRef.current,
             sourcesRef.current,
             multiviewRef.current,
             qualityRef.current,
@@ -422,7 +457,9 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           focusable={true}
           hasTVPreferredFocus={lastFocusedControl === 'play-pause'}
           nextFocusRight={
-            showSources
+            isLive
+              ? (liveRef.current as any)
+              : showSources
               ? (sourcesRef.current as any)
               : isLive
               ? (multiviewRef.current as any)
@@ -452,10 +489,41 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           </Text>
         ) : (
           <View style={styles.liveStatusGroup}>
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>LIVE</Text>
-            </View>
+            <Pressable
+              ref={liveRef}
+              testID="live-button"
+              focusable
+              hasTVPreferredFocus={lastFocusedControl === 'live'}
+              accessibilityRole="button"
+              accessibilityLabel="Return to live"
+              onFocus={() => handleFocus('live')}
+              onBlur={() => handleBlur('live')}
+              onPress={() => {
+                if (!hasLiveRange) {
+                  return;
+                }
+                seekPositionRef.current = rangeEnd;
+                setSeekPosition(rangeEnd);
+                onSeek(rangeEnd);
+                if (paused) {
+                  onTogglePlayPause();
+                }
+              }}
+              style={({ focused }) => [
+                styles.liveBadge,
+                !atLiveEdge && styles.liveBadgeBehind,
+                focused && styles.playButtonFocused,
+              ]}
+            >
+              <View
+                style={[styles.liveDot, !atLiveEdge && styles.liveDotBehind]}
+              />
+              <Text
+                style={[styles.liveText, !atLiveEdge && styles.liveTextBehind]}
+              >
+                LIVE
+              </Text>
+            </Pressable>
             {hasLiveTimeText ? (
               <Text style={styles.liveTimeText}>{liveTimeText}</Text>
             ) : null}
@@ -472,7 +540,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             testID="sources-button"
             focusable={true}
             hasTVPreferredFocus={lastFocusedControl === 'sources'}
-            nextFocusLeft={playRef.current as any}
+            nextFocusLeft={liveRef.current as any}
             nextFocusRight={multiviewRef.current as any}
             onFocus={() => handleFocus('sources')}
             onBlur={() => handleBlur('sources')}
@@ -515,7 +583,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             nextFocusLeft={
               showSources
                 ? (sourcesRef.current as any)
-                : (playRef.current as any)
+                : (liveRef.current as any)
             }
             nextFocusRight={qualityRef.current as any}
             onFocus={() => handleFocus('multiview')}
@@ -686,6 +754,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  liveBadgeBehind: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  liveDotBehind: { backgroundColor: '#ffffff' },
+  liveTextBehind: { color: '#ffffff' },
   liveDot: {
     width: 7,
     height: 7,

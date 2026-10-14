@@ -34,7 +34,6 @@ import { SourceDialog } from './SourceDialog';
 import { WatchProgressService } from '../../services/watchProgress';
 import { LiveSourcePreferencesService } from '../../services/liveSourcePreferences';
 import { t } from '../../i18n';
-import { useForegroundPlaybackTimeout } from '../../hooks/useForegroundPlaybackTimeout';
 
 interface FullScreenPlayerProps {
   onExit: () => void;
@@ -74,6 +73,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     item,
     stream,
     paused,
+    status,
     currentTime,
     duration,
     seekableStart,
@@ -85,7 +85,6 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     seekTo,
   } = useMediaController();
   const { playFullscreen, markError } = useMediaActions();
-  useForegroundPlaybackTimeout(Boolean(item && stream && !paused));
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [activeDialog, setActiveDialog] = useState<DialogType>(null);
@@ -96,6 +95,26 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   const sourceSwitchRequestRef = useRef(0);
   const lastSavedPositionRef = useRef<number>(0);
   const controlsRevealedAtRef = useRef<number>(0);
+  const liveRecoveryRef = useRef({ id: '', attempts: 0 });
+
+  useEffect(() => {
+    if (liveRecoveryRef.current.id !== item?.id) {
+      liveRecoveryRef.current = { id: item?.id ?? '', attempts: 0 };
+    }
+    if (status !== 'error' || item?.kind !== 'live' || liveRecoveryRef.current.attempts >= 2) {
+      return;
+    }
+    let cancelled = false;
+    liveRecoveryRef.current.attempts += 1;
+    resolveLiveChannelStream(item, { useSavedSource: false }).then(nextStream => {
+      if (!cancelled && nextStream.url !== stream?.url) {
+        playFullscreen(item, nextStream);
+      }
+    }).catch(() => {
+      // Keep the existing source controls available if renewal also fails.
+    });
+    return () => { cancelled = true; };
+  }, [item, playFullscreen, status, stream?.url]);
 
   // 1. Controls Auto-Hide Management
   const clearHideTimer = useCallback(() => {

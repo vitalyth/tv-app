@@ -4,6 +4,7 @@ import type { MediaStreamType, VideoQualityOption } from './player';
 export interface MediaSurfaceProps {
   streamUrl: string;
   streamType?: MediaStreamType;
+  isLive?: boolean;
   fallbackStreamUrl?: string;
   fallbackStreamType?: MediaStreamType;
   isMuted?: boolean;
