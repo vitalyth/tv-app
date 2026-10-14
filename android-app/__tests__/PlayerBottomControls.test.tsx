@@ -60,12 +60,13 @@ describe('PlayerBottomControls timeline', () => {
     videoQualities: VideoQualityOption[] = [],
     seekableStart?: number,
     seekableEnd?: number,
+    timeRange?: string,
   ) {
     function Harness() {
       const [focused, setFocused] = React.useState<ControlId>('play-pause');
       return (
         <PlayerBottomControls
-          item={{ id: 'test', kind, title: 'Test' }}
+          item={{ id: 'test', kind, title: 'Test', timeRange }}
           paused={false}
           currentTime={currentTime}
           duration={duration}
@@ -153,7 +154,7 @@ describe('PlayerBottomControls timeline', () => {
     },
   );
 
-  it('shows live playback time against the live edge', async () => {
+  it('shows the live rewind window against the live edge', async () => {
     jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
     await render('live', 103, 210);
 
@@ -162,10 +163,10 @@ describe('PlayerBottomControls timeline', () => {
       .map(node => node.props.children)
       .find(children => typeof children === 'string' && children.includes('/'));
 
-    expect(liveText).toBe('13:05:14 / 13:07:01');
+    expect(liveText).toBe('13:03:31 / 13:07:01');
   });
 
-  it('uses the live seekable range when duration is unavailable', async () => {
+  it('uses the live seekable window when duration is unavailable', async () => {
     jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
     await render('live', 190, 0, 'auto', [], 100, 200);
 
@@ -174,7 +175,19 @@ describe('PlayerBottomControls timeline', () => {
       .map(node => node.props.children)
       .find(children => typeof children === 'string' && children.includes('/'));
 
-    expect(liveText).toBe('13:06:51 / 13:07:01');
+    expect(liveText).toBe('13:05:21 / 13:07:01');
+  });
+
+  it('uses the program time range before live seekable data arrives', async () => {
+    jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
+    await render('live', 0, 0, 'auto', [], undefined, undefined, '13:00 - 14:00');
+
+    const liveText = renderer.root
+      .findAllByType('Text' as any)
+      .map(node => node.props.children)
+      .find(children => typeof children === 'string' && children.includes('/'));
+
+    expect(liveText).toBe('13:00:00 / 13:07:01');
   });
 
   it.each(['vod', 'live'] as const)(

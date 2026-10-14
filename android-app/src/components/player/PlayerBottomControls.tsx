@@ -68,36 +68,59 @@ function formatClockTime(date: Date): string {
   ].join(':');
 }
 
+function liveProgramWindowDisplay(timeRange?: string): string | undefined {
+  const match = timeRange?.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+  if (!match) {
+    return undefined;
+  }
+
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  if (start.getTime() > now.getTime()) {
+    start.setDate(start.getDate() - 1);
+  }
+
+  if (now.getTime() - start.getTime() < 1_000) {
+    return undefined;
+  }
+
+  return `${formatClockTime(start)} / ${formatClockTime(now)}`;
+}
+
 function getLiveTimeDisplay(
-  currentTime: number,
+  _currentTime: number,
   duration: number,
+  timeRange?: string,
   seekableStart?: number,
   seekableEnd?: number,
 ): string {
+  const programWindowText = liveProgramWindowDisplay(timeRange);
+  if (programWindowText) {
+    return programWindowText;
+  }
+
   const hasSeekableRange =
     typeof seekableStart === 'number' &&
     typeof seekableEnd === 'number' &&
     Number.isFinite(seekableStart) &&
     Number.isFinite(seekableEnd) &&
     seekableEnd > seekableStart;
-  const liveEdgeTime = hasSeekableRange ? seekableEnd : duration;
-  const playbackTime = hasSeekableRange
-    ? Math.min(Math.max(currentTime, seekableStart), seekableEnd)
-    : currentTime;
+
+  const rewindWindowSeconds = hasSeekableRange
+    ? seekableEnd - seekableStart
+    : duration;
 
   if (
-    !Number.isFinite(playbackTime) ||
-    !Number.isFinite(liveEdgeTime) ||
-    playbackTime <= 0 ||
-    liveEdgeTime <= 0
+    !Number.isFinite(rewindWindowSeconds) ||
+    rewindWindowSeconds <= 0
   ) {
     return 'LIVE';
   }
 
-  const secondsBehindLive = Math.max(0, liveEdgeTime - playbackTime);
   const liveEdgeMs = Date.now();
-  const currentMs = liveEdgeMs - secondsBehindLive * 1000;
-  return `${formatClockTime(new Date(currentMs))} / ${formatClockTime(
+  const windowStartMs = liveEdgeMs - rewindWindowSeconds * 1000;
+  return `${formatClockTime(new Date(windowStartMs))} / ${formatClockTime(
     new Date(liveEdgeMs),
   )}`;
 }
@@ -131,9 +154,11 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   const liveTimeText = getLiveTimeDisplay(
     displayedTime,
     duration,
+    item.timeRange,
     seekableStart,
     seekableEnd,
   );
+  const hasLiveTimeText = liveTimeText !== 'LIVE';
 
   // Keep repeated remote presses cumulative until playback acknowledges the seek.
   useEffect(() => {
@@ -426,9 +451,14 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             {formatDuration(displayedTime)} / {formatDuration(duration)}
           </Text>
         ) : (
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>{liveTimeText}</Text>
+          <View style={styles.liveStatusGroup}>
+            <View style={styles.liveBadge}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveText}>LIVE</Text>
+            </View>
+            {hasLiveTimeText ? (
+              <Text style={styles.liveTimeText}>{liveTimeText}</Text>
+            ) : null}
           </View>
         )}
 
@@ -651,6 +681,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239, 68, 68, 0.5)',
     marginLeft: 4,
   },
+  liveStatusGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   liveDot: {
     width: 7,
     height: 7,
@@ -661,7 +696,13 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 0,
+  },
+  liveTimeText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
   },
   actionCard: {
     alignItems: 'center',
