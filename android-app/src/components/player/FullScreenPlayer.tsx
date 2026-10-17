@@ -7,7 +7,9 @@ import {
   useState,
 } from 'react';
 import {
+  Animated,
   BackHandler,
+  Easing,
   Pressable,
   StyleSheet,
   View,
@@ -19,6 +21,7 @@ import {
 } from '../../media/MediaController';
 import {
   getLiveChannelSourceOptions,
+  getPlayableLiveChannels,
   resolveLiveChannelStream,
   selectLiveChannelSource,
 } from '../../api/channels';
@@ -34,6 +37,9 @@ import { SourceDialog } from './SourceDialog';
 import { WatchProgressService } from '../../services/watchProgress';
 import { LiveSourcePreferencesService } from '../../services/liveSourcePreferences';
 import { t } from '../../i18n';
+import { tvPlatform } from '../../platform/runtime';
+import { isSameMediaItem, type MediaItem } from '../../media/player';
+import { RecentChannelsService } from '../../services/recentChannels';
 
 interface FullScreenPlayerProps {
   onExit: () => void;
@@ -43,6 +49,13 @@ type DialogType = 'quality' | 'sources' | 'multiview' | null;
 
 const CONTROLS_HIDE_DELAY_MS = 4500;
 const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000;
+const PLAYER_REMOTE_EVENTS = new Set([
+  'up', 'down', 'left', 'right',
+  'longUp', 'longDown', 'longLeft', 'longRight',
+  'select', 'longSelect', 'enter',
+  'playPause', 'playpause', 'play', 'pause', 'stop',
+  'rewind', 'fastForward', 'skip_backward', 'skip_forward', 'info',
+]);
 
 /**
  * Extracts a stable, canonical episodeId from a MediaItem for watch progress storage.
@@ -66,6 +79,27 @@ function getEpisodeId(item: { id: string; kind: string; sourcePayload?: unknown 
   return item.id.replace(/^(cw-)+/, '').replace(/^vod-/, '');
 }
 
+function PlayerLoadingIndicator() {
+  const rotation = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const animation = Animated.loop(Animated.timing(rotation, {
+      toValue: 1,
+      duration: 900,
+      easing: Easing.linear,
+      useNativeDriver: true,
+      isInteraction: false,
+    }));
+    animation.start();
+    return () => animation.stop();
+  }, [rotation]);
+
+  return (
+    <Animated.View style={[styles.spinner, {
+      transform: [{ rotate: rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }],
+    }]} />
+  );
+}
+
 export const FullScreenPlayer = memo(function FullScreenPlayerView({
   onExit,
 }: FullScreenPlayerProps) {
@@ -81,12 +115,16 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     videoQualities,
     selectedQualityId,
     togglePlayPause,
+    setPaused,
     setSelectedQuality,
     seekTo,
   } = useMediaController();
   const { playFullscreen, markError } = useMediaActions();
 
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [channelInfoItem, setChannelInfoItem] = useState<MediaItem | null>(null);
+  const [resolvingChannel, setResolvingChannel] = useState(false);
+  const channelInfoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeDialog, setActiveDialog] = useState<DialogType>(null);
   const [lastFocusedControl, setLastFocusedControl] = useState<ControlId>('play-pause');
   const [switchingSourceId, setSwitchingSourceId] = useState<string>();
@@ -96,6 +134,82 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   const lastSavedPositionRef = useRef<number>(0);
   const controlsRevealedAtRef = useRef<number>(0);
   const liveRecoveryRef = useRef({ id: '', attempts: 0 });
+  const liveChannelsRef = useRef<Promise<MediaItem[]> | null>(null);
+  const channelSwitchRequestRef = useRef(0);
+  const channelTargetRef = useRef(item);
+  const currentItemRef = useRef(item);
+  currentItemRef.current = item;
+
+  useEffect(() => {
+    channelTargetRef.current = item;
+    channelSwitchRequestRef.current += 1;
+    setResolvingChannel(false);
+  }, [item]);
+
+  useEffect(() => () => {
+    channelSwitchRequestRef.current += 1;
+    if (channelInfoTimerRef.current) {
+      clearTimeout(channelInfoTimerRef.current);
+    }
+  }, []);
+
+  const showChannelInfo = useCallback((nextItem: MediaItem | null, autoHide = false) => {
+    if (channelInfoTimerRef.current) {
+      clearTimeout(channelInfoTimerRef.current);
+      channelInfoTimerRef.current = null;
+    }
+    setChannelInfoItem(nextItem);
+    if (nextItem && autoHide) {
+      channelInfoTimerRef.current = setTimeout(() => {
+        channelInfoTimerRef.current = null;
+        setChannelInfoItem(null);
+      }, CONTROLS_HIDE_DELAY_MS);
+    }
+  }, []);
+
+  const switchChannel = useCallback(async (direction: number) => {
+    const request = ++channelSwitchRequestRef.current;
+    const origin = currentItemRef.current;
+    try {
+      if (!liveChannelsRef.current) {
+        liveChannelsRef.current = getPlayableLiveChannels().catch(error => {
+          liveChannelsRef.current = null;
+          throw error;
+        });
+      }
+      const channels = await liveChannelsRef.current;
+      if (!isSameMediaItem(origin, currentItemRef.current)) {
+        return;
+      }
+      const current = channelTargetRef.current ?? currentItemRef.current;
+      const index = channels.findIndex(channel => isSameMediaItem(channel, current));
+      if (index < 0 || channels.length < 2) {
+        return;
+      }
+      const target = channels[(index + direction + channels.length) % channels.length];
+      // Count every press, but only resolve and play the most recent selection.
+      channelTargetRef.current = target;
+      if (request !== channelSwitchRequestRef.current) {
+        return;
+      }
+      showChannelInfo(target);
+      setResolvingChannel(true);
+      const nextStream = await resolveLiveChannelStream(target);
+      if (request !== channelSwitchRequestRef.current) {
+        return;
+      }
+      setResolvingChannel(false);
+      playFullscreen(target, nextStream);
+      showChannelInfo(target, true);
+      RecentChannelsService.recordChannelWatched(target.id).catch(() => {});
+    } catch {
+      if (request === channelSwitchRequestRef.current) {
+        setResolvingChannel(false);
+        channelTargetRef.current = currentItemRef.current;
+        showChannelInfo(currentItemRef.current ?? null, true);
+      }
+    }
+  }, [playFullscreen, showChannelInfo]);
 
   useEffect(() => {
     if (liveRecoveryRef.current.id !== item?.id) {
@@ -139,10 +253,11 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   }, [activeDialog, resetHideTimer, clearHideTimer]);
 
   const handleRevealControls = useCallback(() => {
+    showChannelInfo(null);
     controlsRevealedAtRef.current = Date.now();
     setControlsVisible(true);
     resetHideTimer();
-  }, [resetHideTimer]);
+  }, [resetHideTimer, showChannelInfo]);
 
   const handleTogglePlayPause = useCallback(() => {
     // Prevent accidental play/pause toggle if controls were just revealed in the last 500ms
@@ -186,14 +301,34 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
 
   // 3. TV Remote Event Handling
   useTVEventHandler(event => {
-    if (event.eventKeyAction === 1 || event.eventType === 'back') {
+    if (
+      event.eventKeyAction === 1 ||
+      !PLAYER_REMOTE_EVENTS.has(event.eventType)
+    ) {
       return;
     }
 
-    // Any remote input resets the hide timer
+    if (
+      !controlsVisible && !activeDialog && item?.kind === 'live' &&
+      (event.eventType === 'up' || event.eventType === 'down')
+    ) {
+      switchChannel(event.eventType === 'up' ? 1 : -1);
+      return;
+    }
+
+    // Vega's media session handles these keys; its media events report the result.
+    if (tvPlatform.id !== 'kepler') {
+      if (event.eventType === 'playpause' || event.eventType === 'playPause') {
+        togglePlayPause();
+      } else if (event.eventType === 'play' || event.eventType === 'pause') {
+        setPaused(event.eventType === 'pause');
+      }
+    }
+
+    // Only player input affects the controls' visibility timer.
     resetHideTimer();
 
-    // If controls are hidden, any key press reveals them without executing action
+    // Navigation reveals controls; dedicated media keys also act immediately.
     if (!controlsVisible && !activeDialog) {
       handleRevealControls();
     }
@@ -214,9 +349,10 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
           return true;
         }
 
-        if (controlsVisible) {
+        if (controlsVisible || channelInfoItem) {
           clearHideTimer();
           setControlsVisible(false);
+          showChannelInfo(null);
           return true;
         }
 
@@ -244,6 +380,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     return () => subscription.remove();
   }, [
     activeDialog,
+    channelInfoItem,
     clearHideTimer,
     controlsVisible,
     currentTime,
@@ -251,6 +388,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     item,
     onExit,
     resetHideTimer,
+    showChannelInfo,
   ]);
 
   // 4. VOD Watch Progress Periodic Persistence
@@ -415,15 +553,24 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
         />
       ) : null}
 
+      {resolvingChannel || status === 'loading' ? (
+        <View testID="player-loading" pointerEvents="none" style={styles.loading}>
+          <PlayerLoadingIndicator />
+        </View>
+      ) : null}
+
       {/* Player Overlays (Top and Bottom) - hidden when a dialog is active */}
-      {controlsVisible && !activeDialog ? (
+      {(controlsVisible || channelInfoItem) && !activeDialog ? (
         <View
           pointerEvents="box-none"
           style={StyleSheet.absoluteFill}
         >
-          <PlayerTopInfo item={item} />
-          <View style={styles.spacer} pointerEvents="none" />
-          <PlayerBottomControls
+          <View testID="player-top-panel" pointerEvents="none">
+            <PlayerTopInfo item={controlsVisible ? item : channelInfoItem ?? item} />
+          </View>
+          {controlsVisible ? <>
+            <View style={styles.spacer} pointerEvents="none" />
+            <PlayerBottomControls
             item={item}
             paused={paused}
             currentTime={currentTime}
@@ -440,7 +587,8 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
             onOpenQuality={handleOpenQuality}
             onOpenSources={handleOpenSources}
             onOpenMultiView={handleOpenMultiView}
-          />
+            />
+          </> : null}
         </View>
       ) : null}
 
@@ -486,5 +634,18 @@ const styles = StyleSheet.create({
   },
   spacer: {
     flex: 1,
+  },
+  loading: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  spinner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.25)',
+    borderTopColor: '#38bdf8',
   },
 });

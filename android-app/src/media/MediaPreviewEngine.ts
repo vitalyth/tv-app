@@ -35,6 +35,12 @@ export function useMediaPreviewEngine(
     status: activeMediaStatus,
     stream: activeMediaStream,
   } = useMediaController();
+  const activePlaybackRef = useRef({
+    item: activeMediaItem, status: activeMediaStatus, stream: activeMediaStream,
+  });
+  activePlaybackRef.current = {
+    item: activeMediaItem, status: activeMediaStatus, stream: activeMediaStream,
+  };
 
   const currentFocusedItemRef = useRef<MediaItem | null>(null);
   const sequenceIdRef = useRef<number>(0);
@@ -62,10 +68,11 @@ export function useMediaPreviewEngine(
       currentFocusedItemRef.current = item;
       clearTimers();
 
+      const activePlayback = activePlaybackRef.current;
       if (
-        isSameMediaItem(activeMediaItem, item) &&
-        activeMediaStream &&
-        (activeMediaStatus === 'playing' || activeMediaStatus === 'loading')
+        isSameMediaItem(activePlayback.item, item) &&
+        activePlayback.stream &&
+        (activePlayback.status === 'playing' || activePlayback.status === 'loading')
       ) {
         sequenceIdRef.current += 1;
         return;
@@ -120,9 +127,6 @@ export function useMediaPreviewEngine(
     },
     [
       clearTimers,
-      activeMediaItem,
-      activeMediaStatus,
-      activeMediaStream,
       imageDebounceMs,
       markError,
       play,

@@ -8,6 +8,54 @@ import type { MediaControllerValue } from '../src/media/MediaController';
 import type { MediaItem, MediaStream } from '../src/media/player';
 
 describe('MediaController', () => {
+  it('reuses the latest stream when a native card retained the initial fullscreen callback', () => {
+    let controller!: MediaControllerValue;
+    function Probe() { controller = useMediaController(); return null; }
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => { renderer = ReactTestRenderer.create(<MediaControllerProvider><Probe /></MediaControllerProvider>); });
+    const retainedOpenFullscreen = controller.openFullscreen;
+    const item: MediaItem = { id: '12', kind: 'live', title: 'Keshet' };
+    const stream: MediaStream = { url: 'https://example.com/live.m3u8' };
+    act(() => { controller.play(item, stream); controller.markPlaying(); });
+    expect(controller.openFullscreen).toBe(retainedOpenFullscreen);
+    act(() => retainedOpenFullscreen(item));
+    expect(controller.isFullscreen).toBe(true);
+    expect(controller.stream).toBe(stream);
+    expect(controller.status).toBe('playing');
+    act(() => { controller.exitFullscreen(); retainedOpenFullscreen(item); });
+    expect(controller.stream).toBe(stream);
+    act(() => renderer.unmount());
+  });
+
+  it.each(['enterFullscreen', 'openFullscreen'] as const)(
+    'protects reused playback from preview cleanup after %s', action => {
+      let controller!: MediaControllerValue;
+      function Harness() { controller = useMediaController(); return null; }
+      let renderer!: ReactTestRenderer.ReactTestRenderer;
+      act(() => {
+        renderer = ReactTestRenderer.create(<MediaControllerProvider><Harness /></MediaControllerProvider>);
+      });
+      const item: MediaItem = { id: '13', kind: 'live', title: 'Reshet' };
+      const stream: MediaStream = { url: 'https://example.com/live.m3u8' };
+      act(() => { controller.play(item, stream); controller.markPlaying(); });
+      act(() => {
+        if (action === 'openFullscreen') { controller.openFullscreen(item); }
+        else { controller.enterFullscreen(); }
+        controller.stopAll();
+        controller.stopVideo();
+        controller.showImage({ ...item, id: 'other' });
+        controller.play({ ...item, id: 'other' }, { url: 'https://example.com/other.m3u8' });
+      });
+      expect(controller.isFullscreen).toBe(true);
+      expect(controller.item).toBe(item);
+      expect(controller.stream).toBe(stream);
+      expect(controller.status).toBe('playing');
+      act(() => { controller.exitFullscreen(); controller.stopAll(); });
+      expect(controller.stream).toBeUndefined();
+      act(() => renderer.unmount());
+    },
+  );
+
   it('routes seeks to the active adapter and releases its handler on teardown', () => {
     let controller!: MediaControllerValue;
     function Harness() {

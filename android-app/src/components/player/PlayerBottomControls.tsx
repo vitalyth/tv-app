@@ -69,30 +69,7 @@ function formatClockTime(date: Date): string {
   ].join(':');
 }
 
-function liveProgramWindowDisplay(timeRange?: string): string | undefined {
-  const match = timeRange?.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
-  if (!match) {
-    return undefined;
-  }
-
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(Number(match[1]), Number(match[2]), 0, 0);
-  if (start.getTime() > now.getTime()) {
-    start.setDate(start.getDate() - 1);
-  }
-
-  if (now.getTime() - start.getTime() < 1_000) {
-    return undefined;
-  }
-
-  return `${formatClockTime(start)} / ${formatClockTime(now)}`;
-}
-
 function getLiveTimeDisplay(
-  _currentTime: number,
-  duration: number,
-  timeRange?: string,
   seekableStart?: number,
   seekableEnd?: number,
 ): string {
@@ -101,18 +78,14 @@ function getLiveTimeDisplay(
     typeof seekableEnd === 'number' &&
     Number.isFinite(seekableStart) &&
     Number.isFinite(seekableEnd) &&
+    seekableStart >= 0 &&
     seekableEnd > seekableStart;
 
   if (!hasSeekableRange) {
-    const programWindowText = liveProgramWindowDisplay(timeRange);
-    if (programWindowText) {
-      return programWindowText;
-    }
+    return 'LIVE';
   }
 
-  const rewindWindowSeconds = hasSeekableRange
-    ? seekableEnd - seekableStart
-    : duration;
+  const rewindWindowSeconds = seekableEnd - seekableStart;
 
   if (!Number.isFinite(rewindWindowSeconds) || rewindWindowSeconds <= 0) {
     return 'LIVE';
@@ -162,9 +135,6 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   const displayedTime = seekPosition ?? currentTime;
   const atLiveEdge = !hasLiveRange || rangeEnd - displayedTime <= 5;
   const liveTimeText = getLiveTimeDisplay(
-    displayedTime,
-    duration,
-    item.timeRange,
     seekableStart,
     seekableEnd,
   );

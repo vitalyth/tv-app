@@ -431,6 +431,35 @@ describe('MediaPreviewEngine', () => {
     expect(controllerRef.presentation).toBe('single-video');
   });
 
+  it('uses current playback even if a native carousel retained an older focus callback', async () => {
+    let engine!: ReturnType<typeof useMediaPreviewEngine>;
+    let controller!: ReturnType<typeof useMediaController>;
+    const resolver = jest.fn(async (): Promise<MediaStream> => ({ url: 'https://example.com/live.m3u8' }));
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <TestHarness onEngineReady={value => { engine = value; }} onControllerChange={value => { controller = value; }} streamResolver={resolver} />
+        </MediaControllerProvider>,
+      );
+    });
+    const nativeFocusCallback = engine.focusMediaItem;
+    const item = createItem('13');
+    act(() => nativeFocusCallback(item));
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    act(() => { controller.markPlaying(); });
+    const stream = controller.stream;
+    act(() => {
+      engine.clearPreview({ stopMedia: false });
+      controller.enterFullscreen();
+      controller.exitFullscreen();
+    });
+    act(() => nativeFocusCallback(item));
+    expect(controller.stream).toBe(stream);
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(controller.stream).toBe(stream);
+  });
+
   it('does not reconnect live channels represented by a refreshed item id', async () => {
     let engineRef!: ReturnType<typeof useMediaPreviewEngine>;
     let controllerRef!: ReturnType<typeof useMediaController>;

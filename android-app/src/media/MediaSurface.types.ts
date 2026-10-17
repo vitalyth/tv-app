@@ -15,6 +15,7 @@ export interface MediaSurfaceProps {
   style?: StyleProp<ViewStyle>;
   onFirstFrame: () => void;
   onError: () => void;
+  onPausedChange?: (paused: boolean) => void;
   onProgress?: (data: {
     currentTime: number;
     playableDuration: number;

@@ -87,17 +87,38 @@ function mimeType(type?: 'm3u8' | 'mpd') {
   return undefined;
 }
 
+function serializeVegaUrl(url: URL): string {
+  const query = url.searchParams.toString();
+  // Vega's URL.href appends edited searchParams to the old query instead of replacing it.
+  return `${url.origin}${url.pathname}${query ? `?${query}` : ''}${url.hash}`;
+}
+
 export function getVegaRequestUri(uri: string): string {
   try {
     const proxy = new URL(uri);
-    if (!proxy.pathname.endsWith('/proxy') || proxy.pathname.endsWith('/v/proxy')) {
+    if (!proxy.pathname.endsWith('/proxy')) {
       return uri;
     }
     const upstreamUri = proxy.searchParams.get('url');
     if (!upstreamUri) { return uri; }
     const upstream = new URL(upstreamUri);
-    if (upstream.hostname === 'mako-streaming.akamaized.net') {
-      return upstream.href;
+    // Shaka's HLS refresh rebuilds queries after decoding them, leaking nested
+    // variant selectors and LL-HLS parameters into the outer proxy query.
+    let repaired = false;
+    for (const key of ['bitrate', 'audioId', 'videoId', 'dvr', '_HLS_msn', '_HLS_part', '_HLS_skip']) {
+      const value = proxy.searchParams.get(key);
+      if (value !== null) {
+        upstream.searchParams.set(key, value);
+        proxy.searchParams.delete(key);
+        repaired = true;
+      }
+    }
+    if (upstream.hostname === 'mako-streaming.akamaized.net' && !proxy.pathname.endsWith('/v/proxy')) {
+      return repaired ? serializeVegaUrl(upstream) : upstreamUri;
+    }
+    if (repaired) {
+      proxy.searchParams.set('url', serializeVegaUrl(upstream));
+      return serializeVegaUrl(proxy);
     }
   } catch {
     // Keep platform or non-HTTP URIs unchanged.
@@ -247,7 +268,13 @@ export class VegaShakaPlayer {
   }
 
   seekTo(seconds: number) {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      return;
+    }
     const range = this.getSeekableRange();
+    if (this.player.isLive() && range.end === undefined) {
+      return;
+    }
     const target = this.player.isLive() && range.end !== undefined
       ? Math.max(range.start, Math.min(seconds, range.end - Math.min(3, (range.end - range.start) / 2)))
       : seconds;
@@ -257,7 +284,7 @@ export class VegaShakaPlayer {
 
   getSeekableRange() {
     const range = this.player.seekRange();
-    if (Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start) {
+    if (Number.isFinite(range.start) && Number.isFinite(range.end) && range.start >= 0 && range.end > range.start) {
       return range;
     }
     return {};

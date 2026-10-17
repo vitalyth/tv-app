@@ -14,6 +14,7 @@ export function MediaSurface({
   streamType,
   fallbackStreamUrl,
   fallbackStreamType,
+  isLive = false,
   isMuted = false,
   paused = false,
   startPositionSeconds,
@@ -32,14 +33,29 @@ export function MediaSurface({
   });
   const usingFallback = useRef(false);
   const firstFrameReported = useRef(false);
+  const seekableEndRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    return registerSeekHandler?.(seconds => videoRef.current?.seek(seconds));
-  }, [registerSeekHandler]);
+    return registerSeekHandler?.(seconds => {
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        return;
+      }
+      if (isLive) {
+        const end = seekableEndRef.current;
+        if (end === undefined) {
+          return;
+        }
+        videoRef.current?.seek(Math.min(seconds, end - Math.min(3, end / 2)));
+      } else {
+        videoRef.current?.seek(seconds);
+      }
+    });
+  }, [isLive, registerSeekHandler]);
 
   useEffect(() => {
     usingFallback.current = false;
     firstFrameReported.current = false;
+    seekableEndRef.current = undefined;
     setActiveSource({ url: streamUrl, type: streamType || 'm3u8' });
   }, [streamType, streamUrl]);
 
@@ -52,19 +68,17 @@ export function MediaSurface({
 
   const handleProgress = useCallback(
     (data: OnProgressData) => {
+      const hasRange = Number.isFinite(data.seekableDuration) && data.seekableDuration > 0;
+      seekableEndRef.current = hasRange ? data.seekableDuration : undefined;
       if (data.currentTime > 0) {
         handleFirstFrame();
       }
       onProgress?.({
         currentTime: data.currentTime,
         playableDuration: data.playableDuration,
-        seekableDuration: data.seekableDuration,
-        seekableStart:
-          data.seekableDuration > 0
-            ? 0
-            : undefined,
-        seekableEnd:
-          data.seekableDuration > 0 ? data.seekableDuration : undefined,
+        seekableDuration: hasRange ? data.seekableDuration : 0,
+        seekableStart: hasRange ? 0 : undefined,
+        seekableEnd: seekableEndRef.current,
       });
     },
     [handleFirstFrame, onProgress],
@@ -111,6 +125,7 @@ export function MediaSurface({
   const handleError = useCallback(() => {
     if (fallbackStreamUrl && !usingFallback.current) {
       usingFallback.current = true;
+      seekableEndRef.current = undefined;
       setActiveSource({
         url: fallbackStreamUrl,
         type: fallbackStreamType || 'm3u8',

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { ActivityIndicator, Animated, Image, StyleSheet, View } from 'react-native';
+import { Animated, Image, StyleSheet, View } from 'react-native';
 import { useForegroundPlaybackTimeout } from '../hooks/useForegroundPlaybackTimeout';
 import { useMediaController } from '../media/MediaController';
 import { MediaSurface } from '../media/MediaSurface';
@@ -55,6 +55,7 @@ export function MediaLayer() {
     isFullscreen,
     status,
     paused,
+    setPaused,
     selectedQualityId,
     markError,
     markPlaying,
@@ -66,6 +67,12 @@ export function MediaLayer() {
   useForegroundPlaybackTimeout(
     Boolean(item && stream && presentation !== 'background-image' && !paused),
   );
+
+  useEffect(() => {
+    console.info('[PlaybackTransition]', {
+      item: item?.id, isFullscreen, presentation, status, hasStream: Boolean(stream),
+    });
+  }, [isFullscreen, item?.id, presentation, status, stream]);
 
   return (
     <View
@@ -80,13 +87,6 @@ export function MediaLayer() {
           uri={item.backdropUrl ?? item.imageUrl!}
           fallbackUri={item.fallbackImageUrl}
         />
-      ) : null}
-
-      {/* Centered Loading Spinner in Full Screen mode when video is not yet playing */}
-      {isFullscreen && status !== 'playing' && !stream ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#38bdf8" />
-        </View>
       ) : null}
 
       {item && stream && presentation !== 'background-image' ? (
@@ -113,6 +113,7 @@ export function MediaLayer() {
             registerSeekHandler={registerSeekHandler}
             onFirstFrame={markPlaying}
             onError={markError}
+            onPausedChange={setPaused}
             onProgress={({
               currentTime,
               seekableDuration,
@@ -152,10 +153,4 @@ const styles = StyleSheet.create({
   poster: { ...StyleSheet.absoluteFillObject },
   videoVisible: { opacity: 1 },
   videoHidden: { opacity: 0 },
-  loadingContainer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#07111c',
-  },
 });

@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
-import { BackHandler } from 'react-native';
+import { BackHandler, Image, useTVEventHandler } from 'react-native';
 import { FullScreenPlayer } from '../src/components/player/FullScreenPlayer';
 import {
   MediaControllerProvider,
@@ -12,6 +12,12 @@ import { WatchProgressService } from '../src/services/watchProgress';
 import { SourceDialog } from '../src/components/player/SourceDialog';
 import { t } from '../src/i18n';
 import * as channelApi from '../src/api/channels';
+import { tvPlatform } from '../src/platform/runtime';
+
+jest.mock('react-native/Libraries/Components/TV/useTVEventHandler', () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 
 jest.mock('../src/components/RemoteImage', () => ({
   RemoteImage: () => 'RemoteImage',
@@ -40,6 +46,7 @@ describe('FullScreenPlayer', () => {
       });
       activeRenderer = null;
     }
+    jest.restoreAllMocks();
   });
 
   const mockLiveItem: MediaItem = {
@@ -82,6 +89,163 @@ describe('FullScreenPlayer', () => {
     url: 'https://example.com/stream.m3u8',
     type: 'm3u8',
   };
+
+  const channelList: MediaItem[] = [
+    mockLiveItem,
+    { id: 'ch-12', kind: 'live', title: 'Channel 12', channelName: 'Keshet', channelNumber: '12' },
+    { id: 'ch-13', kind: 'live', title: 'Channel 13', channelName: 'Reshet', channelNumber: '13' },
+  ];
+
+  async function mountHiddenPlayer(mediaItem = mockLiveItem) {
+    let controller!: ReturnType<typeof useMediaController>;
+    function Probe() { controller = useMediaController(); return null; }
+    await act(async () => {
+      activeRenderer = ReactTestRenderer.create(
+        <MediaControllerProvider><Probe /><PlayerTestHarness item={mediaItem} onExit={jest.fn()} /></MediaControllerProvider>,
+      );
+    });
+    await act(async () => { backPressHandler?.(); });
+    return {
+      controller: () => controller,
+      handler: jest.mocked(useTVEventHandler).mock.lastCall![0],
+    };
+  }
+
+  it.each([
+    ['up', 1], ['down', 2],
+  ] as const)('switches hidden live playback with %s without revealing panels', async (eventType, targetIndex) => {
+    const channels = jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream').mockResolvedValue({ url: 'https://example.com/next.m3u8' });
+    const player = await mountHiddenPlayer();
+    await act(async () => { player.handler({ eventType, eventKeyAction: 0 }); });
+    expect(resolve).toHaveBeenCalledWith(channelList[targetIndex]);
+    expect(player.controller().item).toBe(channelList[targetIndex]);
+    expect(player.controller().isFullscreen).toBe(true);
+    expect(activeRenderer!.root.findByProps({ testID: 'player-top-panel' })).toBeDefined();
+    expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+    await act(async () => { player.handler({ eventType, eventKeyAction: 1 }); });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(channels).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the latest channel selection when earlier resolution finishes later', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    let finishFirst!: (stream: MediaStream) => void;
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream')
+      .mockImplementationOnce(() => new Promise<MediaStream>(done => { finishFirst = done; }))
+      .mockResolvedValueOnce({ url: 'https://example.com/latest.m3u8' });
+    const player = await mountHiddenPlayer();
+    await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+    await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+    expect(resolve.mock.calls.map(call => call[0].id)).toEqual(['ch-12', 'ch-13']);
+    expect(player.controller().item?.id).toBe('ch-13');
+    await act(async () => { finishFirst({ url: 'https://example.com/stale.m3u8' }); });
+    expect(player.controller().item?.id).toBe('ch-13');
+    expect(player.controller().stream?.url).toBe('https://example.com/latest.m3u8');
+  });
+
+  it('shows only the selected channel info during resolution and resets its auto-hide timer on another switch', async () => {
+    jest.useFakeTimers();
+    try {
+      jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+      let finish!: (stream: MediaStream) => void;
+      jest.spyOn(channelApi, 'resolveLiveChannelStream')
+        .mockImplementationOnce(() => new Promise<MediaStream>(done => { finish = done; }))
+        .mockResolvedValueOnce({ url: 'https://example.com/third.m3u8' });
+      const player = await mountHiddenPlayer();
+      await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+      const top = () => activeRenderer!.root.findAllByProps({ testID: 'player-top-panel' });
+      expect(top()[0].findAllByType('Text' as any).some(node => node.props.children === 'Channel 12')).toBe(true);
+      expect(player.controller().item).toBe(mockLiveItem);
+      expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+      await act(async () => { jest.advanceTimersByTime(6000); });
+      expect(top().length).toBeGreaterThan(0);
+      await act(async () => { finish({ url: 'https://example.com/second.m3u8' }); });
+      await act(async () => { jest.advanceTimersByTime(4000); });
+      expect(top().length).toBeGreaterThan(0);
+      await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+      await act(async () => { jest.advanceTimersByTime(1000); });
+      expect(top().length).toBeGreaterThan(0);
+      expect(top()[0].findAllByType('Text' as any).some(node => node.props.children === 'Channel 13')).toBe(true);
+      await act(async () => { jest.advanceTimersByTime(3500); });
+      expect(top()).toHaveLength(0);
+      expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+    } finally {
+      await act(async () => { activeRenderer?.unmount(); });
+      activeRenderer = null;
+      jest.useRealTimers();
+    }
+  });
+
+  it('preserves the current stream if channel switching fails and retries from that channel', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream')
+      .mockRejectedValueOnce(new Error('Unavailable'))
+      .mockResolvedValueOnce({ url: 'https://example.com/previous.m3u8' });
+    const player = await mountHiddenPlayer();
+    await act(async () => { player.controller().markPlaying(); });
+    await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+    expect(player.controller().item).toBe(mockLiveItem);
+    expect(player.controller().stream).toBe(mockStream);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'player-loading' })).toHaveLength(0);
+    await act(async () => { player.handler({ eventType: 'down', eventKeyAction: 0 }); });
+    expect(resolve).toHaveBeenLastCalledWith(channelList[2]);
+  });
+
+  it('shows loading through channel resolution and startup, then hides it on playback or error', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    let finish!: (stream: MediaStream) => void;
+    jest.spyOn(channelApi, 'resolveLiveChannelStream')
+      .mockImplementationOnce(() => new Promise<MediaStream>(done => { finish = done; }))
+      .mockResolvedValueOnce({ url: 'https://example.com/third.m3u8' });
+    const player = await mountHiddenPlayer();
+    const loading = () => activeRenderer!.root.findAllByProps({ testID: 'player-loading' });
+    await act(async () => { player.controller().markPlaying(); });
+    expect(loading()).toHaveLength(0);
+    await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+    expect(player.controller().status).toBe('playing');
+    expect(loading().length).toBeGreaterThan(0);
+    await act(async () => { finish({ url: 'https://example.com/second.m3u8' }); });
+    expect(player.controller().status).toBe('loading');
+    expect(loading().length).toBeGreaterThan(0);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+    await act(async () => { player.controller().markPlaying(); });
+    expect(loading()).toHaveLength(0);
+    await act(async () => { player.controller().setPaused(true); });
+    expect(loading()).toHaveLength(0);
+    await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+    expect(loading().length).toBeGreaterThan(0);
+    // Keep automatic live recovery from hiding the terminal error transition.
+    jest.mocked(channelApi.resolveLiveChannelStream).mockRejectedValue(new Error('Unavailable'));
+    await act(async () => { player.controller().markError(); });
+    expect(loading()).toHaveLength(0);
+  });
+
+  it('does not change channels when controls are visible or when playing VOD', async () => {
+    const channels = jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const player = await mountHiddenPlayer();
+    await act(async () => { player.handler({ eventType: 'left', eventKeyAction: 0 }); });
+    const visibleHandler = jest.mocked(useTVEventHandler).mock.calls.at(-2)![0];
+    await act(async () => { visibleHandler({ eventType: 'up', eventKeyAction: 0 }); });
+    expect(channels).not.toHaveBeenCalled();
+    await act(async () => { activeRenderer?.unmount(); });
+    const vod = await mountHiddenPlayer(mockVodItem);
+    await act(async () => { vod.handler({ eventType: 'down', eventKeyAction: 0 }); });
+    expect(channels).not.toHaveBeenCalled();
+    expect(activeRenderer!.root.findByProps({ testID: 'quality-button' })).toBeDefined();
+  });
+
+  it('ignores a pending channel switch after leaving the player', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    let finish!: (stream: MediaStream) => void;
+    jest.spyOn(channelApi, 'resolveLiveChannelStream').mockImplementation(() => new Promise<MediaStream>(done => { finish = done; }));
+    const player = await mountHiddenPlayer();
+    await act(async () => { player.handler({ eventType: 'up', eventKeyAction: 0 }); });
+    await act(async () => { activeRenderer?.unmount(); });
+    activeRenderer = null;
+    await act(async () => { finish({ url: 'https://example.com/stale.m3u8' }); });
+    expect(player.controller().item).toBe(mockLiveItem);
+  });
 
   it('gives preferred focus only to the selected source', async () => {
     await act(async () => {
@@ -186,6 +350,141 @@ describe('FullScreenPlayer', () => {
     expect(textContents).toContain(t('playerSources'));
     expect(textContents).toContain(t('playerMultiView'));
   });
+
+  it.each(['playpause', 'playPause'])(
+    'updates playback and the controls on each %s press, including with hidden panels',
+    async eventType => {
+      let controller!: ReturnType<typeof useMediaController>;
+      function Probe() {
+        controller = useMediaController();
+        return null;
+      }
+      await act(async () => {
+        activeRenderer = ReactTestRenderer.create(
+          <MediaControllerProvider>
+            <Probe />
+            <PlayerTestHarness item={mockLiveItem} onExit={jest.fn()} />
+          </MediaControllerProvider>,
+        );
+      });
+      await act(async () => { backPressHandler?.(); });
+      const handler = jest.mocked(useTVEventHandler).mock.lastCall![0];
+      await act(async () => { handler({ eventType, eventKeyAction: 0 }); });
+      expect(controller.paused).toBe(true);
+      expect(activeRenderer!.root.findByProps({ testID: 'play-pause-button' }).findByType(Image).props.source)
+        .toBe(require('../src/assets/icons/play.png'));
+      await act(async () => { handler({ eventType, eventKeyAction: 1 }); });
+      expect(controller.paused).toBe(true);
+      await act(async () => { handler({ eventType, eventKeyAction: 0 }); });
+      expect(controller.paused).toBe(false);
+      expect(activeRenderer!.root.findByProps({ testID: 'play-pause-button' }).findByType(Image).props.source)
+        .toBe(require('../src/assets/icons/pause.png'));
+      expect(controller.stream).toBe(mockStream);
+    },
+  );
+
+  it('handles explicit pause and play commands without toggling twice', async () => {
+    let controller!: ReturnType<typeof useMediaController>;
+    function Probe() {
+      controller = useMediaController();
+      return null;
+    }
+    await act(async () => {
+      activeRenderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <Probe />
+          <PlayerTestHarness item={mockLiveItem} onExit={jest.fn()} />
+        </MediaControllerProvider>,
+      );
+    });
+    await act(async () => { backPressHandler?.(); });
+    const handler = jest.mocked(useTVEventHandler).mock.lastCall![0];
+    for (const eventType of ['pause', 'pause', 'play', 'play']) {
+      await act(async () => { handler({ eventType, eventKeyAction: 0 }); });
+      expect(controller.paused).toBe(eventType === 'pause');
+      expect(activeRenderer!.root.findByProps({ testID: 'play-pause-button' }).findByType(Image).props.source)
+        .toBe(eventType === 'pause' ? require('../src/assets/icons/play.png') : require('../src/assets/icons/pause.png'));
+    }
+  });
+
+  it('lets the Vega native media session handle playback and renders its reported state', async () => {
+    const previousPlatform = tvPlatform.id;
+    tvPlatform.id = 'kepler';
+    try {
+      let controller!: ReturnType<typeof useMediaController>;
+      function Probe() { controller = useMediaController(); return null; }
+      await act(async () => {
+        activeRenderer = ReactTestRenderer.create(
+          <MediaControllerProvider><Probe /><PlayerTestHarness item={mockLiveItem} onExit={jest.fn()} /></MediaControllerProvider>,
+        );
+      });
+      await act(async () => { backPressHandler?.(); });
+      const handler = jest.mocked(useTVEventHandler).mock.lastCall![0];
+      await act(async () => { handler({ eventType: 'playpause', eventKeyAction: 0 }); });
+      expect(controller.paused).toBe(false);
+      await act(async () => { controller.setPaused(true); });
+      expect(activeRenderer!.root.findByProps({ testID: 'play-pause-button' }).findByType(Image).props.source)
+        .toBe(require('../src/assets/icons/play.png'));
+      await act(async () => { handler({ eventType: 'playpause', eventKeyAction: 0 }); });
+      expect(controller.paused).toBe(true);
+      await act(async () => { controller.setPaused(false); });
+      expect(activeRenderer!.root.findByProps({ testID: 'play-pause-button' }).findByType(Image).props.source)
+        .toBe(require('../src/assets/icons/pause.png'));
+    } finally {
+      tvPlatform.id = previousPlatform;
+    }
+  });
+
+  it.each(['volume_up', 'volume_down', 'mute', 'volumeUp', 'volumeDown', 'focus', 'blur', 'unknown'])(
+    'keeps hidden panels closed for %s while allowing navigation to reveal them',
+    async eventType => {
+      await act(async () => {
+        activeRenderer = ReactTestRenderer.create(
+          <MediaControllerProvider>
+            <PlayerTestHarness item={mockLiveItem} onExit={jest.fn()} />
+          </MediaControllerProvider>,
+        );
+      });
+      await act(async () => { backPressHandler?.(); });
+      const handler = jest.mocked(useTVEventHandler).mock.lastCall![0];
+      await act(async () => {
+        handler({ eventType, eventKeyAction: 0 });
+        handler({ eventType, eventKeyAction: 1 });
+      });
+      expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+      expect(activeRenderer!.root.findByProps({ testID: 'fullscreen-controls-activator' })).toBeDefined();
+      await act(async () => { handler({ eventType: 'left', eventKeyAction: 0 }); });
+      expect(activeRenderer!.root.findByProps({ testID: 'quality-button' })).toBeDefined();
+    },
+  );
+
+  it.each(['volume_up', 'volume_down', 'mute', 'volumeUp', 'volumeDown', 'focus', 'blur', 'unknown'])(
+    'does not extend the panels auto-hide timer for %s',
+    async eventType => {
+      jest.useFakeTimers();
+      try {
+        await act(async () => {
+          activeRenderer = ReactTestRenderer.create(
+            <MediaControllerProvider>
+              <PlayerTestHarness item={mockLiveItem} onExit={jest.fn()} />
+            </MediaControllerProvider>,
+          );
+        });
+        // Reveal again so the latest registered remote handler belongs to the player.
+        await act(async () => { backPressHandler?.(); });
+        const handler = jest.mocked(useTVEventHandler).mock.lastCall![0];
+        await act(async () => { handler({ eventType: 'left', eventKeyAction: 0 }); });
+        await act(async () => { jest.advanceTimersByTime(4000); });
+        await act(async () => { handler({ eventType, eventKeyAction: 0 }); });
+        await act(async () => { jest.advanceTimersByTime(500); });
+        expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+      } finally {
+        await act(async () => { activeRenderer?.unmount(); });
+        activeRenderer = null;
+        jest.useRealTimers();
+      }
+    },
+  );
 
   it('renders VOD player without Sources or Multi View buttons', async () => {
     const onExit = jest.fn();

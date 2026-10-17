@@ -151,8 +151,6 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     previewEngineRef.current = previewEngine;
     const onItemFocusedRef = useRef(onItemFocused);
     onItemFocusedRef.current = onItemFocused;
-    const [pendingFullscreenItem, setPendingFullscreenItem] =
-      useState<MediaItem | null>(null);
 
     const contentWidth =
       windowWidth - MAIN_CONTENT_INSET_LEFT - MAIN_CONTENT_INSET_RIGHT;
@@ -166,22 +164,6 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
     const hasContinue = continueItems.length > 0;
     const hasLive = liveChannels.length > 0;
     const hasVod = vodItems.length > 0;
-
-    useEffect(() => {
-      if (
-        pendingFullscreenItem &&
-        currentMediaStream &&
-        isSameMediaItem(currentMediaItem, pendingFullscreenItem)
-      ) {
-        setPendingFullscreenItem(null);
-        enterFullscreen();
-      }
-    }, [
-      currentMediaItem,
-      currentMediaStream,
-      enterFullscreen,
-      pendingFullscreenItem,
-    ]);
 
     const translateYAnim = useRef(new Animated.Value(0)).current;
     const continueOpacityAnim = useRef(new Animated.Value(1)).current;
@@ -570,19 +552,16 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
 
         if (item.kind === 'live') {
           if (isSameMediaItem(currentMediaItem, item) && currentMediaStream) {
-            setPendingFullscreenItem(null);
             previewEngineRef.current.clearPreview({ stopMedia: false });
             enterFullscreen();
             return;
           }
 
-          setPendingFullscreenItem(item);
           previewEngineRef.current.clearPreview({ stopMedia: false });
-          previewEngineRef.current.focusMediaItem(item);
+          openFullscreen(item);
           return;
         }
 
-        setPendingFullscreenItem(null);
         previewEngineRef.current.clearPreview({ stopMedia: true });
         openFullscreen(item);
       },

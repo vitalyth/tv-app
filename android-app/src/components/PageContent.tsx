@@ -141,10 +141,8 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
       stream: currentMediaStream,
     } =
       useMediaController();
-    const { enterFullscreen } = useMediaActions();
+    const { enterFullscreen, openFullscreen } = useMediaActions();
     const previewEngine = useMediaPreviewEngine();
-    const [pendingFullscreenItem, setPendingFullscreenItem] =
-      useState<MediaItem | null>(null);
 
     const contentWidth =
       windowWidth - MAIN_CONTENT_INSET_LEFT - MAIN_CONTENT_INSET_RIGHT;
@@ -222,20 +220,19 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
     const handleActivate = useCallback(
       (channel: MediaItem) => {
         if (isSameMediaItem(currentMediaItem, channel) && currentMediaStream) {
-          setPendingFullscreenItem(null);
           previewEngine.clearPreview({ stopMedia: false });
           enterFullscreen();
           return;
         }
 
-        setPendingFullscreenItem(channel);
         previewEngine.clearPreview({ stopMedia: false });
-        previewEngine.focusMediaItem(channel);
+        openFullscreen(channel);
       },
       [
         currentMediaItem,
         currentMediaStream,
         enterFullscreen,
+        openFullscreen,
         previewEngine,
       ],
     );
@@ -244,24 +241,6 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
       () => [...channels].reverse(),
       [channels],
     );
-
-    useEffect(() => {
-      if (
-        pendingFullscreenItem &&
-        currentMediaStream &&
-        isSameMediaItem(currentMediaItem, pendingFullscreenItem)
-      ) {
-        setPendingFullscreenItem(null);
-        previewEngine.clearPreview({ stopMedia: false });
-        enterFullscreen();
-      }
-    }, [
-      currentMediaItem,
-      currentMediaStream,
-      enterFullscreen,
-      pendingFullscreenItem,
-      previewEngine,
-    ]);
 
     const renderChannelCard = useCallback(
       (channel: MediaItem, _index: number, focused: boolean) => (

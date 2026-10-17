@@ -25,6 +25,7 @@ interface SurfaceEngineProps {
   registerSeekHandler?: MediaSurfaceProps['registerSeekHandler'];
   onFirstFrame: () => void;
   onError: () => void;
+  onPausedChange?: MediaSurfaceProps['onPausedChange'];
   onProgress?: (data: {
     currentTime: number;
     playableDuration: number;
@@ -88,6 +89,7 @@ function NativeHlsSurface({
   registerSeekHandler,
   onFirstFrame,
   onError,
+  onPausedChange,
   onProgress,
 }: SurfaceEngineProps) {
   const videoRef = useRef<any>(null);
@@ -188,9 +190,15 @@ function NativeHlsSurface({
         }
       }}
       onPlaying={() => {
+        onPausedChange?.(false);
         if (!firstFrameReported.current) {
           firstFrameReported.current = true;
           onFirstFrame();
+        }
+      }}
+      onPause={() => {
+        if (videoInstance.current) {
+          onPausedChange?.(Boolean(videoInstance.current.paused));
         }
       }}
       onError={onError}
@@ -208,6 +216,7 @@ function ShakaPlayerSurface({
   registerSeekHandler,
   onFirstFrame,
   onError,
+  onPausedChange,
   onProgress,
   onVideoTracks,
 }: SurfaceEngineProps) {
@@ -217,6 +226,8 @@ function ShakaPlayerSurface({
   const firstFrameReported = useRef(false);
   const destroyed = useRef(false);
   const teardown = useRef<Promise<void> | null>(null);
+  const playbackCallbacks = useRef({ onPausedChange });
+  playbackCallbacks.current = { onPausedChange };
 
   useEffect(() => {
     return registerSeekHandler?.(seconds => {
@@ -276,21 +287,23 @@ function ShakaPlayerSurface({
       player.setSurfaceHandle(handle);
       player.autoplay = true;
       const reportFirstFrame = () => {
-        if (!firstFrameReported.current) {
+        if (!destroyed.current && videoPlayer.current === player && !firstFrameReported.current) {
           firstFrameReported.current = true;
           onFirstFrame();
         }
       };
       player.addEventListener('playing', reportFirstFrame);
-      player.addEventListener('loadeddata', reportFirstFrame);
-      player.addEventListener('canplay', reportFirstFrame);
+      const reportPaused = () => {
+        if (!destroyed.current && videoPlayer.current === player) {
+          playbackCallbacks.current.onPausedChange?.(Boolean(player.paused));
+        }
+      };
+      player.addEventListener('pause', reportPaused);
+      player.addEventListener('playing', reportPaused);
       player.addEventListener('timeupdate', () => {
         const cur = player.currentTime ?? 0;
         const dur = player.duration ?? 0;
         const seekableRange = shakaPlayer.current?.getSeekableRange() ?? readSeekableRange(player);
-        if (!firstFrameReported.current && (cur > 0 || dur > 0)) {
-          reportFirstFrame();
-        }
         onProgress?.({
           currentTime: cur,
           playableDuration: cur,
@@ -317,7 +330,6 @@ function ShakaPlayerSurface({
           url: url.slice(0, 100),
         });
         await shaka.load(url, streamType);
-        reportFirstFrame();
         if (startPositionSeconds && startPositionSeconds > 0) {
           const duration = player.duration ?? 0;
           player.currentTime =
@@ -428,6 +440,7 @@ export function MediaSurface({
   registerSeekHandler,
   onFirstFrame,
   onError,
+  onPausedChange,
   onProgress,
   onVideoTracks,
 }: MediaSurfaceProps) {
@@ -510,6 +523,7 @@ export function MediaSurface({
         registerSeekHandler={registerSeekHandler}
         onFirstFrame={onFirstFrame}
         onError={handleError}
+        onPausedChange={onPausedChange}
         onProgress={onProgress}
         onVideoTracks={onVideoTracks}
       />

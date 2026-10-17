@@ -156,7 +156,7 @@ describe('PlayerBottomControls timeline', () => {
 
   it('shows the live rewind window against the live edge', async () => {
     jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
-    await render('live', 103, 210);
+    await render('live', 103, 210, 'auto', [], 0, 210);
 
     const liveText = renderer.root
       .findAllByType('Text' as any)
@@ -178,12 +178,12 @@ describe('PlayerBottomControls timeline', () => {
     expect(liveText).toBe('13:05:21 / 13:07:01');
   });
 
-  it('uses the program time range before live seekable data arrives', async () => {
+  it('does not present EPG or duration as an available rewind window', async () => {
     jest.setSystemTime(new Date('2026-10-12T10:07:01Z'));
     await render(
       'live',
       0,
-      0,
+      300,
       'auto',
       [],
       undefined,
@@ -196,7 +196,11 @@ describe('PlayerBottomControls timeline', () => {
       .map(node => node.props.children)
       .find(children => typeof children === 'string' && children.includes('/'));
 
-    expect(liveText).toBe('13:00:00 / 13:07:01');
+    expect(liveText).toBeUndefined();
+    await focus('player-timeline');
+    await press('left');
+    await act(async () => renderer.root.findByProps({ testID: 'live-button' }).props.onPress());
+    expect(onSeek).not.toHaveBeenCalled();
   });
 
   it.each(['vod', 'live'] as const)(
@@ -324,6 +328,23 @@ describe('PlayerBottomControls timeline', () => {
     await focus('live-button');
     await press('right');
     expect(focusRequests.get('multiview-button')).toHaveBeenCalled();
+  });
+
+  it.each([
+    [undefined, undefined],
+    [0, Infinity],
+    [NaN, 200],
+    [-10, 200],
+    [200, 100],
+    [200, 200],
+  ])('ignores invalid live range %s to %s', async (start, end) => {
+    await render('live', 120, 300, 'auto', [], start, end);
+    await focus('player-timeline');
+    await press('left');
+    await press('right');
+    await act(async () => renderer.root.findByProps({ testID: 'live-button' }).props.onPress());
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(renderer.root.findByProps({ testID: 'player-timeline' }).props.accessibilityRole).toBe('progressbar');
   });
 
   it.each([

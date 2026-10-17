@@ -44,3 +44,39 @@ it('seeks Android playback without remounting or changing pause state and unregi
   act(() => renderer.unmount());
   expect(release).toHaveBeenCalledTimes(1);
 });
+
+it('uses only a finite Android live window and stays behind its live edge', () => {
+  mockSeek.mockClear();
+  let seek!: (seconds: number) => void;
+  const onProgress = jest.fn();
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {
+    renderer = ReactTestRenderer.create(
+      <MediaSurface
+        streamUrl="https://example.com/live.m3u8"
+        isLive
+        registerSeekHandler={handler => { seek = handler; return jest.fn(); }}
+        onProgress={onProgress}
+        onFirstFrame={jest.fn()}
+        onError={jest.fn()}
+      />,
+    );
+  });
+  const video = renderer.root.findByType('Video' as any);
+  act(() => seek(200));
+  expect(mockSeek).not.toHaveBeenCalled();
+  act(() => video.props.onProgress({ currentTime: 190, playableDuration: 200, seekableDuration: 200 }));
+  act(() => seek(200));
+  expect(mockSeek).toHaveBeenLastCalledWith(197);
+  act(() => seek(130));
+  expect(mockSeek).toHaveBeenLastCalledWith(130);
+  for (const seekableDuration of [0, -1, Infinity, NaN]) {
+    mockSeek.mockClear();
+    act(() => video.props.onProgress({ currentTime: 190, playableDuration: 200, seekableDuration }));
+    act(() => seek(150));
+    expect(mockSeek).not.toHaveBeenCalled();
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ seekableStart: undefined, seekableEnd: undefined }));
+  }
+  expect(renderer.root.findByType('Video' as any)).toBe(video);
+  act(() => renderer.unmount());
+});

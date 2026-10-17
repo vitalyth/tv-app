@@ -1,7 +1,8 @@
 import React, { createRef } from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { HomeScreen, type HomeScreenHandle } from '../src/screens/HomeScreen';
-import { MediaControllerProvider } from '../src/media/MediaController';
+import { MediaControllerProvider, useMediaController } from '../src/media/MediaController';
+import { PageContent } from '../src/components/PageContent';
 import * as channelsApi from '../src/api/channels';
 import * as vodApi from '../src/api/vod';
 import {
@@ -313,5 +314,78 @@ describe('HomeScreen', () => {
     // ch-12 was in recentChannelIds, so it should be prioritized first
     expect(liveCarousel.props.items[0].id).toBe('ch-12');
     expect(liveCarousel.props.items[1].id).toBe('ch-11');
+  });
+
+  it.each(['home', 'live-tv'] as const)(
+    'opens %s fullscreen immediately without waiting for preview resolution',
+    async routeId => {
+      jest.useFakeTimers();
+      try {
+        jest.spyOn(channelsApi, 'getDistinctLiveChannels').mockResolvedValue(mockLiveChannels);
+        jest.spyOn(channelsApi, 'getPlayableLiveChannels').mockResolvedValue(mockLiveChannels);
+        jest.spyOn(vodApi, 'getRecentVodItems').mockResolvedValue([]);
+        jest.spyOn(WatchProgressService, 'getContinueWatching').mockResolvedValue([]);
+        const resolver = jest.spyOn(channelsApi, 'resolveLiveChannelStream')
+          .mockImplementation(() => new Promise(() => {}));
+        let controller!: ReturnType<typeof useMediaController>;
+        function Observer() {
+          controller = useMediaController();
+          return null;
+        }
+        await act(async () => {
+          renderer = ReactTestRenderer.create(
+            <MediaControllerProvider>
+              <Observer />
+              <PageContent
+                route={{ ...mockRoute, id: routeId }}
+                active
+                menuFocusDestination={null}
+                onContentFocus={jest.fn()}
+              />
+            </MediaControllerProvider>,
+          );
+        });
+        // Home waits for its initial focus timer; activation must not wait for video debounce.
+        await act(async () => { jest.advanceTimersByTime(300); });
+        const carousel = renderer!.root.findByProps({ id: routeId === 'home' ? 'home-live' : 'live-tv-primary' });
+        act(() => carousel.props.onItemSelect(mockLiveChannels[0]));
+        expect(controller.isFullscreen).toBe(true);
+        expect(controller.item?.id).toBe('ch-11');
+        expect(controller.status).toBe('loading');
+        expect(controller.stream).toBeUndefined();
+        await act(async () => { jest.advanceTimersByTime(2000); });
+        expect(resolver).not.toHaveBeenCalled();
+      } finally {
+        act(() => renderer?.unmount());
+        renderer = null;
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  it('reuses an already loading preview stream when opening fullscreen', async () => {
+    jest.spyOn(channelsApi, 'getDistinctLiveChannels').mockResolvedValue(mockLiveChannels);
+    jest.spyOn(vodApi, 'getRecentVodItems').mockResolvedValue([]);
+    jest.spyOn(WatchProgressService, 'getContinueWatching').mockResolvedValue([]);
+    let controller!: ReturnType<typeof useMediaController>;
+    function Observer() {
+      controller = useMediaController();
+      return null;
+    }
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <Observer />
+          <HomeScreen route={mockRoute} active menuFocusDestination={null} onContentFocus={jest.fn()} />
+        </MediaControllerProvider>,
+      );
+    });
+    const stream = { url: 'https://example.com/loading.m3u8', type: 'm3u8' as const };
+    act(() => controller.play(mockLiveChannels[0], stream));
+    expect(controller.status).toBe('loading');
+    act(() => renderer!.root.findByProps({ id: 'home-live' }).props.onItemSelect(mockLiveChannels[0]));
+    expect(controller.isFullscreen).toBe(true);
+    expect(controller.stream).toBe(stream);
+    expect(controller.presentation).toBe('single-video');
   });
 });

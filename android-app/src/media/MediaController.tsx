@@ -87,10 +87,13 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   const stream = streamSource && isSameMediaItem(streamSource.item, item)
     ? streamSource.stream
     : undefined;
+  const playbackRef = useRef({ item, streamSource });
+  playbackRef.current = { item, streamSource };
   const [presentation, setPresentationState] =
     useState<MediaPresentation>('background-image');
   const presentationRef = useRef<MediaPresentation>('background-image');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const isFullscreenRef = useRef(false);
 
   const setPresentation = useCallback((nextPresentation: MediaPresentation) => {
     presentationRef.current = nextPresentation;
@@ -123,7 +126,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   }, []);
 
   const play = useCallback((nextItem: MediaItem, nextStream: MediaStream) => {
-    if (presentationRef.current === 'fullscreen') {
+    if (isFullscreenRef.current || presentationRef.current === 'fullscreen') {
       return;
     }
     setStatus('loading');
@@ -139,6 +142,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   }, [setPresentation]);
 
   const playFullscreen = useCallback((nextItem: MediaItem, nextStream: MediaStream) => {
+    isFullscreenRef.current = true;
     setStatus('loading');
     setIsFullscreen(true);
     setPresentation('fullscreen');
@@ -152,11 +156,11 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   }, [setPresentation]);
 
   const openFullscreen = useCallback((nextItem: MediaItem) => {
-    if (isSameMediaItem(item, nextItem) && streamSource?.stream) {
+    isFullscreenRef.current = true;
+    const current = playbackRef.current;
+    if (isSameMediaItem(current.item, nextItem) && current.streamSource?.stream) {
       setIsFullscreen(true);
       setItem(nextItem);
-      setStatus(current => (current === 'loading' ? 'playing' : current));
-      setPausedState(false);
       return;
     }
 
@@ -171,23 +175,21 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setSeekableStart(0);
     setSeekableEnd(0);
     setVideoQualities([]);
-  }, [item, setPresentation, streamSource?.stream]);
+  }, [setPresentation]);
 
   const enterFullscreen = useCallback(() => {
+    isFullscreenRef.current = true;
     setIsFullscreen(true);
-    if (streamSource?.stream) {
-      setStatus(current => (current === 'loading' ? 'playing' : current));
-    }
-    setPausedState(false);
-  }, [streamSource?.stream]);
+  }, []);
 
   const exitFullscreen = useCallback(() => {
+    isFullscreenRef.current = false;
     setIsFullscreen(false);
     setPresentation('single-video');
   }, [setPresentation]);
 
   const showImage = useCallback((nextItem: MediaItem) => {
-    if (presentationRef.current === 'fullscreen') {
+    if (isFullscreenRef.current || presentationRef.current === 'fullscreen') {
       return;
     }
     setStatus('idle');
@@ -203,7 +205,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   }, [setPresentation]);
 
   const stopVideo = useCallback(() => {
-    if (presentationRef.current === 'fullscreen') {
+    if (isFullscreenRef.current || presentationRef.current === 'fullscreen') {
       return;
     }
     setStatus('idle');
@@ -218,7 +220,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   }, [setPresentation]);
 
   const stopAll = useCallback(() => {
-    if (presentationRef.current === 'fullscreen') {
+    if (isFullscreenRef.current || presentationRef.current === 'fullscreen') {
       return;
     }
     setStatus('idle');
