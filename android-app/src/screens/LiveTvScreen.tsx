@@ -27,6 +27,7 @@ import {
   type GuideData,
 } from '../api/programGuide';
 import type { PageContentHandle } from '../components/PageContent';
+import { resolvePosterUrl } from '../api/channels';
 import { RemoteImage } from '../components/RemoteImage';
 import { t } from '../i18n';
 import { useMediaActions, useMediaController } from '../media/MediaController';
@@ -476,6 +477,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
                   style={[styles.row, { height }]}
                 >
                   <Pressable
+                    testID={`guide-channel-${ch.id}`}
                     focusable={false}
                     onPress={() => {
                       setSelection({
@@ -488,6 +490,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
                     style={[
                       styles.channel,
                       { marginBottom: rowGap },
+                      highlight && styles.activeChannel,
                       highlight &&
                         selection.column === 'channel' &&
                         styles.focused,
@@ -510,7 +513,10 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
                     </View>
                     {isSameMediaItem(controller.item, ch) &&
                     controller.stream ? (
-                      <View style={styles.playing} />
+                      <View
+                        testID={`guide-playing-${ch.id}`}
+                        style={styles.playing}
+                      />
                     ) : null}
                   </Pressable>
                   <View style={styles.timeline}>
@@ -533,6 +539,15 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
                         selection.column === 'program' &&
                         programIndex === column;
                       const live = entry.start <= now && now < entry.end;
+                      const artwork = !entry.placeholder
+                        ? resolvePosterUrl({ image: entry.image }) ||
+                          (live ? ch.imageUrl : undefined)
+                        : undefined;
+                      const showArtwork =
+                        isSelected &&
+                        Boolean(artwork) &&
+                        visibleWidth >= 170 &&
+                        height - rowGap >= 58;
                       return (
                         <Pressable
                           key={entry.id}
@@ -559,20 +574,36 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
                             selected && styles.focused,
                           ]}
                         >
-                          <Text
-                            numberOfLines={isSelected ? 2 : 1}
-                            style={[
-                              styles.programTitle,
-                              entry.placeholder && styles.placeholder,
-                            ]}
-                          >
-                            {entry.title || t('guideNoProgram')}
-                          </Text>
-                          {isSelected && visibleWidth >= 95 ? (
-                            <Text numberOfLines={1} style={styles.programTime}>
-                              {clock(entry.start)} - {clock(entry.end)}
-                            </Text>
-                          ) : null}
+                          <View style={styles.programContent}>
+                            {showArtwork ? (
+                              <RemoteImage
+                                testID={`guide-program-image-${ch.id}-${entry.id}`}
+                                uri={artwork!}
+                                fallbackUri={ch.fallbackImageUrl}
+                                resizeMode="cover"
+                                style={styles.programImage}
+                              />
+                            ) : null}
+                            <View style={styles.programText}>
+                              <Text
+                                numberOfLines={isSelected ? 2 : 1}
+                                style={[
+                                  styles.programTitle,
+                                  entry.placeholder && styles.placeholder,
+                                ]}
+                              >
+                                {entry.title || t('guideNoProgram')}
+                              </Text>
+                              {isSelected && visibleWidth >= 95 ? (
+                                <Text
+                                  numberOfLines={1}
+                                  style={styles.programTime}
+                                >
+                                  {clock(entry.start)} - {clock(entry.end)}
+                                </Text>
+                              ) : null}
+                            </View>
+                          </View>
                         </Pressable>
                       );
                     })}
@@ -651,7 +682,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   liveCell: { backgroundColor: 'rgba(38, 55, 58, 0.95)' },
+  activeChannel: { borderColor: '#25d4de', backgroundColor: '#244044' },
   focused: { borderColor: '#ffffff', backgroundColor: '#34474a' },
+  programContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  programImage: { width: 80, height: 45, borderRadius: 3 },
+  programText: { flex: 1, minWidth: 0 },
   programTitle: { color: '#ffffff', fontSize: 13, lineHeight: 17 },
   placeholder: { color: '#9ca6af' },
   programTime: { color: '#bdcbd0', fontSize: 11, marginTop: 3 },

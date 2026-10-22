@@ -40,6 +40,9 @@ export const he = {
 
   // Player
   playerSources: 'מקורות',
+  playerChannels: 'ערוצים חיים',
+  playerChannelsUnavailable: 'לא ניתן לטעון את הערוצים.',
+  playerChannelUnavailable: 'לא ניתן לנגן את הערוץ. בחר ערוץ אחר או נסה שוב.',
   playerSourceDialogTitle: 'מקורות שידור',
   playerNoAlternateSources: 'לא נמצאו מקורות נוספים לערוץ זה.',
   playerSourceConnecting: 'מתחבר...',

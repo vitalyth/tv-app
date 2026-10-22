@@ -62,6 +62,7 @@ describe('live guide navigation', () => {
           {
             id: 'current',
             title: 'Current',
+            image: 'https://example.com/current.jpg',
             start: now - 1800000,
             end: now + 1800000,
           },
@@ -112,6 +113,45 @@ describe('live guide navigation', () => {
     renderer.root
       .findAllByProps({ testID: 'guide-focus' })
       .find(node => typeof node.props.onPress === 'function')!;
+
+  test('shows program artwork only in the active row and marks its channel while browsing programs', async () => {
+    await mount();
+    await act(async () => focus().props.onFocus());
+    expect(
+      renderer.root.findAllByProps({
+        testID: 'guide-program-image-ch0-current',
+      }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      renderer.root.findAllByProps({
+        testID: 'guide-program-image-ch1-current',
+      }),
+    ).toHaveLength(0);
+    const channel = (id: string) =>
+      renderer.root
+        .findAllByProps({ testID: `guide-channel-${id}` })
+        .find(node => typeof node.props.onPress === 'function')!;
+    expect(StyleSheet.flatten(channel('ch0').props.style).borderColor).toBe(
+      '#25d4de',
+    );
+    await key('down');
+    expect(
+      renderer.root.findAllByProps({
+        testID: 'guide-program-image-ch0-current',
+      }),
+    ).toHaveLength(0);
+    expect(
+      renderer.root.findAllByProps({
+        testID: 'guide-program-image-ch1-current',
+      }).length,
+    ).toBeGreaterThan(0);
+    expect(StyleSheet.flatten(channel('ch1').props.style).borderColor).toBe(
+      '#25d4de',
+    );
+    expect(StyleSheet.flatten(channel('ch0').props.style).borderColor).toBe(
+      'transparent',
+    );
+  });
 
   test.each([92, 270, 318, 360, 540])(
     'fills the measured grid height (%s) without a bottom strip',

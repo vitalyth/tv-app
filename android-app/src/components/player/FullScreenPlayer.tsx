@@ -34,6 +34,7 @@ import {
 import { QualityDialog } from './QualityDialog';
 import { PlayerPlaceholderDialog } from './PlayerPlaceholderDialog';
 import { SourceDialog } from './SourceDialog';
+import { LiveChannelDrawer } from './LiveChannelDrawer';
 import { WatchProgressService } from '../../services/watchProgress';
 import { LiveSourcePreferencesService } from '../../services/liveSourcePreferences';
 import { t } from '../../i18n';
@@ -45,7 +46,7 @@ interface FullScreenPlayerProps {
   onExit: () => void;
 }
 
-type DialogType = 'quality' | 'sources' | 'multiview' | null;
+type DialogType = 'quality' | 'sources' | 'multiview' | 'channels' | null;
 
 const CONTROLS_HIDE_DELAY_MS = 4500;
 const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000;
@@ -124,6 +125,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   const [controlsVisible, setControlsVisible] = useState(true);
   const [channelInfoItem, setChannelInfoItem] = useState<MediaItem | null>(null);
   const [resolvingChannel, setResolvingChannel] = useState(false);
+  const [channelListError, setChannelListError] = useState<string>();
   const channelInfoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeDialog, setActiveDialog] = useState<DialogType>(null);
   const [lastFocusedControl, setLastFocusedControl] = useState<ControlId>('play-pause');
@@ -167,29 +169,49 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     }
   }, []);
 
-  const switchChannel = useCallback(async (direction: number) => {
+  const loadLiveChannels = useCallback(() => {
+    if (!liveChannelsRef.current) {
+      liveChannelsRef.current = getPlayableLiveChannels().catch(error => {
+        liveChannelsRef.current = null;
+        throw error;
+      });
+    }
+    return liveChannelsRef.current;
+  }, []);
+
+  const switchChannel = useCallback(async (selection: number | MediaItem) => {
     const request = ++channelSwitchRequestRef.current;
     const origin = currentItemRef.current;
+    const fromList = typeof selection !== 'number';
     try {
-      if (!liveChannelsRef.current) {
-        liveChannelsRef.current = getPlayableLiveChannels().catch(error => {
-          liveChannelsRef.current = null;
-          throw error;
-        });
-      }
-      const channels = await liveChannelsRef.current;
+      const channels = await loadLiveChannels();
       if (!isSameMediaItem(origin, currentItemRef.current)) {
+        return;
+      }
+      if (fromList && request !== channelSwitchRequestRef.current) {
         return;
       }
       const current = channelTargetRef.current ?? currentItemRef.current;
       const index = channels.findIndex(channel => isSameMediaItem(channel, current));
-      if (index < 0 || channels.length < 2) {
+      if (!fromList && (index < 0 || channels.length < 2)) {
         return;
       }
-      const target = channels[(index + direction + channels.length) % channels.length];
+      const target = typeof selection === 'number'
+        ? channels[(index + selection + channels.length) % channels.length]
+        : channels.find(channel => isSameMediaItem(channel, selection));
+      if (!target) {
+        return;
+      }
       // Count every press, but only resolve and play the most recent selection.
       channelTargetRef.current = target;
       if (request !== channelSwitchRequestRef.current) {
+        return;
+      }
+      setChannelListError(undefined);
+      if (fromList && isSameMediaItem(target, currentItemRef.current)) {
+        setResolvingChannel(false);
+        setActiveDialog(null);
+        showChannelInfo(null);
         return;
       }
       showChannelInfo(target);
@@ -200,16 +222,23 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
       }
       setResolvingChannel(false);
       playFullscreen(target, nextStream);
+      if (fromList) {
+        setActiveDialog(null);
+        setControlsVisible(false);
+      }
       showChannelInfo(target, true);
       RecentChannelsService.recordChannelWatched(target.id).catch(() => {});
     } catch {
       if (request === channelSwitchRequestRef.current) {
         setResolvingChannel(false);
         channelTargetRef.current = currentItemRef.current;
+        if (fromList) {
+          setChannelListError(t('playerChannelUnavailable'));
+        }
         showChannelInfo(currentItemRef.current ?? null, true);
       }
     }
-  }, [playFullscreen, showChannelInfo]);
+  }, [loadLiveChannels, playFullscreen, showChannelInfo]);
 
   useEffect(() => {
     if (liveRecoveryRef.current.id !== item?.id) {
@@ -258,6 +287,17 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     setControlsVisible(true);
     resetHideTimer();
   }, [resetHideTimer, showChannelInfo]);
+
+  const closeChannelDrawer = useCallback(() => {
+    channelSwitchRequestRef.current += 1;
+    channelTargetRef.current = currentItemRef.current;
+    setResolvingChannel(false);
+    setChannelListError(undefined);
+    showChannelInfo(null);
+    clearHideTimer();
+    setControlsVisible(false);
+    setActiveDialog(null);
+  }, [clearHideTimer, showChannelInfo]);
 
   const handleTogglePlayPause = useCallback(() => {
     // Prevent accidental play/pause toggle if controls were just revealed in the last 500ms
@@ -310,6 +350,20 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
 
     if (
       !controlsVisible && !activeDialog && item?.kind === 'live' &&
+      event.eventType === 'left'
+    ) {
+      channelSwitchRequestRef.current += 1;
+      channelTargetRef.current = currentItemRef.current;
+      setResolvingChannel(false);
+      setChannelListError(undefined);
+      showChannelInfo(null);
+      clearHideTimer();
+      setActiveDialog('channels');
+      return;
+    }
+
+    if (
+      !controlsVisible && !activeDialog && item?.kind === 'live' &&
       (event.eventType === 'up' || event.eventType === 'down')
     ) {
       switchChannel(event.eventType === 'up' ? 1 : -1);
@@ -323,6 +377,13 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
       } else if (event.eventType === 'play' || event.eventType === 'pause') {
         setPaused(event.eventType === 'pause');
       }
+    }
+
+    if (activeDialog === 'channels') {
+      if (event.eventType === 'right') {
+        closeChannelDrawer();
+      }
+      return;
     }
 
     // Only player input affects the controls' visibility timer.
@@ -342,6 +403,10 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     const subscription = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
+        if (activeDialog === 'channels') {
+          closeChannelDrawer();
+          return true;
+        }
         if (activeDialog !== null) {
           setActiveDialog(null);
           setControlsVisible(true);
@@ -381,6 +446,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   }, [
     activeDialog,
     channelInfoItem,
+    closeChannelDrawer,
     clearHideTimer,
     controlsVisible,
     currentTime,
@@ -593,6 +659,17 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
       ) : null}
 
       {/* Modal Dialogs - Centered on screen */}
+      {activeDialog === 'channels' && item.kind === 'live' ? (
+        <LiveChannelDrawer
+          item={item}
+          loadChannels={loadLiveChannels}
+          switchingChannelId={resolvingChannel ? channelTargetRef.current?.id : undefined}
+          error={channelListError}
+          onSelectChannel={switchChannel}
+          onClose={closeChannelDrawer}
+        />
+      ) : null}
+
       {activeDialog === 'quality' ? (
         <QualityDialog
           qualities={videoQualities}

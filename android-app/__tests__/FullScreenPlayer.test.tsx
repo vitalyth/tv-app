@@ -26,6 +26,8 @@ jest.mock('../src/components/RemoteImage', () => ({
 describe('FullScreenPlayer', () => {
   let backPressHandler: (() => boolean) | null = null;
   let activeRenderer: ReactTestRenderer.ReactTestRenderer | null = null;
+  const channelDrawer = () => activeRenderer!.root.find(node =>
+    typeof node.props.onSelectChannel === 'function' && typeof node.props.loadChannels === 'function');
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -224,7 +226,7 @@ describe('FullScreenPlayer', () => {
   it('does not change channels when controls are visible or when playing VOD', async () => {
     const channels = jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
     const player = await mountHiddenPlayer();
-    await act(async () => { player.handler({ eventType: 'left', eventKeyAction: 0 }); });
+    await act(async () => { player.handler({ eventType: 'right', eventKeyAction: 0 }); });
     const visibleHandler = jest.mocked(useTVEventHandler).mock.calls.at(-2)![0];
     await act(async () => { visibleHandler({ eventType: 'up', eventKeyAction: 0 }); });
     expect(channels).not.toHaveBeenCalled();
@@ -232,6 +234,106 @@ describe('FullScreenPlayer', () => {
     const vod = await mountHiddenPlayer(mockVodItem);
     await act(async () => { vod.handler({ eventType: 'down', eventKeyAction: 0 }); });
     expect(channels).not.toHaveBeenCalled();
+    expect(activeRenderer!.root.findByProps({ testID: 'quality-button' })).toBeDefined();
+  });
+
+  it('opens all live channels with Left without reconnecting or showing the player panels', async () => {
+    const channels = jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream').mockResolvedValue(mockStream);
+    const player = await mountHiddenPlayer();
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 1 }));
+    expect(channels).not.toHaveBeenCalled();
+    const callCount = jest.mocked(useTVEventHandler).mock.calls.length;
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 0 }));
+    expect(channelDrawer()).toBeDefined();
+    expect(channels).toHaveBeenCalledTimes(1);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(player.controller().stream).toBe(mockStream);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+    const parentHandler = jest.mocked(useTVEventHandler).mock.calls[callCount][0];
+    await act(async () => parentHandler({ eventType: 'up', eventKeyAction: 0 }));
+    expect(resolve).not.toHaveBeenCalled();
+    await act(async () => parentHandler({ eventType: 'right', eventKeyAction: 0 }));
+    expect(activeRenderer!.root.findAllByProps({ testID: 'live-channel-drawer' })).toHaveLength(0);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+  });
+
+  it('selects a channel from the drawer using the existing fullscreen player', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream').mockResolvedValue({ url: 'https://example.com/ch12.m3u8' });
+    const player = await mountHiddenPlayer();
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 0 }));
+    await act(async () => channelDrawer().props.onSelectChannel(channelList[1]));
+    expect(resolve).toHaveBeenCalledWith(channelList[1]);
+    expect(player.controller().item).toBe(channelList[1]);
+    expect(player.controller().isFullscreen).toBe(true);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'live-channel-drawer' })).toHaveLength(0);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+  });
+
+  it('selecting the currently playing channel keeps the same stream and paused state', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream').mockResolvedValue(mockStream);
+    const player = await mountHiddenPlayer();
+    await act(async () => player.controller().setPaused(true));
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 0 }));
+    await act(async () => channelDrawer().props.onSelectChannel(channelList[0]));
+    expect(resolve).not.toHaveBeenCalled();
+    expect(player.controller().stream).toBe(mockStream);
+    expect(player.controller().paused).toBe(true);
+  });
+
+  it('keeps playback and the drawer available if the selected channel fails', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    jest.spyOn(channelApi, 'resolveLiveChannelStream').mockRejectedValue(new Error('Unavailable'));
+    const player = await mountHiddenPlayer();
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 0 }));
+    await act(async () => channelDrawer().props.onSelectChannel(channelList[1]));
+    expect(player.controller().stream).toBe(mockStream);
+    expect(player.controller().item).toBe(mockLiveItem);
+    expect(channelDrawer().props.error).toBe(t('playerChannelUnavailable'));
+  });
+
+  it('Back closes the drawer and cancels pending selection without showing panels', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    let finish!: (stream: MediaStream) => void;
+    jest.spyOn(channelApi, 'resolveLiveChannelStream').mockImplementation(() => new Promise(done => { finish = done; }));
+    const player = await mountHiddenPlayer();
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 0 }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = channelDrawer().props.onSelectChannel(channelList[1]); });
+    await act(async () => { backPressHandler?.(); });
+    await act(async () => { finish({ url: 'https://example.com/stale.m3u8' }); await pending; });
+    expect(player.controller().item).toBe(mockLiveItem);
+    expect(player.controller().stream).toBe(mockStream);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'live-channel-drawer' })).toHaveLength(0);
+    expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
+  });
+
+  it('closing immediately after selection keeps the next channel switch relative to the playing channel', async () => {
+    jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream').mockResolvedValue(mockStream);
+    const player = await mountHiddenPlayer();
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 0 }));
+    const drawer = channelDrawer();
+    await act(async () => {
+      const pending = drawer.props.onSelectChannel(channelList[1]);
+      drawer.props.onClose();
+      await pending;
+    });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(player.controller().item).toBe(mockLiveItem);
+    const handler = jest.mocked(useTVEventHandler).mock.lastCall![0];
+    await act(async () => handler({ eventType: 'up', eventKeyAction: 0 }));
+    expect(resolve).toHaveBeenLastCalledWith(channelList[1]);
+  });
+
+  it('does not open live channels when Left is pressed during VOD playback', async () => {
+    const channels = jest.spyOn(channelApi, 'getPlayableLiveChannels').mockResolvedValue(channelList);
+    const player = await mountHiddenPlayer(mockVodItem);
+    await act(async () => player.handler({ eventType: 'left', eventKeyAction: 0 }));
+    expect(channels).not.toHaveBeenCalled();
+    expect(activeRenderer!.root.findAllByProps({ testID: 'live-channel-drawer' })).toHaveLength(0);
     expect(activeRenderer!.root.findByProps({ testID: 'quality-button' })).toBeDefined();
   });
 
@@ -453,7 +555,7 @@ describe('FullScreenPlayer', () => {
       });
       expect(activeRenderer!.root.findAllByProps({ testID: 'quality-button' })).toHaveLength(0);
       expect(activeRenderer!.root.findByProps({ testID: 'fullscreen-controls-activator' })).toBeDefined();
-      await act(async () => { handler({ eventType: 'left', eventKeyAction: 0 }); });
+      await act(async () => { handler({ eventType: 'right', eventKeyAction: 0 }); });
       expect(activeRenderer!.root.findByProps({ testID: 'quality-button' })).toBeDefined();
     },
   );
@@ -473,7 +575,7 @@ describe('FullScreenPlayer', () => {
         // Reveal again so the latest registered remote handler belongs to the player.
         await act(async () => { backPressHandler?.(); });
         const handler = jest.mocked(useTVEventHandler).mock.lastCall![0];
-        await act(async () => { handler({ eventType: 'left', eventKeyAction: 0 }); });
+        await act(async () => { handler({ eventType: 'right', eventKeyAction: 0 }); });
         await act(async () => { jest.advanceTimersByTime(4000); });
         await act(async () => { handler({ eventType, eventKeyAction: 0 }); });
         await act(async () => { jest.advanceTimersByTime(500); });
