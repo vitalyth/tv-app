@@ -33,6 +33,8 @@ import {
   MEDIA_CAROUSEL_ITEM_SPACING,
 } from '../theme/layout';
 import { HomeScreen, type HomeScreenHandle } from '../screens/HomeScreen';
+import { VodScreen } from '../screens/VodScreen';
+import { LiveTvScreen } from '../screens/LiveTvScreen';
 
 const VISIBLE_CARD_COUNT = 4;
 const CARD_ASPECT_RATIO = 16 / 9;
@@ -321,6 +323,28 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
 
 export const PageContent = forwardRef<PageContentHandle, PageContentProps>(
   function PageContentImpl(props, ref) {
+    if (props.route.id === 'live-tv') {
+      return (
+        <LiveTvScreen
+          ref={ref}
+          active={props.active}
+          menuFocusDestination={props.menuFocusDestination}
+          onContentFocus={props.onContentFocus}
+          onItemFocused={props.onItemFocused}
+        />
+      );
+    }
+    if (props.route.id === 'vod') {
+      return (
+        <VodScreen
+          ref={ref}
+          active={props.active}
+          menuFocusDestination={props.menuFocusDestination}
+          onContentFocus={props.onContentFocus}
+          onItemFocused={props.onItemFocused}
+        />
+      );
+    }
     if (props.route.id === 'home') {
       return (
         <HomeScreen

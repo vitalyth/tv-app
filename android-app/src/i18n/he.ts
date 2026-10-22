@@ -25,6 +25,18 @@ export const he = {
   seasonNumber: 'עונה {season}',
   episodeNumber: 'פרק {episode}',
   vodProgram: 'תוכנית VOD',
+  vodRecent: 'נוספו לאחרונה',
+  vodSearch: 'חיפוש תוכניות',
+  vodClearSearch: 'ניקוי חיפוש',
+  vodBackToCatalog: 'חזרה לקטלוג',
+  vodAllEpisodes: 'כל הפרקים',
+  vodAllCategories: 'כל הקטגוריות',
+  vodLoading: 'טוען...',
+  vodUnavailable: 'הקטלוג אינו זמין כרגע.',
+  vodRetry: 'נסה שוב',
+  vodEmpty: 'לא נמצאו תוכניות.',
+  vodPrevious: 'הקודם',
+  vodNext: 'הבא',
 
   // Player
   playerSources: 'מקורות',
@@ -45,6 +57,9 @@ export const he = {
   // Navigation
   navHome: 'בית',
   navLiveTv: 'טלוויזיה חיה',
+  guideNoProgram: 'אין מידע על התוכנית',
+  guideUnavailable: 'לוח השידורים אינו זמין',
+  guideEmpty: 'אין ערוצים זמינים',
   navVod: 'VOD',
   navSeries: 'סדרות',
   navMovies: 'סרטים',

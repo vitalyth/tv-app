@@ -5,6 +5,7 @@ import { MediaControllerProvider, useMediaController } from '../src/media/MediaC
 import { PageContent } from '../src/components/PageContent';
 import * as channelsApi from '../src/api/channels';
 import * as vodApi from '../src/api/vod';
+import * as guideApi from '../src/api/programGuide';
 import {
   WatchProgressService,
   resetWatchProgressMemoryStore,
@@ -323,6 +324,12 @@ describe('HomeScreen', () => {
       try {
         jest.spyOn(channelsApi, 'getDistinctLiveChannels').mockResolvedValue(mockLiveChannels);
         jest.spyOn(channelsApi, 'getPlayableLiveChannels').mockResolvedValue(mockLiveChannels);
+        jest.spyOn(guideApi, 'getProgramGuide').mockResolvedValue({
+          channels: mockLiveChannels,
+          programs: {},
+          start: guideApi.guideStart(Date.now()),
+          end: guideApi.guideStart(Date.now()) + guideApi.GUIDE_WINDOW_MS,
+        });
         jest.spyOn(vodApi, 'getRecentVodItems').mockResolvedValue([]);
         jest.spyOn(WatchProgressService, 'getContinueWatching').mockResolvedValue([]);
         const resolver = jest.spyOn(channelsApi, 'resolveLiveChannelStream')
@@ -347,8 +354,14 @@ describe('HomeScreen', () => {
         });
         // Home waits for its initial focus timer; activation must not wait for video debounce.
         await act(async () => { jest.advanceTimersByTime(300); });
-        const carousel = renderer!.root.findByProps({ id: routeId === 'home' ? 'home-live' : 'live-tv-primary' });
-        act(() => carousel.props.onItemSelect(mockLiveChannels[0]));
+        if (routeId === 'home') {
+          const carousel = renderer!.root.findByProps({ id: 'home-live' });
+          act(() => carousel.props.onItemSelect(mockLiveChannels[0]));
+        } else {
+          const grid = renderer!.root.findAllByProps({ testID: 'guide-focus' })
+            .find(node => typeof node.props.onPress === 'function')!;
+          act(() => grid.props.onPress());
+        }
         expect(controller.isFullscreen).toBe(true);
         expect(controller.item?.id).toBe('ch-11');
         expect(controller.status).toBe('loading');

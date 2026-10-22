@@ -45,6 +45,7 @@ describe('MediaPreviewEngine', () => {
     imageDebounceMs = 300,
     videoDebounceMs = 1000,
     debounceMs,
+    videoPreviewEnabled,
   }: {
     onEngineReady: (engine: ReturnType<typeof useMediaPreviewEngine>) => void;
     onControllerChange: (
@@ -54,12 +55,14 @@ describe('MediaPreviewEngine', () => {
     imageDebounceMs?: number;
     videoDebounceMs?: number;
     debounceMs?: number;
+    videoPreviewEnabled?: boolean;
   }) {
     const engine = useMediaPreviewEngine({
       imageDebounceMs,
       videoDebounceMs,
       debounceMs,
       streamResolver,
+      videoPreviewEnabled,
     });
     const controller = useMediaController();
 
@@ -73,6 +76,26 @@ describe('MediaPreviewEngine', () => {
 
     return null;
   }
+
+  it('previews catalog artwork without resolving a non-playable series', async () => {
+    let engine!: ReturnType<typeof useMediaPreviewEngine>;
+    let controller!: ReturnType<typeof useMediaController>;
+    const streamResolver = jest.fn();
+    act(() => {
+      renderer = ReactTestRenderer.create(
+        <MediaControllerProvider>
+          <TestHarness onEngineReady={value => { engine = value; }} onControllerChange={value => { controller = value; }} streamResolver={streamResolver} videoPreviewEnabled={false} />
+        </MediaControllerProvider>,
+      );
+    });
+    const item = { ...createItem('series'), kind: 'vod' as const };
+    act(() => { engine.focusMediaItem(item); });
+    await act(async () => { jest.advanceTimersByTime(3000); });
+    expect(controller.item).toBe(item);
+    expect(controller.presentation).toBe('background-image');
+    expect(streamResolver).not.toHaveBeenCalled();
+    expect(controller.status).not.toBe('error');
+  });
 
   it('stops previous video and clears image on focus, shows image after 300ms, then plays video after 1000ms', async () => {
     let engineRef!: ReturnType<typeof useMediaPreviewEngine>;

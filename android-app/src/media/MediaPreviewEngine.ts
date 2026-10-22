@@ -12,6 +12,7 @@ export interface MediaPreviewEngineOptions {
   videoDebounceMs?: number;
   debounceMs?: number;
   streamResolver?: (item: MediaItem) => Promise<MediaStream>;
+  videoPreviewEnabled?: boolean;
 }
 
 export interface MediaPreviewEngine {
@@ -27,6 +28,7 @@ export function useMediaPreviewEngine(
     imageDebounceMs = DEFAULT_IMAGE_DEBOUNCE_MS,
     videoDebounceMs = options.debounceMs ?? DEFAULT_VIDEO_DEBOUNCE_MS,
     streamResolver = resolveLiveChannelStream,
+    videoPreviewEnabled = true,
   } = options;
 
   const { play, showImage, stopAll, markError } = useMediaActions();
@@ -96,6 +98,9 @@ export function useMediaPreviewEngine(
       }, imageDebounceMs);
 
       // 4. Start video resolution and playback after videoDebounceMs (1000ms)
+      if (!videoPreviewEnabled) {
+        return;
+      }
       videoTimerRef.current = setTimeout(async () => {
         if (
           sequenceIdRef.current !== sequence ||
@@ -134,6 +139,7 @@ export function useMediaPreviewEngine(
       stopAll,
       streamResolver,
       videoDebounceMs,
+      videoPreviewEnabled,
     ],
   );
 

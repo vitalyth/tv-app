@@ -25,6 +25,18 @@ export const en = {
   seasonNumber: 'Season {season}',
   episodeNumber: 'Episode {episode}',
   vodProgram: 'VOD Program',
+  vodRecent: 'Recently Added',
+  vodSearch: 'Search programs',
+  vodClearSearch: 'Clear search',
+  vodBackToCatalog: 'Back to catalog',
+  vodAllEpisodes: 'All episodes',
+  vodAllCategories: 'All categories',
+  vodLoading: 'Loading...',
+  vodUnavailable: 'This catalog is unavailable right now.',
+  vodRetry: 'Retry',
+  vodEmpty: 'No titles found.',
+  vodPrevious: 'Previous',
+  vodNext: 'Next',
 
   // Player
   playerSources: 'Sources',
@@ -46,6 +58,9 @@ export const en = {
   // Navigation
   navHome: 'Home',
   navLiveTv: 'Live TV',
+  guideNoProgram: 'No program information',
+  guideUnavailable: 'Program guide unavailable',
+  guideEmpty: 'No live channels available',
   navVod: 'VOD',
   navSeries: 'Series',
   navMovies: 'Movies',

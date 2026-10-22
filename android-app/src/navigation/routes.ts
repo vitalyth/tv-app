@@ -35,17 +35,15 @@ export const routes: readonly RouteDefinition[] = [
     shortLabel: 'TV',
     eyebrow: 'On now',
     title: 'Live television',
-    description:
-      'Channels and live programming will arrive in a later approved stage.',
+    description: '',
   },
   {
     id: 'vod',
     label: 'VOD',
     shortLabel: 'V',
     eyebrow: 'On demand',
-    title: 'Movies and series',
-    description:
-      'The VOD catalogue will be connected after the shared media foundation.',
+    title: 'VOD',
+    description: '',
   },
   {
     id: 'series',

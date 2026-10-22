@@ -1,34 +1,23 @@
 import {useEffect, useState} from 'react';
 import {Image, type ImageProps} from 'react-native';
+import {getBundledChannelLogo} from './channelLogoAssets';
 
 interface RemoteImageProps extends Omit<ImageProps, 'source'> {
   uri: string;
   fallbackUri?: string;
 }
 
-function sanitizeImageUri(uri: string, fallbackUri?: string): string {
-  if (uri && uri.toLowerCase().includes('.svg')) {
-    if (fallbackUri && !fallbackUri.toLowerCase().includes('.svg')) {
-      return fallbackUri;
-    }
-    return uri.replace(/\.svg(\?.*)?$/i, '.png$1');
-  }
-  return uri;
-}
-
 export function RemoteImage({uri, fallbackUri, ...props}: RemoteImageProps) {
-  const [sourceUri, setSourceUri] = useState(() =>
-    sanitizeImageUri(uri, fallbackUri),
-  );
+  const [sourceUri, setSourceUri] = useState(uri);
 
   useEffect(() => {
-    setSourceUri(sanitizeImageUri(uri, fallbackUri));
+    setSourceUri(uri);
   }, [fallbackUri, uri]);
 
   return (
     <Image
       {...props}
-      source={{
+      source={getBundledChannelLogo(sourceUri) ?? {
         uri: sourceUri,
         headers: {'User-Agent': 'okhttp/4.12.0'},
       }}
