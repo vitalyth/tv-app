@@ -32,7 +32,6 @@ import {
   type ControlId,
 } from './PlayerBottomControls';
 import { QualityDialog } from './QualityDialog';
-import { PlayerPlaceholderDialog } from './PlayerPlaceholderDialog';
 import { SourceDialog } from './SourceDialog';
 import { LiveChannelDrawer } from './LiveChannelDrawer';
 import { WatchProgressService } from '../../services/watchProgress';
@@ -46,7 +45,7 @@ interface FullScreenPlayerProps {
   onExit: () => void;
 }
 
-type DialogType = 'quality' | 'sources' | 'multiview' | 'channels' | null;
+type DialogType = 'quality' | 'sources' | 'channels' | null;
 
 const CONTROLS_HIDE_DELAY_MS = 4500;
 const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000;
@@ -120,7 +119,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     setSelectedQuality,
     seekTo,
   } = useMediaController();
-  const { playFullscreen, markError } = useMediaActions();
+  const { playFullscreen, markError, enterMultiView } = useMediaActions();
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [channelInfoItem, setChannelInfoItem] = useState<MediaItem | null>(null);
@@ -533,8 +532,8 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     }
     clearHideTimer();
     setLastFocusedControl('multiview');
-    setActiveDialog('multiview');
-  }, [clearHideTimer, wasJustRevealed]);
+    enterMultiView();
+  }, [clearHideTimer, wasJustRevealed, enterMultiView]);
 
   const handleCloseDialog = useCallback(() => {
     if (activeDialog === 'sources') {
@@ -691,13 +690,6 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
         />
       ) : null}
 
-      {activeDialog === 'multiview' ? (
-        <PlayerPlaceholderDialog
-          title={t('playerMultiView')}
-          message={t('playerMultiViewUnavailable')}
-          onClose={handleCloseDialog}
-        />
-      ) : null}
     </View>
   );
 });

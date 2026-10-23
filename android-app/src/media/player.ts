@@ -23,6 +23,20 @@ export interface MediaStream {
   sourceId?: string;
 }
 
+export interface MultiViewTile {
+  item: MediaItem;
+  stream: MediaStream;
+  status: PlaybackStatus;
+}
+
+export interface MultiViewState {
+  tiles: MultiViewTile[];
+  audioTile: number;
+}
+
+export const MULTIVIEW_MAX_HEIGHT = 180;
+export const MULTIVIEW_MAX_BITRATE = 260000;
+
 export interface VideoQualityOption {
   id: string;
   label: string;

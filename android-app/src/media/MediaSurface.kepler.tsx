@@ -20,6 +20,10 @@ interface SurfaceEngineProps {
   url: string;
   type?: MediaStreamType;
   paused?: boolean;
+  isMuted?: boolean;
+  maxVideoHeight?: number;
+  maxBitRate?: number;
+  resizeMode?: 'cover' | 'contain';
   startPositionSeconds?: number;
   selectedQualityId?: string;
   registerSeekHandler?: MediaSurfaceProps['registerSeekHandler'];
@@ -85,6 +89,8 @@ function readSeekableRange(media: any): { start?: number; end?: number } {
 function NativeHlsSurface({
   url,
   paused = false,
+  isMuted = false,
+  resizeMode = 'cover',
   startPositionSeconds,
   registerSeekHandler,
   onFirstFrame,
@@ -102,7 +108,11 @@ function NativeHlsSurface({
   useEffect(() => {
     return registerSeekHandler?.(seconds => {
       if (videoRef.current) {
-        console.info('[PlayerSeek] native seek', { seconds, current: videoRef.current.currentTime, range: readSeekableRange(videoRef.current) });
+        console.info('[PlayerSeek] native seek', {
+          seconds,
+          current: videoRef.current.currentTime,
+          range: readSeekableRange(videoRef.current),
+        });
         videoRef.current.currentTime = seconds;
       }
     });
@@ -180,9 +190,9 @@ function NativeHlsSurface({
       }
       controls={false}
       autoplay={!paused}
-      muted={false}
+      muted={isMuted}
       loop={false}
-      scalingmode="fill"
+      scalingmode={resizeMode === 'contain' ? 'fit' : 'fill'}
       onCanPlay={() => {
         if (!firstFrameReported.current) {
           firstFrameReported.current = true;
@@ -211,6 +221,10 @@ function ShakaPlayerSurface({
   url,
   type = 'm3u8',
   paused = false,
+  isMuted = false,
+  maxVideoHeight,
+  maxBitRate,
+  resizeMode = 'cover',
   startPositionSeconds,
   selectedQualityId = 'auto',
   registerSeekHandler,
@@ -226,13 +240,32 @@ function ShakaPlayerSurface({
   const firstFrameReported = useRef(false);
   const destroyed = useRef(false);
   const teardown = useRef<Promise<void> | null>(null);
+  const initialization = useRef<Promise<void> | null>(null);
+  const settings = useRef({
+    paused,
+    isMuted,
+    maxVideoHeight,
+    maxBitRate,
+    selectedQualityId,
+  });
+  settings.current = {
+    paused,
+    isMuted,
+    maxVideoHeight,
+    maxBitRate,
+    selectedQualityId,
+  };
   const playbackCallbacks = useRef({ onPausedChange });
   playbackCallbacks.current = { onPausedChange };
 
   useEffect(() => {
     return registerSeekHandler?.(seconds => {
       if (videoPlayer.current && !destroyed.current) {
-        console.info('[PlayerSeek] shaka seek', { seconds, current: videoPlayer.current.currentTime, range: readSeekableRange(videoPlayer.current) });
+        console.info('[PlayerSeek] shaka seek', {
+          seconds,
+          current: videoPlayer.current.currentTime,
+          range: readSeekableRange(videoPlayer.current),
+        });
         shakaPlayer.current?.seekTo(seconds);
       }
     });
@@ -256,6 +289,7 @@ function ShakaPlayerSurface({
 
     teardown.current = (async () => {
       try {
+        await initialization.current?.catch(() => {});
         await shaka?.destroy();
       } finally {
         if (player) {
@@ -265,7 +299,9 @@ function ShakaPlayerSurface({
             console.warn('[MediaSurface] Vega media deinitialize:', result);
           }
         }
-        (globalThis as any).gmedia = null;
+        if ((globalThis as any).gmedia === player) {
+          (globalThis as any).gmedia = null;
+        }
       }
     })();
     registerMediaTeardown(teardown.current);
@@ -274,80 +310,133 @@ function ShakaPlayerSurface({
 
   const onSurfaceViewCreated = useCallback(
     async (handle: string) => {
-      if (videoPlayer.current || destroyed.current) {
-        return;
-      }
-      surfaceHandle.current = handle;
-      const player = new VideoPlayer();
-      videoPlayer.current = player;
-      await player.initialize();
       if (destroyed.current) {
         return;
       }
-      player.setSurfaceHandle(handle);
-      player.autoplay = true;
-      const reportFirstFrame = () => {
-        if (!destroyed.current && videoPlayer.current === player && !firstFrameReported.current) {
-          firstFrameReported.current = true;
-          onFirstFrame();
+      surfaceHandle.current = handle;
+      const existingPlayer = videoPlayer.current;
+      if (existingPlayer) {
+        try {
+          await initialization.current;
+          if (!destroyed.current && videoPlayer.current === existingPlayer && surfaceHandle.current === handle) {
+            existingPlayer.setSurfaceHandle(handle);
+          }
+        } catch (err) {
+          console.warn('[MediaSurface] Vega surface reattach failed:', err);
+          if (!destroyed.current) {
+            onError();
+          }
         }
-      };
-      player.addEventListener('playing', reportFirstFrame);
-      const reportPaused = () => {
-        if (!destroyed.current && videoPlayer.current === player) {
-          playbackCallbacks.current.onPausedChange?.(Boolean(player.paused));
-        }
-      };
-      player.addEventListener('pause', reportPaused);
-      player.addEventListener('playing', reportPaused);
-      player.addEventListener('timeupdate', () => {
-        const cur = player.currentTime ?? 0;
-        const dur = player.duration ?? 0;
-        const seekableRange = shakaPlayer.current?.getSeekableRange() ?? readSeekableRange(player);
-        onProgress?.({
-          currentTime: cur,
-          playableDuration: cur,
-          seekableDuration:
-            seekableRange.end !== undefined && seekableRange.start !== undefined
-              ? Math.max(0, seekableRange.end - seekableRange.start)
-              : dur,
-          seekableStart: seekableRange.start,
-          seekableEnd: seekableRange.end,
-        });
-      });
-      player.addEventListener('error', onError);
-      const shaka = new VegaShakaPlayer(player, onError, qualities => {
-        if (!destroyed.current && shakaPlayer.current === shaka) {
-          onVideoTracks?.(qualities);
-        }
-      });
-      shakaPlayer.current = shaka;
-      const streamType: 'm3u8' | 'mpd' =
-        type === 'mpd' || url.includes('.mpd') ? 'mpd' : 'm3u8';
+        return;
+      }
+      const player = new VideoPlayer();
+      videoPlayer.current = player;
       try {
-        console.info('[MediaSurface] Vega Shaka loading:', {
-          type: streamType,
-          url: url.slice(0, 100),
-        });
-        await shaka.load(url, streamType);
-        if (startPositionSeconds && startPositionSeconds > 0) {
-          const duration = player.duration ?? 0;
-          player.currentTime =
-            duration > 0
-              ? Math.min(startPositionSeconds, duration - 1)
-              : startPositionSeconds;
+        initialization.current = player.initialize();
+        await initialization.current;
+        if (destroyed.current) {
+          return;
         }
-        if (shakaPlayer.current) {
-          const qualities = shaka.getQualities();
-          onVideoTracks?.(qualities);
-          setTimeout(() => {
-            if (!destroyed.current && shakaPlayer.current === shaka) {
-              onVideoTracks?.(shaka.getQualities());
-            }
-          }, 1500);
+        if (surfaceHandle.current) {
+          player.setSurfaceHandle(surfaceHandle.current);
+        }
+        player.autoplay = !settings.current.paused;
+        player.muted = settings.current.isMuted;
+        const reportFirstFrame = () => {
+          if (
+            !destroyed.current &&
+            videoPlayer.current === player &&
+            !firstFrameReported.current
+          ) {
+            firstFrameReported.current = true;
+            onFirstFrame();
+          }
+        };
+        player.addEventListener('playing', reportFirstFrame);
+        const reportPaused = () => {
+          if (!destroyed.current && videoPlayer.current === player) {
+            playbackCallbacks.current.onPausedChange?.(Boolean(player.paused));
+          }
+        };
+        player.addEventListener('pause', reportPaused);
+        player.addEventListener('playing', reportPaused);
+        player.addEventListener('timeupdate', () => {
+          if (destroyed.current || videoPlayer.current !== player) {
+            return;
+          }
+          const cur = player.currentTime ?? 0;
+          const dur = player.duration ?? 0;
+          const seekableRange =
+            shakaPlayer.current?.getSeekableRange() ??
+            readSeekableRange(player);
+          onProgress?.({
+            currentTime: cur,
+            playableDuration: cur,
+            seekableDuration:
+              seekableRange.end !== undefined &&
+              seekableRange.start !== undefined
+                ? Math.max(0, seekableRange.end - seekableRange.start)
+                : dur,
+            seekableStart: seekableRange.start,
+            seekableEnd: seekableRange.end,
+          });
+        });
+        const reportError = () => {
+          if (!destroyed.current && videoPlayer.current === player) {
+            onError();
+          }
+        };
+        player.addEventListener('error', reportError);
+        const shaka = new VegaShakaPlayer(player, reportError, qualities => {
+          if (!destroyed.current && shakaPlayer.current === shaka) {
+            onVideoTracks?.(qualities);
+          }
+        });
+        shakaPlayer.current = shaka;
+        shaka.setPlaybackLimits(
+          settings.current.maxVideoHeight,
+          settings.current.maxBitRate,
+        );
+        const streamType: 'm3u8' | 'mpd' =
+          type === 'mpd' || url.includes('.mpd') ? 'mpd' : 'm3u8';
+        try {
+          console.info('[MediaSurface] Vega Shaka loading:', {
+            type: streamType,
+            url: url.slice(0, 100),
+          });
+          await shaka.load(url, streamType);
+          if (destroyed.current) {
+            return;
+          }
+          player.muted = settings.current.isMuted;
+          if (settings.current.paused) {
+            player.pause?.();
+          }
+          shaka.selectQuality(settings.current.selectedQualityId);
+          if (startPositionSeconds && startPositionSeconds > 0) {
+            const duration = player.duration ?? 0;
+            player.currentTime =
+              duration > 0
+                ? Math.min(startPositionSeconds, duration - 1)
+                : startPositionSeconds;
+          }
+          if (shakaPlayer.current) {
+            const qualities = shaka.getQualities();
+            onVideoTracks?.(qualities);
+            setTimeout(() => {
+              if (!destroyed.current && shakaPlayer.current === shaka) {
+                onVideoTracks?.(shaka.getQualities());
+              }
+            }, 1500);
+          }
+        } catch (err) {
+          console.warn('[MediaSurface] Vega Shaka load failed:', err);
+          if (!destroyed.current) {
+            onError();
+          }
         }
       } catch (err) {
-        console.warn('[MediaSurface] Vega Shaka load failed:', err);
+        console.warn('[MediaSurface] Vega initialization failed:', err);
         if (!destroyed.current) {
           onError();
         }
@@ -375,6 +464,16 @@ function ShakaPlayerSurface({
   }, [paused]);
 
   useEffect(() => {
+    if (videoPlayer.current) {
+      videoPlayer.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
+    shakaPlayer.current?.setPlaybackLimits(maxVideoHeight, maxBitRate);
+  }, [maxVideoHeight, maxBitRate]);
+
+  useEffect(() => {
     if (shakaPlayer.current && selectedQualityId) {
       shakaPlayer.current.selectQuality(selectedQualityId);
     }
@@ -390,14 +489,16 @@ function ShakaPlayerSurface({
   return (
     <KeplerVideoSurfaceView
       style={styles.surface}
-      scalingmode="fill"
+      scalingmode={resizeMode === 'contain' ? 'fit' : 'fill'}
       onSurfaceViewCreated={onSurfaceViewCreated}
       onSurfaceViewDestroyed={(handle: string) => {
+        if (surfaceHandle.current !== handle) {
+          return;
+        }
         if (videoPlayer.current) {
           videoPlayer.current.clearSurfaceHandle(handle);
         }
         surfaceHandle.current = undefined;
-        destroyPlayer();
       }}
     />
   );
@@ -435,6 +536,10 @@ export function MediaSurface({
   fallbackStreamUrl,
   fallbackStreamType,
   paused = false,
+  isMuted = false,
+  maxVideoHeight,
+  maxBitRate,
+  resizeMode = 'cover',
   startPositionSeconds,
   selectedQualityId = 'auto',
   registerSeekHandler,
@@ -508,7 +613,9 @@ export function MediaSurface({
   }
 
   const useShaka =
-    isLive || useShakaFallback || shouldUseShaka(mountedSource.url, mountedSource.type);
+    isLive ||
+    useShakaFallback ||
+    shouldUseShaka(mountedSource.url, mountedSource.type);
   const Engine = useShaka ? ShakaPlayerSurface : NativeHlsSurface;
 
   return (
@@ -518,6 +625,10 @@ export function MediaSurface({
         url={mountedSource.url}
         type={mountedSource.type}
         paused={paused}
+        isMuted={isMuted}
+        maxVideoHeight={maxVideoHeight}
+        maxBitRate={maxBitRate}
+        resizeMode={resizeMode}
         startPositionSeconds={startPositionSeconds}
         selectedQualityId={selectedQualityId}
         registerSeekHandler={registerSeekHandler}

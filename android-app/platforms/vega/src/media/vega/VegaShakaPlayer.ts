@@ -18,6 +18,7 @@ import {TextTrackImpl} from '@amazon-devices/react-native-w3cmedia/dist/TextTrac
 declare const require: (moduleName: string) => any;
 
 let shaka: any;
+const activeMedia = new Set<any>();
 
 function installPolyfills(mediaElement: any) {
   const runtime = global as any;
@@ -130,6 +131,8 @@ export class VegaShakaPlayer {
   private player: any;
   private mediaElement: any;
   private activeQualityHeight?: number;
+  private playbackMaxHeight?: number;
+  private requestedQualityId = 'auto';
   private onQualitiesChanged?: (qualities: any[]) => void;
 
   private getReportedQualityHeight(event?: any): number {
@@ -202,6 +205,7 @@ export class VegaShakaPlayer {
     this.mediaElement = mediaElement;
     this.onQualitiesChanged = onQualitiesChanged;
     this.player = new shaka.Player(mediaElement);
+    activeMedia.add(mediaElement);
     this.player.getNetworkingEngine().registerRequestFilter((_requestType: number, request: any) => {
       request.uris = request.uris.map(getVegaRequestUri);
     });
@@ -259,12 +263,25 @@ export class VegaShakaPlayer {
 
   async load(url: string, type?: 'm3u8' | 'mpd') {
     await this.player.load(url, undefined, mimeType(type));
+    this.selectQuality(this.requestedQualityId);
     this.logActiveQuality();
     await this.mediaElement.play();
     const nav = (global as any).navigator;
     if (nav?.mediaSession) {
       nav.mediaSession.playbackState = 'playing';
     }
+  }
+
+  setPlaybackLimits(maxHeight?: number, maxBitRate?: number) {
+    this.playbackMaxHeight = maxHeight;
+    this.player?.configure({
+      restrictions: { maxHeight: maxHeight ? 1080 : Infinity },
+      abr: { restrictions: {
+        minWidth: maxHeight ? 0 : 320, minHeight: maxHeight ? 0 : 240,
+        maxHeight: maxHeight ?? 1080, maxBandwidth: maxBitRate ?? Infinity,
+      } },
+    });
+    this.selectQuality(this.requestedQualityId ?? 'auto');
   }
 
   seekTo(seconds: number) {
@@ -342,7 +359,23 @@ export class VegaShakaPlayer {
   }
 
   selectQuality(qualityId: string) {
+    this.requestedQualityId = qualityId;
     if (!this.player) {
+      return;
+    }
+
+    if (this.playbackMaxHeight) {
+      const tracks = (this.player.getVariantTracks?.() ?? [])
+        .filter((track: any) => Number(track.height) > 0 && track.allowedByApplication !== false && track.allowedByKeySystem !== false)
+        .sort((left: any, right: any) => Number(left.height) - Number(right.height) || Number(left.bandwidth ?? 0) - Number(right.bandwidth ?? 0));
+      const track = tracks[0];
+      if (track) {
+        this.player.configure({abr: {enabled: false}});
+        if (!track.active) {
+          this.player.selectVariantTrack(track, true);
+        }
+        this.logActiveQuality();
+      }
       return;
     }
 
@@ -365,9 +398,13 @@ export class VegaShakaPlayer {
   }
 
   async destroy() {
+    activeMedia.delete(this.mediaElement);
+    if ((global as any).gmedia === this.mediaElement) {
+      (global as any).gmedia = [...activeMedia].pop() ?? null;
+    }
     const nav = (global as any).navigator;
     if (nav?.mediaSession) {
-      nav.mediaSession.playbackState = 'none';
+      nav.mediaSession.playbackState = [...activeMedia].some(media => !media.paused && !media.muted) ? 'playing' : 'none';
     }
     await this.player.destroy();
     this.player = null;

@@ -33,6 +33,7 @@ import {
 import { PageContent, type PageContentHandle } from './PageContent';
 import { SideMenu } from './SideMenu';
 import { FullScreenPlayer } from './player/FullScreenPlayer';
+import { MultiViewPlayer } from './player/MultiViewPlayer';
 
 function getFormattedTime(): string {
   const now = new Date();
@@ -73,7 +74,7 @@ function ShellContent({
   setFocusedMediaItem: (item: MediaItem | null) => void;
   pageContentRef: React.RefObject<PageContentHandle | null>;
 }) {
-  const { item: playingItem, isFullscreen } = useMediaController();
+  const { item: playingItem, isFullscreen, presentation } = useMediaController();
   const { exitFullscreen } = useMediaActions();
   const activeRoute = getRoute(state.activeRoute);
   const focusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,6 +109,9 @@ function ShellContent({
   }, [exitFullscreen, playingItem?.id, scheduleContentFocus]);
 
   useTVEventHandler(event => {
+    if (isFullscreen) {
+      return;
+    }
     if (event.eventKeyAction === 1) {
       return;
     }
@@ -135,6 +139,9 @@ function ShellContent({
     const subscription = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
+        if (isFullscreen) {
+          return false;
+        }
         if (!state.menuExpanded) {
           return false;
         }
@@ -144,7 +151,7 @@ function ShellContent({
       },
     );
     return () => subscription.remove();
-  }, [state.menuExpanded, dispatch, scheduleContentFocus]);
+  }, [isFullscreen, state.menuExpanded, dispatch, scheduleContentFocus]);
 
   const selectRoute = useCallback(
     (route: RootRoute) => {
@@ -198,7 +205,7 @@ function ShellContent({
       {/* FullScreenPlayer AFTER overlay so it renders on top (React Native z-order) */}
       {isFullscreen ? (
         <View style={StyleSheet.absoluteFill}>
-          <FullScreenPlayer onExit={handleExitFullscreen} />
+          {presentation === 'multi-tile' ? <MultiViewPlayer /> : <FullScreenPlayer onExit={handleExitFullscreen} />}
         </View>
       ) : null}
     </View>

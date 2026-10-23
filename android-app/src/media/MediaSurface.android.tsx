@@ -16,6 +16,10 @@ export function MediaSurface({
   fallbackStreamType,
   isLive = false,
   isMuted = false,
+  disableAudioFocus = false,
+  maxVideoHeight,
+  maxBitRate,
+  resizeMode = 'cover',
   paused = false,
   startPositionSeconds,
   selectedQualityId = 'auto',
@@ -34,6 +38,7 @@ export function MediaSurface({
   const usingFallback = useRef(false);
   const firstFrameReported = useRef(false);
   const seekableEndRef = useRef<number | undefined>(undefined);
+  const [trackHeights, setTrackHeights] = useState<number[]>([]);
 
   useEffect(() => {
     return registerSeekHandler?.(seconds => {
@@ -56,8 +61,15 @@ export function MediaSurface({
     usingFallback.current = false;
     firstFrameReported.current = false;
     seekableEndRef.current = undefined;
+    setTrackHeights([]);
     setActiveSource({ url: streamUrl, type: streamType || 'm3u8' });
   }, [streamType, streamUrl]);
+
+  useEffect(() => {
+    if (maxVideoHeight && trackHeights.length && trackHeights.every(height => height > 1080)) {
+      onError();
+    }
+  }, [maxVideoHeight, trackHeights, onError]);
 
   const handleFirstFrame = useCallback(() => {
     if (!firstFrameReported.current) {
@@ -68,7 +80,8 @@ export function MediaSurface({
 
   const handleProgress = useCallback(
     (data: OnProgressData) => {
-      const hasRange = Number.isFinite(data.seekableDuration) && data.seekableDuration > 0;
+      const hasRange =
+        Number.isFinite(data.seekableDuration) && data.seekableDuration > 0;
       seekableEndRef.current = hasRange ? data.seekableDuration : undefined;
       if (data.currentTime > 0) {
         handleFirstFrame();
@@ -90,6 +103,11 @@ export function MediaSurface({
         return;
       }
       const seenHeights = new Set<number>();
+      setTrackHeights(
+        data.videoTracks
+          .map(track => track.height ?? 0)
+          .filter(height => height > 0),
+      );
       const trackOptions: VideoQualityOption[] = [
         {
           id: 'auto',
@@ -136,6 +154,15 @@ export function MediaSurface({
   }, [fallbackStreamType, fallbackStreamUrl, onError]);
 
   const selectedVideoTrack = useMemo<SelectedVideoTrack>(() => {
+    if (maxVideoHeight && trackHeights.length) {
+      const allowed = trackHeights.filter(height => height <= maxVideoHeight);
+      return {
+        type: SelectedVideoTrackType.RESOLUTION,
+        value: allowed.length
+          ? Math.max(...allowed)
+          : Math.min(...trackHeights),
+      };
+    }
     if (!selectedQualityId || selectedQualityId === 'auto') {
       return { type: SelectedVideoTrackType.AUTO };
     }
@@ -147,7 +174,7 @@ export function MediaSurface({
       };
     }
     return { type: SelectedVideoTrackType.AUTO };
-  }, [selectedQualityId]);
+  }, [maxVideoHeight, selectedQualityId, trackHeights]);
 
   return (
     <Video
@@ -155,11 +182,13 @@ export function MediaSurface({
       key={activeSource.url}
       source={{ uri: activeSource.url, type: activeSource.type || 'm3u8' }}
       style={[styles.surface, style]}
-      resizeMode="cover"
+      resizeMode={resizeMode}
       paused={paused}
       controls={false}
       muted={isMuted}
+      disableFocus={disableAudioFocus}
       volume={1.0}
+      maxBitRate={maxBitRate}
       repeat={true}
       useTextureView={false}
       shutterColor="transparent"

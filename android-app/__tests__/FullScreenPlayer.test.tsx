@@ -766,12 +766,15 @@ describe('FullScreenPlayer', () => {
     expect(root.findByProps({ testID: 'player-dialog-card' })).toBeDefined();
   });
 
-  it('opens and closes Multi View placeholder dialog', async () => {
+  it('opens Multi View through the shared media controller without a placeholder', async () => {
     const onExit = jest.fn();
+    let controller!: ReturnType<typeof useMediaController>;
+    function Probe() { controller = useMediaController(); return null; }
 
     await act(async () => {
       activeRenderer = ReactTestRenderer.create(
         <MediaControllerProvider>
+          <Probe />
           <PlayerTestHarness item={mockLiveItem} onExit={onExit} />
         </MediaControllerProvider>,
       );
@@ -784,15 +787,10 @@ describe('FullScreenPlayer', () => {
       multiviewButton.props.onPress();
     });
 
-    expect(root.findByProps({ testID: 'player-dialog-card' })).toBeDefined();
-    const textNodes = root.findAllByType('Text' as any);
-    const textContents = textNodes.map(node => node.props.children).flat();
-    expect(textContents).toContain(t('playerMultiView'));
-
-    // Close dialog
-    await act(async () => {
-      backPressHandler?.();
-    });
+    expect(controller.presentation).toBe('multi-tile');
+    expect(controller.multiView).toEqual({ tiles: [], audioTile: 0 });
+    expect(controller.item).toBe(mockLiveItem);
+    expect(controller.stream).toBe(mockStream);
     expect(root.findAllByProps({ testID: 'player-dialog-card' }).length).toBe(0);
   });
 

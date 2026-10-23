@@ -80,3 +80,31 @@ it('uses only a finite Android live window and stays behind its live edge', () =
   expect(renderer.root.findByType('Video' as any)).toBe(video);
   act(() => renderer.unmount());
 });
+
+it('caps Android Multi View quality and restores automatic quality without replacing the surface', () => {
+  const props = { streamUrl: 'https://example.com/live.m3u8', onFirstFrame: jest.fn(), onError: jest.fn() };
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => { renderer = ReactTestRenderer.create(<MediaSurface {...props} maxVideoHeight={720} maxBitRate={2500000} isMuted disableAudioFocus />); });
+  const video = renderer.root.findByType('Video' as any);
+  act(() => video.props.onVideoTracks({ videoTracks: [{ height: 1080 }, { height: 720 }, { height: 480 }] }));
+  expect(video.props.selectedVideoTrack).toEqual({ type: 'resolution', value: 720 });
+  expect(video.props.muted).toBe(true);
+  expect(video.props.disableFocus).toBe(true);
+  expect(video.props.paused).toBe(false);
+  expect(video.props.maxBitRate).toBe(2500000);
+  expect(props.onError).not.toHaveBeenCalled();
+  act(() => renderer.update(<MediaSurface {...props} />));
+  expect(renderer.root.findByType('Video' as any)).toBe(video);
+  expect(video.props.selectedVideoTrack).toEqual({ type: 'auto' });
+  expect(video.props.disableFocus).toBe(false);
+  act(() => renderer.unmount());
+});
+
+it('rejects 4K-only Android streams in Multi View rather than exhausting decoders', () => {
+  const onError = jest.fn();
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => { renderer = ReactTestRenderer.create(<MediaSurface streamUrl="https://example.com/4k.m3u8" maxVideoHeight={720} onFirstFrame={jest.fn()} onError={onError} />); });
+  act(() => renderer.root.findByType('Video' as any).props.onVideoTracks({ videoTracks: [{ height: 2160 }] }));
+  expect(onError).toHaveBeenCalledTimes(1);
+  act(() => renderer.unmount());
+});

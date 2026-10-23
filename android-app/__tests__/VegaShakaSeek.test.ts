@@ -6,6 +6,30 @@ const TestURL = URL as any;
 jest.mock('@amazon-devices/react-native-w3cmedia/dist/headless', () => ({}), { virtual: true });
 jest.mock('@amazon-devices/react-native-w3cmedia/dist/TextTrackImpl', () => ({}), { virtual: true });
 
+describe('Vega tile quality', () => {
+  it('forces the lowest real rendition in tile mode, even when Auto is requested, and restores Auto on exit', () => {
+    const wrapper = Object.create(VegaShakaPlayer.prototype) as VegaShakaPlayer;
+    const tracks = [
+      { id: 1, height: 1080, bandwidth: 4000000, active: true },
+      { id: 2, height: 360, bandwidth: 600000 },
+      { id: 3, height: 360, bandwidth: 400000 },
+    ];
+    const native = { configure: jest.fn(), getVariantTracks: () => tracks, selectVariantTrack: jest.fn() };
+    Object.assign(wrapper, { player: native, logActiveQuality: jest.fn() });
+    jest.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      wrapper.setPlaybackLimits(180, 260000);
+      expect(native.selectVariantTrack).toHaveBeenLastCalledWith(tracks[2], true);
+      wrapper.selectQuality('auto');
+      expect(native.configure).toHaveBeenLastCalledWith({ abr: { enabled: false } });
+      wrapper.setPlaybackLimits(undefined, undefined);
+      expect(native.configure).toHaveBeenLastCalledWith({ abr: { enabled: true } });
+    } finally {
+      jest.restoreAllMocks();
+    }
+  });
+});
+
 describe('Vega live seek target', () => {
   const media = { currentTime: 0 };
   const player = Object.create(VegaShakaPlayer.prototype) as VegaShakaPlayer;

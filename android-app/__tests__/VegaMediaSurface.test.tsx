@@ -30,6 +30,7 @@ jest.mock('../platforms/vega/src/media/vega/VegaShakaPlayer', () => ({
     load: mockLoad,
     getQualities: () => [],
     selectQuality: jest.fn(),
+    setPlaybackLimits: jest.fn(),
     destroy: jest.fn(async () => {}),
   })),
 }));
@@ -75,6 +76,72 @@ it('reports native pause/play state, preserves the player across renders, and ig
     emit('playing');
     expect(updatedCallback).not.toHaveBeenCalled();
     expect(props.onFirstFrame).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('mutes independent Vega players without reloading either stream and preserves the surviving global media reference', async () => {
+  jest.useFakeTimers();
+  const { VideoPlayer } = require('@amazon-devices/react-native-w3cmedia/dist/headless');
+  const first = { ...mockPlayer, muted: false };
+  const second = { ...mockPlayer, muted: false };
+  VideoPlayer.mockImplementationOnce(() => first).mockImplementationOnce(() => second);
+  const props = { isLive: true, onFirstFrame: jest.fn(), onError: jest.fn() };
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  const render = (audio: number, secondary = true) => <>
+    <MediaSurface {...props} streamUrl="https://example.com/first.m3u8" isMuted={audio !== 0} maxVideoHeight={720} />
+    {secondary ? <MediaSurface {...props} streamUrl="https://example.com/second.m3u8" isMuted={audio !== 1} maxVideoHeight={720} /> : null}
+  </>;
+  try {
+    await act(async () => { renderer = ReactTestRenderer.create(render(0)); await jest.advanceTimersByTimeAsync(3000); });
+    const nodes = renderer.root.findAllByType('KeplerSurface' as any);
+    await act(async () => { await nodes[0].props.onSurfaceViewCreated('first'); await nodes[1].props.onSurfaceViewCreated('second'); });
+    expect([first.muted, second.muted]).toEqual([false, true]);
+    const loads = mockLoad.mock.calls.length;
+    await act(async () => renderer.update(render(1)));
+    expect([first.muted, second.muted]).toEqual([true, false]);
+    expect(mockLoad).toHaveBeenCalledTimes(loads);
+    (globalThis as any).gmedia = first;
+    await act(async () => renderer.update(render(0, false)));
+    expect(first.muted).toBe(false);
+    expect((globalThis as any).gmedia).toBe(first);
+  } finally {
+    await act(async () => renderer.unmount());
+    jest.useRealTimers();
+  }
+});
+
+it('reattaches recreated tile surfaces without destroying or reconnecting the player', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(Date.now() + 60000);
+  const props = { streamUrl: 'https://example.com/resize.m3u8', isLive: true, onFirstFrame: jest.fn(), onError: jest.fn() };
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(<MediaSurface {...props} />);
+      await jest.advanceTimersByTimeAsync(3000);
+    });
+    const surface = renderer.root.findByType('KeplerSurface' as any);
+    await act(async () => surface.props.onSurfaceViewCreated('full'));
+    const loads = mockLoad.mock.calls.length;
+    const initializations = mockPlayer.initialize.mock.calls.length;
+    const deinitializations = mockPlayer.deinitializeSync.mock.calls.length;
+    const pauses = mockPlayer.pause.mock.calls.length;
+    await act(async () => surface.props.onSurfaceViewDestroyed('full'));
+    expect(mockPlayer.clearSurfaceHandle).toHaveBeenLastCalledWith('full');
+    await act(async () => surface.props.onSurfaceViewCreated('tile'));
+    expect(mockPlayer.setSurfaceHandle).toHaveBeenLastCalledWith('tile');
+    const clears = mockPlayer.clearSurfaceHandle.mock.calls.length;
+    await act(async () => surface.props.onSurfaceViewDestroyed('full'));
+    expect(mockPlayer.clearSurfaceHandle).toHaveBeenCalledTimes(clears);
+    expect(mockLoad).toHaveBeenCalledTimes(loads);
+    expect(mockPlayer.initialize).toHaveBeenCalledTimes(initializations);
+    expect(mockPlayer.deinitializeSync).toHaveBeenCalledTimes(deinitializations);
+    expect(mockPlayer.pause).toHaveBeenCalledTimes(pauses);
+    await act(async () => renderer.unmount());
+    expect(mockPlayer.clearSurfaceHandle).toHaveBeenLastCalledWith('tile');
+    expect(mockPlayer.deinitializeSync).toHaveBeenCalledTimes(deinitializations + 1);
   } finally {
     jest.useRealTimers();
   }
