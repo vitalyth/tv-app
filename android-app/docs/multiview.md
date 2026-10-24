@@ -22,7 +22,10 @@ The existing MediaController and persistent MediaLayer own all surfaces. Enterin
 browsing, and exiting do not resolve or remount the original stream. Removing its
 tile or promoting another channel is an explicit playback change.
 
-Android and Vega support at most four streams. Quality targets match the old app
+Android supports at most four streams. Vega is capped at two streams after
+physical-device tests consistently lost a picture when a third player started.
+This is an application safety limit, not a documented universal hardware maximum.
+Quality targets match the old app
 (180p / 260 kbit/s), with
 the lowest available rendition when the target does not exist. 4K-only streams are
 rejected in tile mode. Decoder errors and startup timeouts release the affected
@@ -32,13 +35,45 @@ Android tile players use `disableFocus` to avoid competing audio-focus requests.
 Muting changes volume, never pause state. Without this, react-native-video pauses
 earlier players on `AUDIOFOCUS_LOSS` when another tile starts.
 
+### Experimental Vega Focus Recovery
+
+The experimental recovery path is inactive under Vega's two-stream cap.
+With three or four tiles on Vega, gaining audio focus schedules recreation of
+that tile's native player after 650 ms. Rapid browsing cancels the pending
+recreation. The old player is released before its replacement starts; sibling
+players are not intentionally restarted. Android and one/two-tile playback are
+unchanged. Exiting multiview cancels pending recovery without recreating the
+surviving primary player.
+
+This is a workaround, not black-frame detection: Vega can report PLAYING and an
+advancing media clock while the picture is black. Consequently every settled
+focus change in three/four-tile mode can reload even a currently visible tile,
+with a brief interruption and a return to the stream's live start position.
+Recovering one picture can make another tile black; this does not enable four
+simultaneously visible pictures.
+
 ## Verification
 
+- Focus-recovery release installed on physical Fire TV 192.168.1.108. A black
+  channel 13 tile regained its picture after recreation, while channel 12 became
+  black. In a subsequent three-tile session, moving focus to the black primary
+  channel 23 restored its picture while channel 11 became black. Long-duration
+  reliability and four-tile focus recovery are not qualified. Moving focus next
+  to black channel 11 restored its picture and displaced channel 12 instead.
+- 256 automated tests pass, including the Vega two-stream controller/UI cap,
+  Android four-stream playback, targeted player teardown/recreation,
+  cancellation during rapid navigation, and fullscreen player continuity.
+- Controlled three-clip Vega test (2026-10-23): reproduced with independent local
+  H.264 Baseline/AAC MP4s, 160x90 at 5 fps, about 1 MB each. Two pictures rendered;
+  starting the third made the first black. All three clocks continued advancing;
+  two subsequent captures showed only tiles 2 and 3 moving. See
+  [decoder diagnostic](decoder-diagnostic.md). This bypasses Shaka and live
+  providers, but does not prove a documented hardware decoder maximum.
 - Latest four-tile Fire TV test: FAILED. On `192.168.1.108`, adding the third
   and fourth channels leaves earlier tiles black while their audio remains
   audible when focused. Surface reattachment and native-plane recreation did
   not resolve this. Hardware/decoder limits have not been confirmed. The
-  four-stream cap is enabled at the user's request, but is not qualified on Vega.
+  four-stream experiment has now been disabled on Vega; its cap is two.
 - Android emulator rendering uses TextureView on emulator hardware only, and
   fullscreen fits the complete frame. Four-tile captures after this change showed
   movement in all four video regions, with four active native audio tracks and

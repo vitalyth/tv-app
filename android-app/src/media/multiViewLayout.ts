@@ -1,5 +1,7 @@
 import type { ViewStyle } from 'react-native';
-export const MULTIVIEW_MAX_STREAMS = 4;
+import { tvPlatform } from '../platform/runtime';
+
+export const MULTIVIEW_MAX_STREAMS = tvPlatform.id === 'kepler' ? 2 : 4;
 
 export function multiViewTileLayout(
   index: number,

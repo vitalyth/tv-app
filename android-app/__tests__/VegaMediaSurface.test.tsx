@@ -146,3 +146,71 @@ it('reattaches recreated tile surfaces without destroying or reconnecting the pl
     jest.useRealTimers();
   }
 });
+
+it('recreates only the newly focused Vega tile after focus settles and releases it before replacement', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2040-01-01T00:00:00Z'));
+  const props = { isLive: true, onFirstFrame: jest.fn(), onError: jest.fn() };
+  const render = (audio: number, enabled = true) => <>
+    {[0, 1, 2].map(index => <MediaSurface
+      key={index} {...props} streamUrl={`https://example.com/tile-${index}.m3u8`}
+      isMuted={audio !== index} recoverVideoOnFocus={enabled}
+    />)}
+  </>;
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => { renderer = ReactTestRenderer.create(render(2)); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(3000); });
+    const before = renderer.root.findAllByType('KeplerSurface' as any);
+    expect(before).toHaveLength(3);
+    await act(async () => {
+      for (let index = 0; index < before.length; index++) {
+        await before[index].props.onSurfaceViewCreated(`tile-${index}`);
+      }
+    });
+    const loads = mockLoad.mock.calls.length;
+    const releases = mockPlayer.deinitializeSync.mock.calls.length;
+    await act(async () => { renderer.update(render(0)); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(649); });
+    expect(renderer.root.findAllByType('KeplerSurface' as any)).toEqual(before);
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); });
+    expect(mockPlayer.deinitializeSync).toHaveBeenCalledTimes(releases + 1);
+    expect(renderer.root.findAllByType('KeplerSurface' as any)).toEqual(before.slice(1));
+    await act(async () => { await jest.advanceTimersByTimeAsync(701); });
+    const after = renderer.root.findAllByType('KeplerSurface' as any);
+    expect(after[0]).not.toBe(before[0]);
+    expect(after.slice(1)).toEqual(before.slice(1));
+    await act(async () => { await after[0].props.onSurfaceViewCreated('recovered-0'); });
+    expect(mockLoad).toHaveBeenCalledTimes(loads + 1);
+    await act(async () => { renderer.update(render(0, false)); await jest.advanceTimersByTimeAsync(2000); });
+    expect(renderer.root.findAllByType('KeplerSurface' as any)).toEqual(after);
+    expect(mockLoad).toHaveBeenCalledTimes(loads + 1);
+  } finally {
+    await act(async () => { renderer.unmount(); });
+    jest.useRealTimers();
+  }
+});
+
+it('cancels focus recovery when browsing away quickly or leaving multiview', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2041-01-01T00:00:00Z'));
+  const props = { streamUrl: 'https://example.com/focus.m3u8', isLive: true, onFirstFrame: jest.fn(), onError: jest.fn() };
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => { renderer = ReactTestRenderer.create(<MediaSurface {...props} isMuted recoverVideoOnFocus />); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(10000); });
+    const before = renderer.root.findByType('KeplerSurface' as any);
+    await act(async () => { renderer.update(<MediaSurface {...props} recoverVideoOnFocus />); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(400); });
+    await act(async () => { renderer.update(<MediaSurface {...props} isMuted recoverVideoOnFocus />); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(1000); });
+    expect(renderer.root.findByType('KeplerSurface' as any)).toBe(before);
+    await act(async () => { renderer.update(<MediaSurface {...props} recoverVideoOnFocus />); });
+    await act(async () => { renderer.update(<MediaSurface {...props} />); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(2000); });
+    expect(renderer.root.findByType('KeplerSurface' as any)).toBe(before);
+  } finally {
+    await act(async () => { renderer.unmount(); });
+    jest.useRealTimers();
+  }
+});

@@ -9,6 +9,7 @@ export interface MediaSurfaceProps {
   fallbackStreamType?: MediaStreamType;
   isMuted?: boolean;
   disableAudioFocus?: boolean;
+  recoverVideoOnFocus?: boolean;
   maxVideoHeight?: number;
   maxBitRate?: number;
   resizeMode?: 'cover' | 'contain';

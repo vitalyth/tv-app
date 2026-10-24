@@ -117,7 +117,8 @@ function ExtraMediaTile({
           fallbackStreamUrl={entry.stream.fallbackUrl}
           fallbackStreamType={entry.stream.fallbackType}
           isLive
-        disableAudioFocus
+          disableAudioFocus
+          recoverVideoOnFocus={count > 2}
           paused={paused}
           isMuted={audioTile !== index}
           maxVideoHeight={MULTIVIEW_MAX_HEIGHT}
@@ -204,6 +205,7 @@ export function MediaLayer() {
             paused={paused}
             isMuted={tiled && multiView.audioTile !== 0}
             disableAudioFocus={tiled}
+            recoverVideoOnFocus={tiled && count > 2}
             maxVideoHeight={tiled ? MULTIVIEW_MAX_HEIGHT : undefined}
             maxBitRate={tiled ? MULTIVIEW_MAX_BITRATE : undefined}
             resizeMode={

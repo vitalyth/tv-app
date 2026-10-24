@@ -537,6 +537,7 @@ export function MediaSurface({
   fallbackStreamType,
   paused = false,
   isMuted = false,
+  recoverVideoOnFocus = false,
   maxVideoHeight,
   maxBitRate,
   resizeMode = 'cover',
@@ -553,9 +554,28 @@ export function MediaSurface({
     url: streamUrl,
     type: streamType,
   });
-  const [mountedSource, setMountedSource] = useState<typeof activeSource>();
+  const [recoveryGeneration, setRecoveryGeneration] = useState(0);
+  const [mountedSource, setMountedSource] = useState<
+    (typeof activeSource) & { generation: number }
+  >();
   const [useShakaFallback, setUseShakaFallback] = useState(false);
   const usingFallback = useRef(false);
+  const wasMuted = useRef(isMuted);
+
+  useEffect(() => {
+    const gainedFocus = wasMuted.current && !isMuted;
+    wasMuted.current = isMuted;
+    if (!recoverVideoOnFocus || !gainedFocus || paused) {
+      return;
+    }
+    // Vega can report PLAYING while an older video plane is black. Reclaim it
+    // after focus settles, without restarting the other tiles or rapid browsing.
+    const timer = setTimeout(() => {
+      console.info('[MultiViewFocusRecovery] recreating focused player');
+      setRecoveryGeneration(previous => previous + 1);
+    }, 650);
+    return () => clearTimeout(timer);
+  }, [isMuted, paused, recoverVideoOnFocus, streamUrl]);
 
   useEffect(() => {
     usingFallback.current = false;
@@ -568,13 +588,13 @@ export function MediaSurface({
     setMountedSource(undefined);
     waitForMediaRelease().then(() => {
       if (active) {
-        setMountedSource(activeSource);
+        setMountedSource({ ...activeSource, generation: recoveryGeneration });
       }
     });
     return () => {
       active = false;
     };
-  }, [activeSource]);
+  }, [activeSource, recoveryGeneration]);
 
   const handleError = useCallback(() => {
     if (
@@ -608,7 +628,7 @@ export function MediaSurface({
     useShakaFallback,
   ]);
 
-  if (!mountedSource) {
+  if (!mountedSource || mountedSource.generation !== recoveryGeneration) {
     return <View pointerEvents="none" style={styles.surface} />;
   }
 
