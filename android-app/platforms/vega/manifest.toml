@@ -12,6 +12,9 @@ target = "1.2"
 
 [needs]
 [[needs.module]]
+id = "/com.amazon.kepler.kepler_graphics_2@IKeplerGraphics_1"
+
+[[needs.module]]
 id = "/com.amazon.vega.os@IVega_1_2"
 
 [[needs.module]]

@@ -56,6 +56,8 @@ export const he = {
   multiAudio: 'שמע',
   multiFullscreen: 'מסך מלא',
   multiRemove: 'הסר',
+  multiSoftwareDecoder: 'פענוח תוכנה (ניסיוני)',
+  multiStandardDecoder: 'פענוח רגיל',
   playerPlay: 'נגן',
   playerPause: 'השהה',
   multiPlaybackError: 'לא ניתן לנגן את השידור בצפייה מפוצלת. נסה ערוץ אחר.',

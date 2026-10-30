@@ -3,6 +3,7 @@ import type {KeplerTurboModule} from '@amazon-devices/keplerscript-turbomodule-a
 export interface TvAppUserEngagement extends KeplerTurboModule {
   startVideoEngagement(): boolean;
   stopVideoEngagement(): boolean;
+  isSoftwareMultiViewAvailable(): boolean;
 }
 
 declare const module: TvAppUserEngagement;

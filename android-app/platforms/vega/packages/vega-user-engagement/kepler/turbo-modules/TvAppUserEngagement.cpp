@@ -23,6 +23,12 @@ void TvAppUserEngagement::aggregateMethods(
       "startVideoEngagement", 0, &TvAppUserEngagement::startVideoEngagement);
   methodAggregator.addMethod(
       "stopVideoEngagement", 0, &TvAppUserEngagement::stopVideoEngagement);
+  methodAggregator.addMethod(
+      "isSoftwareMultiViewAvailable", 0, &TvAppUserEngagement::isSoftwareMultiViewAvailable);
+}
+
+bool TvAppUserEngagement::isSoftwareMultiViewAvailable() {
+  return TVAPP_VLC_AVAILABLE != 0;
 }
 
 apmf::Ptr<IUserEngagement> TvAppUserEngagement::getVideoEngagement() {

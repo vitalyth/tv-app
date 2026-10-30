@@ -46,7 +46,7 @@ const MEDIA_DEINITIALIZE_TIMEOUT_MS = 2_000;
 let mediaTeardown = Promise.resolve();
 let mediaReleaseUntil = 0;
 
-function registerMediaTeardown(teardown?: Promise<unknown>) {
+export function registerMediaTeardown(teardown?: Promise<unknown>) {
   mediaReleaseUntil = Date.now() + MEDIA_RELEASE_DELAY_MS;
   if (teardown) {
     mediaTeardown = mediaTeardown
@@ -56,7 +56,7 @@ function registerMediaTeardown(teardown?: Promise<unknown>) {
   }
 }
 
-async function waitForMediaRelease() {
+export async function waitForMediaRelease() {
   await mediaTeardown;
   const remainingDelay = mediaReleaseUntil - Date.now();
   if (remainingDelay > 0) {

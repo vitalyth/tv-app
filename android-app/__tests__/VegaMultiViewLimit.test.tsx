@@ -29,6 +29,8 @@ it('caps Vega at two streams in both controller and channel-add UI, while permit
     await act(async () => { renderer = Renderer.create(<MediaControllerProvider><Harness /></MediaControllerProvider>); });
     await act(async () => { controller.playFullscreen(item('11'), stream('11')); controller.markPlaying(); });
     await act(async () => { controller.enterMultiView(); });
+    await act(async () => { controller.setMultiViewBackend('software'); });
+    expect(controller.multiView?.backend).toBeUndefined();
     await act(async () => { controller.setMultiViewChannel(item('12'), stream('12'), 1); controller.markMultiViewPlaying(1); });
     await act(async () => { controller.setMultiViewChannel(item('13'), stream('13'), 2); });
     expect(controller.multiView?.tiles.map(tile => tile.item.id)).toEqual(['12']);

@@ -22,6 +22,7 @@ class TvAppUserEngagement : public TM_API_NAMESPACE::KeplerTurboModule {
 
   bool startVideoEngagement();
   bool stopVideoEngagement();
+  bool isSoftwareMultiViewAvailable();
 
  private:
   apmf::Ptr<apmf::iface::com::amazon::kepler::user_engagement::IUserEngagement>

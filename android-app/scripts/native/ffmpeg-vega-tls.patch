@@ -1,0 +1,52 @@
+--- a/libavformat/tls_openssl.c
++++ b/libavformat/tls_openssl.c
+@@ -25,6 +25,7 @@
+ #include "tls.h"
+ #include "libavutil/opt.h"
++#include "libavutil/mem.h"
+ 
+ #include <openssl/bio.h>
+ #include <openssl/ssl.h>
+ #include <openssl/err.h>
+@@ -276,6 +276,15 @@
+         goto fail;
+     }
+     SSL_CTX_set_options(p->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
++    /* App bundle policy: verify every HTTPS connection, including HLS children. */
++    c->verify = 1;
++    if (!c->ca_file) {
++        c->ca_file = av_strdup("/etc/ssl/certs/ca-certificates.crt");
++        if (!c->ca_file) {
++            ret = AVERROR(ENOMEM);
++            goto fail;
++        }
++    }
+     if (c->ca_file) {
+         if (!SSL_CTX_load_verify_locations(p->ctx, c->ca_file, NULL))
+             av_log(h, AV_LOG_ERROR, "SSL_CTX_load_verify_locations %s\n", ERR_error_string(ERR_get_error(), NULL));
+@@ -292,8 +301,6 @@
+         ret = AVERROR(EIO);
+         goto fail;
+     }
+-    // Note, this doesn't check that the peer certificate actually matches
+-    // the requested hostname.
+     if (c->verify)
+         SSL_CTX_set_verify(p->ctx, SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+     p->ssl = SSL_new(p->ctx);
+@@ -302,6 +309,16 @@
+         ret = AVERROR(EIO);
+         goto fail;
+     }
++    if (!c->listen) {
++        X509_VERIFY_PARAM *param = SSL_get0_param(p->ssl);
++        int valid = c->numerichost
++            ? X509_VERIFY_PARAM_set1_ip_asc(param, c->host)
++            : SSL_set1_host(p->ssl, c->host);
++        if (valid != 1) {
++            ret = AVERROR(EIO);
++            goto fail;
++        }
++    }
+ #if OPENSSL_VERSION_NUMBER >= 0x1010000fL
+     p->url_bio_method = BIO_meth_new(BIO_TYPE_SOURCE_SINK, "urlprotocol bio");
+     BIO_meth_set_write(p->url_bio_method, url_bio_bwrite);

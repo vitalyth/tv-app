@@ -200,6 +200,7 @@ export class VegaShakaPlayer {
     mediaElement: any,
     onError: () => void,
     onQualitiesChanged?: (qualities: any[]) => void,
+    audioOnly = false,
   ) {
     installPolyfills(mediaElement);
     this.mediaElement = mediaElement;
@@ -243,6 +244,7 @@ export class VegaShakaPlayer {
         retryParameters: {maxAttempts: 3},
       },
       manifest: {
+        disableVideo: audioOnly,
         dash: {disableXlinkProcessing: true},
         hls: {
           disableClosedCaptionsDetection: true,

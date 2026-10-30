@@ -19,7 +19,7 @@ import {
   useMediaController,
 } from '../../media/MediaController';
 import {
-  MULTIVIEW_MAX_STREAMS,
+  multiViewMaxStreams,
   multiViewTileLayout,
 } from '../../media/multiViewLayout';
 import { isSameMediaItem, type MediaItem } from '../../media/player';
@@ -27,10 +27,12 @@ import { tvPlatform } from '../../platform/runtime';
 import { t } from '../../i18n';
 import { RemoteImage } from '../RemoteImage';
 import { LiveChannelDrawer } from './LiveChannelDrawer';
+import { softwareMultiViewAvailable } from '../../media/nativeMultiView';
 
-type Action = 'add' | 'fullscreen' | 'remove';
+type Action = 'add' | 'fullscreen' | 'remove' | 'backend';
 type Picker = { index: number; replace: boolean };
 const icon = {
+  backend: require('../../assets/icons/settings.png'),
   add: require('../../assets/icons/add.png'),
   fullscreen: require('../../assets/icons/fullscreen.png'),
   remove: require('../../assets/icons/close.png'),
@@ -42,6 +44,7 @@ export function MultiViewPlayer() {
   const { setMultiViewAudio } = media;
   const { width, height } = useWindowDimensions();
   const count = (controller.multiView?.tiles.length ?? 0) + 1;
+  const maxStreams = multiViewMaxStreams(controller.multiView?.backend);
   const [tile, setTile] = useState(0);
   const focusedTile = Math.min(tile, count - 1);
   const [action, setAction] = useState<Action | null>(null);
@@ -54,7 +57,8 @@ export function MultiViewPlayer() {
   const lastInteraction = useRef(0);
   const anchor = useRef<View & { requestTVFocus?: () => void }>(null);
   const actions: Action[] = [
-    ...(count < MULTIVIEW_MAX_STREAMS ? ['add' as const] : []),
+    ...(count < maxStreams ? ['add' as const] : []),
+    ...(softwareMultiViewAvailable && count <= 2 ? ['backend' as const] : []),
     'fullscreen',
     ...(count > 1 ? ['remove' as const] : []),
   ];
@@ -135,7 +139,11 @@ export function MultiViewPlayer() {
 
   const openPicker = useCallback((replace = false) => {
     const current = latest.current;
-    if (!replace && current.count >= MULTIVIEW_MAX_STREAMS) {
+    if (
+      !replace &&
+      current.count >=
+        multiViewMaxStreams(current.controller.multiView?.backend)
+    ) {
       return;
     }
     setError(undefined);
@@ -192,7 +200,14 @@ export function MultiViewPlayer() {
   const runAction = useCallback(
     (command: Action) => {
       const current = latest.current;
-      if (command === 'add') {
+      if (command === 'backend') {
+        current.media.setMultiViewBackend(
+          current.controller.multiView?.backend === 'software'
+            ? 'platform'
+            : 'software',
+        );
+        setAction(null);
+      } else if (command === 'add') {
         openPicker();
       } else if (command === 'fullscreen') {
         if (current.selectedStatus === 'error') {
@@ -297,6 +312,11 @@ export function MultiViewPlayer() {
     return null;
   }
   const labels: Record<Action, string> = {
+    backend: t(
+      controller.multiView.backend === 'software'
+        ? 'multiStandardDecoder'
+        : 'multiSoftwareDecoder',
+    ),
     add: t('multiAddChannel'),
     fullscreen:
       selectedStatus === 'error' ? t('vodRetry') : t('multiFullscreen'),
@@ -401,6 +421,9 @@ export function MultiViewPlayer() {
                   />
                 </Pressable>
               ))}
+              {action === 'backend' ? (
+                <Text style={styles.decoderLabel}>{labels.backend}</Text>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -420,6 +443,14 @@ export function MultiViewPlayer() {
 }
 
 const styles = StyleSheet.create({
+  decoderLabel: {
+    position: 'absolute',
+    bottom: 52,
+    color: '#ffffff',
+    fontSize: 14,
+    width: 260,
+    textAlign: 'center',
+  },
   root: { ...StyleSheet.absoluteFillObject },
   anchor: { ...StyleSheet.absoluteFillObject, opacity: 0.01 },
   tile: {

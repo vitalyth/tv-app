@@ -57,6 +57,8 @@ export const en = {
   multiAudio: 'Sound',
   multiFullscreen: 'Full screen',
   multiRemove: 'Remove',
+  multiSoftwareDecoder: 'Software decoder (experimental)',
+  multiStandardDecoder: 'Standard decoder',
   playerPlay: 'Play',
   playerPause: 'Pause',
   multiPlaybackError: 'This stream could not play in Multi View. Try another channel.',

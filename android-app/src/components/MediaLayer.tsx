@@ -9,6 +9,7 @@ import {
 import { useForegroundPlaybackTimeout } from '../hooks/useForegroundPlaybackTimeout';
 import { useMediaController } from '../media/MediaController';
 import { MediaSurface } from '../media/MediaSurface';
+import { MultiViewSurface } from '../media/MultiViewSurface';
 import { RemoteImage } from './RemoteImage';
 import {
   MULTIVIEW_MAX_HEIGHT,
@@ -149,9 +150,12 @@ export function MediaLayer() {
     setAvailableQualities,
     registerSeekHandler,
     multiView,
+    markMultiViewPlaying,
+    markMultiViewError,
   } = useMediaController();
   const { width, height } = useWindowDimensions();
   const tiled = presentation === 'multi-tile' && multiView !== null;
+  const software = tiled && multiView.backend === 'software';
   const count = (multiView?.tiles.length ?? 0) + 1;
   const showVideo = status === 'playing' || (isFullscreen && Boolean(stream));
   useForegroundPlaybackTimeout(
@@ -185,6 +189,7 @@ export function MediaLayer() {
 
       {item &&
       stream &&
+      !software &&
       presentation !== 'background-image' &&
       (!tiled || status !== 'error') ? (
         <View
@@ -244,7 +249,29 @@ export function MediaLayer() {
           />
         </View>
       ) : null}
-      {tiled
+      {software && stream ? (
+        <MultiViewSurface
+          streams={[stream, ...multiView.tiles.map(entry => entry.stream)]}
+          audioTile={multiView.audioTile}
+          paused={paused}
+          onTileState={(index, state) => {
+            if (state === 'playing') {
+              if (index === 0) {
+                markPlaying();
+              } else {
+                markMultiViewPlaying(index);
+              }
+            } else if (state === 'error') {
+              if (index === 0) {
+                markError();
+              } else {
+                markMultiViewError(index);
+              }
+            }
+          }}
+        />
+      ) : null}
+      {tiled && !software
         ? multiView.tiles.map((entry, index) => (
             <ExtraMediaTile
               key={`${entry.item.id}:${entry.stream.url}`}

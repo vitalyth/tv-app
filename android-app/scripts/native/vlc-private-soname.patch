@@ -1,0 +1,20 @@
+--- a/lib/Makefile.am
++++ b/lib/Makefile.am
+@@ -68,6 +68,6 @@
+ libvlc_la_LDFLAGS = \
+ 	$(LDFLAGS_libvlc) \
+ 	-no-undefined \
+-	-version-number @LIBVLC_ABI_MAJOR@:@LIBVLC_ABI_MINOR@:@LIBVLC_ABI_MICRO@ \
++	-avoid-version \
+ 	-export-symbols $(srcdir)/libvlc.sym
+ EXTRA_libvlc_la_DEPENDENCIES = libvlc.sym
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -597,6 +597,6 @@
+ libvlccore_la_LDFLAGS = \
+ 	$(LDFLAGS_libvlccore) \
+ 	-no-undefined \
+ 	-export-symbols $(srcdir)/libvlccore.sym \
+-	-version-info 9:0:0
++	-avoid-version
+ libvlccore_la_SOURCES += libvlccore.sym

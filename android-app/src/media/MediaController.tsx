@@ -16,7 +16,8 @@ import type {
   MultiViewState,
 } from './player';
 import { isSameMediaItem } from './player';
-import { MULTIVIEW_MAX_STREAMS } from './multiViewLayout';
+import { multiViewMaxStreams } from './multiViewLayout';
+import { softwareMultiViewAvailable } from './nativeMultiView';
 
 export interface MediaControllerValue {
   item?: MediaItem;
@@ -33,6 +34,9 @@ export interface MediaControllerValue {
   selectedQualityId: string;
   multiView: MultiViewState | null;
   enterMultiView: () => void;
+  setMultiViewBackend: (
+    backend: NonNullable<MultiViewState['backend']>,
+  ) => void;
   exitMultiView: () => void;
   setMultiViewChannel: (
     item: MediaItem,
@@ -88,6 +92,7 @@ export type MediaControllerActions = Pick<
   | 'seekTo'
   | 'registerSeekHandler'
   | 'enterMultiView'
+  | 'setMultiViewBackend'
   | 'exitMultiView'
   | 'setMultiViewChannel'
   | 'setMultiViewPrimary'
@@ -148,6 +153,39 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setPresentation('fullscreen');
   }, [setPresentation]);
 
+  const setMultiViewBackend = useCallback(
+    (backend: NonNullable<MultiViewState['backend']>) => {
+      if (backend === 'software' && !softwareMultiViewAvailable) {
+        return;
+      }
+      const current = multiViewRef.current;
+      if (
+        !current ||
+        (current.backend ?? 'platform') === backend ||
+        current.tiles.length + 1 > multiViewMaxStreams(backend)
+      ) {
+        return;
+      }
+      setStatus('loading');
+      setMultiView(previous => {
+        if (
+          !previous ||
+          previous.backend === backend ||
+          previous.tiles.length + 1 > multiViewMaxStreams(backend)
+        ) {
+          return previous;
+        }
+        return {
+          ...previous,
+          backend,
+          audioTile: -1,
+          tiles: previous.tiles.map(entry => ({ ...entry, status: 'loading' })),
+        };
+      });
+    },
+    [],
+  );
+
   const setMultiViewChannel = useCallback(
     (nextItem: MediaItem, nextStream: MediaStream, tile = 1) => {
       if (
@@ -160,7 +198,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
         if (
           !previous ||
           tile < 1 ||
-          tile >= MULTIVIEW_MAX_STREAMS ||
+          tile >= multiViewMaxStreams(previous.backend) ||
           tile > previous.tiles.length + 1 ||
           previous.tiles.some(
             (entry, index) =>
@@ -176,6 +214,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
           status: 'loading',
         };
         return {
+          ...previous,
           audioTile: previous.audioTile === tile ? -1 : previous.audioTile,
           tiles,
         };
@@ -212,6 +251,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setMultiView(previous =>
       previous?.tiles[tile - 1]
         ? {
+            ...previous,
             audioTile: previous.audioTile === tile ? -1 : previous.audioTile,
             tiles: previous.tiles.map((entry, index) =>
               index === tile - 1 ? { ...entry, status: 'error' } : entry,
@@ -262,7 +302,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
         setMultiView(null);
         setPresentation('fullscreen');
       } else {
-        setMultiView({ tiles, audioTile: -1 });
+        setMultiView({ ...current, tiles, audioTile: -1 });
       }
     },
     [setPresentation],
@@ -290,6 +330,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
 
   const multiViewActions = useMemo(
     () => ({
+      setMultiViewBackend,
       enterMultiView,
       exitMultiView,
       setMultiViewChannel,
@@ -300,6 +341,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       markMultiViewError,
     }),
     [
+      setMultiViewBackend,
       enterMultiView,
       exitMultiView,
       setMultiViewChannel,
