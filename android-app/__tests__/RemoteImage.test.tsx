@@ -10,7 +10,14 @@ describe('native channel logo images', () => {
   afterEach(() => { if (renderer) { act(() => renderer.unmount()); } });
   const image = () => renderer.root.findByType(Image);
 
-  it.each(['16tv.jpg', 'cnn.svg', 'wcvb.svg', 'ftv-white.svg'])(
+  it.each([
+    '16tv.jpg', 'cnn.svg', 'wcvb.svg', 'ftv-white.svg',
+    'sport-1-square.svg', 'sport-2-square.svg', 'sport-3-square.svg',
+    'sport-4-square.svg', 'one-1-square.svg', 'one-2-square.svg',
+    'sport-5-square.svg', 'sport-5-live-square.svg', 'sport-5-plus-square.svg',
+    'sport-5-gold-square.svg', 'sport-5-stars-square.svg', 'sport-5-max-square.svg',
+    'eurosport-1-square.svg', 'eurosport-2-square.svg',
+  ])(
     'loads %s from a real bundled PNG without requesting an invented URL', filename => {
       const uri = `${SERVICE_BASE_URL}/ch/${filename}`;
       act(() => { renderer = Renderer.create(<RemoteImage uri={uri} resizeMode="contain" />); });
@@ -34,7 +41,7 @@ describe('native channel logo images', () => {
     const nativeURL = require('react-native/Libraries/Blob/URL').URL;
     try {
       globalThis.URL = nativeURL;
-      for (const name of ['16tv.jpg', 'cnn.svg', 'wcvb.svg', 'ftv-white.svg']) {
+      for (const name of ['16tv.jpg', 'cnn.svg', 'wcvb.svg', 'ftv-white.svg', 'sport-1-square.svg', 'sport-5-max-square.svg', 'eurosport-2-square.svg']) {
         expect(getBundledChannelLogo(`${SERVICE_BASE_URL}/ch/${name}`)).toBeDefined();
         expect(getBundledChannelLogo(`${SERVICE_BASE_URL}/ch/${name}?v=2`)).toBeDefined();
       }
