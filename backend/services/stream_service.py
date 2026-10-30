@@ -1,8 +1,12 @@
 import xbmcplugin
 from services.custom_channel_service import get_custom_channel
+from services.nextbet_stream_service import resolve_stream as resolve_nextbet_stream
 
 
 def get_custom_channel_stream(custom_channel):
+    if custom_channel.get("streamProvider") == "nextbet":
+        return resolve_nextbet_stream(custom_channel.get("streamSlug"))
+
     return custom_channel.get("streamUrl") or (custom_channel.get("linkDetails") or {}).get("link")
 
 

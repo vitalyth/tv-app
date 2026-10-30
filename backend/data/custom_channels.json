@@ -1410,5 +1410,47 @@
     "linkDetails": {
       "link": "https://glzwizzlv.bynetcdn.com/glglz_alt_mp3?awCollectionId=misc&awEpisodeId=glglz_alt"
     }
+  },
+  {
+    "id": "ch_sport5_max",
+    "channelID": "ch_sport5_max",
+    "name": "ספורט 5 Max",
+    "title": "ספורט 5 Max",
+    "label": "ספורט 5 Max",
+    "index": 16,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "Sport5.png",
+    "logo": "Sport5.png",
+    "tvgID": "",
+    "sourceUrl": "https://1nextbet7.tv/kanal-izle/sport-5-max",
+    "streamProvider": "nextbet",
+    "streamSlug": "sport-5-max",
+    "linkDetails": {
+      "referer": "https://1nextbet7.tv/",
+      "manifest_type": "hls"
+    }
+  },
+  {
+    "id": "ch_sport5_live",
+    "channelID": "ch_sport5_live",
+    "name": "ספורט 5",
+    "title": "ספורט 5",
+    "label": "ספורט 5",
+    "index": 15,
+    "type": "tv",
+    "module": "custom",
+    "mode": 0,
+    "image": "Sport5.png",
+    "logo": "Sport5.png",
+    "tvgID": "",
+    "sourceUrl": "https://1nextbet7.tv/kanal-izle/yes-5",
+    "streamProvider": "nextbet",
+    "streamSlug": "yes-5",
+    "linkDetails": {
+      "referer": "https://1nextbet7.tv/",
+      "manifest_type": "hls"
+    }
   }
 ]

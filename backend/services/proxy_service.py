@@ -10,6 +10,7 @@ import re
 import html
 import json
 from services.radio_metadata_service import update_radio_now_playing
+from services.nextbet_stream_service import SITE_URL as NEXTBET_SITE_URL, fresh_manifest_url, is_nextbet_referer
 
 try:
     from curl_cffi import requests as curl_requests
@@ -1069,6 +1070,17 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
     }
     headers.update(kodi_headers)
 
+    nextbet = is_nextbet_referer(referer)
+    if nextbet:
+        headers.update({
+            "User-Agent": "Mozilla/5.0",
+            "Origin": NEXTBET_SITE_URL.rstrip("/"),
+            "Referer": NEXTBET_SITE_URL,
+            "Cache-Control": "no-cache",
+        })
+        if _url_path(url).endswith((".css", ".m3u8")):
+            url = fresh_manifest_url(url)
+
     if _is_pluto_hls_url(url):
         _apply_pluto_headers(headers, referer)
 
@@ -1089,6 +1101,11 @@ def handle_proxy(request, url, referer, cast=False, channel_id=None):
         effective_url = r.url or effective_url
 
     content_type = _content_type_for_url(effective_url, r.headers.get("content-type", ""))
+    if nextbet:
+        if _url_path(effective_url).endswith(".jpeg"):
+            content_type = "video/mp2t"
+        elif _url_path(effective_url).endswith(".css"):
+            content_type = "application/vnd.apple.mpegurl"
     clean_content_type = content_type.lower()
     is_head = request.method == "HEAD"
 

@@ -307,3 +307,20 @@ http://192.168.86.75:8001
 # 👨‍💻 Author
 
 Vitaly Thirulnikov
+
+### Nextbet live sports channels
+
+The custom channel catalog includes `ch_sport5_live` (Sport 5 / `yes-5`)
+and `ch_sport5_max` (Sport 5 Max / `sport-5-max`) alongside the existing
+Sport 5 website channel. Both are listed under sports and included in the
+existing live-channel and M3U playlist endpoints.
+
+The backend resolves a fresh signed URL on playback through the source AJAX
+endpoint; no expiring tokens are stored in the catalog. The existing stream
+proxy supplies the source Referer, Origin and User-Agent for manifests and
+segments, refreshes cached manifests, and serves the source's `.jpeg` transport
+stream segments as `video/mp2t`. Clients can use `/stream?channel_id=ch_sport5_live`
+or `/stream?channel_id=ch_sport5_max` without supplying source headers.
+
+These channels require the upstream website and CDN to be available from the
+backend. Deploy the updated backend image and catalog together.
