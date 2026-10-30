@@ -15,182 +15,236 @@
     "channelID": "ch_sport1",
     "streamSlug": "yes-1",
     "name": "ספורט 1",
-    "logo": "sport-1.png",
+    "logo": "sport-1-square.svg",
     "sourceUrl": "https://sport1.maariv.co.il/app/themes/sport1/public/images/channels-logo/sport1-1-channel-logo.svg",
     "original": "originals/sport-1.svg",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "layout": "Official vector numeral above the complete wordmark"
   },
   {
     "channelID": "ch_sport2",
     "streamSlug": "yes-2",
     "name": "ספורט 2",
-    "logo": "sport-2.png",
+    "logo": "sport-2-square.svg",
     "sourceUrl": "https://sport1.maariv.co.il/app/themes/sport1/public/images/channels-logo/sport1-3-channel-logo.svg",
     "original": "originals/sport-2.svg",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "layout": "Official vector numeral above the complete wordmark"
   },
   {
     "channelID": "ch_sport3",
     "streamSlug": "yes-3",
     "name": "ספורט 3",
-    "logo": "sport-3.png",
+    "logo": "sport-3-square.svg",
     "sourceUrl": "https://sport1.maariv.co.il/app/themes/sport1/public/images/channels-logo/sport1-4-channel-logo.svg",
     "original": "originals/sport-3.svg",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "layout": "Official vector numeral above the complete wordmark"
   },
   {
     "channelID": "ch_sport4",
     "streamSlug": "yes-4",
     "name": "ספורט 4",
-    "logo": "sport-4.png",
+    "logo": "sport-4-square.svg",
     "sourceUrl": "https://sport1.maariv.co.il/app/themes/sport1/public/images/channels-logo/sport1-5-channel-logo.svg",
     "original": "originals/sport-4.svg",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "layout": "Official vector numeral above the complete wordmark"
   },
   {
     "channelID": "ch_one1",
     "streamSlug": "One-1",
     "name": "ONE",
-    "logo": "one-1.webp",
-    "sourceUrl": "https://cms.freetv.tv/uploads/one_1_aa2bf2fd61.webp",
-    "original": "one-1.webp",
+    "logo": "one-1-square.svg",
+    "sourceUrl": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/israel/one-il.png",
+    "original": "originals/square-sources/one-il.png",
     "dimensions": [
-      200,
-      200
+      512,
+      512
     ],
-    "background": "transparent"
+    "background": "#ffffff",
+    "sourceDimensions": [
+      512,
+      107
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_one2",
     "streamSlug": "one-2",
     "name": "ONE 2",
-    "logo": "one-2.webp",
-    "sourceUrl": "https://cms.freetv.tv/uploads/one2_6b0eb363e6.webp",
-    "original": "one-2.webp",
+    "logo": "one-2-square.svg",
+    "sourceUrl": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/israel/one2-il.png",
+    "original": "originals/square-sources/one2-il.png",
     "dimensions": [
-      200,
-      200
+      512,
+      512
     ],
-    "background": "transparent"
+    "background": "#ffffff",
+    "sourceDimensions": [
+      512,
+      111
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_sport5_live",
     "streamSlug": "yes-5",
     "name": "ספורט 5",
-    "logo": "sport-5.png",
-    "sourceUrl": "https://www.sport5.co.il/Images/channels/SPORT5_CHANNEL_white1.svg",
-    "original": "originals/sport-5.svg",
+    "logo": "sport-5-square.svg",
+    "sourceUrl": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/israel/5sport-il.png",
+    "original": "originals/square-sources/5sport-il.png",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "sourceDimensions": [
+      512,
+      631
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_sport5_extra_live",
     "streamSlug": "yes-5-live",
     "name": "ספורט 5 Live",
-    "logo": "sport-5-live.png",
-    "sourceUrl": "https://www.sport5.co.il/Images/channels/5LIVE_CHANNEL_white1.svg",
-    "original": "originals/sport-5-live.svg",
+    "logo": "sport-5-live-square.svg",
+    "sourceUrl": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/israel/5live-il.png",
+    "original": "originals/square-sources/5live-il.png",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "sourceDimensions": [
+      512,
+      641
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_sport5_plus",
     "streamSlug": "yes-5-plus",
     "name": "ספורט 5 Plus",
-    "logo": "sport-5-plus.png",
-    "sourceUrl": "https://www.sport5.co.il/Images/channels/5PLUS_CHANNEL_white1.svg",
-    "original": "originals/sport-5-plus.svg",
+    "logo": "sport-5-plus-square.svg",
+    "sourceUrl": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/israel/5plus-il.png",
+    "original": "originals/square-sources/5plus-il.png",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "sourceDimensions": [
+      512,
+      642
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_sport5_gold",
     "streamSlug": "yes-5-gold",
     "name": "ספורט 5 Gold",
-    "logo": "sport-5-gold.png",
-    "sourceUrl": "https://www.sport5.co.il/Images/channels/5GOLD_CHANNEL_white1.svg",
-    "original": "originals/sport-5-gold.svg",
+    "logo": "sport-5-gold-square.svg",
+    "sourceUrl": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/israel/5gold-il.png",
+    "original": "originals/square-sources/5gold-il.png",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "sourceDimensions": [
+      512,
+      643
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_sport5_stars",
     "streamSlug": "yes-5-stars",
     "name": "ספורט 5 Stars",
-    "logo": "sport-5-stars.png",
-    "sourceUrl": "https://www.sport5.co.il/Images/channels/5_STARS_white1.svg",
-    "original": "originals/sport-5-stars.svg",
+    "logo": "sport-5-stars-square.svg",
+    "sourceUrl": "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/israel/5stars-il.png",
+    "original": "originals/square-sources/5stars-il.png",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#101820",
+    "sourceDimensions": [
+      512,
+      641
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_sport5_max",
     "streamSlug": "sport-5-max",
     "name": "ספורט 5 Max",
-    "logo": "sport-5-max.png",
-    "sourceUrl": "https://www.sport5.co.il/Images/channels/5max_white1.svg",
-    "original": "originals/sport-5-max.svg",
+    "logo": "sport-5-max-square.svg",
+    "sourceUrl": "https://cms.freetv.tv/uploads/sport5max_7d0d681281.webp",
+    "original": "originals/square-sources/sport5max.webp",
     "dimensions": [
       512,
       512
     ],
-    "background": "transparent"
+    "background": "#ffffff",
+    "sourceDimensions": [
+      200,
+      200
+    ],
+    "layout": "Compact logo; provider frame excluded"
   },
   {
     "channelID": "ch_eurosport1",
     "streamSlug": "euro1",
     "name": "Eurosport 1",
-    "logo": "eurosport-1.png",
-    "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Eurosport_1_Logo_2015.svg",
-    "original": "originals/eurosport-1.svg",
+    "logo": "eurosport-1-square.svg",
+    "sourceUrl": "https://i.imgur.com/olQJgm7.png",
+    "original": "originals/square-sources/eurosport1.png",
     "dimensions": [
       512,
       512
     ],
-    "background": "#ffffff"
+    "background": "#ffffff",
+    "sourceDimensions": [
+      576,
+      418
+    ],
+    "layout": "Original artwork centered without stretching"
   },
   {
     "channelID": "ch_eurosport2",
     "streamSlug": "euro2",
     "name": "Eurosport 2",
-    "logo": "eurosport-2.png",
-    "sourceUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d8/Eurosport_2_Logo_2015.svg",
-    "original": "originals/eurosport-2.svg",
+    "logo": "eurosport-2-square.svg",
+    "sourceUrl": "https://i.imgur.com/f56dHgR.png",
+    "original": "originals/square-sources/eurosport2.png",
     "dimensions": [
       512,
       512
     ],
-    "background": "#ffffff"
+    "background": "#ffffff",
+    "sourceDimensions": [
+      512,
+      307
+    ],
+    "layout": "Original artwork centered without stretching"
   }
 ]

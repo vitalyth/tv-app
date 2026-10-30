@@ -331,10 +331,12 @@ endpoint without supplying source headers.
 
 Logos are served locally from `frontend/public/ch`. Download sources and output
 sizes are documented in `frontend/docs/channel-logo-sources.json`. Original
-SVG files are retained in `frontend/public/ch/originals`; compatible PNG copies
-are rendered at 512×512 with transparent padding. Black Kan / Eurosport marks
-use a white background for contrast on dark guide rows. ONE logos retain the
-provider's original 200×200 WebP files; no small raster images are upscaled.
+artwork is retained in `frontend/public/ch/originals`. The additional sports
+channels use 512×512 SVG tiles with embedded local artwork and contrasting
+backgrounds. Sport 5 uses vertical marks; Eurosport uses compact E1/E2 marks.
+Sport 1–4 use the official vector numeral above the complete wordmark, without
+stretching either. Regenerate the tiles with
+`node frontend/scripts/build-square-channel-logos.mjs` from the repository root.
 No logos are loaded from third-party servers during playback.
 
 These channels require the upstream website and CDN to be available from the
