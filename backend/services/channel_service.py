@@ -282,6 +282,9 @@ CHANNELS_BY_CATEGORY = {
 
     "sports": [
         "ch_sport5", "ch_sport5_live", "ch_sport5_max",
+        "ch_sport1", "ch_sport2", "ch_sport3", "ch_sport4",
+        "ch_one1", "ch_one2", "ch_sport5_extra_live", "ch_sport5_plus",
+        "ch_sport5_gold", "ch_sport5_stars", "ch_eurosport1", "ch_eurosport2",
         "rd_sport5"
     ],
 

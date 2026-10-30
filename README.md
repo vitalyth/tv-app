@@ -46,6 +46,25 @@ tv-app/
 
 ## 🧪 Run Locally (Development)
 
+### Docker: frontend and backend
+
+```bash
+docker compose -p tv-app-local -f docker-compose.local.yml up -d --build
+```
+
+Open <http://localhost:8001>. The API is available at
+<http://localhost:8001/api/docs> and directly at <http://localhost:8000/docs>.
+This stack includes the frontend, backend, VPN backend, Gluetun, scheduler and
+Nginx. Configure `WIREGUARD_PRIVATE_KEY` and `WIREGUARD_ADDRESSES` in `.env` for
+the Surfshark VPN. Live/API traffic uses the regular backend; VPN routes use
+the backend sharing Gluetun's network.
+
+```bash
+docker compose -p tv-app-local -f docker-compose.local.yml logs -f
+docker compose -p tv-app-local -f docker-compose.local.yml down
+```
+
+
 ### 🔹 Backend
 
 ```bash

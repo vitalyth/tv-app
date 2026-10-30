@@ -7,7 +7,22 @@ from fastapi import HTTPException
 from utils.http import create_session
 
 SITE_URL = "https://1nextbet7.tv/"
-CHANNEL_SLUGS = {"sport-5-max", "yes-5"}
+CHANNEL_SLUGS = {
+    "yes-1",
+    "yes-2",
+    "yes-3",
+    "yes-4",
+    "One-1",
+    "one-2",
+    "yes-5",
+    "yes-5-live",
+    "yes-5-plus",
+    "yes-5-gold",
+    "yes-5-stars",
+    "sport-5-max",
+    "euro1",
+    "euro2",
+}
 session = create_session()
 
 

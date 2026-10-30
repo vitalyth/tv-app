@@ -1,0 +1,97 @@
+# Complete local stack: frontend, API, VPN API, scheduler, and reverse proxy.
+# Start: docker compose -f docker-compose.local.yml up -d --build
+services:
+  backend:
+    image: tv-app-local-backend
+    build: ./backend
+    environment:
+      ROOT_PATH: /api
+      BACKEND_CACHE_DIR: /app/cache
+      KAN_VOD_DB_PATH: /app/db/kan_vod.db
+      LOCAL_SERIES_DB_PATH: /app/db/local_series.db
+      LOCAL_VOD_TV_DIR: /app/media/tv
+      LOCAL_SERIES_WATCHER_ENABLED: "false"
+    volumes:
+      - ./backend/cache:/app/cache
+      - local-backend-db:/app/db
+      - ./.docker/local-tv:/app/media/tv:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    image: tv-app-local-frontend
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_BASE: /api
+    volumes:
+      - ./frontend/public/ch:/app/public/ch:ro
+    restart: unless-stopped
+
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      VPN_SERVICE_PROVIDER: surfshark
+      VPN_TYPE: wireguard
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES}
+      SERVER_COUNTRIES: Israel
+      TZ: America/New_York
+      HTTP_CONTROL_SERVER: "off"
+    ports:
+      - "127.0.0.1:8002:8002"
+    restart: unless-stopped
+
+  backend-vpn:
+    image: tv-app-local-backend
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+    network_mode: "service:gluetun"
+    environment:
+      ROOT_PATH: /api
+      BACKEND_CACHE_DIR: /app/cache
+      KAN_VOD_DB_PATH: /app/db/kan_vod.db
+      LOCAL_SERIES_DB_PATH: /app/db/local_series.db
+      LOCAL_VOD_TV_DIR: /app/media/tv
+      LOCAL_SERIES_WATCHER_ENABLED: "false"
+    volumes:
+      - ./backend/cache:/app/cache
+      - local-backend-db:/app/db
+      - ./.docker/local-tv:/app/media/tv:ro
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  backend-scheduler:
+    image: tv-app-local-backend
+    command: ["python", "/app/run_scheduler.py"]
+    environment:
+      BACKEND_CACHE_DIR: /app/cache
+      KAN_VOD_DB_PATH: /app/db/kan_vod.db
+      EPG_INTERVAL_SECONDS: ${EPG_INTERVAL_SECONDS:-86400}
+      VOD_RECENT_INTERVAL_SECONDS: ${VOD_RECENT_INTERVAL_SECONDS:-43200}
+      KAN_VOD_SCAN_INTERVAL_SECONDS: ${KAN_VOD_SCAN_INTERVAL_SECONDS:-28800}
+    volumes:
+      - ./backend/cache:/app/cache
+      - local-backend-db:/app/db
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8001:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+      - backend-vpn
+    restart: unless-stopped
+
+volumes:
+  local-backend-db:

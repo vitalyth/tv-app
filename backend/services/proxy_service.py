@@ -1057,6 +1057,9 @@ def handle_local_file_proxy(request, file_path: str, root_dir: str):
 
 def handle_proxy(request, url, referer, cast=False, channel_id=None):
     url, kodi_headers = _split_kodi_url_props(url)
+    # Resolved streams can carry their own source Referer in Kodi URL properties.
+    # Use it for both this request and rewritten child manifest URLs.
+    referer = kodi_headers.get("Referer") or referer
     url = _resolve_relative_proxy_url(url, referer)
     origin = _origin_for_url(url)
     max_bitrate = _default_max_bitrate_for_request(request, url)

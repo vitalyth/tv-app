@@ -5,6 +5,7 @@ import { Clock3, ListVideo, Play, Video } from "lucide-react";
 import { Channel, Program } from "@/lib/channels-data";
 import { CHANNEL_REGION_SECTIONS, getChannelRegion } from "@/lib/channel-regions";
 import { getProgramGuideImageSrc } from "@/lib/image-urls";
+import { getHourlyEpgGaps } from "@/lib/epg-gaps";
 import { useNowSec } from "@/hooks/use-now-sec";
 import {
     DropdownMenu,
@@ -570,6 +571,17 @@ function ProgramGuide({
 
         return programsByChannelId;
     }, [guideEnd, guideStart, visibleGuideRows, visibleTimeRange]);
+
+    const visibleGapsByChannelId = useMemo(() => {
+        const gapsByChannelId = new Map<string, { start: number; end: number }[]>();
+        const start = Math.max(guideStart, visibleTimeRange?.start ?? guideStart);
+        const end = Math.min(guideEnd, visibleTimeRange?.end ?? guideEnd);
+
+        visibleProgramsByChannelId.forEach((programs, channelId) => {
+            gapsByChannelId.set(channelId, getHourlyEpgGaps(programs, start, end));
+        });
+        return gapsByChannelId;
+    }, [guideStart, guideEnd, visibleTimeRange, visibleProgramsByChannelId]);
 
     const updateVisibleDateLabel = useCallback(() => {
         if (!mainRef.current) {
@@ -1138,32 +1150,41 @@ function ProgramGuide({
                                             aria-hidden="true"
                                         />
                                     )}
-                                    {visiblePrograms.length === 0 ? (
-                                        <div
-                                            className="absolute top-1.5 inset-x-2 rounded-lg border border-zinc-800/40 bg-zinc-900/50 flex items-center pr-3"
-                                            style={{ height: CELL_H - 12 }}
-                                        >
-                                            <span className="text-xs text-zinc-600">אין מידע</span>
-                                        </div>
-                                    ) : (
-                                        visiblePrograms.map((prog) => (
-                                            <ProgramCell
-                                                key={`${prog.start}:${prog.end}:${prog.name}`}
-                                                program={prog}
-                                                channel={ch}
-                                                guideStart={guideStart}
-                                                guideEnd={guideEnd}
-                                                nowSec={nowSec}
-                                                pxPerSec={pxPerSec}
-                                                isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
-                                                isSelectedProgram={selectedProgramKey === getProgramSelectionKey(prog, ch)}
-                                                hasVod={hasVodForProgram?.(prog, ch) ?? false}
-                                                enableTooltip={enableProgramTooltip}
-                                                onClick={onProgramClick}
-                                                didDrag={didDrag}
-                                            />
-                                        ))
-                                    )}
+                                    {(visibleGapsByChannelId.get(ch.id) ?? []).map((gap) => {
+                                        const width = Math.max((gap.end - gap.start) * pxPerSec - 3, 0);
+                                        if (width < 2) return null;
+
+                                        return (
+                                            <div
+                                                key={`empty:${gap.start}:${gap.end}`}
+                                                data-epg-placeholder="true"
+                                                data-channel-id={ch.id}
+                                                data-start={gap.start}
+                                                data-end={gap.end}
+                                                className="absolute top-1.5 flex items-start overflow-hidden rounded-lg border border-zinc-800/30 bg-zinc-900/25 px-2 py-1 select-none"
+                                                style={{ right: (guideEnd - gap.end) * pxPerSec + 2, width, height: CELL_H - 12, contain: "layout paint style" }}
+                                            >
+                                                <span className="truncate text-[10px] font-normal leading-tight text-zinc-600">אין מידע</span>
+                                            </div>
+                                        );
+                                    })}
+                                    {visiblePrograms.map((prog) => (
+                                        <ProgramCell
+                                            key={`${prog.start}:${prog.end}:${prog.name}`}
+                                            program={prog}
+                                            channel={ch}
+                                            guideStart={guideStart}
+                                            guideEnd={guideEnd}
+                                            nowSec={nowSec}
+                                            pxPerSec={pxPerSec}
+                                            isPlayingProgram={isPlayingChannel && isProgramLive(prog, nowSec)}
+                                            isSelectedProgram={selectedProgramKey === getProgramSelectionKey(prog, ch)}
+                                            hasVod={hasVodForProgram?.(prog, ch) ?? false}
+                                            enableTooltip={enableProgramTooltip}
+                                            onClick={onProgramClick}
+                                            didDrag={didDrag}
+                                        />
+                                    ))}
                                 </div>
                             );
                         })}

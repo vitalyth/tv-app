@@ -308,19 +308,34 @@ http://192.168.86.75:8001
 
 Vitaly Thirulnikov
 
-### Nextbet live sports channels
+### Nextbet live channels
 
-The custom channel catalog includes `ch_sport5_live` (Sport 5 / `yes-5`)
-and `ch_sport5_max` (Sport 5 Max / `sport-5-max`) alongside the existing
-Sport 5 website channel. Both are listed under sports and included in the
-existing live-channel and M3U playlist endpoints.
+The custom catalog includes 14 additional source channels alongside existing
+channels: Sport 1–4, ONE / ONE 2, Sport 5 / Live / Plus / Gold / Stars / Max,
+and Eurosport 1 / 2. The source slugs `yes-1` through `yes-4` carry Sport 1–4,
+not the similarly named yes movie channels. Existing IDs for Sport 5 and
+Sport 5 Max remain stable.
+
+Each additional source has its own guide index so the web guide does not
+collapse it into an unrelated channel. Kan 11 uses the existing `ch_11` entry
+and its existing backup sources under guide index 1, with the downloaded local
+Kan logo. No duplicate Kan entry is added for the unavailable source.
+The new sports channels have no EPG until a matching schedule source is configured.
 
 The backend resolves a fresh signed URL on playback through the source AJAX
 endpoint; no expiring tokens are stored in the catalog. The existing stream
 proxy supplies the source Referer, Origin and User-Agent for manifests and
 segments, refreshes cached manifests, and serves the source's `.jpeg` transport
-stream segments as `video/mp2t`. Clients can use `/stream?channel_id=ch_sport5_live`
-or `/stream?channel_id=ch_sport5_max` without supplying source headers.
+stream segments as `video/mp2t`. Clients use the existing `/stream?channel_id=…`
+endpoint without supplying source headers.
+
+Logos are served locally from `frontend/public/ch`. Download sources and output
+sizes are documented in `frontend/docs/channel-logo-sources.json`. Original
+SVG files are retained in `frontend/public/ch/originals`; compatible PNG copies
+are rendered at 512×512 with transparent padding. Black Kan / Eurosport marks
+use a white background for contrast on dark guide rows. ONE logos retain the
+provider's original 200×200 WebP files; no small raster images are upscaled.
+No logos are loaded from third-party servers during playback.
 
 These channels require the upstream website and CDN to be available from the
-backend. Deploy the updated backend image and catalog together.
+backend. Deploy the updated backend image, catalog and frontend assets together.
