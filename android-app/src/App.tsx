@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { ApplicationShell } from './components/ApplicationShell';
 import { LoadingScreen } from './components/LoadingScreen';
+import { startLiveEpgSync } from './services/liveEpgSync';
 
 const MINIMUM_LOADING_TIME_MS = 900;
 
 export function App() {
+  useEffect(startLiveEpgSync, []);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {

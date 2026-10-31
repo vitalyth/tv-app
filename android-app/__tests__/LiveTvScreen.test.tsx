@@ -1,3 +1,4 @@
+import {liveEpgStore} from '../src/state/liveEpg';
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
 import { StyleSheet, View } from 'react-native';
@@ -80,6 +81,7 @@ describe('live guide navigation', () => {
     jest.useFakeTimers();
     jest.setSystemTime(now);
     jest.clearAllMocks();
+    liveEpgStore.publish([]);
     Object.assign(mockController, {
       item: null,
       stream: null,
@@ -93,6 +95,10 @@ describe('live guide navigation', () => {
     }
     jest.useRealTimers();
   });
+  const publishEpg = () => liveEpgStore.publish(guide.channels.map(channel => ({
+    ...channel,
+    sourcePayload: {programs: guide.programs[channel.id].map(program => ({...program, name: program.title}))},
+  })));
   const key = async (eventType: string, eventKeyAction = 0) => {
     await act(async () => mockRemote({ eventType, eventKeyAction }));
   };
@@ -302,6 +308,7 @@ describe('live guide navigation', () => {
     await mount();
     await act(async () => {
       jest.advanceTimersByTime(1800000);
+      publishEpg();
     });
     expect(onItemFocused).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -318,6 +325,7 @@ describe('live guide navigation', () => {
     await key('right');
     await act(async () => {
       jest.advanceTimersByTime(60000);
+      publishEpg();
     });
     expect(onItemFocused).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -341,6 +349,7 @@ describe('live guide navigation', () => {
     expect(timeText()).toBe(clock(now));
     await act(async () => {
       jest.advanceTimersByTime(60000);
+      publishEpg();
     });
     expect(timeText()).toBe(clock(now + 60000));
     for (let i = 0; i < 8; i++) {

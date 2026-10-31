@@ -1,3 +1,4 @@
+import {liveEpgStore, useLiveEpg} from '../state/liveEpg';
 import {
   forwardRef,
   memo,
@@ -128,7 +129,10 @@ const FallbackRouteContent = forwardRef<PageContentHandle, PageContentProps>(
     { route, active, menuFocusDestination, onContentFocus, onItemFocused },
     ref,
   ) {
-    const [channels, setChannels] = useState<MediaItem[]>([]);
+    const [loadedChannels, setChannels] = useState<MediaItem[]>([]);
+    const epg = useLiveEpg();
+    const channels = useMemo(() => epg.channels.length
+      ? loadedChannels.map(liveEpgStore.resolve) : loadedChannels, [loadedChannels, epg]);
     const [loading, setLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const { width: windowWidth } = useWindowDimensions();

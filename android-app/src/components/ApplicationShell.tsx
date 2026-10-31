@@ -1,3 +1,4 @@
+import {liveEpgStore, useLiveEpg} from '../state/liveEpg';
 import {
   memo,
   useCallback,
@@ -76,6 +77,8 @@ function ShellContent({
 }) {
   const { item: playingItem, isFullscreen, presentation } = useMediaController();
   const { exitFullscreen } = useMediaActions();
+  useLiveEpg();
+  const focusedItem = focusedMediaItem ? liveEpgStore.resolve(focusedMediaItem) : null;
   const activeRoute = getRoute(state.activeRoute);
   const focusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -184,7 +187,7 @@ function ShellContent({
               <Text style={styles.platform}>{tvPlatform.displayName}</Text>
               <LiveClock />
             </View>
-            <IntroRegion route={activeRoute} focusedItem={focusedMediaItem} />
+            <IntroRegion route={activeRoute} focusedItem={focusedItem} />
             <PageContent
               ref={pageContentRef}
               route={activeRoute}

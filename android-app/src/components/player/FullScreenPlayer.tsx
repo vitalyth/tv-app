@@ -1,3 +1,4 @@
+import {liveEpgStore, useLiveEpg} from '../../state/liveEpg';
 import {
   memo,
   useCallback,
@@ -135,13 +136,16 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   const lastSavedPositionRef = useRef<number>(0);
   const controlsRevealedAtRef = useRef<number>(0);
   const liveRecoveryRef = useRef({ id: '', attempts: 0 });
-  const liveChannelsRef = useRef<Promise<MediaItem[]> | null>(null);
+  useLiveEpg();
   const channelSwitchRequestRef = useRef(0);
   const channelTargetRef = useRef(item);
+  const channelIdentityRef = useRef(item?.id);
   const currentItemRef = useRef(item);
   currentItemRef.current = item;
 
   useEffect(() => {
+    if (channelIdentityRef.current === item?.id) return;
+    channelIdentityRef.current = item?.id;
     channelTargetRef.current = item;
     channelSwitchRequestRef.current += 1;
     setResolvingChannel(false);
@@ -169,13 +173,8 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   }, []);
 
   const loadLiveChannels = useCallback(() => {
-    if (!liveChannelsRef.current) {
-      liveChannelsRef.current = getPlayableLiveChannels().catch(error => {
-        liveChannelsRef.current = null;
-        throw error;
-      });
-    }
-    return liveChannelsRef.current;
+    const channels = liveEpgStore.getSnapshot().channels;
+    return channels.length ? Promise.resolve(channels) : getPlayableLiveChannels();
   }, []);
 
   const switchChannel = useCallback(async (selection: number | MediaItem) => {
@@ -631,7 +630,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
           style={StyleSheet.absoluteFill}
         >
           <View testID="player-top-panel" pointerEvents="none">
-            <PlayerTopInfo item={controlsVisible ? item : channelInfoItem ?? item} />
+            <PlayerTopInfo item={controlsVisible ? item : (channelInfoItem ? liveEpgStore.resolve(channelInfoItem) : item)} />
           </View>
           {controlsVisible ? <>
             <View style={styles.spacer} pointerEvents="none" />

@@ -1,3 +1,4 @@
+import { useLiveEpg } from '../state/liveEpg';
 import {
   forwardRef,
   useCallback,
@@ -23,11 +24,14 @@ import {
   getProgramGuide,
   GUIDE_SLOT_MS,
   guideMediaItem,
+  guideStart,
+  GUIDE_WINDOW_MS,
+  normalizePrograms,
   programAt,
   type GuideData,
 } from '../api/programGuide';
 import type { PageContentHandle } from '../components/PageContent';
-import { resolvePosterUrl } from '../api/channels';
+import { currentTimeMs, resolvePosterUrl } from '../api/channels';
 import { RemoteImage } from '../components/RemoteImage';
 import { t } from '../i18n';
 import { useMediaActions, useMediaController } from '../media/MediaController';
@@ -70,7 +74,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
     const [data, setData] = useState<GuideData | null>(null);
     const [failed, setFailed] = useState(false);
     const [retry, setRetry] = useState(0);
-    const [now, setNow] = useState(Date.now);
+    const [now, setNow] = useState(currentTimeMs);
     const [selection, setSelection] = useState<Selection>({
       channelId: '',
       anchor: now,
@@ -155,7 +159,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
           if (mounted) {
             setData(guide);
             setFailed(false);
-            setNow(Date.now());
+            setNow(currentTimeMs());
             setSelection(previous => ({
               ...previous,
               channelId: guide.channels.some(ch => ch.id === previous.channelId)
@@ -166,7 +170,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
                   guide.channels[0]?.id ||
                   '',
               anchor: latest.current.selectedItem?.isLive
-                ? Date.now()
+                ? currentTimeMs()
                 : Math.max(
                     guide.start,
                     Math.min(guide.end - 1, previous.anchor),
@@ -182,28 +186,44 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
         }
       };
       refresh();
-      const interval = setInterval(refresh, 60000);
       return () => {
         mounted = false;
-        clearInterval(interval);
       };
     }, [retry]);
 
+    const epg = useLiveEpg();
+    useEffect(() => {
+      if (!epg.channels.length) return;
+      const time = currentTimeMs();
+      setData(() => {
+        const start = guideStart(time);
+        const channels = epg.channels;
+        const updatedPrograms = Object.fromEntries(
+          channels.map(entry => [
+            entry.id,
+            normalizePrograms(
+              (entry.sourcePayload as { programs?: unknown } | undefined)
+                ?.programs,
+            ),
+          ]),
+        );
+        return { channels, programs: updatedPrograms, start, end: start + GUIDE_WINDOW_MS };
+      });
+      setFailed(false);
+      setNow(time);
+      setSelection(previous => ({
+        ...previous,
+        channelId: epg.channels.some(
+          entry => entry.id === previous.channelId,
+        )
+          ? previous.channelId
+          : epg.channels[0].id,
+        anchor: latest.current.selectedItem?.isLive ? time : previous.anchor,
+      }));
+    }, [epg]);
+
     const previewRef = useRef(preview);
     previewRef.current = preview;
-    useEffect(() => {
-      let timer: ReturnType<typeof setTimeout>;
-      const tick = () => {
-        const time = Date.now();
-        if (latest.current.selectedItem?.isLive) {
-          setSelection(previous => ({ ...previous, anchor: time }));
-        }
-        setNow(time);
-        timer = setTimeout(tick, 60000 - (Date.now() % 60000));
-      };
-      timer = setTimeout(tick, 60000 - (Date.now() % 60000));
-      return () => clearTimeout(timer);
-    }, []);
     useEffect(() => {
       if (!active || controller.isFullscreen || !selectedItem) {
         return;
@@ -250,7 +270,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
           if (match) {
             setSelection({
               channelId: match.id,
-              anchor: Date.now(),
+              anchor: currentTimeMs(),
               column: 'program',
             });
           }
@@ -482,7 +502,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
                     onPress={() => {
                       setSelection({
                         channelId: ch.id,
-                        anchor: Date.now(),
+                        anchor: currentTimeMs(),
                         column: 'channel',
                       });
                       requestFocus();

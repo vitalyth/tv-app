@@ -1,3 +1,4 @@
+import {liveEpgStore, useLiveEpg} from '../state/liveEpg';
 import {
   forwardRef,
   useCallback,
@@ -19,8 +20,6 @@ import {
 } from 'react-native';
 import {
   getDistinctLiveChannels,
-  mergeLiveChannelsPreservingOrder,
-  refreshMediaItemEpg,
   resolveLiveChannelStream,
 } from '../api/channels';
 import { getRecentVodItems, resolveVodStream } from '../api/vod';
@@ -372,68 +371,19 @@ export const HomeScreen = forwardRef<HomeScreenHandle, HomeScreenProps>(
       };
     }, [contentOpacity, skeletonOpacity]);
 
-    // Periodic EPG progress & program recalculation without altering ordering
+    const epg = useLiveEpg();
     useEffect(() => {
-      if (!contentReady || !active) {
-        return;
+      if (!contentReady) return;
+      setLiveChannels(previous => previous.map(liveEpgStore.resolve));
+      const focused = currentlyFocusedItemRef.current;
+      if (focused?.kind === 'live') {
+        const updated = liveEpgStore.resolve(focused);
+        if (updated !== focused) {
+          currentlyFocusedItemRef.current = updated;
+          onItemFocusedRef.current?.(updated);
+        }
       }
-      const localInterval = setInterval(() => {
-        setLiveChannels(prev => {
-          const updated = prev.map(refreshMediaItemEpg);
-          if (currentlyFocusedItemRef.current?.kind === 'live') {
-            const currentId = currentlyFocusedItemRef.current.id;
-            const updatedFocused = updated.find(c => c.id === currentId);
-            if (
-              updatedFocused &&
-              (updatedFocused.title !== currentlyFocusedItemRef.current.title ||
-                updatedFocused.timeRange !==
-                  currentlyFocusedItemRef.current.timeRange ||
-                updatedFocused.progressPercentage !==
-                  currentlyFocusedItemRef.current.progressPercentage)
-            ) {
-              currentlyFocusedItemRef.current = updatedFocused;
-              onItemFocusedRef.current?.(updatedFocused);
-              previewEngineRef.current.focusMediaItem(updatedFocused);
-            }
-          }
-          return updated;
-        });
-      }, 30_000);
-
-      const remoteInterval = setInterval(() => {
-        getDistinctLiveChannels({ requireEpg: true })
-          .then(fresh => {
-            setLiveChannels(prev => {
-              const merged = mergeLiveChannelsPreservingOrder(prev, fresh);
-              if (currentlyFocusedItemRef.current?.kind === 'live') {
-                const currentId = currentlyFocusedItemRef.current.id;
-                const updatedFocused = merged.find(c => c.id === currentId);
-                if (
-                  updatedFocused &&
-                  (updatedFocused.title !==
-                    currentlyFocusedItemRef.current.title ||
-                    updatedFocused.timeRange !==
-                      currentlyFocusedItemRef.current.timeRange)
-                ) {
-                  currentlyFocusedItemRef.current = updatedFocused;
-                  onItemFocusedRef.current?.(updatedFocused);
-                  previewEngineRef.current.focusMediaItem(updatedFocused);
-                }
-              }
-              return merged;
-            });
-          })
-          .catch(() => {});
-      }, 180_000);
-
-      (localInterval as unknown as { unref?: () => void }).unref?.();
-      (remoteInterval as unknown as { unref?: () => void }).unref?.();
-
-      return () => {
-        clearInterval(localInterval);
-        clearInterval(remoteInterval);
-      };
-    }, [active, contentReady]);
+    }, [epg, contentReady]);
 
     // Refresh Continue Watching whenever the user returns to the Home Screen
     // (e.g. after exiting fullscreen). contentReady guards against running before

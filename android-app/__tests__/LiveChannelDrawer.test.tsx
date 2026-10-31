@@ -1,3 +1,4 @@
+import { liveEpgStore } from '../src/state/liveEpg';
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
 import { StyleSheet, useTVEventHandler } from 'react-native';
@@ -49,12 +50,33 @@ describe('fullscreen live channel list', () => {
   };
   beforeEach(() => {
     jest.clearAllMocks();
+    liveEpgStore.publish([]);
     load.mockResolvedValue(channels);
   });
   afterEach(async () => {
     if (renderer) {
       await act(async () => renderer.unmount());
     }
+  });
+
+  it('updates the open list from global EPG without reloading or moving selection', async () => {
+    await mount();
+    await act(async () => {
+      liveEpgStore.publish(
+        channels.map(channel => ({
+          ...channel,
+          title: `Updated ${channel.id}`,
+        })),
+      );
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain('Updated ch25');
+    expect(load).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      activate()();
+    });
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'ch25', title: 'Updated ch25' }),
+    );
   });
 
   it('focuses the playing channel and keeps the rendered list bounded', async () => {
