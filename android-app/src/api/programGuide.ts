@@ -1,6 +1,9 @@
+import { liveEpgStore } from '../state/liveEpg';
 import { getJson } from './client';
 import {
   getPlayableLiveChannels,
+  refreshMediaItemEpg,
+  currentTimeMs,
   formatProgramTimeRange,
   resolveBackdropUrl,
   resolvePosterUrl,
@@ -17,6 +20,9 @@ export interface GuideProgram {
   end: number;
   description?: string;
   image?: string;
+  poster?: string;
+  backdrop?: string;
+  backdrop_image?: string;
   placeholder?: boolean;
 }
 export interface GuideData {
@@ -60,6 +66,13 @@ export function normalizePrograms(raw: unknown): GuideProgram[] {
               ? entry.description
               : undefined,
           image: typeof entry.image === 'string' ? entry.image : undefined,
+          poster: typeof entry.poster === 'string' ? entry.poster : undefined,
+          backdrop:
+            typeof entry.backdrop === 'string' ? entry.backdrop : undefined,
+          backdrop_image:
+            typeof entry.backdrop_image === 'string'
+              ? entry.backdrop_image
+              : undefined,
         },
       ];
     })
@@ -116,7 +129,7 @@ export function guideMediaItem(
   now: number,
 ): MediaItem {
   const isLive = program.start <= now && now < program.end;
-  const artwork = { image: program.image };
+  const artwork = program;
   return {
     ...channel,
     id: isLive ? channel.id : `guide:${channel.id}:${program.id}`,
@@ -129,7 +142,26 @@ export function guideMediaItem(
   };
 }
 
-export async function getProgramGuide(now = Date.now()): Promise<GuideData> {
+let guideRequest: Promise<GuideData> | undefined;
+let guideCache: { data: GuideData; time: number } | undefined;
+export async function getProgramGuide(
+  now = currentTimeMs(),
+): Promise<GuideData> {
+  if (liveEpgStore.active && guideCache && Date.now() - guideCache.time < 15000)
+    return guideCache.data;
+  if (guideRequest) return guideRequest;
+  guideRequest = loadProgramGuide(now)
+    .then(data => {
+      guideCache = { data, time: Date.now() };
+      return data;
+    })
+    .finally(() => {
+      guideRequest = undefined;
+    });
+  return guideRequest;
+}
+
+async function loadProgramGuide(now: number): Promise<GuideData> {
   const start = guideStart(now);
   const end = start + GUIDE_WINDOW_MS;
   const channels = await getPlayableLiveChannels();
@@ -147,10 +179,11 @@ export async function getProgramGuide(now = Date.now()): Promise<GuideData> {
   const programs: Record<string, GuideProgram[]> = {};
   for (const channel of channels) {
     const payload = channel.sourcePayload as
-      | { programs?: unknown; channelID?: string }
+      | { programs?: unknown; channelID?: string; tvgID?: string }
       | undefined;
     const schedule = normalizePrograms(
-      epg[channel.id] ??
+      epg[payload?.tvgID ?? ''] ??
+        epg[channel.id] ??
         epg[payload?.channelID ?? ''] ??
         epg[channel.channelNumber ?? ''] ??
         epg[channel.channelName ?? ''],
@@ -159,5 +192,22 @@ export async function getProgramGuide(now = Date.now()): Promise<GuideData> {
       ? schedule
       : normalizePrograms(payload?.programs);
   }
-  return { channels, programs, start, end };
+  const enriched = channels.map(channel => {
+    const payload = channel.sourcePayload as
+      | Record<string, unknown>
+      | undefined;
+    const schedule = programs[channel.id];
+    return refreshMediaItemEpg({
+      ...channel,
+      sourcePayload: {
+        ...payload,
+        programs: schedule.map(program => ({
+          ...program,
+          name: program.title,
+        })),
+      },
+    });
+  });
+  liveEpgStore.publish(enriched);
+  return { channels: enriched, programs, start, end };
 }

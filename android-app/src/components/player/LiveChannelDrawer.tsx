@@ -1,3 +1,4 @@
+import { liveEpgStore, useLiveEpg } from '../../state/liveEpg';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image,
@@ -33,7 +34,9 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
   onSelectChannel,
   onClose,
 }: Props) {
-  const [channels, setChannels] = useState<MediaItem[]>([]);
+  const [loadedChannels, setChannels] = useState<MediaItem[]>([]);
+  useLiveEpg();
+  const channels = loadedChannels.map(liveEpgStore.resolve);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);

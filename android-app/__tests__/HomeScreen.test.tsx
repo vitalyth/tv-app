@@ -1,3 +1,4 @@
+import {liveEpgStore} from '../src/state/liveEpg';
 import React, { createRef } from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { HomeScreen, type HomeScreenHandle } from '../src/screens/HomeScreen';
@@ -64,6 +65,7 @@ describe('HomeScreen', () => {
   beforeEach(() => {
     resetWatchProgressMemoryStore();
     jest.clearAllMocks();
+    liveEpgStore.publish([]);
     mockCarouselHandles.clear();
   });
 
@@ -160,6 +162,15 @@ describe('HomeScreen', () => {
     expect(onItemFocused).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'ch-11' }),
     );
+    const before = root.findByProps({id: 'home-live'}).props.items as MediaItem[];
+    await act(async () => {
+      liveEpgStore.publish(mockLiveChannels.map(channel => ({...channel, title: 'Updated program'})));
+    });
+    const after = root.findByProps({id: 'home-live'}).props.items as MediaItem[];
+    expect(after.map(channel => channel.id)).toEqual(before.map(channel => channel.id));
+    expect(after[0].title).toBe('Updated program');
+    expect(onItemFocused).toHaveBeenLastCalledWith(expect.objectContaining({id: 'ch-11', title: 'Updated program'}));
+
   });
 
   it('renders all three rows when continue watching items exist', async () => {

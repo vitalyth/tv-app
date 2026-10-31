@@ -8,6 +8,7 @@ import { getJson } from './client';
 import type { MediaItem, MediaStream, MediaStreamType } from '../media/player';
 import { LiveSourcePreferencesService } from '../services/liveSourcePreferences';
 import { t } from '../i18n';
+import { liveEpgStore } from '../state/liveEpg';
 
 interface ApiProgram {
   start?: unknown;
@@ -58,7 +59,7 @@ function syncServerClock(response: Response): void {
   }
 }
 
-function currentTimeMs(): number {
+export function currentTimeMs(): number {
   return Date.now() + (serverClockOffsetMs ?? 0);
 }
 
@@ -537,29 +538,60 @@ export function distinctLogicalChannels(rawChannels: unknown[]): ApiChannel[] {
   return distinctList;
 }
 
+let liveChannelsRequest: Promise<unknown> | undefined;
+let liveChannelsCache: { value: unknown; time: number } | undefined;
+async function loadLiveChannels(): Promise<unknown> {
+  if (
+    liveEpgStore.active &&
+    liveChannelsCache &&
+    Date.now() - liveChannelsCache.time < 15000
+  ) {
+    return liveChannelsCache.value;
+  }
+  if (liveChannelsRequest) return liveChannelsRequest;
+  liveChannelsRequest = getJson<unknown>('/live_channels', {
+    onResponse: syncServerClock,
+  })
+    .then(value => {
+      liveChannelsCache = { value, time: Date.now() };
+      return value;
+    })
+    .finally(() => {
+      liveChannelsRequest = undefined;
+    });
+  return liveChannelsRequest;
+}
+
 export async function getDistinctLiveChannels(
   options: LiveChannelOptions = { requireEpg: true },
 ): Promise<MediaItem[]> {
-  const channels = await getJson<unknown>('/live_channels', {
-    onResponse: syncServerClock,
-  });
+  const channels = await loadLiveChannels();
   if (!Array.isArray(channels)) {
     throw new Error('Unexpected live channels response');
   }
   const distinct = distinctLogicalChannels(channels);
+  const playable = distinct
+    .map(channel => toMediaItem(channel))
+    .filter((item): item is MediaItem => item !== undefined);
+  // Keep the full shared schedule when callers reload the lightweight channel list.
+  liveEpgStore.publish(playable.map(liveEpgStore.resolve));
   return distinct
     .map(channel => toMediaItem(channel, options))
     .filter((item): item is MediaItem => item !== undefined);
 }
 
 export function refreshMediaItemEpg(item: MediaItem): MediaItem {
+  if (item.kind !== 'live' || item.isLive === false) return item;
   const channel = item.sourcePayload as ApiChannel | undefined;
   if (!channel || !Array.isArray(channel.programs)) {
     return item;
   }
   const program = currentProgram(channel.programs);
   if (!program) {
-    return item;
+    const fresh = toMediaItem(channel);
+    return fresh
+      ? { ...item, ...fresh, id: item.id, sourcePayload: item.sourcePayload }
+      : item;
   }
   const programTitle = text(program.name);
   if (!programTitle) {
@@ -617,11 +649,7 @@ export async function getPlayableLiveChannels(): Promise<MediaItem[]> {
 }
 
 function channelSourceId(channel: ApiChannel, index = 0): string {
-  return (
-    text(channel.id) ??
-    text(channel.channelID) ??
-    `source-${index + 1}`
-  );
+  return text(channel.id) ?? text(channel.channelID) ?? `source-${index + 1}`;
 }
 
 export function getLiveChannelSourceOptions(
@@ -633,12 +661,13 @@ export function getLiveChannelSourceOptions(
     return [];
   }
 
-  const sources = Array.isArray(channel.sources) && channel.sources.length > 0
-    ? channel.sources.filter(
-        (source): source is ApiChannel =>
-          Boolean(source) && typeof source === 'object',
-      )
-    : [channel];
+  const sources =
+    Array.isArray(channel.sources) && channel.sources.length > 0
+      ? channel.sources.filter(
+          (source): source is ApiChannel =>
+            Boolean(source) && typeof source === 'object',
+        )
+      : [channel];
   const selectedId = activeSourceId ?? channelSourceId(channel);
 
   return sources.map((source, index) => ({
@@ -657,12 +686,13 @@ export function selectLiveChannelSource(
     return undefined;
   }
 
-  const sources = Array.isArray(channel.sources) && channel.sources.length > 0
-    ? channel.sources.filter(
-        (source): source is ApiChannel =>
-          Boolean(source) && typeof source === 'object',
-      )
-    : [channel];
+  const sources =
+    Array.isArray(channel.sources) && channel.sources.length > 0
+      ? channel.sources.filter(
+          (source): source is ApiChannel =>
+            Boolean(source) && typeof source === 'object',
+        )
+      : [channel];
   const selectedIndex = sources.findIndex(
     (source, index) => channelSourceId(source, index) === sourceId,
   );

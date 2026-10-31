@@ -1,7 +1,9 @@
+import { liveEpgStore, useLiveEpg } from '../state/liveEpg';
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -130,6 +132,21 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   const [multiView, setMultiView] = useState<MultiViewState | null>(null);
   const multiViewRef = useRef(multiView);
   multiViewRef.current = multiView;
+
+  const epg = useLiveEpg();
+  useEffect(() => {
+    setItem(previous => (previous ? liveEpgStore.resolve(previous) : previous));
+    setMultiView(previous => {
+      if (!previous) return previous;
+      const tiles = previous.tiles.map(tile => {
+        const updated = liveEpgStore.resolve(tile.item);
+        return updated === tile.item ? tile : { ...tile, item: updated };
+      });
+      return tiles.every((tile, index) => tile === previous.tiles[index])
+        ? previous
+        : { ...previous, tiles };
+    });
+  }, [epg]);
 
   const enterMultiView = useCallback(() => {
     if (presentationRef.current === 'multi-tile') {

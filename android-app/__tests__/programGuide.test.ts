@@ -1,3 +1,4 @@
+import { liveEpgStore } from '../src/state/liveEpg';
 import {
   fillGuideGaps,
   getProgramGuide,
@@ -29,11 +30,9 @@ const channel = {
 describe('program guide data and geometry', () => {
   test('uses a 12-hour half-hour aligned window with one hour lookback', async () => {
     jest.mocked(getPlayableLiveChannels).mockResolvedValue([channel]);
-    jest
-      .mocked(getJson)
-      .mockResolvedValue({
-        '11': [{ start: 1800000000, end: 1800003600, name: 'EPG' }],
-      });
+    jest.mocked(getJson).mockResolvedValue({
+      '11': [{ start: 1800000000, end: 1800003600, name: 'EPG' }],
+    });
     const result = await getProgramGuide(1800000100000);
     expect(result.start % GUIDE_SLOT_MS).toBe(0);
     expect(result.start).toBe(guideStart(1800000100000));
@@ -103,4 +102,27 @@ describe('program guide data and geometry', () => {
       isLive: false,
     });
   });
+});
+
+test('links tvgID schedules and publishes them for the whole app', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(1800000100000);
+  jest.mocked(getPlayableLiveChannels).mockResolvedValue([
+    {
+      ...channel,
+      sourcePayload: { ...channel.sourcePayload, tvgID: 'sport5_max' },
+    },
+  ]);
+  jest
+    .mocked(getJson)
+    .mockResolvedValue({
+      sport5_max: [{ start: 1800000000, end: 1800003600, name: 'Sport event' }],
+    });
+  const result = await getProgramGuide();
+  expect(result.channels[0].title).toBe('Sport event');
+  expect(liveEpgStore.getSnapshot().channels[0].title).toBe('Sport event');
+  expect((result.channels[0].sourcePayload as any).programs[0].name).toBe(
+    'Sport event',
+  );
+  jest.useRealTimers();
 });
