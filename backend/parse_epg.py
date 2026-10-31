@@ -21,6 +21,7 @@ from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.reshet13 import parse_reshet13_epg
 from epg_parsers.ftv import parse_ftv_epg
 from epg_parsers.glglz import parse_glglz_epg
+from epg_parsers.sport5 import SPORT5_CHANNELS, parse_sport5_epg
 from epg_parsers.fishenzon import (
     FISHENZON_CHANNEL_IDS,
     fetch_fishenzon_epg,
@@ -72,6 +73,7 @@ FORMAL_EPG_CHANNEL_IDS = {
     *FISHENZON_CHANNEL_IDS,
     *KESHET_THEMATIC_CHANNELS,
     *LOCAL_US_CHANNEL_IDS,
+    *SPORT5_CHANNELS,
 }
 
 ACTIVE_IMPORT_CHANNEL_IDS: set[str] | None = None
@@ -469,6 +471,10 @@ def main():
 
         elif args.channel == "ftv":
             programs = parse_ftv_epg()
+
+        elif args.channel in SPORT5_CHANNELS:
+            programs = parse_sport5_epg(args.channel)
+            replace_existing_programs = True
 
         elif args.channel in FISHENZON_CHANNEL_IDS:
             programs = parse_fishenzon_channel_epg(args.channel)
@@ -986,6 +992,22 @@ def main():
         if ftv_programs:
             persist_channel_programs("ftv", ftv_programs, output_dir)
             print(f"Stored {len(ftv_programs)} programs for ftv")
+
+        print("\nParsing Sport 5 channels from the official broadcast sheet")
+        for channel_id in SPORT5_CHANNELS:
+            if not should_import_channel(channel_id):
+                continue
+            try:
+                sport5_programs = parse_sport5_epg(channel_id)
+            except Exception as ex:
+                failed_channels.append(channel_id)
+                print(f"Failed parsing {channel_id}: {ex}")
+                traceback.print_exc()
+                sport5_programs = read_existing_channel_programs(output_dir, channel_id)
+            combined_epg[channel_id] = sport5_programs
+            if sport5_programs:
+                persist_channel_programs(channel_id, sport5_programs, output_dir)
+                print(f"Stored {len(sport5_programs)} programs for {channel_id}")
 
         print("\nParsing local US channels from public TV guides")
         for channel_id in LOCAL_US_CHANNEL_IDS:

@@ -320,7 +320,31 @@ Each additional source has its own guide index so the web guide does not
 collapse it into an unrelated channel. Kan 11 uses the existing `ch_11` entry
 and its existing backup sources under guide index 1, with the downloaded local
 Kan logo. No duplicate Kan entry is added for the unavailable source.
-The new sports channels have no EPG until a matching schedule source is configured.
+The six Sport 5 linear channels use the official Sport 5 broadcast sheet EPG.
+Sport 1–4, ONE and Eurosport retain their existing EPG configuration.
+
+### Sport 5 EPG
+
+`epg_parsers/sport5.py` imports up to five published days from the official
+[broadcast sheet](https://www.sport5.co.il/html/pages/broadcastsheet.html),
+using its separate tabs for Sport 5, Plus, Live, Gold, Stars and Max. Each
+linear channel has a dedicated `tvgID`: `sport5`, `sport5_plus`, `sport5_live`,
+`sport5_gold`, `sport5_stars`, `sport5_max`.
+
+The existing `parse_epg.py --all-channels` scheduler job imports these schedules
+into SQLite along with the other EPG sources. To refresh one channel manually:
+
+```bash
+python parse_epg.py --channel sport5_max
+```
+
+Times are interpreted in `Asia/Jerusalem`, including daylight saving changes.
+Because the site publishes start times, each program ends at the next known
+start; the importer fetches an additional day for the midnight boundary.
+Unpublished rows stay empty, and failed or empty imports retain cached programs.
+Requests are paced to respect the site's rate limit; fetching stops when the
+site reports that further days are unavailable or requests are being limited.
+The original Sport 5 website studio stream keeps its separate `5radio` schedule.
 
 The backend resolves a fresh signed URL on playback through the source AJAX
 endpoint; no expiring tokens are stored in the catalog. The existing stream
