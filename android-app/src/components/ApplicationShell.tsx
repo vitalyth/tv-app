@@ -1,3 +1,4 @@
+import {useTVNavigationEventHandler} from '../hooks/useTVNavigationEventHandler';
 import {liveEpgStore, useLiveEpg} from '../state/liveEpg';
 import {
   memo,
@@ -11,7 +12,6 @@ import {
   BackHandler,
   StyleSheet,
   Text,
-  useTVEventHandler,
   View,
   type FocusDestination,
   type View as ViewType,
@@ -112,7 +112,7 @@ function ShellContent({
     scheduleContentFocus(playingItem?.id, 50);
   }, [exitFullscreen, playingItem?.id, scheduleContentFocus]);
 
-  useTVEventHandler(event => {
+  useTVNavigationEventHandler(event => {
     if (isFullscreen) {
       return;
     }

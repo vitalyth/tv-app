@@ -1,3 +1,4 @@
+import {useTVNavigationEventHandler} from '../hooks/useTVNavigationEventHandler';
 import { useLiveEpg } from '../state/liveEpg';
 import {
   forwardRef,
@@ -14,7 +15,6 @@ import {
   StyleSheet,
   Text,
   TVFocusGuideView,
-  useTVEventHandler,
   useWindowDimensions,
   View,
   type FocusDestination,
@@ -296,7 +296,7 @@ export const LiveTvScreen = forwardRef<PageContentHandle, Props>(
       );
     }, [openFullscreen]);
 
-    useTVEventHandler(event => {
+    useTVNavigationEventHandler(event => {
       const current = latest.current;
       if (
         event.eventKeyAction === 1 ||

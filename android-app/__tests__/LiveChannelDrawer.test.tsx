@@ -150,6 +150,24 @@ describe('fullscreen live channel list', () => {
     await act(async () => retained());
     expect(select).toHaveBeenLastCalledWith(channels[26]);
   });
+  it('keeps browsing while Down is held and stops on release without changing playback', async () => {
+    jest.useFakeTimers();
+    try {
+      await mount();
+      await key('down');
+      await key('longDown');
+      for (let i = 0; i < 2; i++) {
+        await act(async () => { jest.advanceTimersByTime(120); });
+      }
+      await key('longDown', 1);
+      await act(async () => { jest.advanceTimersByTime(1000); });
+      expect(select).not.toHaveBeenCalled();
+      await act(async () => activate()());
+      expect(select).toHaveBeenLastCalledWith(channels[29]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   it('shows the highlighted program artwork and keeps the playing channel marked while browsing', async () => {
     await mount();
     const artwork = () =>

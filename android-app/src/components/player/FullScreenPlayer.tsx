@@ -1,3 +1,4 @@
+import {useTVNavigationEventHandler} from '../../hooks/useTVNavigationEventHandler';
 import {liveEpgStore, useLiveEpg} from '../../state/liveEpg';
 import {
   memo,
@@ -14,7 +15,6 @@ import {
   Pressable,
   StyleSheet,
   View,
-  useTVEventHandler,
 } from 'react-native';
 import {
   useMediaActions,
@@ -344,7 +344,7 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   }, [item, markError, playFullscreen, stream]);
 
   // 3. TV Remote Event Handling
-  useTVEventHandler(event => {
+  useTVNavigationEventHandler(event => {
     if (
       event.eventKeyAction === 1 ||
       !PLAYER_REMOTE_EVENTS.has(event.eventType)

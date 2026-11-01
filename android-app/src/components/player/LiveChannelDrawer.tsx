@@ -1,3 +1,4 @@
+import {useTVNavigationEventHandler} from '../../hooks/useTVNavigationEventHandler';
 import {channelDrawerLayout, CHANNEL_DRAWER_ANIMATION_MS, PLAYER_PANEL_INSET, PLAYER_PANEL_VERTICAL_INSET} from '../../media/playerLayout';
 import { liveEpgStore, useLiveEpg } from '../../state/liveEpg';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
@@ -10,7 +11,6 @@ import {
   Text,
   TVFocusGuideView,
   View,
-  useTVEventHandler,
   useWindowDimensions,
 } from 'react-native';
 import { isSameMediaItem, type MediaItem } from '../../media/player';
@@ -115,7 +115,7 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
     }
   }, []);
 
-  useTVEventHandler(event => {
+  useTVNavigationEventHandler(event => {
     if (event.eventKeyAction === 1) {
       return;
     }
