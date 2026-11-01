@@ -209,7 +209,7 @@ function ShellContent({
       {/* FullScreenPlayer AFTER overlay so it renders on top (React Native z-order) */}
       {isFullscreen ? (
         <View style={StyleSheet.absoluteFill}>
-          {presentation === 'multi-tile' ? <MultiViewPlayer /> : <FullScreenPlayer onExit={handleExitFullscreen} onChannelDrawerChange={setChannelDrawerOpen} />}
+          {presentation === 'multi-tile' ? <MultiViewPlayer onChannelDrawerChange={setChannelDrawerOpen} /> : <FullScreenPlayer onExit={handleExitFullscreen} onChannelDrawerChange={setChannelDrawerOpen} />}
         </View>
       ) : null}
     </View>

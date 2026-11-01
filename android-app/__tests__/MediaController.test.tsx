@@ -56,6 +56,44 @@ describe('MediaController', () => {
     },
   );
 
+  it('stops timeline broadcasts in Multi View and resumes them after exit', () => {
+    let controller!: MediaControllerValue;
+    const render = jest.fn();
+    function Probe() { controller = useMediaController(); render(); return null; }
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => { renderer = ReactTestRenderer.create(<MediaControllerProvider><Probe /></MediaControllerProvider>); });
+    act(() => { controller.playFullscreen({id: '12', kind: 'live', title: '12'}, {url: 'https://example.com/live.m3u8'}); });
+    act(() => controller.updateProgress(10, 30, 0, 30));
+    act(() => controller.enterMultiView());
+    render.mockClear();
+    act(() => controller.updateProgress(20, 40, 5, 40));
+    expect(render).not.toHaveBeenCalled();
+    expect(controller.currentTime).toBe(10);
+    act(() => controller.exitMultiView());
+    act(() => controller.updateProgress(21, 41, 6, 41));
+    expect(controller.currentTime).toBe(21);
+    expect(controller.seekableEnd).toBe(41);
+    act(() => renderer.unmount());
+  });
+
+  it('does not broadcast unchanged quality lists but publishes changed qualities', () => {
+    let controller!: MediaControllerValue;
+    const render = jest.fn();
+    function Probe() { controller = useMediaController(); render(); return null; }
+    let renderer!: ReactTestRenderer.ReactTestRenderer;
+    act(() => { renderer = ReactTestRenderer.create(<MediaControllerProvider><Probe /></MediaControllerProvider>); });
+    const quality = {id: '360', label: '360p', height: 360, active: true};
+    act(() => controller.setAvailableQualities([quality]));
+    render.mockClear();
+    act(() => controller.setAvailableQualities([{...quality}]));
+    // React may invoke the provider for a no-op setter, but consumers stay unchanged.
+    expect(render).not.toHaveBeenCalled();
+    act(() => controller.setAvailableQualities([{...quality, active: false}]));
+    expect(controller.videoQualities[0].active).toBe(false);
+    expect(render).toHaveBeenCalled();
+    act(() => renderer.unmount());
+  });
+
   it('routes seeks to the active adapter and releases its handler on teardown', () => {
     let controller!: MediaControllerValue;
     function Harness() {

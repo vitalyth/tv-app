@@ -1,15 +1,14 @@
-import {channelDrawerLayout, CHANNEL_DRAWER_ANIMATION_MS} from '../media/playerLayout';
-import { useCallback, useEffect, useRef } from 'react';
+import {useChannelDrawerViewport} from '../hooks/useChannelDrawerViewport';
+import { memo, useCallback, useEffect, useRef } from 'react';
 import {
   Animated,
-  Easing,
   Image,
   StyleSheet,
   View,
   useWindowDimensions,
 } from 'react-native';
 import { useForegroundPlaybackTimeout } from '../hooks/useForegroundPlaybackTimeout';
-import { useMediaController } from '../media/MediaController';
+import { useMediaActions, useMediaController } from '../media/MediaController';
 import { MediaSurface } from '../media/MediaSurface';
 import { MultiViewSurface } from '../media/MultiViewSurface';
 import { RemoteImage } from './RemoteImage';
@@ -63,21 +62,21 @@ function HeroBackdropImage({ uri, fallbackUri }: HeroBackdropImageProps) {
   );
 }
 
-function ExtraMediaTile({
+const ExtraMediaTile = memo(function ExtraMediaTileContent({
   entry,
   index,
   count,
-  audioTile,
+  isMuted,
   paused,
 }: {
   entry: MultiViewTile;
   index: number;
   count: number;
-  audioTile: number;
+  isMuted: boolean;
   paused: boolean;
 }) {
   const { markMultiViewPlaying, markMultiViewError, setPaused } =
-    useMediaController();
+    useMediaActions();
   const { width, height } = useWindowDimensions();
   const latest = useRef({ index, markMultiViewPlaying, markMultiViewError });
   latest.current = { index, markMultiViewPlaying, markMultiViewError };
@@ -123,18 +122,18 @@ function ExtraMediaTile({
           disableAudioFocus
           recoverVideoOnFocus={count > 2}
           paused={paused}
-          isMuted={audioTile !== index}
+          isMuted={isMuted}
           maxVideoHeight={MULTIVIEW_MAX_HEIGHT}
           maxBitRate={MULTIVIEW_MAX_BITRATE}
           resizeMode="contain"
           onFirstFrame={reportPlaying}
           onError={reportError}
-          onPausedChange={audioTile === index ? setPaused : undefined}
+          onPausedChange={isMuted ? undefined : setPaused}
         />
       ) : null}
     </View>
   );
-}
+});
 
 export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boolean}) {
   const {
@@ -158,31 +157,7 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
   const { width, height } = useWindowDimensions();
   const tiled = presentation === 'multi-tile' && multiView !== null;
   const software = tiled && multiView.backend === 'software';
-  const drawerProgress = useRef(new Animated.Value(0)).current;
-  const drawerOpen = channelDrawerOpen && isFullscreen && !tiled;
-  const drawerFrame = channelDrawerLayout(width, height);
-  useEffect(() => {
-    const animation = Animated.timing(drawerProgress, {
-      toValue: drawerOpen ? 1 : 0,
-      duration: CHANNEL_DRAWER_ANIMATION_MS,
-      easing: Easing.out(Easing.cubic),
-      // Animate the persistent video on the UI thread while channel rows load.
-      useNativeDriver: true,
-    });
-    animation.start();
-    return () => animation.stop();
-  }, [drawerOpen, drawerProgress]);
-  const drawerVideoStyle = {
-    transform: [
-      {translateX: drawerProgress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [0, drawerFrame.videoLeft - (width - drawerFrame.videoWidth) / 2],
-      })},
-      {scale: drawerProgress.interpolate({
-        inputRange: [0, 1], outputRange: [1, width > 0 ? drawerFrame.videoWidth / width : 1],
-      })},
-    ],
-  };
+  const drawerVideoStyle = useChannelDrawerViewport(channelDrawerOpen && isFullscreen);
   const count = (multiView?.tiles.length ?? 0) + 1;
   const showVideo = status === 'playing' || (isFullscreen && Boolean(stream));
   useForegroundPlaybackTimeout(
@@ -214,6 +189,11 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
         />
       ) : null}
 
+      <Animated.View
+        testID="player-viewport"
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, isFullscreen && drawerVideoStyle]}
+      >
       {item &&
       stream &&
       !software &&
@@ -223,7 +203,6 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
           testID="player-video-frame"
           style={[
             StyleSheet.absoluteFill,
-            isFullscreen && !tiled && drawerVideoStyle,
             tiled && multiViewTileLayout(0, count, width, height),
             tiled && styles.tileClip,
             showVideo ? styles.videoVisible : styles.videoHidden,
@@ -307,11 +286,12 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
               entry={entry}
               index={index + 1}
               count={count}
-              audioTile={multiView.audioTile}
+              isMuted={multiView.audioTile !== index + 1}
               paused={paused}
             />
           ))
         : null}
+      </Animated.View>
       {!isFullscreen ? (
         <Image
           source={scrimComposite}

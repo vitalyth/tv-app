@@ -1,5 +1,8 @@
+import {liveEpgStore} from '../../state/liveEpg';
+import {useChannelDrawerViewport} from '../../hooks/useChannelDrawerViewport';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   BackHandler,
   Image,
   Pressable,
@@ -29,16 +32,18 @@ import { RemoteImage } from '../RemoteImage';
 import { LiveChannelDrawer } from './LiveChannelDrawer';
 import { softwareMultiViewAvailable } from '../../media/nativeMultiView';
 
-type Action = 'add' | 'fullscreen' | 'remove' | 'backend';
+type Action = 'add' | 'change' | 'fullscreen' | 'remove' | 'backend';
 type Picker = { index: number; replace: boolean };
+const PANELS_HIDE_DELAY_MS = 4500;
 const icon = {
   backend: require('../../assets/icons/settings.png'),
   add: require('../../assets/icons/add.png'),
+  change: require('../../assets/icons/change.png'),
   fullscreen: require('../../assets/icons/fullscreen.png'),
   remove: require('../../assets/icons/close.png'),
 };
 
-export function MultiViewPlayer() {
+export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?: (open: boolean) => void}) {
   const controller = useMediaController();
   const media = useMediaActions();
   const { setMultiViewAudio } = media;
@@ -48,24 +53,36 @@ export function MultiViewPlayer() {
   const [tile, setTile] = useState(0);
   const focusedTile = Math.min(tile, count - 1);
   const [action, setAction] = useState<Action | null>(null);
+  const [infoVisible, setInfoVisible] = useState(true);
   const [picker, setPicker] = useState<Picker | null>(() =>
     count === 1 ? { index: 1, replace: false } : null,
   );
+  const viewportStyle = useChannelDrawerViewport(picker !== null);
+  useEffect(() => {
+    onChannelDrawerChange?.(picker !== null);
+    return () => onChannelDrawerChange?.(false);
+  }, [picker, onChannelDrawerChange]);
   const [resolving, setResolving] = useState<string>();
   const [error, setError] = useState<string>();
   const request = useRef(0);
   const lastInteraction = useRef(0);
   const anchor = useRef<View & { requestTVFocus?: () => void }>(null);
   const actions: Action[] = [
-    ...(count < maxStreams ? ['add' as const] : []),
-    ...(softwareMultiViewAvailable && count <= 2 ? ['backend' as const] : []),
     'fullscreen',
+    ...(count < maxStreams ? ['add' as const] : []),
+    'change',
     ...(count > 1 ? ['remove' as const] : []),
+    ...(softwareMultiViewAvailable && count <= 2 ? ['backend' as const] : []),
   ];
   const selected =
     focusedTile === 0
       ? controller.item
       : controller.multiView?.tiles[focusedTile - 1]?.item;
+  useEffect(() => {
+    setInfoVisible(true);
+    const timer = setTimeout(() => setInfoVisible(false), PANELS_HIDE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [focusedTile, selected?.id]);
   const selectedStatus =
     focusedTile === 0
       ? controller.status
@@ -121,7 +138,7 @@ export function MultiViewPlayer() {
     if (!action) {
       return;
     }
-    const timer = setTimeout(() => setAction(null), 4500);
+    const timer = setTimeout(() => setAction(null), PANELS_HIDE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [action, focusedTile, picker]);
   useEffect(() => {
@@ -150,20 +167,9 @@ export function MultiViewPlayer() {
     setAction(null);
     setPicker({ index: replace ? current.tile : current.count, replace });
   }, []);
-  const loadChannels = useCallback(async () => {
-    const channels = await getPlayableLiveChannels();
-    const current = latest.current;
-    const playing = [
-      current.controller.item,
-      ...(current.controller.multiView?.tiles.map(entry => entry.item) ?? []),
-    ];
-    return channels.filter(
-      channel =>
-        !playing.some(
-          (entry, index) =>
-            index !== current.picker?.index && isSameMediaItem(channel, entry),
-        ),
-    );
+  const loadChannels = useCallback(() => {
+    const channels = liveEpgStore.getSnapshot().channels;
+    return channels.length ? Promise.resolve(channels) : getPlayableLiveChannels();
   }, []);
   const selectChannel = useCallback(
     async (channel: MediaItem) => {
@@ -171,7 +177,18 @@ export function MultiViewPlayer() {
       if (!current.picker) {
         return;
       }
-      const targetIndex = current.picker.index;
+      const playing = [
+        {item: current.controller.item, status: current.controller.status},
+        ...(current.controller.multiView?.tiles ?? []),
+      ];
+      const exact = playing.findIndex(entry => entry.item?.id === channel.id);
+      const existing = exact >= 0 ? exact : playing.findIndex(entry => isSameMediaItem(entry.item, channel));
+      if (existing >= 0 && playing[existing].status !== 'error') {
+        setTile(existing);
+        closePicker();
+        return;
+      }
+      const targetIndex = existing >= 0 ? existing : current.picker.index;
       const sequence = ++request.current;
       setResolving(channel.id);
       setError(undefined);
@@ -209,6 +226,8 @@ export function MultiViewPlayer() {
         setAction(null);
       } else if (command === 'add') {
         openPicker();
+      } else if (command === 'change') {
+        openPicker(true);
       } else if (command === 'fullscreen') {
         if (current.selectedStatus === 'error') {
           openPicker(true);
@@ -263,21 +282,31 @@ export function MultiViewPlayer() {
       }
       return;
     }
-    if (event.eventType === 'left' || event.eventType === 'right') {
-      const direction = event.eventType === 'right' ? 1 : -1;
+    if (event.eventType === 'left') {
+      if (current.action) {
+        const index = current.actions.indexOf(current.action);
+        setAction(
+          current.actions[(index - 1 + current.actions.length) % current.actions.length],
+        );
+      } else {
+        setTile(Math.max(0, current.tile - 1));
+      }
+      return;
+    }
+    if (event.eventType === 'right') {
       if (current.action) {
         const index = current.actions.indexOf(current.action);
         setAction(
           current.actions[
-            (index + direction + current.actions.length) %
+            (index + 1) %
               current.actions.length
           ],
         );
-      } else if (direction > 0 && current.tile === current.count - 1) {
+      } else if (current.tile === current.count - 1) {
         openPicker();
       } else {
         setTile(
-          Math.max(0, Math.min(current.count - 1, current.tile + direction)),
+          Math.max(0, Math.min(current.count - 1, current.tile + 1)),
         );
       }
     } else if (event.eventType === 'up' || event.eventType === 'down') {
@@ -318,6 +347,7 @@ export function MultiViewPlayer() {
         : 'multiSoftwareDecoder',
     ),
     add: t('multiAddChannel'),
+    change: t('multiChangeChannel'),
     fullscreen:
       selectedStatus === 'error' ? t('vodRetry') : t('multiFullscreen'),
     remove: t('multiRemove'),
@@ -346,6 +376,11 @@ export function MultiViewPlayer() {
         onPress={activate}
         style={styles.anchor}
       />
+      <Animated.View
+        testID="multiview-overlay-viewport"
+        pointerEvents={picker ? 'none' : 'box-none'}
+        style={[StyleSheet.absoluteFill, viewportStyle]}
+      >
       {tiles.map((entry, index) => (
         <View
           key={entry.item.id}
@@ -375,7 +410,8 @@ export function MultiViewPlayer() {
               <Text style={styles.state}>{t('multiPlaybackError')}</Text>
             </View>
           ) : null}
-          <View pointerEvents="none" style={styles.caption}>
+          {infoVisible ? (
+          <View testID={`multiview-caption-${index}`} pointerEvents="none" style={styles.caption}>
             {entry.item.fallbackImageUrl ? (
               <RemoteImage
                 uri={entry.item.fallbackImageUrl}
@@ -392,10 +428,8 @@ export function MultiViewPlayer() {
                 {entry.item.title}
               </Text>
             </View>
-            {controller.multiView?.audioTile === index ? (
-              <View testID={`multiview-audio-${index}`} style={styles.audio} />
-            ) : null}
           </View>
+          ) : null}
           {focusedTile === index && action && !picker ? (
             <View style={styles.controls}>
               {actions.map(command => (
@@ -428,6 +462,7 @@ export function MultiViewPlayer() {
           ) : null}
         </View>
       ))}
+      </Animated.View>
       {picker ? (
         <LiveChannelDrawer
           item={selected || controller.item}
@@ -462,21 +497,24 @@ const styles = StyleSheet.create({
   focused: { borderColor: '#16d7d7' },
   caption: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 12,
+    left: 12,
+    right: 12,
     height: 76,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    overflow: 'hidden',
     padding: 12,
     gap: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(8,20,26,0.86)',
+    backgroundColor: 'rgba(10, 14, 20, 0.80)',
   },
   logo: { width: 40, height: 40 },
   metadata: { flex: 1, minWidth: 0 },
   channel: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   program: { color: '#d2d7da', fontSize: 12, marginTop: 3 },
-  audio: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#16d7d7' },
   controls: {
     position: 'absolute',
     right: 18,
@@ -484,8 +522,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 4,
     padding: 5,
-    borderRadius: 8,
-    backgroundColor: 'rgba(8,20,26,0.9)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    backgroundColor: 'rgba(10, 14, 20, 0.80)',
   },
   button: {
     width: 44,

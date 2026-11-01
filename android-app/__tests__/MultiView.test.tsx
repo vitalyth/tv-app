@@ -1,6 +1,7 @@
+import {liveEpgStore} from '../src/state/liveEpg';
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
-import { BackHandler, useTVEventHandler } from 'react-native';
+import { BackHandler } from 'react-native';
 import {
   MediaControllerProvider,
   useMediaController,
@@ -14,17 +15,28 @@ import {
 import { multiViewTileLayout } from '../src/media/multiViewLayout';
 import type { MediaItem, MediaStream } from '../src/media/player';
 
+const mockRemoteListeners = new Set<{current: (event: any) => void}>();
 jest.mock('react-native/Libraries/Components/TV/useTVEventHandler', () => ({
   __esModule: true,
-  default: jest.fn(),
+  default: jest.fn((callback: (event: any) => void) => {
+    const react = require('react');
+    const latest = react.useRef(callback);
+    latest.current = callback;
+    react.useEffect(() => {
+      mockRemoteListeners.add(latest);
+      return () => {mockRemoteListeners.delete(latest);};
+    }, []);
+  }),
 }));
 jest.mock('../src/components/RemoteImage', () => ({
   RemoteImage: 'RemoteImage',
 }));
+const mockRender = jest.fn();
 const mockMount = jest.fn();
 const mockUnmount = jest.fn();
 jest.mock('../src/media/MediaSurface', () => ({
   MediaSurface: (props: any) => {
+    mockRender(props.streamUrl);
     const react = require('react');
     react.useEffect(() => {
       mockMount(props.streamUrl);
@@ -38,7 +50,7 @@ jest.mock('../src/api/channels', () => ({
   resolveLiveChannelStream: jest.fn(),
 }));
 
-describe('old Android-style Multi View', () => {
+describe('Multi View channel menu', () => {
   const channels: MediaItem[] = Array.from({ length: 5 }, (_, index) => ({
     id: String(index + 11),
     kind: 'live',
@@ -53,10 +65,11 @@ describe('old Android-style Multi View', () => {
   let back: () => boolean;
   function Harness() {
     controller = useMediaController();
+    const [drawerOpen, setDrawerOpen] = React.useState(false);
     return (
       <>
-        <MediaLayer />
-        {controller.presentation === 'multi-tile' ? <MultiViewPlayer /> : null}
+        <MediaLayer channelDrawerOpen={drawerOpen} />
+        {controller.presentation === 'multi-tile' ? <MultiViewPlayer onChannelDrawerChange={setDrawerOpen} /> : null}
       </>
     );
   }
@@ -66,9 +79,9 @@ describe('old Android-style Multi View', () => {
       .find(node => typeof node.props.onPress === 'function')!;
   const key = async (eventType: string) =>
     act(async () => {
-      jest
-        .mocked(useTVEventHandler)
-        .mock.lastCall![0]({ eventType, eventKeyAction: 0 });
+      for (const listener of mockRemoteListeners) {
+        listener.current({eventType, eventKeyAction: 0});
+      }
     });
   const surfaces = () => renderer.root.findAllByType('VideoSurface' as any);
   const drawer = () =>
@@ -95,6 +108,7 @@ describe('old Android-style Multi View', () => {
   beforeEach(async () => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    liveEpgStore.publish([]);
     jest
       .spyOn(BackHandler, 'addEventListener')
       .mockImplementation((_event, handler) => {
@@ -211,6 +225,20 @@ describe('old Android-style Multi View', () => {
     expect(resolveLiveChannelStream).not.toHaveBeenCalled();
   });
 
+  it('keeps unaffected tile renders out of focus and playback-progress updates', async () => {
+    await enter(); await add(1); await add(2); await add(3);
+    mockRender.mockClear();
+    await act(async () => controller.updateProgress(10, 30));
+    expect(mockRender.mock.calls.flat()).not.toContain(streams[1].url);
+    expect(mockRender.mock.calls.flat()).not.toContain(streams[2].url);
+    expect(mockRender.mock.calls.flat()).not.toContain(streams[3].url);
+    mockRender.mockClear();
+    await key('right');
+    expect(mockRender.mock.calls.flat()).toContain(streams[1].url);
+    expect(mockRender.mock.calls.flat()).not.toContain(streams[2].url);
+    expect(mockRender.mock.calls.flat()).not.toContain(streams[3].url);
+  });
+
   it('silences all other tiles while the focused tile loads or fails', async () => {
     await enter();
     await act(async () =>
@@ -228,16 +256,160 @@ describe('old Android-style Multi View', () => {
     expect(surfaces()[0].props.isMuted).toBe(false);
   });
 
-  it('opens the add picker on entry and from the right edge, filters duplicates, and focuses the added channel', async () => {
+  it('opens the styled picker on entry and from the right edge, starting on the active channel', async () => {
     await act(async () => controller.enterMultiView());
-    expect(await drawer().props.loadChannels()).toEqual(channels.slice(1));
+    expect(await drawer().props.loadChannels()).toEqual(channels);
+    expect(drawer().props.item).toBe(channels[0]);
     await act(async () => drawer().props.onSelectChannel(channels[1]));
     expect(controller.multiView?.tiles[0]?.item).toBe(channels[1]);
     expect(controller.multiView?.audioTile).toBe(-1);
     await act(async () => surfaces()[1].props.onFirstFrame());
     expect(controller.multiView?.audioTile).toBe(1);
     await key('right');
-    expect(await drawer().props.loadChannels()).toEqual(channels.slice(2));
+    expect(await drawer().props.loadChannels()).toEqual(channels);
+    expect(drawer().props.item).toBe(channels[1]);
+  });
+
+  it('focuses an existing channel without resolving or duplicating its stream', async () => {
+    await enter();
+    await add(1);
+    await key('right');
+    const original = surfaces();
+    await key('right');
+    expect(drawer().props.item).toBe(channels[1]);
+    await act(async () => drawer().props.onSelectChannel(channels[0]));
+    expect(controller.multiView?.tiles).toHaveLength(1);
+    expect(controller.multiView?.audioTile).toBe(0);
+    expect(surfaces()).toEqual(original);
+    expect(resolveLiveChannelStream).not.toHaveBeenCalled();
+  });
+
+  it('opens the picker with Add and keeps the original stream', async () => {
+    await enter();
+    const original = surfaces()[0];
+    await act(async () => button('focus').props.onPress());
+    await act(async () => button('add').props.onPress());
+    expect(drawer().props.item).toBe(channels[0]);
+    await act(async () => drawer().props.onSelectChannel(channels[1]));
+    expect(controller.multiView?.tiles[0]?.item).toBe(channels[1]);
+    expect(surfaces()[0]).toBe(original);
+    expect(controller.stream).toBe(streams[0]);
+  });
+
+  it('moves Left across a full grid without opening the channel menu', async () => {
+    await enter();
+    await add(1); await add(2); await add(3);
+    const original = surfaces();
+    await key('right'); await key('down');
+    await key('left');
+    expect(controller.multiView?.audioTile).toBe(2);
+    await key('left');
+    expect(controller.multiView?.audioTile).toBe(1);
+    await key('left'); await key('left');
+    expect(controller.multiView?.audioTile).toBe(0);
+    expect(renderer.root.findAllByProps({testID: 'live-channel-drawer'})).toHaveLength(0);
+    expect(surfaces()).toEqual(original);
+    expect(resolveLiveChannelStream).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1])('changes only tile %i at capacity and preserves other streams', async target => {
+    await enter();
+    await add(1); await add(2); await add(3);
+    if (target) { await key('right'); }
+    const original = surfaces();
+    await act(async () => button('focus').props.onPress());
+    expect(button('add')).toBeUndefined();
+    await act(async () => button('change').props.onPress());
+    expect(drawer().props.item).toBe(channels[target]);
+    jest.mocked(resolveLiveChannelStream).mockResolvedValueOnce(streams[4]);
+    await act(async () => drawer().props.onSelectChannel(channels[4]));
+    expect([controller.item, ...controller.multiView!.tiles.map(entry => entry.item)])
+      .toEqual(channels.slice(0, 4).map((channel, index) => index === target ? channels[4] : channel));
+    expect(surfaces()).toHaveLength(4);
+    original.forEach((surface, index) => {
+      if (index !== target) { expect(surfaces()[index]).toBe(surface); }
+    });
+    await act(async () => surfaces()[target].props.onFirstFrame());
+    expect(controller.multiView?.audioTile).toBe(target);
+  });
+
+  it('preserves the current channels when changing is cancelled or fails', async () => {
+    await enter(); await add(1);
+    const original = surfaces();
+    await act(async () => button('focus').props.onPress());
+    await act(async () => button('change').props.onPress());
+    await act(async () => { back(); });
+    expect(surfaces()).toEqual(original);
+    await act(async () => jest.advanceTimersByTime(400));
+    await act(async () => button('focus').props.onPress());
+    await act(async () => button('change').props.onPress());
+    jest.mocked(resolveLiveChannelStream).mockRejectedValueOnce(new Error('offline'));
+    await act(async () => drawer().props.onSelectChannel(channels[2]));
+    expect(drawer().props.error).toBeTruthy();
+    expect(surfaces()).toEqual(original);
+    expect(controller.item).toBe(channels[0]);
+    expect(controller.multiView?.tiles[0].item).toBe(channels[1]);
+  });
+
+  it('animates the media grid and overlay together when opening and closing the picker', async () => {
+    await enter(); await add(1);
+    const original = surfaces();
+    await act(async () => button('focus').props.onPress());
+    await act(async () => button('add').props.onPress());
+    expect(renderer.root.findByType(MediaLayer).props.channelDrawerOpen).toBe(true);
+    await key('right');
+    expect(renderer.root.findAllByProps({testID: 'live-channel-drawer'})).toHaveLength(0);
+    expect(renderer.root.findByType(MediaLayer).props.channelDrawerOpen).toBe(false);
+    expect(surfaces()).toEqual(original);
+    expect(mockUnmount).not.toHaveBeenCalled();
+  });
+
+  it('moves Left between tile actions without opening the channel menu', async () => {
+    await enter(); await add(1);
+    await act(async () => button('focus').props.onPress());
+    expect(button('fullscreen')).toBeDefined();
+    await key('left');
+    expect(button('focus').props.accessibilityLabel).toBe(button('remove').props.accessibilityLabel);
+    expect(renderer.root.findAllByProps({testID: 'live-channel-drawer'})).toHaveLength(0);
+    await key('right');
+    expect(button('focus').props.accessibilityLabel).toBe(button('fullscreen').props.accessibilityLabel);
+  });
+
+  it('reopens the menu from the shared channel list without waiting for another request', async () => {
+    await enter();
+    const calls = jest.mocked(getPlayableLiveChannels).mock.calls.length;
+    await act(async () => {liveEpgStore.publish(channels);});
+    await key('right');
+    expect(await drawer().props.loadChannels()).toEqual(channels);
+    expect(getPlayableLiveChannels).toHaveBeenCalledTimes(calls);
+    expect(drawer().props.item).toBe(channels[0]);
+  });
+
+  it('hides information panels until tile focus changes and restarts their timeout', async () => {
+    await enter(); await add(1); await add(2); await add(3);
+    const original = surfaces();
+    const captions = () => [...new Set(renderer.root.findAll(node => /^multiview-caption-/.test(node.props.testID ?? '')).map(node => node.props.testID))];
+    expect(captions()).toHaveLength(4);
+    await act(async () => jest.advanceTimersByTime(4500));
+    expect(captions()).toHaveLength(0);
+    await key('left'); // Already at the first tile: no focus change.
+    await key('playpause'); await key('playpause');
+    await act(async () => controller.updateProgress(10, 30));
+    expect(captions()).toHaveLength(0);
+    await key('right');
+    expect(captions()).toHaveLength(4);
+    await act(async () => jest.advanceTimersByTime(3000));
+    await key('down');
+    await act(async () => jest.advanceTimersByTime(2000));
+    expect(captions()).toHaveLength(4);
+    await act(async () => jest.advanceTimersByTime(2500));
+    expect(captions()).toHaveLength(0);
+    await act(async () => button('focus').props.onPress());
+    expect(button('change')).toBeDefined();
+    expect(captions()).toHaveLength(0);
+    expect(surfaces()).toEqual(original);
+    expect(mockUnmount).not.toHaveBeenCalled();
+    expect(resolveLiveChannelStream).not.toHaveBeenCalled();
   });
 
   it('opens compact in-tile actions with Select and hides them automatically', async () => {
@@ -249,6 +421,7 @@ describe('old Android-style Multi View', () => {
     await act(async () => button('focus').props.onPress());
     expect(button('fullscreen')).toBeDefined();
     expect(button('add')).toBeDefined();
+    expect(button('change')).toBeDefined();
     expect(button('remove')).toBeDefined();
     await act(async () => jest.advanceTimersByTime(4500));
     expect(
@@ -357,8 +530,8 @@ describe('old Android-style Multi View', () => {
         expect(Number(box.left) + Number(box.width)).toBeLessThanOrEqual(960);
         expect(Number(box.top) + Number(box.height)).toBeLessThanOrEqual(540);
       }
-      expect(layouts[0].top).toBe(18);
-      expect(Number(layouts[0].height)).toBe(count === 2 ? 504 : 246);
+      expect(layouts[0].top).toBe(8);
+      expect(Number(layouts[0].height)).toBe(count === 2 ? 524 : 261);
     }
   });
 });

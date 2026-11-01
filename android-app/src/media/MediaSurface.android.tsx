@@ -9,6 +9,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MediaSurfaceProps } from './MediaSurface.types';
 import type { VideoQualityOption } from './player';
 
+const bufferConfig = {
+  minBufferMs: 2500,
+  maxBufferMs: 8000,
+  bufferForPlaybackMs: 750,
+  bufferForPlaybackAfterRebufferMs: 1500,
+};
+
 export function MediaSurface({
   streamUrl,
   streamType,
@@ -103,10 +110,12 @@ export function MediaSurface({
         return;
       }
       const seenHeights = new Set<number>();
-      setTrackHeights(
-        data.videoTracks
-          .map(track => track.height ?? 0)
-          .filter(height => height > 0),
+      const heights = [...new Set(data.videoTracks
+        .map(track => track.height ?? 0)
+        .filter(height => height > 0))].sort((a, b) => a - b);
+      setTrackHeights(previous =>
+        previous.length === heights.length && previous.every((height, index) => height === heights[index])
+          ? previous : heights,
       );
       const trackOptions: VideoQualityOption[] = [
         {
@@ -176,11 +185,15 @@ export function MediaSurface({
     return { type: SelectedVideoTrackType.AUTO };
   }, [maxVideoHeight, selectedQualityId, trackHeights]);
 
+  const source = useMemo(() => ({
+    uri: activeSource.url, type: activeSource.type || 'm3u8',
+  }), [activeSource.url, activeSource.type]);
+
   return (
     <Video
       ref={videoRef}
       key={activeSource.url}
-      source={{ uri: activeSource.url, type: activeSource.type || 'm3u8' }}
+      source={source}
       style={[styles.surface, style]}
       resizeMode={resizeMode}
       paused={paused}
@@ -209,16 +222,12 @@ export function MediaSurface({
           handleFirstFrame();
         }
       }}
+      progressUpdateInterval={maxVideoHeight ? 1000 : 250}
       onProgress={handleProgress}
       onVideoTracks={handleVideoTracks}
       selectedVideoTrack={selectedVideoTrack}
       onError={handleError}
-      bufferConfig={{
-        minBufferMs: 2500,
-        maxBufferMs: 8000,
-        bufferForPlaybackMs: 750,
-        bufferForPlaybackAfterRebufferMs: 1500,
-      }}
+      bufferConfig={bufferConfig}
     />
   );
 }

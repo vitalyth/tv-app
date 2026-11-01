@@ -537,6 +537,12 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       nextSeekableStart?: number,
       nextSeekableEnd?: number,
     ) => {
+      // Multi View has no timeline. Publishing every native progress tick here
+      // rerenders the shell and hidden guide while several decoders are busy.
+      // The next progress event refreshes the timeline after leaving the grid.
+      if (presentationRef.current === 'multi-tile') {
+        return;
+      }
       setCurrentTime(nextCurrentTime);
       if (nextDuration > 0) {
         setDuration(nextDuration);
@@ -559,7 +565,14 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
 
   const setAvailableQualities = useCallback(
     (qualities: VideoQualityOption[]) => {
-      setVideoQualities(qualities);
+      setVideoQualities(previous =>
+        previous.length === qualities.length && previous.every((quality, index) => {
+          const next = qualities[index];
+          return quality.id === next.id && quality.label === next.label &&
+            quality.height === next.height && quality.width === next.width &&
+            quality.bitrate === next.bitrate && quality.active === next.active;
+        }) ? previous : qualities,
+      );
     },
     [],
   );

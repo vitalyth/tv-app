@@ -20,6 +20,7 @@ const icons = {
   'pause': `<rect x="6" y="4" width="4" height="16" fill="white" stroke="white" stroke-width="2"/><rect x="14" y="4" width="4" height="16" fill="white" stroke="white" stroke-width="2"/>`,
   'quality': `<path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/>`,
   'sources': `<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>`,
+  'change': `<path d="M3 7h18l-4-4"/><path d="M21 17H3l4 4"/>`,
   'multiview': `<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/><path d="M3 12h18"/>`,
   'close': `<line x1="18" y1="6" x2="6" y2="18" stroke="white" stroke-width="2.5" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="white" stroke-width="2.5" stroke-linecap="round"/>`,
 };
@@ -28,6 +29,9 @@ const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tv-app-icons-'));
 
 for (const [name, svgContent] of Object.entries(icons)) {
+  if (process.argv[2] && name !== process.argv[2]) {
+    continue;
+  }
   const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:transparent;display:flex;align-items:center;justify-content:center;width:96px;height:96px;overflow:hidden;"><svg xmlns="http://www.w3.org/2000/svg" width="76" height="76" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svgContent}</svg></body></html>`;
   const tempHtmlPath = path.join(targetDir, `_temp_${name}.html`);
   const outPngPath = path.join(targetDir, `${name}.png`);

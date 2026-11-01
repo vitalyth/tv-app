@@ -6,12 +6,23 @@ The interaction reference is the older Kotlin application:
 `android-tv-app/android/tv-app/src/main/java/com/tvapp/programguide/ui/ProgramGuideApp.kt`
 (`ExpandedPlayer`, `MultiPlayerGrid`, `MultiPlayerOverlayView`).
 
-- Enter through the fullscreen player's Multi View button and choose a channel.
-- Two columns fill the available screen; three/four channels use two rows.
-- Arrows move the tile focus. Only the focused, ready tile is audible.
+- The fullscreen player's Multi View button opens the shared channel menu, focused
+  on the active channel. The player/grid animates aside using the same viewport
+  transition as fullscreen channel selection.
+- Add opens the channel menu while capacity remains. Left navigates between
+  tiles or actions without opening the menu.
+- Existing channels remain listed. Choosing one focuses its tile without resolving
+  or duplicating its stream; choosing a failed channel retries its existing slot.
+- Two columns fill the available screen with a 2-point gap and 8-point outer
+  inset; three/four channels use two rows.
+- Left, Right, Up and Down move tile focus. Only the focused, ready tile is audible.
 - Unlike the old app's one-second audio delay, audio follows focus immediately.
 - Loading/failed focused tiles silence the others instead of playing another tile's audio.
-- Select reveals compact Add / Fullscreen / Remove icons inside the focused tile.
+- Rounded information panels appear on entry or a change of focused channel, then
+  hide after 4.5 seconds. Playback ticks and action-button navigation do not reveal them.
+- Select reveals compact Fullscreen / Add / Change channel / Remove icons inside
+  the focused tile. Change channel replaces that tile, including when the grid is
+  full, and leaves the other streams playing.
 - The icons hide after 4.5 seconds. Right past the last tile opens Add when capacity permits.
 - Back closes the channel picker, then returns to the original fullscreen stream.
 - Hardware play/pause affects playback; volume does not reveal controls.
@@ -52,7 +63,55 @@ with a brief interruption and a return to the stream's live start position.
 Recovering one picture can make another tile black; this does not enable four
 simultaneously visible pictures.
 
+### Sony Android 12 surface release workaround
+
+On BRAVIA VH2 (Android 12/API 31), the system `c2.android.avc.decoder`
+crashed in `libcodec2_soft_avcdec.so` just after switching to a placeholder surface
+while releasing a Multi View tile (2026-10-31 21:53:28). The codec service died,
+then Android's MediaCodec STOPPING assertion aborted the app.
+
+`configure-bravia-codecs.js` installs `TvAppRenderersFactory`, which enables
+Media3's surface-switch workaround for that decoder on Sony API 31. Media3
+releases the decoder rather than switching a running software decoder to a new
+surface. The normal hardware/software decoder selection, four-tile limit, and
+native playback on focus changes are preserved. Other devices use the default
+renderer factory.
+
+This TV's `/vendor/etc/media_codecs_4k.xml` advertises two concurrent hardware AVC
+instances. Four-tile playback therefore needs software fallback for additional
+AVC streams, which costs CPU time. A temporary test excluding software fallback
+kept two channels playing but prevented the third/fourth; that exclusion was
+removed in favor of the surface-lifecycle workaround.
+
+### Multi View update overhead
+
+Multi View does not display a timeline, so native progress events no longer
+publish timeline state through the shared media controller while the grid is
+open. Fullscreen progress resumes on the next event after exit. Android grid
+players report progress once per second rather than four times per second.
+Repeated track lists retain their existing selection and quality state, and
+native source/buffer configuration objects stay stable during focus changes.
+
+BRAVIA sample (2026-10-31, channels 12/13/Sport 5/Sport 1): process CPU averaged
+about 137% before and 122% after these changes (100% means one CPU core).
+Software decoder CPU remained about 156%; audio post-processing and compositor
+CPU stayed similar. Samples cover a few seconds of live content rather than a
+controlled benchmark. The fourth stream still needs costly 1080p software AVC
+decoding. Lower bitrate selection cannot resize a stream that only has an HD
+rendition; further reductions there require a lower-quality source or upstream
+transcoding.
+
 ## Verification
+
+- BRAVIA VH2 Android 12 (2026-10-31): four live channels (11/12/13/14)
+  rendered with the surface workaround active. Changed a software-decoded tile,
+  removed/re-added both software tiles, navigated the grid, and returned to
+  fullscreen with the same app process and no new native crash. This is a smoke
+  test, not long-duration stability qualification.
+- Secondary media tiles now subscribe to stable playback actions and skip renders
+  when their own media/audio state has not changed. A regression test checks that
+  primary timeline updates and focus changes do not render unaffected tiles.
+
 
 - Focus-recovery release installed on physical Fire TV 192.168.1.108. A black
   channel 13 tile regained its picture after recreation, while channel 12 became
