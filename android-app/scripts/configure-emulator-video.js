@@ -2,16 +2,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const original = 'private val playerView = PlayerView(context).apply {';
-const replacement = `// TVAPP_EMULATOR_TEXTURE: keep emulator video inside the UI compositor.
+const legacyReplacement = `// TVAPP_EMULATOR_TEXTURE: keep emulator video inside the UI compositor.
     private val playerView = (if (android.os.Build.HARDWARE in listOf("ranchu", "goldfish")) {
         android.view.LayoutInflater.from(context).inflate(
             com.brentvatne.react.R.layout.tvapp_texture_player_view, this, false
         ) as PlayerView
     } else PlayerView(context)).apply {`;
 
+const replacement = `// TVAPP_ANIMATED_TEXTURE: compose video with the UI for smooth player animations.
+    private val playerView = (android.view.LayoutInflater.from(context).inflate(
+        com.brentvatne.react.R.layout.tvapp_texture_player_view, this, false
+    ) as PlayerView).apply {`;
+
 function configureEmulatorVideo(source) {
-  if (source.includes('TVAPP_EMULATOR_TEXTURE')) {
+  if (source.includes('TVAPP_ANIMATED_TEXTURE')) {
     return source;
+  }
+  if (source.includes('TVAPP_EMULATOR_TEXTURE')) {
+    if (!source.includes(legacyReplacement)) {
+      throw new Error('Custom native video view changed; review texture surface handling.');
+    }
+    return source.replace(legacyReplacement, replacement);
   }
   // Upstream implementations already handle the requested surface type.
   if (!source.includes('// TODO: Implement proper surface type switching if needed')) {
@@ -29,7 +40,7 @@ if (require.main === module) {
   if (fs.existsSync(filename)) {
     const source = fs.readFileSync(filename, 'utf8');
     const updated = configureEmulatorVideo(source);
-    if (updated.includes('TVAPP_EMULATOR_TEXTURE')) {
+    if (updated.includes('TVAPP_ANIMATED_TEXTURE')) {
       const layoutRoot = path.join(nativeRoot, 'res/layout');
       fs.mkdirSync(layoutRoot, { recursive: true });
       fs.copyFileSync(
@@ -39,7 +50,7 @@ if (require.main === module) {
     }
     if (updated !== source) {
       fs.writeFileSync(filename, updated);
-      console.info('Configured emulator-only TextureView rendering.');
+      console.info('Configured TextureView rendering for smooth TV player animations.');
     }
   }
 }

@@ -190,7 +190,9 @@ export function MediaSurface({
       volume={1.0}
       maxBitRate={maxBitRate}
       repeat={true}
-      useTextureView={false}
+      // Keep a TextureView throughout playback so native scale/translation
+      // animations remain smooth without replacing the video surface.
+      useTextureView={true}
       shutterColor="transparent"
       playInBackground={false}
       playWhenInactive={false}

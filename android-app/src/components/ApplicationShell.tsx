@@ -79,6 +79,7 @@ function ShellContent({
   const { exitFullscreen } = useMediaActions();
   useLiveEpg();
   const focusedItem = focusedMediaItem ? liveEpgStore.resolve(focusedMediaItem) : null;
+  const [channelDrawerOpen, setChannelDrawerOpen] = useState(false);
   const activeRoute = getRoute(state.activeRoute);
   const focusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -175,7 +176,7 @@ function ShellContent({
 
   return (
     <View style={styles.screen}>
-      <MediaLayer />
+      <MediaLayer channelDrawerOpen={channelDrawerOpen} />
       <View
         accessibilityElementsHidden={isFullscreen}
         importantForAccessibility={isFullscreen ? 'no-hide-descendants' : 'auto'}
@@ -208,7 +209,7 @@ function ShellContent({
       {/* FullScreenPlayer AFTER overlay so it renders on top (React Native z-order) */}
       {isFullscreen ? (
         <View style={StyleSheet.absoluteFill}>
-          {presentation === 'multi-tile' ? <MultiViewPlayer /> : <FullScreenPlayer onExit={handleExitFullscreen} />}
+          {presentation === 'multi-tile' ? <MultiViewPlayer /> : <FullScreenPlayer onExit={handleExitFullscreen} onChannelDrawerChange={setChannelDrawerOpen} />}
         </View>
       ) : null}
     </View>

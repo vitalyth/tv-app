@@ -1,6 +1,8 @@
+import {channelDrawerLayout, CHANNEL_DRAWER_ANIMATION_MS} from '../media/playerLayout';
 import { useCallback, useEffect, useRef } from 'react';
 import {
   Animated,
+  Easing,
   Image,
   StyleSheet,
   View,
@@ -134,7 +136,7 @@ function ExtraMediaTile({
   );
 }
 
-export function MediaLayer() {
+export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boolean}) {
   const {
     item,
     stream,
@@ -156,6 +158,31 @@ export function MediaLayer() {
   const { width, height } = useWindowDimensions();
   const tiled = presentation === 'multi-tile' && multiView !== null;
   const software = tiled && multiView.backend === 'software';
+  const drawerProgress = useRef(new Animated.Value(0)).current;
+  const drawerOpen = channelDrawerOpen && isFullscreen && !tiled;
+  const drawerFrame = channelDrawerLayout(width, height);
+  useEffect(() => {
+    const animation = Animated.timing(drawerProgress, {
+      toValue: drawerOpen ? 1 : 0,
+      duration: CHANNEL_DRAWER_ANIMATION_MS,
+      easing: Easing.out(Easing.cubic),
+      // Animate the persistent video on the UI thread while channel rows load.
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [drawerOpen, drawerProgress]);
+  const drawerVideoStyle = {
+    transform: [
+      {translateX: drawerProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, drawerFrame.videoLeft - (width - drawerFrame.videoWidth) / 2],
+      })},
+      {scale: drawerProgress.interpolate({
+        inputRange: [0, 1], outputRange: [1, width > 0 ? drawerFrame.videoWidth / width : 1],
+      })},
+    ],
+  };
   const count = (multiView?.tiles.length ?? 0) + 1;
   const showVideo = status === 'playing' || (isFullscreen && Boolean(stream));
   useForegroundPlaybackTimeout(
@@ -192,9 +219,11 @@ export function MediaLayer() {
       !software &&
       presentation !== 'background-image' &&
       (!tiled || status !== 'error') ? (
-        <View
+        <Animated.View
+          testID="player-video-frame"
           style={[
             StyleSheet.absoluteFill,
+            isFullscreen && !tiled && drawerVideoStyle,
             tiled && multiViewTileLayout(0, count, width, height),
             tiled && styles.tileClip,
             showVideo ? styles.videoVisible : styles.videoHidden,
@@ -247,7 +276,7 @@ export function MediaLayer() {
               setAvailableQualities(tracks);
             }}
           />
-        </View>
+        </Animated.View>
       ) : null}
       {software && stream ? (
         <MultiViewSurface
