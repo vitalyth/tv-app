@@ -20,6 +20,8 @@ if not os.path.isfile(favoritesFile):
 def GetCategoriesList():
 	name = common.GetLabelColor("מועדפי עידן פלוס", bold=True, color="none")
 	common.addDir(name, '', 10, icon, infos={"title": name}, addFav=False)
+	name = common.GetLabelColor("המשך צפייה", bold=True, color="none")
+	common.addDir(name, '', 27, icon, infos={"title": name}, addFav=False)
 	name = common.GetLabelColor("חיפוש תכניות", bold=True, color="none")
 	common.addDir(name, '', 4, icon, infos={"title": name}, addFav=False)
 	name = common.GetLabelColor("טלויזיה", bold=True, color="none")
@@ -518,6 +520,17 @@ def route(query):
 			ChangeChannelTvgId(url)
 		elif mode == 26:
 			ChangeChannelAdaptive(url)
+		elif mode == 27:
+			from resources.lib import watch_ui
+			watch_ui.ShowContinue(icon)
+		elif mode == 28:   # a click on a Continue-watching row: the chooser (not a listing: leave without endOfDirectory)
+			from resources.lib import watch_ui
+			watch_ui.ShowChooser(url)
+			sys.exit()
+		elif mode == 29:   # the context-menu action of a Continue row: remove its series from the list (an action, not a listing)
+			from resources.lib import watch_ui
+			watch_ui.HideContinue(url)
+			sys.exit()
 		if mode == 1 or mode == 3 or mode == 10:
 			common.SetViewMode('episodes')
 	else:
@@ -527,6 +540,7 @@ def route(query):
 		except Exception as ex:
 			xbmc.log(str(ex), 3)
 			import traceback
+			xbmc.log(traceback.format_exc(), 3)   # the whole traceback: the message alone does not say where it came from
 			ex_type, ex, tb = sys.exc_info()
 			xbmc.log(str(ex_type), 3)
 			del tb
