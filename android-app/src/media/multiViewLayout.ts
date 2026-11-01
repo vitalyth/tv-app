@@ -21,13 +21,15 @@ export function multiViewTileLayout(
     return { position: 'absolute', left: 0, top: 0, width, height };
   }
   const rows = count > 2 ? 2 : 1;
-  const cellWidth = (width - 24) / 2;
-  const cellHeight = (height - 24) / rows;
+  const inset = 8;
+  const gap = 2;
+  const cellWidth = (width - 2 * inset + gap) / 2;
+  const cellHeight = (height - 2 * inset + gap) / rows;
   return {
     position: 'absolute',
-    left: 18 + (index % 2) * cellWidth,
-    top: 18 + Math.floor(index / 2) * cellHeight,
-    width: cellWidth - 12,
-    height: cellHeight - 12,
+    left: inset + (index % 2) * cellWidth,
+    top: inset + Math.floor(index / 2) * cellHeight,
+    width: cellWidth - gap,
+    height: cellHeight - gap,
   };
 }
