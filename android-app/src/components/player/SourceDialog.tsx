@@ -1,9 +1,9 @@
+import {useTVNavigationEventHandler} from '../../hooks/useTVNavigationEventHandler';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
   Text,
-  useTVEventHandler,
   View,
   type View as ViewType,
 } from 'react-native';
@@ -62,7 +62,7 @@ export const SourceDialog = memo(function SourceDialogView({
     return () => clearTimeout(timer);
   }, [preferredFocusIndex, sources]);
 
-  useTVEventHandler(event => {
+  useTVNavigationEventHandler(event => {
     if (event.eventKeyAction === 1 || switchingSourceId) {
       return;
     }

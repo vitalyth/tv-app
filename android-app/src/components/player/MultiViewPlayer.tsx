@@ -1,3 +1,4 @@
+import {useTVNavigationEventHandler} from '../../hooks/useTVNavigationEventHandler';
 import {liveEpgStore} from '../../state/liveEpg';
 import {useChannelDrawerViewport} from '../../hooks/useChannelDrawerViewport';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -9,7 +10,6 @@ import {
   StyleSheet,
   Text,
   TVFocusGuideView,
-  useTVEventHandler,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -261,7 +261,7 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
     }
   }, [runAction]);
 
-  useTVEventHandler(event => {
+  useTVNavigationEventHandler(event => {
     if (event.eventKeyAction === 1) {
       return;
     }

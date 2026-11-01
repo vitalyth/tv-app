@@ -1,3 +1,4 @@
+import {useTVNavigationEventHandler} from '../../hooks/useTVNavigationEventHandler';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image,
@@ -5,7 +6,6 @@ import {
   StyleSheet,
   Text,
   TVFocusGuideView,
-  useTVEventHandler,
   View,
 } from 'react-native';
 import type { MediaItem, VideoQualityOption } from '../../media/player';
@@ -266,7 +266,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   }, [lastFocusedControl, requestControlFocus]);
 
   // Handle remote DPAD left/right explicitly to bridge the flexSpacer gap seamlessly
-  useTVEventHandler(event => {
+  useTVNavigationEventHandler(event => {
     if (event.eventKeyAction === 1) {
       return;
     }
