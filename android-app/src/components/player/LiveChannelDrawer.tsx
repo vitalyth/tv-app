@@ -1,6 +1,9 @@
+import {channelDrawerLayout, CHANNEL_DRAWER_ANIMATION_MS, PLAYER_PANEL_INSET, PLAYER_PANEL_VERTICAL_INSET} from '../../media/playerLayout';
 import { liveEpgStore, useLiveEpg } from '../../state/liveEpg';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   Image,
   Pressable,
   StyleSheet,
@@ -8,6 +11,7 @@ import {
   TVFocusGuideView,
   View,
   useTVEventHandler,
+  useWindowDimensions,
 } from 'react-native';
 import { isSameMediaItem, type MediaItem } from '../../media/player';
 import { t } from '../../i18n';
@@ -26,6 +30,11 @@ interface Props {
 const ROW_HEIGHT = 52;
 const ACTIVE_ROW_HEIGHT = 112;
 
+function playingChannelIndex(channels: MediaItem[], item: MediaItem): number {
+  const exact = channels.findIndex(channel => channel.id === item.id);
+  return exact >= 0 ? exact : channels.findIndex(channel => isSameMediaItem(channel, item));
+}
+
 export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
   item,
   loadChannels,
@@ -41,7 +50,21 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const [index, setIndex] = useState(0);
+  const [listFocused, setListFocused] = useState(false);
   const [height, setHeight] = useState(400);
+  const {width: screenWidth} = useWindowDimensions();
+  const {drawerWidth} = channelDrawerLayout(screenWidth, 0);
+  const entrance = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const animation = Animated.timing(entrance, {
+      toValue: 1,
+      duration: CHANNEL_DRAWER_ANIMATION_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [entrance]);
   const focusRef = useRef<View & { requestTVFocus?: () => void }>(null);
   const latest = useRef({ channels, index, failed, onSelectChannel, item });
   latest.current = { channels, index, failed, onSelectChannel, item };
@@ -56,10 +79,7 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
           return;
         }
         setChannels(result);
-        const selected = result.findIndex(channel =>
-          isSameMediaItem(channel, latest.current.item),
-        );
-        setIndex(Math.max(0, selected));
+        setIndex(Math.max(0, playingChannelIndex(result, latest.current.item)));
       })
       .catch(() => {
         if (mounted) {
@@ -77,9 +97,11 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
   }, [loadChannels, retry]);
 
   useEffect(() => {
-    const timer = setTimeout(() => focusRef.current?.requestTVFocus?.(), 80);
+    if (loading) return;
+    // Wait for the selected row to render and the drawer to enter the screen.
+    const timer = setTimeout(() => focusRef.current?.requestTVFocus?.(), CHANNEL_DRAWER_ANIMATION_MS);
     return () => clearTimeout(timer);
-  }, []);
+  }, [loading]);
 
   const activate = useCallback(() => {
     const current = latest.current;
@@ -113,6 +135,7 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
     }
   });
 
+  const playingIndex = playingChannelIndex(channels, item);
   const visibleCount = Math.max(
     1,
     1 + Math.floor((height - ACTIVE_ROW_HEIGHT) / ROW_HEIGHT),
@@ -132,12 +155,17 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
         accessible={false}
         onPress={onClose}
       />
+      <Animated.View style={[styles.panel, {
+        width: drawerWidth,
+        opacity: entrance,
+        transform: [{translateX: entrance.interpolate({inputRange: [0, 1], outputRange: [-drawerWidth - PLAYER_PANEL_INSET, 0]})}],
+      }]}>
       <TVFocusGuideView
         trapFocusUp
         trapFocusDown
         trapFocusLeft
         trapFocusRight
-        style={styles.panel}
+        style={styles.panelContent}
       >
         <View style={styles.header}>
           <Text style={styles.heading}>{t('playerChannels')}</Text>
@@ -161,7 +189,7 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
           <Pressable
             ref={focusRef}
             testID="live-channel-drawer-focus"
-            hasTVPreferredFocus
+            hasTVPreferredFocus={!loading}
             focusable
             accessibilityLabel={
               failed
@@ -169,6 +197,8 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
                 : channels[index]?.channelName || t('playerChannels')
             }
             onPress={activate}
+            onFocus={() => setListFocused(true)}
+            onBlur={() => setListFocused(false)}
             style={styles.focusAnchor}
           />
           {loading ? (
@@ -184,7 +214,7 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
               .slice(first, first + visibleCount)
               .map((channel, offset) => {
                 const selected = first + offset === index;
-                const playing = isSameMediaItem(channel, item);
+                const playing = first + offset === playingIndex;
                 return (
                   <Pressable
                     key={channel.id}
@@ -202,8 +232,8 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
                     }}
                     style={[
                       styles.row,
-                      playing && styles.playingRow,
-                      selected && styles.focused,
+                      selected && styles.expanded,
+                      selected && listFocused && styles.focused,
                     ]}
                   >
                     <View style={styles.channelInfo}>
@@ -269,6 +299,7 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
           </Text>
         ) : null}
       </TVFocusGuideView>
+      </Animated.View>
     </View>
   );
 });
@@ -276,16 +307,19 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
 const styles = StyleSheet.create({
   root: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    paddingLeft: PLAYER_PANEL_INSET,
+    paddingVertical: PLAYER_PANEL_VERTICAL_INSET,
   },
   panel: {
-    width: 336,
-    maxWidth: '80%',
-    height: '100%',
-    paddingHorizontal: 18,
-    paddingTop: 28,
-    paddingBottom: 20,
-    backgroundColor: 'rgba(12,16,20,0.97)',
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    backgroundColor: 'rgba(10, 14, 20, 0.80)',
+    overflow: 'hidden',
+  },
+  panelContent: {
+    flex: 1,
+    padding: 16,
   },
   header: { height: 40, flexDirection: 'row', alignItems: 'center', gap: 12 },
   heading: { color: '#ffffff', fontSize: 18, fontWeight: '700', flex: 1 },
@@ -304,14 +338,13 @@ const styles = StyleSheet.create({
     height: ROW_HEIGHT,
     borderWidth: 2,
     borderColor: 'transparent',
-    borderRadius: 4,
+    borderRadius: 10,
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
   channelInfo: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  playingRow: { backgroundColor: '#17383c', borderColor: '#25d4de' },
+  expanded: { height: ACTIVE_ROW_HEIGHT },
   focused: {
-    height: ACTIVE_ROW_HEIGHT,
     backgroundColor: '#34474a',
     borderColor: '#ffffff',
   },
@@ -324,7 +357,7 @@ const styles = StyleSheet.create({
   programImage: {
     width: 96,
     height: 54,
-    borderRadius: 3,
+    borderRadius: 6,
     backgroundColor: '#182125',
   },
   activeProgram: { flex: 1, color: '#ffffff', fontSize: 12, lineHeight: 17 },
@@ -333,7 +366,7 @@ const styles = StyleSheet.create({
   metadata: { flex: 1, minWidth: 0 },
   name: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
   program: { color: '#aab9c1', fontSize: 11, marginTop: 3 },
-  playing: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#25d4de' },
+  playing: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#7fb7bc' },
   message: { color: '#d7e0e5', fontSize: 14, marginTop: 16 },
   error: {
     color: '#ffb4b9',

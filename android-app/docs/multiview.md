@@ -74,8 +74,10 @@ simultaneously visible pictures.
   audible when focused. Surface reattachment and native-plane recreation did
   not resolve this. Hardware/decoder limits have not been confirmed. The
   four-stream experiment has now been disabled on Vega; its cap is two.
-- Android emulator rendering uses TextureView on emulator hardware only, and
-  fullscreen fits the complete frame. Four-tile captures after this change showed
+- The original Android emulator rendering fix used TextureView on emulator hardware
+  only; player panel animation now uses it on physical Android TVs as well (see
+  [Android video rendering](android-video-rendering.md)). Fullscreen fits the complete
+  frame. Four-tile emulator captures after the original fix showed
   movement in all four video regions, with four active native audio tracks and
   exactly one unmuted track.
 

@@ -630,14 +630,19 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 48,
-    paddingBottom: 28,
-    paddingTop: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.70)',
+    marginHorizontal: 24,
+    marginBottom: 16,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+    paddingTop: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    backgroundColor: 'rgba(10, 14, 20, 0.80)',
   },
   timelineContainer: {
     width: '100%',
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingHorizontal: 10,
   },
   progressTrack: {
@@ -676,7 +681,7 @@ const styles = StyleSheet.create({
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 8,
     gap: 12,
   },
   flexSpacer: {

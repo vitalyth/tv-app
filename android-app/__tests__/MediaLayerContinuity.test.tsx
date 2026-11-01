@@ -1,3 +1,4 @@
+import {Animated} from 'react-native';
 import React from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { MediaLayer } from '../src/components/MediaLayer';
@@ -46,4 +47,35 @@ it('keeps one video surface and stream across fullscreen transitions and synchro
   expect(mockMount).toHaveBeenCalledTimes(1);
   expect(mockUnmount).not.toHaveBeenCalled();
   act(() => renderer.unmount());
+});
+
+it('shrinks and restores the existing player for the channel drawer without resetting playback', () => {
+  const timing = jest.spyOn(Animated, 'timing');
+  let controller!: ReturnType<typeof useMediaController>;
+  function Probe() {controller = useMediaController(); return null;}
+  function Harness({open}: {open: boolean}) {
+    return <MediaControllerProvider><Probe /><MediaLayer channelDrawerOpen={open} /></MediaControllerProvider>;
+  }
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {renderer = ReactTestRenderer.create(<Harness open={false} />);});
+  const stream = {url: 'https://example.com/drawer-live.m3u8'};
+  act(() => {
+    controller.playFullscreen({id: 'drawer-live', kind: 'live', title: 'Live'}, stream);
+    controller.markPlaying();
+    controller.setPaused(true);
+    controller.setSelectedQuality('720');
+  });
+  const surface = renderer.root.findByType('VideoSurface' as any);
+  const onFirstFrame = surface.props.onFirstFrame;
+  for (const open of [true, false, true, false]) {
+    act(() => {renderer.update(<Harness open={open} />);});
+    expect(renderer.root.findByType('VideoSurface' as any)).toBe(surface);
+    expect(controller.stream).toBe(stream);
+    expect(controller.paused).toBe(true);
+    expect(timing).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({toValue: open ? 1 : 0, duration: 260, useNativeDriver: true}));
+    expect(surface.props.selectedQualityId).toBe('720');
+    expect(surface.props.onFirstFrame).toBe(onFirstFrame);
+  }
+  act(() => {renderer.unmount();});
+  timing.mockRestore();
 });

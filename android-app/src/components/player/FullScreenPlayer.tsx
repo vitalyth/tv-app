@@ -44,6 +44,7 @@ import { RecentChannelsService } from '../../services/recentChannels';
 
 interface FullScreenPlayerProps {
   onExit: () => void;
+  onChannelDrawerChange?: (open: boolean) => void;
 }
 
 type DialogType = 'quality' | 'sources' | 'channels' | null;
@@ -103,6 +104,7 @@ function PlayerLoadingIndicator() {
 
 export const FullScreenPlayer = memo(function FullScreenPlayerView({
   onExit,
+  onChannelDrawerChange,
 }: FullScreenPlayerProps) {
   const {
     item,
@@ -128,6 +130,10 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   const [channelListError, setChannelListError] = useState<string>();
   const channelInfoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeDialog, setActiveDialog] = useState<DialogType>(null);
+  useEffect(() => {
+    onChannelDrawerChange?.(activeDialog === 'channels');
+    return () => onChannelDrawerChange?.(false);
+  }, [activeDialog, onChannelDrawerChange]);
   const [lastFocusedControl, setLastFocusedControl] = useState<ControlId>('play-pause');
   const [switchingSourceId, setSwitchingSourceId] = useState<string>();
   const [sourceError, setSourceError] = useState<string>();

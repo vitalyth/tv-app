@@ -9,6 +9,15 @@ jest.mock('react-native/Libraries/Components/TV/useTVEventHandler', () => ({
   __esModule: true,
   default: jest.fn(),
 }));
+jest.mock('react-native/Libraries/Components/Pressable/Pressable', () => {
+  const ReactModule = require('react');
+  return {
+    __esModule: true,
+    default: ReactModule.forwardRef((props: any, ref: any) =>
+      ReactModule.createElement('Pressable', {...props, ref}, props.children),
+    ),
+  };
+});
 jest.mock('../src/components/RemoteImage', () => ({
   RemoteImage: 'RemoteImage',
 }));
@@ -36,7 +45,7 @@ describe('fullscreen live channel list', () => {
     renderer.root
       .findAllByProps({ testID: 'live-channel-drawer-focus' })
       .find(node => typeof node.props.onPress === 'function')!.props.onPress;
-  const mount = async () => {
+  const mount = async (requestFocus?: jest.Mock) => {
     await act(async () => {
       renderer = Renderer.create(
         <LiveChannelDrawer
@@ -45,8 +54,13 @@ describe('fullscreen live channel list', () => {
           onSelectChannel={select}
           onClose={jest.fn()}
         />,
+        {createNodeMock: element => (element.props as {testID?: string}).testID === 'live-channel-drawer-focus'
+          ? {requestTVFocus: requestFocus} : null},
       );
     });
+    const anchor = renderer.root.findAllByProps({testID: 'live-channel-drawer-focus'})
+      .find(node => typeof node.props.onPress === 'function')!;
+    if (anchor.props.hasTVPreferredFocus) await act(async () => anchor.props.onFocus());
   };
   beforeEach(() => {
     jest.clearAllMocks();
@@ -56,6 +70,37 @@ describe('fullscreen live channel list', () => {
   afterEach(async () => {
     if (renderer) {
       await act(async () => renderer.unmount());
+    }
+  });
+
+  it('prefers the playing channel ID over another channel with the same number', async () => {
+    load.mockResolvedValue(channels.map((channel, index) => index === 24
+      ? {...channel, channelNumber: '25'} : channel));
+    await mount();
+    await act(async () => {activate()();});
+    expect(select).toHaveBeenLastCalledWith(channels[25]);
+    const neighboring = renderer.root.findAllByProps({testID: 'drawer-channel-ch24'})[0];
+    expect(neighboring.props.accessibilityState.checked).toBe(false);
+    const playing = renderer.root.findAllByProps({testID: 'drawer-channel-ch25'})[0];
+    expect(playing.props.accessibilityState.checked).toBe(true);
+  });
+
+  it('requests native focus after a delayed channel load and selects the playing channel', async () => {
+    jest.useFakeTimers();
+    try {
+      let finish!: (items: MediaItem[]) => void;
+      load.mockReturnValue(new Promise<MediaItem[]>(resolve => {finish = resolve;}));
+      const requestFocus = jest.fn();
+      await mount(requestFocus);
+      await act(async () => {jest.advanceTimersByTime(1000);});
+      expect(requestFocus).not.toHaveBeenCalled();
+      await act(async () => {finish(channels);});
+      await act(async () => {jest.advanceTimersByTime(260);});
+      expect(requestFocus).toHaveBeenCalledTimes(1);
+      await act(async () => {activate()();});
+      expect(select).toHaveBeenLastCalledWith(channels[25]);
+    } finally {
+      jest.useRealTimers();
     }
   });
 
@@ -114,6 +159,8 @@ describe('fullscreen live channel list', () => {
         .findAllByProps({ testID: `drawer-channel-${id}` })
         .find(node => typeof node.props.onPress === 'function')!;
     expect(artwork().props.uri).toBe(channels[25].imageUrl);
+    expect(StyleSheet.flatten(row('ch25').props.style).borderColor).toBe('#ffffff');
+    expect(renderer.root.findAllByProps({testID: 'drawer-playing-channel'}).length).toBeGreaterThan(0);
     expect(row('ch25').props.accessibilityState).toEqual({
       selected: true,
       checked: true,
@@ -129,7 +176,7 @@ describe('fullscreen live channel list', () => {
       checked: false,
     });
     expect(StyleSheet.flatten(row('ch25').props.style).borderColor).toBe(
-      '#25d4de',
+      'transparent',
     );
     expect(StyleSheet.flatten(row('ch26').props.style).height).toBeGreaterThan(
       StyleSheet.flatten(row('ch25').props.style).height,
