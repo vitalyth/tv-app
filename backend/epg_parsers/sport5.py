@@ -10,13 +10,15 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
+from curl_cffi import requests as curl_requests
 
 from epg_parsers.common import dedupe_and_sort_programs
 
 SCHEDULE_URL = "https://www.sport5.co.il/html/pages/broadcastsheet.html"
 AJAX_URL = "https://www.sport5.co.il/Ajax/GetBroadcastSheetData.aspx"
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
-DEFAULT_DAYS = 5
+# Match the ten dates offered by the official broadcast-sheet day selector.
+DEFAULT_DAYS = 10
 _fetch_lock = threading.Lock()
 _last_fetch = 0.0
 SPORT5_CHANNELS = {
@@ -29,25 +31,61 @@ SPORT5_CHANNELS = {
 }
 
 
+def _fetch_browser_schedule(request: Request) -> str:
+    # Akamai can reject urllib while accepting Chrome on the same connection.
+    try:
+        response = curl_requests.get(
+            request.full_url, impersonate="chrome", timeout=20,
+            headers={"Referer": SCHEDULE_URL, "X-Requested-With": "XMLHttpRequest"},
+        )
+    except curl_requests.exceptions.RequestException as exc:
+        raise URLError(str(exc)) from exc
+    try:
+        if response.status_code >= 400:
+            raise HTTPError(request.full_url, response.status_code, "Sport 5 browser request failed", response.headers, None)
+        return response.content.decode("utf-8-sig")
+    finally:
+        response.close()
+
+
 def fetch_schedule(channel_type: str, schedule_date: date) -> str:
     global _last_fetch
-    # The official endpoint rate-limits bursts, including requests for unpublished days.
-    with _fetch_lock:
-        delay = max(0, 2 - (clock.monotonic() - _last_fetch))
-        if delay:
-            clock.sleep(delay)
-        _last_fetch = clock.monotonic()
-    query = urlencode({"Type": channel_type, "Date": schedule_date.isoformat()})
+    # Match the site's JavaScript (getMonth() + 1 / getDate()), including
+    # unpadded single-digit months and days.
+    site_date = f"{schedule_date.year}-{schedule_date.month}-{schedule_date.day}"
+    query = urlencode({"Type": channel_type, "Date": site_date})
+    schedule_url = f"{AJAX_URL}?{query}"
     request = Request(
-        f"{AJAX_URL}?{query}",
+        schedule_url,
         headers={
             "User-Agent": "Mozilla/5.0",
             "Referer": SCHEDULE_URL,
             "X-Requested-With": "XMLHttpRequest",
         },
     )
-    with urlopen(request, timeout=20) as response:
-        return response.read().decode("utf-8-sig")
+    for attempt in range(2):
+        # Pace retries too: the official endpoint rate-limits bursts.
+        with _fetch_lock:
+            delay = max(0, 2 - (clock.monotonic() - _last_fetch))
+            if delay:
+                clock.sleep(delay)
+            _last_fetch = clock.monotonic()
+        try:
+            try:
+                with urlopen(request, timeout=20) as response:
+                    return response.read().decode("utf-8-sig")
+            except HTTPError as exc:
+                if exc.code != 500:
+                    raise
+                exc.close()
+                return _fetch_browser_schedule(request)
+        except HTTPError as exc:
+            # The same published date can return 500 and then succeed later.
+            # Retry once, but never retry rate-limit responses (403/429).
+            if exc.code != 500 or attempt:
+                raise
+            exc.close()
+            clock.sleep(3)
 
 
 def parse_schedule_page(html_text: str, schedule_date: date) -> list[dict]:
@@ -67,7 +105,18 @@ def parse_schedule_page(html_text: str, schedule_date: date) -> list[dict]:
         start = datetime.combine(
             schedule_date, time(int(match[1]), int(match[2])), tzinfo=ISRAEL_TZ
         )
-        entries.append({"start": int(start.timestamp()), "name": title, "description": ""})
+        # The live badge is an image beside the time, so get_text alone loses it.
+        time_labels = [time_cell.get_text(" ", strip=True)]
+        time_labels.extend(
+            str(tag.get(attribute, ""))
+            for tag in time_cell.find_all(True)
+            for attribute in ("alt", "title")
+        )
+        is_live = any(re.search(r"(?<!\w)ישיר(?!\w)", label) for label in time_labels)
+        entries.append({
+            "start": int(start.timestamp()), "name": title,
+            "description": "ישיר" if is_live else "",
+        })
     return entries
 
 
@@ -96,13 +145,11 @@ def parse_sport5_epg(
             entries.extend(parse_schedule_page(fetch_schedule(channel_type, schedule_date), schedule_date))
             successful_pages += 1
         except (HTTPError, URLError, TimeoutError, UnicodeError, RuntimeError) as exc:
-            # The site can return HTTP 500 for future days not published yet.
-            # Keep usable days and let SQLite retain the previously cached ones.
+            # A missing/error day does not mean later dates are unavailable.
+            # Keep checking the bounded window and retain cached programs.
             print(f"Sport 5 {channel_id} {schedule_date}: {exc}")
             if isinstance(exc, HTTPError):
                 if exc.code in (403, 429):
-                    break
-                if exc.code == 500 and offset > 0 and successful_pages:
                     break
     if not successful_pages:
         raise RuntimeError(f"No Sport 5 schedule pages could be loaded for {channel_id}")

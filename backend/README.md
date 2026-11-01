@@ -325,7 +325,7 @@ Sport 1–4, ONE and Eurosport retain their existing EPG configuration.
 
 ### Sport 5 EPG
 
-`epg_parsers/sport5.py` imports up to five published days from the official
+`epg_parsers/sport5.py` imports up to ten published days from the official
 [broadcast sheet](https://www.sport5.co.il/html/pages/broadcastsheet.html),
 using its separate tabs for Sport 5, Plus, Live, Gold, Stars and Max. Each
 linear channel has a dedicated `tvgID`: `sport5`, `sport5_plus`, `sport5_live`,
@@ -338,12 +338,20 @@ into SQLite along with the other EPG sources. To refresh one channel manually:
 python parse_epg.py --channel sport5_max
 ```
 
+Requests match the site's unpadded `YYYY-M-D` date format.
+The live badge beside a start time is retained as `ישיר` in the program description.
 Times are interpreted in `Asia/Jerusalem`, including daylight saving changes.
 Because the site publishes start times, each program ends at the next known
 start; the importer fetches an additional day for the midnight boundary.
 Unpublished rows stay empty, and failed or empty imports retain cached programs.
-Requests are paced to respect the site's rate limit; fetching stops when the
-site reports that further days are unavailable or requests are being limited.
+The ten-day window matches the site's day selector. Failed dates are skipped
+so a missing day cannot hide a later published schedule. Requests are paced
+to respect the site's rate limit; fetching stops on HTTP 403 or 429.
+HTTP 500 is retried once after a delay: it can also occur for published dates,
+so it is not treated as proof that a schedule is unavailable.
+When a direct request returns HTTP 500, the importer tries the same URL with
+Chrome browser impersonation using the existing `curl-cffi` dependency. This
+works around Akamai failures without requiring the VPN backend.
 The original Sport 5 website studio stream keeps its separate `5radio` schedule.
 
 The backend resolves a fresh signed URL on playback through the source AJAX
