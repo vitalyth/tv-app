@@ -269,8 +269,8 @@
   {
     "id": "ch_13comedy",
     "channelID": "ch_13comedy",
-    "channelNumber": "24",
-    "orderNumber": 240
+    "channelNumber": "29",
+    "orderNumber": 295
   },
   {
     "id": "ch_13nofesh",
@@ -1858,7 +1858,8 @@
   {
     "id": "ch_24b",
     "channelID": "ch_24b",
-    "orderNumber": 230
+    "orderNumber": 230,
+    "channelNumber": "24"
   },
   {
     "id": "ch_ynet",
