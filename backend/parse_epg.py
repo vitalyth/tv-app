@@ -21,7 +21,8 @@ from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.reshet13 import parse_reshet13_epg
 from epg_parsers.ftv import parse_ftv_epg
 from epg_parsers.glglz import parse_glglz_epg
-from epg_parsers.sport5 import SPORT5_CHANNELS, parse_sport5_epg
+from epg_parsers.sport1 import SPORT1_CHANNELS, parse_sport1_epg, parse_sport1_epgs
+from epg_parsers.sport5 import SPORT5_CHANNELS, parse_sport5_epg, parse_sport5_epgs
 from epg_parsers.fishenzon import (
     FISHENZON_CHANNEL_IDS,
     fetch_fishenzon_epg,
@@ -74,6 +75,7 @@ FORMAL_EPG_CHANNEL_IDS = {
     *KESHET_THEMATIC_CHANNELS,
     *LOCAL_US_CHANNEL_IDS,
     *SPORT5_CHANNELS,
+    *SPORT1_CHANNELS,
 }
 
 ACTIVE_IMPORT_CHANNEL_IDS: set[str] | None = None
@@ -291,6 +293,18 @@ def main():
         help="Fetch only the official i24 Hebrew schedule and store it in SQLite.",
     )
     parser.add_argument(
+        "--skip-sport5",
+        action="store_true",
+        help="Skip Sport 5 when its dedicated scheduled refresh already runs separately.",
+    )
+    parser.add_argument("--sport1-only", action="store_true", help="Refresh official Sport 1–4 schedules only.")
+    parser.add_argument("--skip-sport1", action="store_true", help="Skip Sport 1–4 (refreshed separately by the scheduler).")
+    parser.add_argument(
+        "--sport5-only",
+        action="store_true",
+        help="Refresh all six Sport 5 schedules together without scanning other providers.",
+    )
+    parser.add_argument(
         "--channel",
         help="Parse only one specific channel id, for example: 33, 10, 66, 99, i24news, i24newsen, i24newsfr, i24newsar, 11, 24, 13comedy, erets.",
     )
@@ -305,6 +319,22 @@ def main():
         combined_epg = combine_epg_directory(output_dir)
         persist_epg(combined_epg, output_dir)
         print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
+        return
+
+    if args.sport1_only:
+        schedules = parse_sport1_epgs()
+        for channel_id, programs in schedules.items():
+            if programs:
+                persist_channel_programs(channel_id, programs, output_dir)
+            print(f"Stored {len(programs)} refreshed programs for {channel_id}; existing cache retained")
+        return
+
+    if args.sport5_only:
+        schedules = parse_sport5_epgs()
+        for sport5_id, programs in schedules.items():
+            if programs:
+                persist_channel_programs(sport5_id, programs, output_dir)
+            print(f"Stored {len(programs)} refreshed programs for {sport5_id}; existing cache retained")
         return
 
     if args.i24_only:
@@ -471,6 +501,10 @@ def main():
 
         elif args.channel == "ftv":
             programs = parse_ftv_epg()
+
+        elif args.channel in SPORT1_CHANNELS:
+            programs = parse_sport1_epg(args.channel)
+            replace_existing_programs = True
 
         elif args.channel in SPORT5_CHANNELS:
             programs = parse_sport5_epg(args.channel)
@@ -993,12 +1027,21 @@ def main():
             persist_channel_programs("ftv", ftv_programs, output_dir)
             print(f"Stored {len(ftv_programs)} programs for ftv")
 
+        sport1_ids = [] if args.skip_sport1 else [channel for channel in SPORT1_CHANNELS if should_import_channel(channel)]
+        sport1_schedules = parse_sport1_epgs(sport1_ids)
+        for channel_id in sport1_ids:
+            programs = sport1_schedules.get(channel_id) or read_existing_channel_programs(output_dir, channel_id)
+            combined_epg[channel_id] = programs
+            if programs:
+                persist_channel_programs(channel_id, programs, output_dir)
+                print(f"Stored {len(programs)} programs for {channel_id}")
+
         print("\nParsing Sport 5 channels from the official broadcast sheet")
-        for channel_id in SPORT5_CHANNELS:
-            if not should_import_channel(channel_id):
-                continue
+        sport5_ids = [] if args.skip_sport5 else [channel_id for channel_id in SPORT5_CHANNELS if should_import_channel(channel_id)]
+        sport5_schedules = parse_sport5_epgs(sport5_ids)
+        for channel_id in sport5_ids:
             try:
-                sport5_programs = parse_sport5_epg(channel_id)
+                sport5_programs = sport5_schedules.get(channel_id) or read_existing_channel_programs(output_dir, channel_id)
             except Exception as ex:
                 failed_channels.append(channel_id)
                 print(f"Failed parsing {channel_id}: {ex}")

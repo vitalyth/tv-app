@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
-from epg_parsers.sport5 import SPORT5_CHANNELS, fetch_schedule, parse_schedule_page, parse_sport5_epg
+from epg_parsers.sport5 import SPORT5_CHANNELS, fetch_schedule, fetch_yes_schedule, parse_yes_schedule, parse_schedule_page, parse_sport5_epg, parse_sport5_epgs
 from services.epg_storage import load_channel_programs, upsert_channel_programs
 
 
@@ -20,6 +20,87 @@ def page(*rows):
 
 
 class Sport5EPGTests(unittest.TestCase):
+    def setUp(self):
+        # Existing official-source tests must not make real backup requests.
+        backup = patch("epg_parsers.sport5.fetch_yes_schedule", return_value=[])
+        self.backup = backup.start()
+        self.addCleanup(backup.stop)
+
+    @patch("epg_parsers.sport5.fetch_schedule")
+    def test_batch_import_visits_every_channel_today_before_future_dates(self, fetch):
+        fetch.return_value = page(("12:00", "חדשות"), ("13:00", "משחק"))
+        results = parse_sport5_epgs(today=date(2026, 11, 2), days=1)
+        self.assertEqual(set(results), set(SPORT5_CHANNELS))
+        self.assertEqual([call.args for call in fetch.call_args_list[:6]], [
+            (tab, date(2026, 11, 2)) for tab in SPORT5_CHANNELS.values()
+        ])
+        self.assertTrue(all(results.values()))
+        self.backup.assert_not_called()
+
+    @patch("epg_parsers.sport5.fetch_schedule")
+    def test_unpublished_plus_uses_exact_utc_schedule_from_backup(self, fetch):
+        fetch.return_value = '<table></table><div class="no-programs">טרם פורסם</div>'
+        program = {"start": 1793644800, "end": 1793652000, "name": "כדורסל", "description": "ישיר"}
+        self.backup.return_value = [program]
+        self.assertEqual(parse_sport5_epg("sport5_plus", today=date(2026, 11, 2), days=1), [program])
+        self.assertEqual(self.backup.call_args_list[0].args, ("sport5_plus", date(2026, 11, 2)))
+
+    @patch("epg_parsers.sport5.fetch_schedule")
+    def test_provider_limit_does_not_starve_other_channels_and_is_not_retried(self, fetch):
+        fetch.side_effect = HTTPError("url", 429, "rate limited", {}, None)
+        self.backup.return_value = [{"start": 1793644800, "end": 1793652000, "name": "משחק", "description": ""}]
+        results = parse_sport5_epgs(today=date(2026, 11, 2), days=1)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(self.backup.call_count, 12)
+        self.assertTrue(all(results.values()))
+
+    @patch("epg_parsers.sport5.fetch_schedule")
+    def test_both_provider_limits_stop_batch_and_allow_cached_data_to_survive(self, fetch):
+        fetch.side_effect = HTTPError("url", 403, "limited", {}, None)
+        self.backup.side_effect = HTTPError("url", 429, "limited", {}, None)
+        self.assertEqual(parse_sport5_epgs(days=1), dict.fromkeys(SPORT5_CHANNELS, []))
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(self.backup.call_count, 1)
+
+    def test_backup_rejects_wrong_channel_and_invalid_times_preserving_live_label(self):
+        row = {"channelId": "CH54", "title": "ישיר! כדורסל", "description": "משחק",
+               "starts": "2026-11-02T18:00:00Z", "ends": "2026-11-02T20:00:00Z"}
+        data = {"items": [row, {**row, "channelId": "PT26"},
+                          {**row, "starts": "invalid"}, {**row, "ends": "2026-11-02T17:00:00Z"}]}
+        programs = parse_yes_schedule(data, "CH54")
+        self.assertEqual(len(programs), 1)
+        self.assertEqual(programs[0]["start"], int(datetime(2026, 11, 2, 18, tzinfo=timezone.utc).timestamp()))
+        self.assertIn("ישיר", programs[0]["description"])
+
+    @patch("epg_parsers.sport5.clock.sleep")
+    @patch("epg_parsers.sport5.curl_requests.get")
+    def test_backup_fetch_uses_official_channel_id_and_retains_past_items(self, get, sleep):
+        get.return_value.status_code = 200
+        get.return_value.content = json.dumps({"items": [{
+            "channelId": "CH54", "title": "כדורסל", "starts": "2026-11-02T18:00:00Z",
+            "ends": "2026-11-02T20:00:00Z",
+        }]}).encode()
+        self.assertEqual(len(fetch_yes_schedule("sport5_plus", date(2026, 11, 2))), 1)
+        url = urlsplit(get.call_args.args[0])
+        self.assertEqual(url.netloc, "svc.yes.co.il")
+        self.assertTrue(url.path.endswith("/CH54"))
+        self.assertEqual(parse_qs(url.query), {"date": ["2026-11-2"], "ignorePastItems": ["false"]})
+        self.assertEqual(get.call_args.kwargs["impersonate"], "chrome")
+        get.return_value.close.assert_called_once()
+
+    @patch("parse_epg.enrich_programs_with_vod", side_effect=lambda channel, programs: programs)
+    @patch("parse_epg.parse_sport5_epgs")
+    def test_dedicated_batch_cli_persists_each_schedule_without_other_imports(self, parse, enrich):
+        import parse_epg
+        programs = [{"start": 1000, "end": 2000, "name": "משחק", "description": "ישיר"}]
+        parse.return_value = {channel_id: programs for channel_id in SPORT5_CHANNELS}
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("sys.argv", ["parse_epg.py", "--sport5-only", "--output-dir", str(Path(directory) / "epg")]):
+                parse_epg.main()
+            for channel_id in SPORT5_CHANNELS:
+                self.assertEqual(load_channel_programs(channel_id, Path(directory) / "epg.sqlite"), programs)
+        parse.assert_called_once_with()
+
     @patch("epg_parsers.sport5.clock.sleep")
     @patch("epg_parsers.sport5.urlopen")
     def test_requests_use_the_sites_unpadded_date_format(self, open_url, sleep):

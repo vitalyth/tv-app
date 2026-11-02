@@ -85,8 +85,18 @@ def main() -> int:
     python = sys.executable
     jobs = [
         ScheduledJob(
+            name="sport1_epg",
+            command=[python, "parse_epg.py", "--sport1-only"],
+            interval_seconds=read_interval("SPORT1_EPG_INTERVAL_SECONDS", 2 * 60 * 60),
+        ),
+        ScheduledJob(
+            name="sport5_epg",
+            command=[python, "parse_epg.py", "--sport5-only"],
+            interval_seconds=read_interval("SPORT5_EPG_INTERVAL_SECONDS", 2 * 60 * 60),
+        ),
+        ScheduledJob(
             name="epg",
-            command=[python, "parse_epg.py", "--all-channels"],
+            command=[python, "parse_epg.py", "--all-channels", "--skip-sport5", "--skip-sport1"],
             interval_seconds=read_interval("EPG_INTERVAL_SECONDS", 24 * 60 * 60),
         ),
         ScheduledJob(

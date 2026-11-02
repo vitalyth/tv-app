@@ -352,8 +352,10 @@ using its separate tabs for Sport 5, Plus, Live, Gold, Stars and Max. Each
 linear channel has a dedicated `tvgID`: `sport5`, `sport5_plus`, `sport5_live`,
 `sport5_gold`, `sport5_stars`, `sport5_max`.
 
-The existing `parse_epg.py --all-channels` scheduler job imports these schedules
-into SQLite along with the other EPG sources. To refresh one channel manually:
+A dedicated scheduler job refreshes all six channels every two hours
+(`SPORT5_EPG_INTERVAL_SECONDS`, default 7200) before the other jobs. The daily
+full import skips Sport 5 to avoid duplicate source requests. To refresh the
+group manually, run `python parse_epg.py --sport5-only`. To refresh one channel:
 
 ```bash
 python parse_epg.py --channel sport5_max
@@ -373,6 +375,14 @@ so it is not treated as proof that a schedule is unavailable.
 When a direct request returns HTTP 500, the importer tries the same URL with
 Chrome browser impersonation using the existing `curl-cffi` dependency. This
 works around Akamai failures without requiring the VPN backend.
+The importer visits every channel for today before advancing to tomorrow and
+later dates. On an unpublished day, invalid response, or provider failure, it
+uses the official [yes schedule API](https://svc.yes.co.il/api/content/broadcast-schedule/channels?page=0&pageSize=1000)
+as a backup. This also covers Sport 5 Plus while its official tab is empty.
+The backup uses a Chrome-compatible client on the direct connection and preserves
+its exact UTC timestamps and program ends. Both providers are paced; a 403/429
+stops further requests to that provider for the batch. Cached schedules survive
+empty/failed refreshes, and unknown times are never filled with invented programs.
 Both Sport 5 TV sources use the `sport5` schedule; the separate audio radio
 station retains `5radio`. The original TV source remains primary.
 Its channel 55 override sets `linkDetails.vpn` so the app, web player and IPTV
@@ -398,3 +408,14 @@ No logos are loaded from third-party servers during playback.
 
 These channels require the upstream website and CDN to be available from the
 backend. Deploy the updated backend image, catalog and frontend assets together.
+
+### Sport 1–4 EPG
+
+Sport 1–4 use the official `sport1.maariv.co.il` broadcast API, with channel IDs
+2, 3, 4 and 5 respectively. `python parse_epg.py --sport1-only` refreshes the
+seven-day schedule independently; the scheduler runs this every two hours
+(`SPORT1_EPG_INTERVAL_SECONDS`, default `7200`). The daily general import uses
+`--skip-sport1` to avoid duplicate requests. Times use `Asia/Jerusalem`, and shows
+marked `ישיר` retain that label in their descriptions. Program ends come from
+the following published start, including across midnight. Unpublished final
+ends are not invented; failed/empty imports retain cached programs.
