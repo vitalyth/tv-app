@@ -5,115 +5,115 @@
     "channelNumber": "11",
     "image": "kan11.png",
     "logo": "kan11.png",
-    "orderNumber": 10
+    "orderNumber": 40
   },
   {
     "id": "ch_11b",
     "channelID": "ch_11b",
     "channelNumber": "11",
-    "orderNumber": 20
+    "orderNumber": 50
   },
   {
     "id": "ch_11c",
     "channelID": "ch_11c",
     "channelNumber": "11",
-    "orderNumber": 30
+    "orderNumber": 60
   },
   {
     "id": "ch_12",
     "channelID": "ch_12",
     "channelNumber": "12",
-    "orderNumber": 40
+    "orderNumber": 80
   },
   {
     "id": "ch_12b",
     "channelID": "ch_12b",
     "channelNumber": "12",
-    "orderNumber": 50
+    "orderNumber": 90
   },
   {
     "id": "ch_12b2",
     "channelID": "ch_12b2",
     "channelNumber": "12",
-    "orderNumber": 60
+    "orderNumber": 100
   },
   {
     "id": "ch_12b3",
     "channelID": "ch_12b3",
     "channelNumber": "12",
-    "orderNumber": 70
+    "orderNumber": 110
   },
   {
     "id": "ch_12c",
     "channelID": "ch_12c",
     "channelNumber": "12",
-    "orderNumber": 80
+    "orderNumber": 120
   },
   {
     "id": "ch_13",
     "channelID": "ch_13",
     "channelNumber": "13",
-    "orderNumber": 90
+    "orderNumber": 130
   },
   {
     "id": "ch_13b",
     "channelID": "ch_13b",
     "channelNumber": "13",
-    "orderNumber": 100
+    "orderNumber": 140
   },
   {
     "id": "ch_13b2",
     "channelID": "ch_13b2",
     "channelNumber": "13",
-    "orderNumber": 110
+    "orderNumber": 150
   },
   {
     "id": "ch_13c",
     "channelID": "ch_13c",
     "channelNumber": "13",
-    "orderNumber": 120
+    "orderNumber": 160
   },
   {
     "id": "ch_14",
     "channelID": "ch_14",
     "channelNumber": "14",
-    "orderNumber": 130
+    "orderNumber": 170
   },
   {
     "id": "ch_14b",
     "channelID": "ch_14b",
     "channelNumber": "14",
-    "orderNumber": 140
+    "orderNumber": 180
   },
   {
     "id": "ch_14b2",
     "channelID": "ch_14b2",
     "channelNumber": "14",
-    "orderNumber": 150
+    "orderNumber": 190
   },
   {
     "id": "ch_10",
     "channelID": "ch_10",
     "channelNumber": "10",
-    "orderNumber": 160
+    "orderNumber": 30
   },
   {
     "id": "ch_23",
     "channelID": "ch_23",
     "channelNumber": "80",
-    "orderNumber": 170
+    "orderNumber": 490
   },
   {
     "id": "ch_23b",
     "channelID": "ch_23b",
     "channelNumber": "80",
-    "orderNumber": 180
+    "orderNumber": 500
   },
   {
     "id": "ch_24",
     "channelID": "ch_24",
     "channelNumber": "24",
-    "orderNumber": 190
+    "orderNumber": 220
   },
   {
     "id": "ch_bb",
@@ -136,7 +136,7 @@
       "manifest_type": "hls",
       "vpn": true
     },
-    "orderNumber": 210
+    "orderNumber": 260
   },
   {
     "id": "ch_bbb",
@@ -159,78 +159,78 @@
       "manifest_type": "hls",
       "vpn": true
     },
-    "orderNumber": 220
+    "orderNumber": 270
   },
   {
     "id": "ch_i24newsen",
     "channelID": "ch_i24newsen",
     "channelNumber": "118",
     "tvgID": "i24newsen",
-    "orderNumber": 510
+    "orderNumber": 560
   },
   {
     "id": "ch_i24newsfr",
     "channelID": "ch_i24newsfr",
     "channelNumber": "144",
     "tvgID": "i24newsfr",
-    "orderNumber": 520
+    "orderNumber": 580
   },
   {
     "id": "ch_i24newsar",
     "channelID": "ch_i24newsar",
     "channelNumber": "119",
     "tvgID": "i24newsar",
-    "orderNumber": 530
+    "orderNumber": 570
   },
   {
     "id": "ch_erets",
     "channelID": "ch_erets",
     "channelNumber": "27",
     "tvgID": "erets",
-    "orderNumber": 580
+    "orderNumber": 280
   },
   {
     "id": "ch_savri",
     "channelID": "ch_savri",
     "channelNumber": "28",
     "tvgID": "savri",
-    "orderNumber": 590
+    "orderNumber": 290
   },
   {
     "id": "ch_33",
     "channelID": "ch_33",
     "channelNumber": "33",
-    "orderNumber": 230
+    "orderNumber": 310
   },
   {
     "id": "ch_33b",
     "channelID": "ch_33b",
     "channelNumber": "33",
-    "orderNumber": 240
+    "orderNumber": 320
   },
   {
     "id": "ch_66",
     "channelID": "ch_66",
     "channelNumber": "66",
-    "orderNumber": 250
+    "orderNumber": 480
   },
   {
     "id": "ch_97",
     "channelID": "ch_97",
     "channelNumber": "97",
-    "orderNumber": 260
+    "orderNumber": 510
   },
   {
     "id": "ch_99",
     "channelID": "ch_99",
     "channelNumber": "99",
-    "orderNumber": 270
+    "orderNumber": 520
   },
   {
     "id": "ch_99c",
     "channelID": "ch_99c",
     "channelNumber": "99",
-    "orderNumber": 280
+    "orderNumber": 530
   },
   {
     "id": "ch_sport5",
@@ -240,7 +240,7 @@
       "vpn": true,
       "referer": "https://radio.sport5.co.il/"
     },
-    "orderNumber": 300,
+    "orderNumber": 390,
     "name": "ספורט 5",
     "title": "ספורט 5",
     "label": "ספורט 5",
@@ -252,37 +252,37 @@
     "id": "ch_100",
     "channelID": "ch_100",
     "channelNumber": "100",
-    "orderNumber": 450
+    "orderNumber": 540
   },
   {
     "id": "ch_9",
     "channelID": "ch_9",
     "channelNumber": "9",
-    "orderNumber": 460
+    "orderNumber": 10
   },
   {
     "id": "ch_i24news",
     "channelID": "ch_i24news",
     "channelNumber": "15",
-    "orderNumber": 500
+    "orderNumber": 200
   },
   {
     "id": "ch_13comedy",
     "channelID": "ch_13comedy",
     "channelNumber": "24",
-    "orderNumber": 550
+    "orderNumber": 240
   },
   {
     "id": "ch_13nofesh",
     "channelID": "ch_13nofesh",
     "channelNumber": "25",
-    "orderNumber": 560
+    "orderNumber": 250
   },
   {
     "id": "ch_13reality",
     "channelID": "ch_13reality",
     "channelNumber": "32",
-    "orderNumber": 570
+    "orderNumber": 300
   },
   {
     "id": "ch_11d",
@@ -305,7 +305,7 @@
       "manifest_type": "hls",
       "vpn": true
     },
-    "orderNumber": 640
+    "orderNumber": 70
   },
   {
     "id": "cnn",
@@ -327,7 +327,7 @@
       "referer": "https://pluto.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 650
+    "orderNumber": 550
   },
   {
     "id": "cbs_news_boston",
@@ -349,7 +349,7 @@
       "referer": "https://www.cbsnews.com/boston/",
       "manifest_type": "hls"
     },
-    "orderNumber": 660
+    "orderNumber": 630
   },
   {
     "id": "nbc10_boston",
@@ -371,7 +371,7 @@
       "referer": "https://www.nbcboston.com/watch/",
       "manifest_type": "hls"
     },
-    "orderNumber": 670
+    "orderNumber": 620
   },
   {
     "id": "wcvb_boston",
@@ -393,7 +393,7 @@
       "referer": "https://www.wcvb.com/",
       "manifest_type": "hls"
     },
-    "orderNumber": 680
+    "orderNumber": 610
   },
   {
     "id": "boston25",
@@ -415,7 +415,7 @@
       "referer": "https://www.boston25news.com/video/",
       "manifest_type": "hls"
     },
-    "orderNumber": 690
+    "orderNumber": 600
   },
   {
     "id": "gbh_boston",
@@ -437,7 +437,7 @@
       "referer": "https://www.wgbh.org/tv-shows/watch-world-channel-live",
       "manifest_type": "hls"
     },
-    "orderNumber": 700
+    "orderNumber": 590
   },
   {
     "id": "iltv",
@@ -459,7 +459,7 @@
       "referer": "https://iltv.tv/programs/live-6vrdxorpogu",
       "manifest_type": "hls"
     },
-    "orderNumber": 710
+    "orderNumber": 650
   },
   {
     "id": "ftv",
@@ -481,7 +481,7 @@
       "referer": "https://www.fashiontv.com/",
       "manifest_type": "hls"
     },
-    "orderNumber": 720
+    "orderNumber": 640
   },
   {
     "id": "ch_16tv",
@@ -502,7 +502,7 @@
       "link": "https://ch16israel-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8",
       "manifest_type": "hls"
     },
-    "orderNumber": 540
+    "orderNumber": 210
   },
   {
     "id": "rd_kab_heb",
@@ -1553,7 +1553,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 350
+    "orderNumber": 450,
+    "channelNumber": "60"
   },
   {
     "id": "ch_sport5_live",
@@ -1575,7 +1576,7 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 310,
+    "orderNumber": 400,
     "channelNumber": "55"
   },
   {
@@ -1598,7 +1599,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 370
+    "orderNumber": 350,
+    "channelNumber": "51"
   },
   {
     "id": "ch_sport2",
@@ -1620,7 +1622,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 380
+    "orderNumber": 360,
+    "channelNumber": "52"
   },
   {
     "id": "ch_sport3",
@@ -1642,7 +1645,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 390
+    "orderNumber": 370,
+    "channelNumber": "53"
   },
   {
     "id": "ch_sport4",
@@ -1664,7 +1668,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 400
+    "orderNumber": 380,
+    "channelNumber": "54"
   },
   {
     "id": "ch_one1",
@@ -1686,7 +1691,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 410
+    "orderNumber": 340,
+    "channelNumber": "50"
   },
   {
     "id": "ch_one2",
@@ -1708,7 +1714,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 420
+    "orderNumber": 330,
+    "channelNumber": "49"
   },
   {
     "id": "ch_sport5_extra_live",
@@ -1730,7 +1737,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 330
+    "orderNumber": 430,
+    "channelNumber": "58"
   },
   {
     "id": "ch_sport5_plus",
@@ -1752,7 +1760,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 320
+    "orderNumber": 410,
+    "channelNumber": "56"
   },
   {
     "id": "ch_sport5_gold",
@@ -1774,7 +1783,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 360
+    "orderNumber": 420,
+    "channelNumber": "57"
   },
   {
     "id": "ch_sport5_stars",
@@ -1796,7 +1806,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 340
+    "orderNumber": 440,
+    "channelNumber": "59"
   },
   {
     "id": "ch_eurosport1",
@@ -1818,7 +1829,8 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 430
+    "orderNumber": 460,
+    "channelNumber": "61"
   },
   {
     "id": "ch_eurosport2",
@@ -1840,52 +1852,53 @@
       "referer": "https://1nextbet7.tv/",
       "manifest_type": "hls"
     },
-    "orderNumber": 440
+    "orderNumber": 470,
+    "channelNumber": "62"
   },
   {
     "id": "ch_24b",
     "channelID": "ch_24b",
-    "orderNumber": 200
+    "orderNumber": 230
   },
   {
     "id": "ch_ynet",
     "channelID": "ch_ynet",
-    "orderNumber": 290
+    "orderNumber": 660
   },
   {
     "id": "ch_891",
     "channelID": "ch_891",
-    "orderNumber": 470
+    "orderNumber": 20
   },
   {
     "id": "ch_kabru",
     "channelID": "ch_kabru",
-    "orderNumber": 480
+    "orderNumber": 670
   },
   {
     "id": "ch_musayof",
     "channelID": "ch_musayof",
-    "orderNumber": 490
+    "orderNumber": 680
   },
   {
     "id": "ch_free_comedy",
     "channelID": "ch_free_comedy",
-    "orderNumber": 600
+    "orderNumber": 690
   },
   {
     "id": "ch_free_drama",
     "channelID": "ch_free_drama",
-    "orderNumber": 610
+    "orderNumber": 700
   },
   {
     "id": "ch_free_music",
     "channelID": "ch_free_music",
-    "orderNumber": 620
+    "orderNumber": 710
   },
   {
     "id": "ch_free_food",
     "channelID": "ch_free_food",
-    "orderNumber": 630
+    "orderNumber": 720
   },
   {
     "id": "rd_glglz",

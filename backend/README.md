@@ -316,6 +316,17 @@ inserting channels. The API and IPTV playlist share this order. `index` still
 groups alternate sources, and `channelNumber` remains the displayed number.
 Order-only overrides do not add absent upstream channels. Channels without a
 configured order receive an `orderNumber` after the configured entries.
+The configured TV order follows ascending channel numbers, with unnumbered
+channels at the end. Alternate sources stay together, preserving primary-source
+preference within each group. Radio ordering is unchanged.
+
+Sports display numbers follow the published Israeli channel lineup: ONE 2 / ONE
+49 / 50, Sport 1–4 at 51–54, Sport 5 / Plus / Gold / Live / Stars / Max at
+55–60, and Eurosport 1 / 2 at 61 / 62. Both main Sport 5 sources use 55.
+These numbers are independent of display order and source-group indices.
+Sources: [yes sports lineup](https://www.yes.co.il/content/yes-magazine/sports-tvguide/)
+and [HOT channel list](https://www.hot.net.il/heb/tv/channels/hotchannels/),
+checked November 2, 2026.
 
 ### Nextbet live channels
 
