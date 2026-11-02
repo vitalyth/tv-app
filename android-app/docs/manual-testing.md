@@ -1,5 +1,20 @@
 # Manual Testing
 
+## Remote channel number entry
+
+- From any page or the player, type a channel's displayed number on the remote
+  (up to four digits). After 1.5 seconds without another digit, that channel
+  opens in the full-screen player. For example, `55` selects Sport 5.
+- Verify `49`, `51`, `55`, `57`, `60`, and `62` select the expected sports
+  channels, including channels with no EPG. Sport 5 must retain both sources.
+- An unknown number displays a message and leaves the current playback running.
+- Back cancels entry without exiting playback. Navigation cancels pending entry;
+  pressing Select retains its normal action. Holding a digit must not duplicate it.
+- Digits entered into VOD search must remain search text. Backgrounding the app
+  or starting another number while channels load must cancel the old request.
+- Dialing from Multi View opens the selected channel alone, like opening a live
+  channel from the home page.
+
 ## Google TV / Android TV with Android Studio
 
 1. Open Android Studio and choose `Open`.
