@@ -34,6 +34,9 @@ export function MediaSurface({
   style,
   onFirstFrame,
   onError,
+  onBuffer,
+  onPlaybackStateChanged,
+  onEnd,
   onProgress,
   onVideoTracks,
 }: MediaSurfaceProps) {
@@ -45,6 +48,9 @@ export function MediaSurface({
   const usingFallback = useRef(false);
   const firstFrameReported = useRef(false);
   const seekableEndRef = useRef<number | undefined>(undefined);
+  const currentPositionRef = useRef(startPositionSeconds ?? 0);
+  const pendingResumeRef = useRef(startPositionSeconds ?? 0);
+  const fallbackPositionRef = useRef<number | undefined>(undefined);
   const [trackHeights, setTrackHeights] = useState<number[]>([]);
 
   useEffect(() => {
@@ -59,6 +65,8 @@ export function MediaSurface({
         }
         videoRef.current?.seek(Math.min(seconds, end - Math.min(3, end / 2)));
       } else {
+        currentPositionRef.current = seconds;
+        pendingResumeRef.current = 0;
         videoRef.current?.seek(seconds);
       }
     });
@@ -68,6 +76,9 @@ export function MediaSurface({
     usingFallback.current = false;
     firstFrameReported.current = false;
     seekableEndRef.current = undefined;
+    currentPositionRef.current = startPositionSeconds ?? 0;
+    pendingResumeRef.current = startPositionSeconds ?? 0;
+    fallbackPositionRef.current = undefined;
     setTrackHeights([]);
     setActiveSource({ url: streamUrl, type: streamType || 'm3u8' });
   }, [streamType, streamUrl]);
@@ -90,6 +101,11 @@ export function MediaSurface({
       const hasRange =
         Number.isFinite(data.seekableDuration) && data.seekableDuration > 0;
       seekableEndRef.current = hasRange ? data.seekableDuration : undefined;
+      if (Number.isFinite(data.currentTime) && data.currentTime >= 0 &&
+          data.currentTime >= pendingResumeRef.current - 2) {
+        currentPositionRef.current = data.currentTime;
+        pendingResumeRef.current = 0;
+      }
       if (data.currentTime > 0) {
         handleFirstFrame();
       }
@@ -152,6 +168,8 @@ export function MediaSurface({
   const handleError = useCallback(() => {
     if (fallbackStreamUrl && !usingFallback.current) {
       usingFallback.current = true;
+      fallbackPositionRef.current = isLive ? undefined : currentPositionRef.current;
+      pendingResumeRef.current = isLive ? 0 : currentPositionRef.current;
       seekableEndRef.current = undefined;
       setActiveSource({
         url: fallbackStreamUrl,
@@ -160,7 +178,7 @@ export function MediaSurface({
       return;
     }
     onError();
-  }, [fallbackStreamType, fallbackStreamUrl, onError]);
+  }, [fallbackStreamType, fallbackStreamUrl, isLive, onError]);
 
   const selectedVideoTrack = useMemo<SelectedVideoTrack>(() => {
     if (maxVideoHeight && trackHeights.length) {
@@ -202,7 +220,7 @@ export function MediaSurface({
       disableFocus={disableAudioFocus}
       volume={1.0}
       maxBitRate={maxBitRate}
-      repeat={true}
+      repeat={isLive}
       // Keep a TextureView throughout playback so native scale/translation
       // animations remain smooth without replacing the video surface.
       useTextureView={true}
@@ -212,13 +230,15 @@ export function MediaSurface({
       ignoreSilentSwitch="ignore"
       onReadyForDisplay={handleFirstFrame}
       onLoad={() => {
-        if (startPositionSeconds && startPositionSeconds > 0) {
-          videoRef.current?.seek(startPositionSeconds);
+        const position = fallbackPositionRef.current ?? startPositionSeconds;
+        if (!isLive && position && position > 0) {
+          videoRef.current?.seek(position);
         }
         handleFirstFrame();
       }}
-      onPlaybackStateChanged={({ isPlaying }) => {
-        if (isPlaying) {
+      onPlaybackStateChanged={state => {
+        onPlaybackStateChanged?.(state);
+        if (state.isPlaying) {
           handleFirstFrame();
         }
       }}
@@ -227,6 +247,8 @@ export function MediaSurface({
       onVideoTracks={handleVideoTracks}
       selectedVideoTrack={selectedVideoTrack}
       onError={handleError}
+      onBuffer={({isBuffering}) => onBuffer?.(isBuffering)}
+      onEnd={onEnd}
       bufferConfig={bufferConfig}
     />
   );

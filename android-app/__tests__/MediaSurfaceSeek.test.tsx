@@ -16,6 +16,22 @@ jest.mock('react-native-video', () => {
   };
 });
 
+it('forwards native playing/seeking state for event-driven recovery', () => {
+  const onPlaybackStateChanged = jest.fn();
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {
+    renderer = ReactTestRenderer.create(<MediaSurface
+      streamUrl="https://example.com/live.m3u8" isLive
+      onFirstFrame={jest.fn()} onError={jest.fn()}
+      onPlaybackStateChanged={onPlaybackStateChanged}
+    />);
+  });
+  const video = renderer.root.findByType('Video' as any);
+  act(() => video.props.onPlaybackStateChanged({isPlaying: false, isSeeking: true}));
+  expect(onPlaybackStateChanged).toHaveBeenLastCalledWith({isPlaying: false, isSeeking: true});
+  act(() => renderer.unmount());
+});
+
 it('seeks Android playback without remounting or changing pause state and unregisters on exit', () => {
   let seek!: (seconds: number) => void;
   const release = jest.fn();
@@ -78,6 +94,50 @@ it('uses only a finite Android live window and stays behind its live edge', () =
     expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ seekableStart: undefined, seekableEnd: undefined }));
   }
   expect(renderer.root.findByType('Video' as any)).toBe(video);
+  act(() => renderer.unmount());
+});
+
+it('preserves the latest VOD position on native fallback and does not loop completed episodes', () => {
+  mockSeek.mockClear();
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  const onEnd = jest.fn();
+  act(() => {
+    renderer = ReactTestRenderer.create(<MediaSurface
+      streamUrl="https://example.com/vod.m3u8"
+      fallbackStreamUrl="https://example.com/vod-fallback.m3u8"
+      startPositionSeconds={120}
+      onFirstFrame={jest.fn()} onError={jest.fn()} onEnd={onEnd}
+    />);
+  });
+  const original = renderer.root.findByType('Video' as any);
+  act(() => original.props.onProgress({currentTime: 240, seekableDuration: 600}));
+  act(() => original.props.onError());
+  const fallback = renderer.root.findByType('Video' as any);
+  expect(fallback).not.toBe(original);
+  act(() => fallback.props.onLoad());
+  expect(mockSeek).toHaveBeenLastCalledWith(240);
+  expect(fallback.props.repeat).toBe(false);
+  act(() => fallback.props.onEnd());
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  act(() => renderer.unmount());
+});
+
+it('does not lose a VOD recovery bookmark when fallback occurs before the resume seek lands', () => {
+  mockSeek.mockClear();
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {
+    renderer = ReactTestRenderer.create(<MediaSurface
+      streamUrl="https://example.com/vod.m3u8"
+      fallbackStreamUrl="https://example.com/fallback.m3u8"
+      startPositionSeconds={351}
+      onFirstFrame={jest.fn()} onError={jest.fn()}
+    />);
+  });
+  const original = renderer.root.findByType('Video' as any);
+  act(() => original.props.onProgress({currentTime: 0, seekableDuration: 600}));
+  act(() => original.props.onError());
+  act(() => renderer.root.findByType('Video' as any).props.onLoad());
+  expect(mockSeek).toHaveBeenLastCalledWith(351);
   act(() => renderer.unmount());
 });
 

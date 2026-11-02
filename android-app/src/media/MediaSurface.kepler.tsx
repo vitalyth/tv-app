@@ -29,6 +29,7 @@ interface SurfaceEngineProps {
   registerSeekHandler?: MediaSurfaceProps['registerSeekHandler'];
   onFirstFrame: () => void;
   onError: () => void;
+  onEnd?: () => void;
   onPausedChange?: MediaSurfaceProps['onPausedChange'];
   onProgress?: (data: {
     currentTime: number;
@@ -95,6 +96,7 @@ function NativeHlsSurface({
   registerSeekHandler,
   onFirstFrame,
   onError,
+  onEnd,
   onPausedChange,
   onProgress,
 }: SurfaceEngineProps) {
@@ -212,7 +214,7 @@ function NativeHlsSurface({
         }
       }}
       onError={onError}
-      onEnded={onError}
+      onEnded={onEnd}
     />
   );
 }
@@ -230,6 +232,7 @@ function ShakaPlayerSurface({
   registerSeekHandler,
   onFirstFrame,
   onError,
+  onEnd,
   onPausedChange,
   onProgress,
   onVideoTracks,
@@ -387,6 +390,9 @@ function ShakaPlayerSurface({
           }
         };
         player.addEventListener('error', reportError);
+        player.addEventListener('ended', () => {
+          if (!destroyed.current && videoPlayer.current === player) onEnd?.();
+        });
         const shaka = new VegaShakaPlayer(player, reportError, qualities => {
           if (!destroyed.current && shakaPlayer.current === shaka) {
             onVideoTracks?.(qualities);
@@ -546,6 +552,7 @@ export function MediaSurface({
   registerSeekHandler,
   onFirstFrame,
   onError,
+  onEnd,
   onPausedChange,
   onProgress,
   onVideoTracks,
@@ -654,6 +661,7 @@ export function MediaSurface({
         registerSeekHandler={registerSeekHandler}
         onFirstFrame={onFirstFrame}
         onError={handleError}
+        onEnd={onEnd}
         onPausedChange={onPausedChange}
         onProgress={onProgress}
         onVideoTracks={onVideoTracks}

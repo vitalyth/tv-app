@@ -1,4 +1,5 @@
 export const en = {
+  playerReconnecting: 'Reconnecting…',
   channelNumberLabel: 'Channel',
   channelNumberLoading: 'Switching channel…',
   channelNumberNotFound: 'Channel not found',

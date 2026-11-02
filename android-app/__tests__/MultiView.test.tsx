@@ -248,7 +248,8 @@ describe('Multi View channel menu', () => {
     expect(surfaces().map(node => node.props.isMuted)).toEqual([true, true]);
     await act(async () => surfaces()[1].props.onFirstFrame());
     expect(surfaces().map(node => node.props.isMuted)).toEqual([true, false]);
-    await act(async () => surfaces()[1].props.onError());
+    // The surface retries transient errors; this is its terminal failure signal.
+    await act(async () => controller.markMultiViewError(1));
     expect(surfaces()).toHaveLength(1);
     expect(surfaces()[0].props.isMuted).toBe(true);
     expect(controller.multiView?.audioTile).toBe(-1);
@@ -484,12 +485,20 @@ describe('Multi View channel menu', () => {
     expect(controller.stream).toBe(streams[0]);
   });
 
-  it('times out and releases a nonplaying extra tile', async () => {
+  it('retries a nonplaying extra tile and releases it after bounded failures', async () => {
     await enter();
     await act(async () =>
       controller.setMultiViewChannel(channels[1], streams[1]),
     );
-    await act(async () => jest.advanceTimersByTime(25000));
+    jest.mocked(resolveLiveChannelStream).mockRejectedValue(new Error('offline'));
+    // Keep the primary healthy while the extra tile exhausts its five retries.
+    for (let second = 1; second <= 40; second++) {
+      await act(async () => {
+        surfaces()[0].props.onProgress({currentTime: second, seekableDuration: second + 3});
+        jest.advanceTimersByTime(1000);
+      });
+    }
+    expect(resolveLiveChannelStream).toHaveBeenCalledTimes(5);
     expect(controller.multiView?.tiles[0]?.status).toBe('error');
     expect(surfaces()).toHaveLength(1);
     expect(controller.status).toBe('playing');

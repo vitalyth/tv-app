@@ -1,5 +1,40 @@
 # Manual Testing
 
+## Playback recovery
+
+- Play live TV, interrupt the stream connection, then restore it. An explicit
+  player error starts renewal immediately. After playback has started, confirmed
+  buffering with an empty buffer, stopped playback and no progress starts a local
+  seek after two seconds. A silent frozen position starts it after four seconds.
+  If the seek fails to restore progress within two more seconds, renew the URL
+  and reload the decoder. Polling adds at most about half a second.
+- A short rebuffer must finish normally without reloading. Buffering alone must
+  not restart advancing playback. Seeking gets up to five seconds of grace;
+  resuming actual playback ends that grace. Initial loading gets ten seconds
+  without new buffered data, with a 25-second cap while the buffer is growing.
+- Confirm the reconnecting message appears and playback restarts even if the
+  resolver returns the same URL. Live recovery must land within six seconds of
+  the live edge; the player seeks to about three seconds behind it when needed.
+  Normal manual timeshift is preserved until recovery is needed.
+- Repeat with VOD: watch beyond its original resume bookmark, interrupt playback,
+  and verify recovery resumes at the latest position. A completed episode must
+  not be treated as a stuck stream or loop back to the beginning.
+- Pause playback for at least a minute: it must not reload. Repeat while the app
+  is in the background. Changing channel/source or seeking during renewal must
+  discard the old result.
+- An outage is retried at delays of 0, 1, 3, 7 and 15 seconds. Each successful
+  reload gets a fresh startup window; renewal requests time out after 15 seconds.
+  After five unsuccessful attempts the normal player error remains available.
+  Thirty seconds of advancing playback resets the retry budget.
+- In native Multi View, failing one tile must not reload healthy tiles. The
+  optional software Multi View backend retains its separate native error path.
+
+The combined event checks use the documented
+[React Native Video v6 callbacks](https://docs.thewidlarzgroup.com/react-native-video/docs/v6/component/events/)
+and [Media3 player states](https://developer.android.com/media/media3/exoplayer/listening-to-player-events).
+Live-edge recovery follows [Media3 live playback guidance](https://developer.android.com/media/media3/exoplayer/live-streaming).
+The timing thresholds above are app policy, rather than platform recommendations.
+
 ## Remote channel number entry
 
 - From any page or the player, type a channel's displayed number on the remote

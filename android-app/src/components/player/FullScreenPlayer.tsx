@@ -141,7 +141,6 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
   const sourceSwitchRequestRef = useRef(0);
   const lastSavedPositionRef = useRef<number>(0);
   const controlsRevealedAtRef = useRef<number>(0);
-  const liveRecoveryRef = useRef({ id: '', attempts: 0 });
   useLiveEpg();
   const channelSwitchRequestRef = useRef(0);
   const channelTargetRef = useRef(item);
@@ -243,25 +242,6 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
       }
     }
   }, [loadLiveChannels, playFullscreen, showChannelInfo]);
-
-  useEffect(() => {
-    if (liveRecoveryRef.current.id !== item?.id) {
-      liveRecoveryRef.current = { id: item?.id ?? '', attempts: 0 };
-    }
-    if (status !== 'error' || item?.kind !== 'live' || liveRecoveryRef.current.attempts >= 2) {
-      return;
-    }
-    let cancelled = false;
-    liveRecoveryRef.current.attempts += 1;
-    resolveLiveChannelStream(item, { useSavedSource: false }).then(nextStream => {
-      if (!cancelled && nextStream.url !== stream?.url) {
-        playFullscreen(item, nextStream);
-      }
-    }).catch(() => {
-      // Keep the existing source controls available if renewal also fails.
-    });
-    return () => { cancelled = true; };
-  }, [item, playFullscreen, status, stream?.url]);
 
   // 1. Controls Auto-Hide Management
   const clearHideTimer = useCallback(() => {
