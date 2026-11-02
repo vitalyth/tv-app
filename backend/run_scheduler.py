@@ -83,21 +83,37 @@ def main() -> int:
     signal.signal(signal.SIGINT, request_stop)
 
     python = sys.executable
+    epg_interval = read_interval("EPG_INTERVAL_SECONDS", 3 * 60 * 60)
     jobs = [
+        ScheduledJob(
+            name="channel16_epg",
+            command=[python, "parse_epg.py", "--channel16-only"],
+            interval_seconds=epg_interval,
+        ),
+        ScheduledJob(
+            name="eurosport_epg",
+            command=[python, "parse_epg.py", "--eurosport-only"],
+            interval_seconds=epg_interval,
+        ),
+        ScheduledJob(
+            name="one_epg",
+            command=[python, "parse_epg.py", "--one-only"],
+            interval_seconds=epg_interval,
+        ),
         ScheduledJob(
             name="sport1_epg",
             command=[python, "parse_epg.py", "--sport1-only"],
-            interval_seconds=read_interval("SPORT1_EPG_INTERVAL_SECONDS", 2 * 60 * 60),
+            interval_seconds=epg_interval,
         ),
         ScheduledJob(
             name="sport5_epg",
             command=[python, "parse_epg.py", "--sport5-only"],
-            interval_seconds=read_interval("SPORT5_EPG_INTERVAL_SECONDS", 2 * 60 * 60),
+            interval_seconds=epg_interval,
         ),
         ScheduledJob(
             name="epg",
-            command=[python, "parse_epg.py", "--all-channels", "--skip-sport5", "--skip-sport1"],
-            interval_seconds=read_interval("EPG_INTERVAL_SECONDS", 24 * 60 * 60),
+            command=[python, "parse_epg.py", "--all-channels", "--skip-sport5", "--skip-sport1", "--skip-one", "--skip-eurosport", "--skip-channel16"],
+            interval_seconds=epg_interval,
         ),
         ScheduledJob(
             name="kan_vod_scan",

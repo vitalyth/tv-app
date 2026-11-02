@@ -126,7 +126,7 @@ python run_scheduler.py
 
 The scheduler runs both jobs immediately on startup, then repeats:
 
-* EPG once per day (`EPG_INTERVAL_SECONDS=86400`)
+* EPG every three hours (`EPG_INTERVAL_SECONDS=10800`)
 * Recent VOD twice per day (`VOD_RECENT_INTERVAL_SECONDS=43200`)
 
 Generated cache files are written under:
@@ -352,10 +352,9 @@ using its separate tabs for Sport 5, Plus, Live, Gold, Stars and Max. Each
 linear channel has a dedicated `tvgID`: `sport5`, `sport5_plus`, `sport5_live`,
 `sport5_gold`, `sport5_stars`, `sport5_max`.
 
-A dedicated scheduler job refreshes all six channels every two hours
-(`SPORT5_EPG_INTERVAL_SECONDS`, default 7200) before the other jobs. The daily
-full import skips Sport 5 to avoid duplicate source requests. To refresh the
-group manually, run `python parse_epg.py --sport5-only`. To refresh one channel:
+A dedicated scheduler job refreshes all six channels using the shared
+`EPG_INTERVAL_SECONDS` interval (default `10800`). The general import skips
+Sport 5 to avoid duplicate source requests. To refresh the group manually, run `python parse_epg.py --sport5-only`. To refresh one channel:
 
 ```bash
 python parse_epg.py --channel sport5_max
@@ -413,9 +412,52 @@ backend. Deploy the updated backend image, catalog and frontend assets together.
 
 Sport 1–4 use the official `sport1.maariv.co.il` broadcast API, with channel IDs
 2, 3, 4 and 5 respectively. `python parse_epg.py --sport1-only` refreshes the
-seven-day schedule independently; the scheduler runs this every two hours
-(`SPORT1_EPG_INTERVAL_SECONDS`, default `7200`). The daily general import uses
+seven-day schedule independently; the scheduler uses the shared
+`EPG_INTERVAL_SECONDS` interval (default `10800`). The general import uses
 `--skip-sport1` to avoid duplicate requests. Times use `Asia/Jerusalem`, and shows
 marked `ישיר` retain that label in their descriptions. Program ends come from
 the following published start, including across midnight. Unpublished final
 ends are not invented; failed/empty imports retain cached programs.
+
+### ONE / ONE2 EPG
+
+ONE and ONE2 import seven days from the official yes broadcast API (`TR01` and
+`CH58`), sharing the same client as the Sport 5 backup. Run
+`python parse_epg.py --one-only` to refresh both. The scheduler uses the shared
+`EPG_INTERVAL_SECONDS` interval (default `10800`); the general import uses
+`--skip-one`. The channel catalog maps to EPG IDs `one1` / `one2`. Exact UTC
+start/end times, descriptions, live labels and available program images are
+preserved. Empty or failed requests retain cached data. Provider rate limits
+stop further requests for that batch.
+
+### Eurosport 1 / Eurosport 2 EPG
+
+Eurosport uses the same yes client and seven-day import window (`PT39` / `CH33`,
+EPG IDs `eurosport1` / `eurosport2`). Run `python parse_epg.py --eurosport-only`
+to refresh both channels. The scheduler uses the shared
+`EPG_INTERVAL_SECONDS` interval (default `10800`); the general import
+uses `--skip-eurosport`. Only published programs are imported, preserving exact
+start/end times; Eurosport 2 can publish fewer days than Eurosport 1.
+
+### Sports program images and yes coverage
+
+All 14 sports channels (Sport 1–4, six Sport 5 channels, ONE/ONE2 and
+Eurosport 1/2) import yes program artwork through the shared client. Sport 1–4
+map to `PT53`, `PT98`, `CH09`, `CH11`. Sport 1 and Sport 5 import both sources:
+yes intervals retain their exact ends and `image` URLs, while official-site
+programs fill uncovered periods or provider failures. Refreshes preserve cached
+programs, including overnight broadcasts when yesterday's yes API is empty.
+
+### Channel 16 EPG
+
+Channel 16 (`16tv`) imports up to seven published days from yes (`CN66`),
+including descriptions, artwork and exact start/end times. Run
+`python parse_epg.py --channel16-only` (or `--channel 16tv`) to refresh it.
+The scheduler uses the shared `EPG_INTERVAL_SECONDS` interval (default
+`10800`); the general import uses `--skip-channel16`. Empty or failed source
+requests retain cached programs.
+
+All EPG import jobs share `EPG_INTERVAL_SECONDS` (seconds, default `10800`).
+Set `EPG_INTERVAL_SECONDS=7200` to refresh every channel group every two hours.
+Jobs remain separate to avoid duplicate imports and isolate source failures,
+with no channel-specific interval settings.

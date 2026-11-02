@@ -33,6 +33,7 @@ KAN_VOD_SEGMENT_RETRIES = max(0, int(os.getenv("KAN_VOD_SEGMENT_RETRIES", "2")))
 PLUTO_SEGMENT_RETRIES = max(0, int(os.getenv("PLUTO_SEGMENT_RETRIES", "2")))
 
 IMAGE_PROXY_ALLOWED_HOSTS = {
+    "fykswkmjb.filerobot.com",
     "cdn.i24news.tv",
     "images.frp1.ott.kaltura.com",
     "images.maariv.co.il",

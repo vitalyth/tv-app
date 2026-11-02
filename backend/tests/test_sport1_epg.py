@@ -18,6 +18,31 @@ def page(channel, day, *times):
 
 
 class Sport1EPGTests(unittest.TestCase):
+    def setUp(self):
+        yes = patch("epg_parsers.sport1.fetch_yes_schedule", return_value=[])
+        self.yes = yes.start()
+        self.addCleanup(yes.stop)
+
+    @patch("epg_parsers.sport1.fetch_schedule")
+    def test_yes_program_keeps_photo_and_exact_end_with_official_gap_fallback(self, fetch):
+        day = date(2026, 11, 2)
+        fetch.side_effect = lambda channel, date: page(channel, date, "12:00", "13:00", "14:00")
+        start = int(datetime(2026, 11, 2, 11, tzinfo=timezone.utc).timestamp())
+        photo = {"start": start, "end": start + 1800, "name": "yes game", "description": "ישיר", "image": "https://example.com/game.jpg"}
+        self.yes.return_value = [photo]
+        rows = parse_sport1_epgs(["sport1"], today=day, days=1)["sport1"]
+        self.assertIn(photo, rows)
+        self.assertTrue(any(p["start"] < start and not p.get("image") for p in rows))
+        self.assertEqual(self.yes.call_args_list[0].args, ("PT53", day))
+
+    @patch("epg_parsers.sport1.fetch_schedule")
+    def test_yes_error_retains_official_programs(self, fetch):
+        fetch.side_effect = lambda channel, day: page(channel, day, "12:00", "13:00")
+        self.yes.side_effect = HTTPError("url", 429, "limited", {}, None)
+        rows = parse_sport1_epgs(["sport1"], today=date(2026, 11, 2), days=1)["sport1"]
+        self.assertTrue(rows)
+        self.assertEqual(self.yes.call_count, 1)
+
     def test_exact_channel_and_date_scope_and_israel_time(self):
         day = date(2026, 11, 2)
         html = page('sport2', day, '01:00') + page('sport1', day, '19:25', '25:00') + page('sport1', '2026-11-03', '01:00')

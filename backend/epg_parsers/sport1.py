@@ -13,8 +13,10 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests as curl_requests
 
 from epg_parsers.common import dedupe_and_sort_programs
+from epg_parsers.yes import fetch_yes_schedule
 
 SPORT1_CHANNELS = {"sport1": 2, "sport2": 3, "sport3": 4, "sport4": 5}
+YES_CHANNELS = {"sport1": "PT53", "sport2": "PT98", "sport3": "CH09", "sport4": "CH11"}
 ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 DEFAULT_DAYS = 7
 SCHEDULE_URL = "https://sport1.maariv.co.il/broadcast-schedule/"
@@ -85,31 +87,43 @@ def parse_sport1_epgs(channel_ids=None, *, today: date | None = None, days: int 
     today = today or datetime.now(ISRAEL_TZ).date()
     entries = {channel: [] for channel in selected}
     limited = False
+    yes_limited = False
+    yes_programs = {channel: [] for channel in selected}
     # Fetch one boundary day so the last published program has a known end.
     # Round robin keeps all channels current if later requests are throttled.
     for offset in range(days + 1):
-        if limited or not selected:
+        if (limited and yes_limited) or not selected:
             break
         schedule_date = today + timedelta(days=offset)
         for channel in selected:
-            try:
-                html = fetch_schedule(channel, schedule_date)
-                entries[channel].extend(parse_schedule_html(html, channel, schedule_date))
-            except (HTTPError, URLError, ValueError, curl_requests.exceptions.RequestException) as exc:
-                print(f"Sport 1 {channel} {schedule_date}: {exc}")
-                if isinstance(exc, HTTPError) and exc.code in (403, 429):
-                    limited = True
-                    break
+            if not limited:
+                try:
+                    html = fetch_schedule(channel, schedule_date)
+                    entries[channel].extend(parse_schedule_html(html, channel, schedule_date))
+                except (HTTPError, URLError, TimeoutError, ValueError, curl_requests.exceptions.RequestException) as exc:
+                    print(f"Sport 1 {channel} {schedule_date}: {exc}", flush=True)
+                    if isinstance(exc, HTTPError) and exc.code in (403, 429):
+                        limited = True
+            if not yes_limited:
+                try:
+                    yes_programs[channel].extend(fetch_yes_schedule(YES_CHANNELS[channel], schedule_date))
+                except (HTTPError, URLError, TimeoutError, UnicodeError, RuntimeError, ValueError) as exc:
+                    print(f"Sport 1 {channel} {schedule_date}: yes failed: {exc}", flush=True)
+                    if isinstance(exc, HTTPError) and exc.code in (403, 429):
+                        yes_limited = True
     cutoff = int(datetime.combine(today + timedelta(days=days), time.min, tzinfo=ISRAEL_TZ).timestamp())
     schedules = {}
     for channel, rows in entries.items():
         ordered = sorted({row["start"]: row for row in rows}.values(), key=lambda row: row["start"])
         programs = []
-        for current, following in zip(ordered, ordered[1:]):
+        starts = sorted({row["start"] for row in ordered + yes_programs[channel]})
+        following_start = dict(zip(starts, starts[1:]))
+        for current in ordered:
+            end = following_start.get(current["start"])
             # Missing days must not turn a short show into a multi-day program.
-            if current["start"] < cutoff and 0 < following["start"] - current["start"] <= 24 * 3600:
-                programs.append({**current, "end": following["start"]})
-        schedules[channel] = dedupe_and_sort_programs(programs)
+            if end and current["start"] < cutoff and 0 < end - current["start"] <= 24 * 3600:
+                programs.append({**current, "end": end})
+        schedules[channel] = dedupe_and_sort_programs(programs + [row for row in yes_programs[channel] if row["start"] < cutoff])
     return schedules
 
 

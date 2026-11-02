@@ -5,6 +5,7 @@ import time
 import traceback
 from pathlib import Path
 
+from epg_parsers.channel16 import CHANNEL16_ID, parse_channel16_epg
 from epg_parsers.c14 import parse_c14_epg
 from epg_parsers.common import dedupe_and_sort_programs, merge_existing_with_new_programs
 from epg_parsers.i24 import parse_i24_epg
@@ -21,6 +22,8 @@ from epg_parsers.radio100fm import parse_100fm_epg
 from epg_parsers.reshet13 import parse_reshet13_epg
 from epg_parsers.ftv import parse_ftv_epg
 from epg_parsers.glglz import parse_glglz_epg
+from epg_parsers.eurosport import EUROSPORT_CHANNELS, parse_eurosport_epg, parse_eurosport_epgs
+from epg_parsers.one import ONE_CHANNELS, parse_one_epg, parse_one_epgs
 from epg_parsers.sport1 import SPORT1_CHANNELS, parse_sport1_epg, parse_sport1_epgs
 from epg_parsers.sport5 import SPORT5_CHANNELS, parse_sport5_epg, parse_sport5_epgs
 from epg_parsers.fishenzon import (
@@ -71,11 +74,14 @@ FORMAL_EPG_CHANNEL_IDS = {
     "i24newsfr",
     "i24newsar",
     "ftv",
+    CHANNEL16_ID,
     *FISHENZON_CHANNEL_IDS,
     *KESHET_THEMATIC_CHANNELS,
     *LOCAL_US_CHANNEL_IDS,
     *SPORT5_CHANNELS,
     *SPORT1_CHANNELS,
+    *ONE_CHANNELS,
+    *EUROSPORT_CHANNELS,
 }
 
 ACTIVE_IMPORT_CHANNEL_IDS: set[str] | None = None
@@ -297,6 +303,12 @@ def main():
         action="store_true",
         help="Skip Sport 5 when its dedicated scheduled refresh already runs separately.",
     )
+    parser.add_argument("--channel16-only", action="store_true", help="Refresh Channel 16 from yes only.")
+    parser.add_argument("--skip-channel16", action="store_true", help="Skip Channel 16 refreshed separately by the scheduler.")
+    parser.add_argument("--eurosport-only", action="store_true", help="Refresh Eurosport 1 and 2 schedules only.")
+    parser.add_argument("--skip-eurosport", action="store_true", help="Skip Eurosport refreshed separately by the scheduler.")
+    parser.add_argument("--one-only", action="store_true", help="Refresh ONE and ONE2 schedules only.")
+    parser.add_argument("--skip-one", action="store_true", help="Skip ONE channels refreshed separately by the scheduler.")
     parser.add_argument("--sport1-only", action="store_true", help="Refresh official Sport 1–4 schedules only.")
     parser.add_argument("--skip-sport1", action="store_true", help="Skip Sport 1–4 (refreshed separately by the scheduler).")
     parser.add_argument(
@@ -319,6 +331,27 @@ def main():
         combined_epg = combine_epg_directory(output_dir)
         persist_epg(combined_epg, output_dir)
         print(f"Stored {len(combined_epg)} channels in {get_epg_db_path_from_output_dir(output_dir)}")
+        return
+
+    if args.channel16_only:
+        programs = parse_channel16_epg()
+        if programs:
+            persist_channel_programs(CHANNEL16_ID, programs, output_dir)
+        print(f"Stored {len(programs)} refreshed programs for {CHANNEL16_ID}; existing cache retained")
+        return
+
+    if args.eurosport_only:
+        for channel_id, programs in parse_eurosport_epgs().items():
+            if programs:
+                persist_channel_programs(channel_id, programs, output_dir)
+            print(f"Stored {len(programs)} refreshed programs for {channel_id}; existing cache retained")
+        return
+
+    if args.one_only:
+        for channel_id, programs in parse_one_epgs().items():
+            if programs:
+                persist_channel_programs(channel_id, programs, output_dir)
+            print(f"Stored {len(programs)} refreshed programs for {channel_id}; existing cache retained")
         return
 
     if args.sport1_only:
@@ -501,6 +534,18 @@ def main():
 
         elif args.channel == "ftv":
             programs = parse_ftv_epg()
+
+        elif args.channel == CHANNEL16_ID:
+            programs = parse_channel16_epg()
+            replace_existing_programs = bool(programs)
+
+        elif args.channel in EUROSPORT_CHANNELS:
+            programs = parse_eurosport_epg(args.channel)
+            replace_existing_programs = True
+
+        elif args.channel in ONE_CHANNELS:
+            programs = parse_one_epg(args.channel)
+            replace_existing_programs = True
 
         elif args.channel in SPORT1_CHANNELS:
             programs = parse_sport1_epg(args.channel)
@@ -1026,6 +1071,31 @@ def main():
         if ftv_programs:
             persist_channel_programs("ftv", ftv_programs, output_dir)
             print(f"Stored {len(ftv_programs)} programs for ftv")
+
+        if not args.skip_channel16 and should_import_channel(CHANNEL16_ID):
+            programs = parse_channel16_epg() or read_existing_channel_programs(output_dir, CHANNEL16_ID)
+            combined_epg[CHANNEL16_ID] = programs
+            if programs:
+                persist_channel_programs(CHANNEL16_ID, programs, output_dir)
+                print(f"Stored {len(programs)} programs for {CHANNEL16_ID}")
+
+        eurosport_ids = [] if args.skip_eurosport else [channel for channel in EUROSPORT_CHANNELS if should_import_channel(channel)]
+        eurosport_schedules = parse_eurosport_epgs(eurosport_ids)
+        for channel_id in eurosport_ids:
+            programs = eurosport_schedules.get(channel_id) or read_existing_channel_programs(output_dir, channel_id)
+            combined_epg[channel_id] = programs
+            if programs:
+                persist_channel_programs(channel_id, programs, output_dir)
+                print(f"Stored {len(programs)} programs for {channel_id}")
+
+        one_ids = [] if args.skip_one else [channel for channel in ONE_CHANNELS if should_import_channel(channel)]
+        one_schedules = parse_one_epgs(one_ids)
+        for channel_id in one_ids:
+            programs = one_schedules.get(channel_id) or read_existing_channel_programs(output_dir, channel_id)
+            combined_epg[channel_id] = programs
+            if programs:
+                persist_channel_programs(channel_id, programs, output_dir)
+                print(f"Stored {len(programs)} programs for {channel_id}")
 
         sport1_ids = [] if args.skip_sport1 else [channel for channel in SPORT1_CHANNELS if should_import_channel(channel)]
         sport1_schedules = parse_sport1_epgs(sport1_ids)
