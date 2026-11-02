@@ -203,7 +203,11 @@
   {
     "id": "ch_sport5",
     "channelID": "ch_sport5",
-    "channelNumber": "55"
+    "channelNumber": "55",
+    "linkDetails": {
+      "vpn": true,
+      "referer": "https://radio.sport5.co.il/"
+    }
   },
   {
     "id": "ch_100",

@@ -48,7 +48,8 @@ def get_stream(channel):
 
     link_details = getattr(channel, "linkDetails", None) or {}
     direct_stream = link_details.get("link") or link_details.get("live")
-    if getattr(channel, "type", None) == "radio" and direct_stream:
+    # Newer IdanPlus catalogs also use link for pages requiring regex extraction.
+    if getattr(channel, "type", None) == "radio" and direct_stream and not link_details.get("regex"):
         return direct_stream
     
     xbmcplugin.clearStream()
