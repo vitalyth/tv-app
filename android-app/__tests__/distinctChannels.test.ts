@@ -8,6 +8,41 @@ import {
 } from '../src/api/channels';
 
 describe('Channels deduplication and time formatting', () => {
+  it('groups the Sport 5 catalog sources with IdanPlus selected by default', () => {
+    const catalog = require('../../backend/data/custom_channels.json');
+    const builtin = require('../../backend/plugin_video_idanplus/resources/channels.json');
+    const rawChannels = catalog
+      .filter((channel: { channelID: string }) =>
+        ['ch_sport5', 'ch_sport5_live'].includes(channel.channelID),
+      )
+      .map((channel: { channelID: string }) => ({
+        ...builtin[channel.channelID],
+        ...channel,
+      }))
+      .sort((a: { orderNumber: number }, b: { orderNumber: number }) =>
+        a.orderNumber - b.orderNumber,
+      );
+    const channels = distinctLogicalChannels(rawChannels);
+    expect(channels).toHaveLength(1);
+    expect(channels[0]).toEqual(expect.objectContaining({
+      id: 'ch_sport5', name: 'ספורט 5', module: 'sport5', tvgID: 'sport5',
+      linkDetails: expect.objectContaining({ vpn: true }),
+    }));
+    const item = {
+      id: 'ch_sport5', kind: 'live' as const, title: 'ספורט 5',
+      sourcePayload: channels[0],
+    };
+    expect(getLiveChannelSourceOptions(item)).toEqual([
+      { id: 'ch_sport5', label: 'ספורט 5', selected: true },
+      { id: 'ch_sport5_live', label: 'ספורט 5 - מקור נוסף', selected: false },
+    ]);
+    const alternate = selectLiveChannelSource(item, 'ch_sport5_live');
+    expect(alternate?.sourcePayload).toEqual(expect.objectContaining({
+      id: 'ch_sport5_live', module: 'custom', tvgID: 'sport5',
+    }));
+    expect(getLiveChannelSourceOptions(alternate!)).toHaveLength(2);
+  });
+
   it('deduplicates live channels by index or channel number', () => {
     const rawChannels = [
       {
