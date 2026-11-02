@@ -395,15 +395,13 @@ describe('FullScreenPlayer', () => {
     return <FullScreenPlayer onExit={onExit} />;
   }
 
-  it('renews a failed live source without exiting fullscreen and limits retries', async () => {
+  it('keeps fullscreen open after terminal failure without competing with surface recovery', async () => {
     let controller!: ReturnType<typeof useMediaController>;
     function Probe() {
       controller = useMediaController();
       return null;
     }
-    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream')
-      .mockResolvedValueOnce({ ...mockStream, url: 'https://example.com/fresh-1.m3u8' })
-      .mockResolvedValueOnce({ ...mockStream, url: 'https://example.com/fresh-2.m3u8' });
+    const resolve = jest.spyOn(channelApi, 'resolveLiveChannelStream');
     try {
       await act(async () => {
         activeRenderer = ReactTestRenderer.create(
@@ -414,13 +412,12 @@ describe('FullScreenPlayer', () => {
         );
       });
       await act(async () => controller.markError());
-      expect(controller.stream?.url).toBe('https://example.com/fresh-1.m3u8');
+      expect(controller.stream?.url).toBe(mockStream.url);
       expect(controller.isFullscreen).toBe(true);
       await act(async () => controller.markError());
-      expect(controller.stream?.url).toBe('https://example.com/fresh-2.m3u8');
+      expect(controller.stream?.url).toBe(mockStream.url);
       await act(async () => controller.markError());
-      expect(resolve).toHaveBeenCalledTimes(2);
-      expect(resolve).toHaveBeenCalledWith(mockLiveItem, { useSavedSource: false });
+      expect(resolve).not.toHaveBeenCalled();
     } finally {
       resolve.mockRestore();
     }

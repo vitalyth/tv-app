@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useForegroundPlaybackTimeout } from '../hooks/useForegroundPlaybackTimeout';
 import { useMediaActions, useMediaController } from '../media/MediaController';
-import { MediaSurface } from '../media/MediaSurface';
+import { RecoveringMediaSurface } from '../media/RecoveringMediaSurface';
 import { MultiViewSurface } from '../media/MultiViewSurface';
 import { RemoteImage } from './RemoteImage';
 import {
@@ -97,13 +97,6 @@ const ExtraMediaTile = memo(function ExtraMediaTileContent({
       latest.current.markMultiViewError(latest.current.index);
     }
   }, []);
-  useEffect(() => {
-    if (entry.status !== 'loading' || paused) {
-      return;
-    }
-    const timer = setTimeout(reportError, 25000);
-    return () => clearTimeout(timer);
-  }, [entry.status, paused, reportError]);
   return (
     <View
       testID={`multiview-extra-surface-${index}`}
@@ -113,12 +106,9 @@ const ExtraMediaTile = memo(function ExtraMediaTileContent({
       ]}
     >
       {entry.status !== 'error' ? (
-        <MediaSurface
-          streamUrl={entry.stream.url}
-          streamType={entry.stream.type}
-          fallbackStreamUrl={entry.stream.fallbackUrl}
-          fallbackStreamType={entry.stream.fallbackType}
-          isLive
+        <RecoveringMediaSurface
+          item={entry.item}
+          stream={entry.stream}
           disableAudioFocus
           recoverVideoOnFocus={count > 2}
           paused={paused}
@@ -208,13 +198,10 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
             showVideo ? styles.videoVisible : styles.videoHidden,
           ]}
         >
-          <MediaSurface
-            key={stream.url}
-            streamUrl={stream.url}
-            streamType={stream.type}
-            isLive={item.kind === 'live'}
-            fallbackStreamUrl={stream.fallbackUrl}
-            fallbackStreamType={stream.fallbackType}
+          <RecoveringMediaSurface
+            key={`${item.id}:${stream.sourceId ?? ''}:${stream.url}`}
+            item={item}
+            stream={stream}
             paused={paused}
             isMuted={tiled && multiView.audioTile !== 0}
             disableAudioFocus={tiled}

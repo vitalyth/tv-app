@@ -1,4 +1,5 @@
 export const he = {
+  playerReconnecting: 'מתחבר מחדש…',
   channelNumberLabel: 'ערוץ',
   channelNumberLoading: 'עובר לערוץ…',
   channelNumberNotFound: 'הערוץ לא נמצא',

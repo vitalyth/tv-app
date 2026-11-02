@@ -20,6 +20,9 @@ export interface MediaSurfaceProps {
   style?: StyleProp<ViewStyle>;
   onFirstFrame: () => void;
   onError: () => void;
+  onBuffer?: (buffering: boolean) => void;
+  onPlaybackStateChanged?: (state: {isPlaying: boolean; isSeeking: boolean}) => void;
+  onEnd?: () => void;
   onPausedChange?: (paused: boolean) => void;
   onProgress?: (data: {
     currentTime: number;
