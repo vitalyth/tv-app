@@ -1,4 +1,7 @@
 export const he = {
+  channelNumberLabel: 'ערוץ',
+  channelNumberLoading: 'עובר לערוץ…',
+  channelNumberNotFound: 'הערוץ לא נמצא',
   title: 'אפליקציית טלוויזיה v2',
   foundation: 'דיאגנוסטיקה בסיסית',
   platform: 'פלטפורמה מזוהה',

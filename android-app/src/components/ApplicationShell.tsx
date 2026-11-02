@@ -35,6 +35,8 @@ import { PageContent, type PageContentHandle } from './PageContent';
 import { SideMenu } from './SideMenu';
 import { FullScreenPlayer } from './player/FullScreenPlayer';
 import { MultiViewPlayer } from './player/MultiViewPlayer';
+import { ChannelNumberEntry } from './ChannelNumberEntry';
+import { RecentChannelsService } from '../services/recentChannels';
 
 function getFormattedTime(): string {
   const now = new Date();
@@ -76,7 +78,7 @@ function ShellContent({
   pageContentRef: React.RefObject<PageContentHandle | null>;
 }) {
   const { item: playingItem, isFullscreen, presentation } = useMediaController();
-  const { exitFullscreen } = useMediaActions();
+  const { exitFullscreen, openFullscreen } = useMediaActions();
   useLiveEpg();
   const focusedItem = focusedMediaItem ? liveEpgStore.resolve(focusedMediaItem) : null;
   const [channelDrawerOpen, setChannelDrawerOpen] = useState(false);
@@ -212,6 +214,11 @@ function ShellContent({
           {presentation === 'multi-tile' ? <MultiViewPlayer onChannelDrawerChange={setChannelDrawerOpen} /> : <FullScreenPlayer onExit={handleExitFullscreen} onChannelDrawerChange={setChannelDrawerOpen} />}
         </View>
       ) : null}
+      <ChannelNumberEntry onTune={channel => {
+        setChannelDrawerOpen(false);
+        openFullscreen(channel);
+        RecentChannelsService.recordChannelWatched(channel.id).catch(() => {});
+      }} />
     </View>
   );
 }

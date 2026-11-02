@@ -1,4 +1,7 @@
 export const en = {
+  channelNumberLabel: 'Channel',
+  channelNumberLoading: 'Switching channel…',
+  channelNumberNotFound: 'Channel not found',
   title: 'TV App v2',
   foundation: 'Foundation diagnostics',
   platform: 'Detected platform',
