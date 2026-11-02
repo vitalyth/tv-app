@@ -18,6 +18,7 @@ const DETAIL_IMAGE_PROXY_HOSTS = new Set([
     "www.kan.org.il",
 ]);
 const PROGRAM_GUIDE_IMAGE_PROXY_HOSTS = new Set([
+    "fykswkmjb.filerobot.com",
     "cdn.i24news.tv",
     "images.maariv.co.il",
     "img.mako.co.il",
@@ -32,6 +33,7 @@ const PROGRAM_GUIDE_IMAGE_PROXY_HOSTS = new Set([
     "www.knesset.tv",
 ]);
 const GRID_PROXY_RESIZE_HOSTS = new Set([
+    "fykswkmjb.filerobot.com",
     "cdn.i24news.tv",
     "images.maariv.co.il",
     "img.mako.co.il",

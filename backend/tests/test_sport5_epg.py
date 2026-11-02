@@ -35,7 +35,16 @@ class Sport5EPGTests(unittest.TestCase):
             (tab, date(2026, 11, 2)) for tab in SPORT5_CHANNELS.values()
         ])
         self.assertTrue(all(results.values()))
-        self.backup.assert_not_called()
+        self.assertEqual(self.backup.call_count, 12)
+
+    @patch("epg_parsers.sport5.fetch_schedule")
+    def test_yes_image_and_exact_end_survive_when_official_schedule_also_exists(self, fetch):
+        fetch.return_value = page(("12:00", "משחק"), ("13:00", "חדשות"))
+        start = int(datetime(2026, 11, 2, 10, tzinfo=timezone.utc).timestamp())
+        photo = {"start": start, "end": start + 1800, "name": "משחק", "description": "ישיר", "image": "https://example.com/game.jpg"}
+        self.backup.return_value = [photo]
+        rows = parse_sport5_epg("sport5", today=date(2026, 11, 2), days=1)
+        self.assertIn(photo, rows)
 
     @patch("epg_parsers.sport5.fetch_schedule")
     def test_unpublished_plus_uses_exact_utc_schedule_from_backup(self, fetch):
