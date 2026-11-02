@@ -373,7 +373,7 @@
 		"type": "tv",
 		"linkDetails": {
 			"ch": "studioUrl",
-			"link": "https://rgelive.akamaized.net/hls/live/2043095/live3/playlist.m3u8"
+			"link": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/sport_5/live.livx/playlist.m3u8"
 		}
 	},
 	"ch_100": {
@@ -721,8 +721,8 @@
 		"tvgID": "1015fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "https://cdn.cybercdn.live/Darom_1015FM/Live/icecast.audio",
-			"final": true
+			"link": "http://radio.2net.co.il/hatahana",
+			"regex": "width=\"100%\" src=\"(.*?)\""
 		}
 	},
 	"rd_102": {
@@ -760,8 +760,8 @@
 		"tvgID": "103fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "https://cdn.cybercdn.live/103FM/Live/icecast.audio",
-			"final": true
+			"link": "http://103fm.maariv.co.il/include/OnLineView.aspx",
+			"regex": "data-file=\"(.*?)\""
 		}
 	},
 	"rd_1045": {
@@ -773,8 +773,8 @@
 		"tvgID": "1045fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "https://cdn.cybercdn.live/Tzafon_NonStop/Live_Audio/icecast.audio",
-			"final": true
+			"link": "https://1045fm.maariv.co.il/include/OnLineView.aspx",
+			"regex": "data-file=\"(.*?)\""
 		}
 	},
 	"rd_1075": {
@@ -916,8 +916,8 @@
 		"tvgID": "891fm",
 		"type": "radio",
 		"linkDetails": {
-			"link": "https://cdn.cybercdn.live/Pervoia/Audio/icecast.audio",
-			"final": true
+			"link": "http://www.891fm.co.il/",
+			"regex": "data-mp3=\"(.*?)\""
 		}
 	},
 	"rd_1064": {

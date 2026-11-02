@@ -353,6 +353,9 @@ When a direct request returns HTTP 500, the importer tries the same URL with
 Chrome browser impersonation using the existing `curl-cffi` dependency. This
 works around Akamai failures without requiring the VPN backend.
 The original Sport 5 website studio stream keeps its separate `5radio` schedule.
+Its channel 55 override sets `linkDetails.vpn` so the app, web player and IPTV
+playlist use the Israeli VPN backend for the CloudFront fallback introduced
+in IdanPlus 4.0.4. That stream returns HTTP 403 on the direct local connection.
 
 The backend resolves a fresh signed URL on playback through the source AJAX
 endpoint; no expiring tokens are stored in the catalog. The existing stream
