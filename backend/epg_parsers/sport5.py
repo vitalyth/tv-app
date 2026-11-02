@@ -1,6 +1,7 @@
 """Official Sport 5 channel schedules used by the site's broadcast sheet."""
 
 import re
+import json
 import threading
 import time as clock
 from datetime import date, datetime, time, timedelta
@@ -21,6 +22,7 @@ ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 DEFAULT_DAYS = 10
 _fetch_lock = threading.Lock()
 _last_fetch = 0.0
+_last_yes_fetch = 0.0
 SPORT5_CHANNELS = {
     "sport5": "5",
     "sport5_plus": "5P",
@@ -29,6 +31,66 @@ SPORT5_CHANNELS = {
     "sport5_stars": "5STARS",
     "sport5_max": "5MAX",
 }
+YES_CHANNELS = {
+    "sport5": "PT26", "sport5_plus": "CH54", "sport5_live": "PT62",
+    "sport5_gold": "MU03", "sport5_stars": "CH56", "sport5_max": "CN49",
+}
+YES_SCHEDULE_URL = "https://svc.yes.co.il/api/content/broadcast-schedule/channels/"
+
+
+def fetch_yes_schedule(channel_id: str, schedule_date: date) -> list[dict]:
+    """Official provider backup for unpublished/failed Sport 5 schedule days."""
+    global _last_yes_fetch
+    with _fetch_lock:
+        delay = max(0, 1 - (clock.monotonic() - _last_yes_fetch))
+        if delay:
+            clock.sleep(delay)
+        _last_yes_fetch = clock.monotonic()
+    site_date = f"{schedule_date.year}-{schedule_date.month}-{schedule_date.day}"
+    channel = YES_CHANNELS[channel_id]
+    url = f"{YES_SCHEDULE_URL}{channel}?{urlencode({'date': site_date, 'ignorePastItems': 'false'})}"
+    try:
+        response = curl_requests.get(
+            url, impersonate="chrome", timeout=20,
+            headers={"Accept-Language": "he-IL", "Referer": "https://www.yes.co.il/"},
+        )
+    except curl_requests.exceptions.RequestException as exc:
+        raise URLError(str(exc)) from exc
+    try:
+        if response.status_code >= 400:
+            raise HTTPError(url, response.status_code, "yes schedule request failed", response.headers, None)
+        return parse_yes_schedule(json.loads(response.content), channel)
+    finally:
+        response.close()
+
+
+def parse_yes_schedule(data: dict, channel_id: str) -> list[dict]:
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        raise RuntimeError("yes returned an invalid schedule")
+    programs = []
+    for item in data["items"]:
+        if not isinstance(item, dict) or item.get("channelId") != channel_id:
+            continue
+        try:
+            # yes publishes true ISO UTC timestamps; do not reinterpret as local.
+            start = datetime.fromisoformat(item["starts"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(item["ends"].replace("Z", "+00:00"))
+            if start.tzinfo is None or end.tzinfo is None or end <= start:
+                continue
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        name = " ".join(str(item.get("title") or "").split())
+        if not name:
+            continue
+        description = str(item.get("description") or "").strip()
+        if re.search(r"(?<!\w)ישיר(?!\w)", name) and "ישיר" not in description:
+            description = f"{description}\nישיר".strip()
+        program = {"start": int(start.timestamp()), "end": int(end.timestamp()),
+                   "name": name, "description": description}
+        if isinstance(item.get("imageUrl"), str) and item["imageUrl"].startswith("https://"):
+            program["image"] = item["imageUrl"]
+        programs.append(program)
+    return dedupe_and_sort_programs(programs)
 
 
 def _fetch_browser_schedule(request: Request) -> str:
@@ -126,7 +188,20 @@ def parse_sport5_epg(
     today: datetime | date | None = None,
     days: int = DEFAULT_DAYS,
 ) -> list[dict]:
-    channel_type = SPORT5_CHANNELS[channel_id]
+    return parse_sport5_epgs([channel_id], today=today, days=days)[channel_id]
+
+
+def parse_sport5_epgs(
+    channel_ids: list[str] | None = None,
+    *,
+    today: datetime | date | None = None,
+    days: int = DEFAULT_DAYS,
+) -> dict[str, list[dict]]:
+    """Fetch near dates for every channel before spending requests on later days."""
+    channel_ids = list(SPORT5_CHANNELS) if channel_ids is None else list(dict.fromkeys(channel_ids))
+    for channel_id in channel_ids:
+        if channel_id not in SPORT5_CHANNELS:
+            raise ValueError(f"Unknown Sport 5 channel: {channel_id}")
     if days < 1:
         raise ValueError("days must be positive")
     if today is None:
@@ -136,31 +211,64 @@ def parse_sport5_epg(
     else:
         first_date = today
 
-    entries = []
-    successful_pages = 0
+    entries = {channel_id: [] for channel_id in channel_ids}
+    backups = {channel_id: [] for channel_id in channel_ids}
+    successful_pages = {channel_id: 0 for channel_id in channel_ids}
+    limited = False
+    backup_limited = False
     # The next day's first start supplies the final requested day's end time.
     for offset in range(days + 1):
         schedule_date = first_date + timedelta(days=offset)
-        try:
-            entries.extend(parse_schedule_page(fetch_schedule(channel_type, schedule_date), schedule_date))
-            successful_pages += 1
-        except (HTTPError, URLError, TimeoutError, UnicodeError, RuntimeError) as exc:
-            # A missing/error day does not mean later dates are unavailable.
-            # Keep checking the bounded window and retain cached programs.
-            print(f"Sport 5 {channel_id} {schedule_date}: {exc}")
-            if isinstance(exc, HTTPError):
-                if exc.code in (403, 429):
-                    break
-    if not successful_pages:
-        raise RuntimeError(f"No Sport 5 schedule pages could be loaded for {channel_id}")
+        for channel_id in channel_ids:
+            rows = []
+            if not limited:
+                try:
+                    rows = parse_schedule_page(fetch_schedule(SPORT5_CHANNELS[channel_id], schedule_date), schedule_date)
+                    successful_pages[channel_id] += 1
+                    entries[channel_id].extend(rows)
+                except (HTTPError, URLError, TimeoutError, UnicodeError, RuntimeError) as exc:
+                    print(f"Sport 5 {channel_id} {schedule_date}: {exc}", flush=True)
+                    if isinstance(exc, HTTPError) and exc.code in (403, 429):
+                        # A provider-wide limit must not be retried per channel.
+                        limited = True
+            if not rows and not backup_limited:
+                try:
+                    backup = fetch_yes_schedule(channel_id, schedule_date)
+                    if backup:
+                        successful_pages[channel_id] += 1
+                    backups[channel_id].extend(backup)
+                    print(f"Sport 5 {channel_id} {schedule_date}: yes backup, {len(backup)} programs", flush=True)
+                except (HTTPError, URLError, TimeoutError, UnicodeError, RuntimeError, ValueError) as exc:
+                    print(f"Sport 5 {channel_id} {schedule_date}: yes backup failed: {exc}", flush=True)
+                    if isinstance(exc, HTTPError) and exc.code in (403, 429):
+                        backup_limited = True
+        if limited and backup_limited:
+            break
 
+    result = {}
+    for channel_id in channel_ids:
+        if not successful_pages[channel_id]:
+            if len(channel_ids) == 1:
+                raise RuntimeError(f"No Sport 5 schedule pages could be loaded for {channel_id}")
+            # The caller retains this channel's cached programs.
+            result[channel_id] = []
+            continue
+        result[channel_id] = _build_programs(entries[channel_id], backups[channel_id], first_date, days)
+    return result
+
+
+def _build_programs(entries: list[dict], backups: list[dict], first_date: date, days: int) -> list[dict]:
+    # Backup rows supply exact ends and midnight boundaries for adjacent official
+    # rows; do not bridge a missing day with an invented all-day program.
     entries = sorted({(p["start"], p["name"]): p for p in entries}.values(), key=lambda p: p["start"])
+    starts = sorted({p["start"] for p in entries + backups})
+    next_start = dict(zip(starts, starts[1:]))
     cutoff = int(datetime.combine(first_date + timedelta(days=days), time(), tzinfo=ISRAEL_TZ).timestamp())
-    programs = []
-    for current, following in zip(entries, entries[1:]):
+    programs = [p for p in backups if p["start"] < cutoff]
+    for current in entries:
         if current["start"] >= cutoff:
             break
-        # Do not turn a missing day's schedule into an invented all-day program.
-        if 0 < following["start"] - current["start"] <= 24 * 3600:
-            programs.append({**current, "end": following["start"]})
+        end = next_start.get(current["start"])
+        if end and 0 < end - current["start"] <= 24 * 3600:
+            programs.append({**current, "end": end})
     return dedupe_and_sort_programs(programs)
