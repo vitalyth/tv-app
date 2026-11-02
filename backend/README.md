@@ -308,6 +308,15 @@ http://192.168.86.75:8001
 
 Vitaly Thirulnikov
 
+### Channel display order
+
+Set each channel's `orderNumber` in `data/custom_channels.json` to control its
+display position. Lower numbers appear first; values have gaps of 10 to allow
+inserting channels. The API and IPTV playlist share this order. `index` still
+groups alternate sources, and `channelNumber` remains the displayed number.
+Order-only overrides do not add absent upstream channels. Channels without a
+configured order receive an `orderNumber` after the configured entries.
+
 ### Nextbet live channels
 
 The custom catalog includes 14 additional source channels alongside existing
@@ -316,8 +325,9 @@ and Eurosport 1 / 2. The source slugs `yes-1` through `yes-4` carry Sport 1–4,
 not the similarly named yes movie channels. Existing IDs for Sport 5 and
 Sport 5 Max remain stable.
 
-Each additional source has its own guide index so the web guide does not
-collapse it into an unrelated channel. Kan 11 uses the existing `ch_11` entry
+Additional channels have their own guide indices. Sport 5 groups the original
+IdanPlus source (primary) and Nextbet source (alternate) under index 15 and
+channel number 55, with the shared `sport5` EPG. Kan 11 uses the existing `ch_11` entry
 and its existing backup sources under guide index 1, with the downloaded local
 Kan logo. No duplicate Kan entry is added for the unavailable source.
 The six Sport 5 linear channels use the official Sport 5 broadcast sheet EPG.
@@ -352,7 +362,8 @@ so it is not treated as proof that a schedule is unavailable.
 When a direct request returns HTTP 500, the importer tries the same URL with
 Chrome browser impersonation using the existing `curl-cffi` dependency. This
 works around Akamai failures without requiring the VPN backend.
-The original Sport 5 website studio stream keeps its separate `5radio` schedule.
+Both Sport 5 TV sources use the `sport5` schedule; the separate audio radio
+station retains `5radio`. The original TV source remains primary.
 Its channel 55 override sets `linkDetails.vpn` so the app, web player and IPTV
 playlist use the Israeli VPN backend for the CloudFront fallback introduced
 in IdanPlus 4.0.4. That stream returns HTTP 403 on the direct local connection.

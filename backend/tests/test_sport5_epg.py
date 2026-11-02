@@ -224,8 +224,10 @@ class Sport5EPGTests(unittest.TestCase):
         }]
         self.assertEqual(len(channels), 6)
         self.assertEqual({c["tvgID"] for c in channels}, set(SPORT5_CHANNELS))
-        # The original website studio stream retains its own radio/studio EPG.
-        self.assertNotIn("tvgID", next(c for c in catalog if c.get("channelID") == "ch_sport5"))
+        # The primary TV source shares the linear schedule with its alternate.
+        self.assertEqual(next(c for c in catalog if c.get("channelID") == "ch_sport5")["tvgID"], "sport5")
+        builtin = json.loads((backend / "plugin_video_idanplus/resources/channels.json").read_text())
+        self.assertEqual(builtin["rd_sport5"]["tvgID"], "5radio")
 
     @patch("parse_epg.enrich_epg_with_vod", side_effect=lambda epg: epg)
     @patch("parse_epg.enrich_programs_with_vod", side_effect=lambda channel, programs: programs)

@@ -31,6 +31,7 @@ export interface Program {
 export interface Channel {
   id: string
   index: number
+  orderNumber?: number
   name: string
   logo: string
   category: string

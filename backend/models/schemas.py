@@ -11,6 +11,7 @@ class Program(BaseModel):
 class Channel(BaseModel):
     id: Optional[str] = None
     index: int
+    orderNumber: Optional[int] = None
     name: str
     logo: Optional[str] = None
     category: Optional[str] = None

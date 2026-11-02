@@ -25,6 +25,7 @@ interface ApiChannel {
   id?: unknown;
   channelID?: unknown;
   index?: unknown;
+  orderNumber?: unknown;
   name?: unknown;
   channelNumber?: unknown;
   logo?: unknown;

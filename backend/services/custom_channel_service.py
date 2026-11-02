@@ -51,7 +51,33 @@ def merge_custom_channels(channels):
             }
             continue
 
+        # An override for an absent/hidden upstream channel is not a new channel.
+        if "index" not in custom_channel or "type" not in custom_channel:
+            continue
+
         channels_by_id[channel_id] = len(merged_channels)
         merged_channels.append(custom_channel)
 
-    return merged_channels
+    return order_channels(merged_channels, custom_channels)
+
+
+def order_channels(channels, custom_channels=None):
+    """Apply the shared display order without changing source-group indices."""
+    if custom_channels is None:
+        custom_channels = load_custom_channels()
+    overrides = {
+        channel.get("channelID") or channel.get("id"): channel["orderNumber"]
+        for channel in custom_channels if isinstance(channel.get("orderNumber"), int)
+    }
+    orders = [*overrides.values(), *(channel["orderNumber"] for channel in channels
+               if isinstance(channel.get("orderNumber"), int))]
+    next_order = max(orders, default=0) + 10
+    ordered = []
+    for channel in channels:
+        channel_id = channel.get("channelID") or channel.get("id")
+        order = overrides.get(channel_id, channel.get("orderNumber"))
+        if not isinstance(order, int):
+            order = next_order
+            next_order += 10
+        ordered.append({**channel, "orderNumber": order})
+    return sorted(ordered, key=lambda channel: channel["orderNumber"])

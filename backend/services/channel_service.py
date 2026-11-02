@@ -19,7 +19,7 @@ from plugin_video_idanplus.resources import main as idan_main
 from resources.lib import cache as addon_cache
 from services.epg_service import get_now_epg
 from models.schemas import Channel
-from services.custom_channel_service import load_custom_channels, merge_custom_channels
+from services.custom_channel_service import load_custom_channels, merge_custom_channels, order_channels
 from services.kan_vod_service import get_kan_vod_recent_episodes
 from services.keshet_vod_service import get_keshet_vod_recent_episodes
 from services.reshet_vod_service import get_reshet_vod_recent_episodes
@@ -487,6 +487,7 @@ def _build_channel(channel: dict, programs: list | None = None) -> Channel:
     return Channel(
         id=channel["channelID"],
         index=channel["index"],
+        orderNumber=channel.get("orderNumber", channel["index"]),
         name=channel["name"],
         mode=channel["mode"],
         logo=get_channel_logo(channel),
@@ -548,7 +549,7 @@ def get_live_channels():
 def get_radio_channels():
     db_channels = _load_radio_channels_from_db()
     if db_channels:
-        return [_build_channel(channel) for channel in db_channels]
+        return [_build_channel(channel) for channel in order_channels(db_channels)]
 
     channels = merge_custom_channels(idan_main.GetUserChannels(type='radio'))
     return [_build_channel(channel) for channel in channels if channel.get("type") == "radio"]

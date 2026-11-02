@@ -17,9 +17,19 @@ from services.stream_service import get_custom_channel_stream
 
 class NextbetStreamsTests(unittest.TestCase):
     def test_catalog_adds_all_source_channels_without_replacing_existing_sport5(self):
-        original = {"channelID": "ch_sport5", "name": "Existing sport channel"}
+        original = {"channelID": "ch_sport5", "index": 15, "name": "Existing sport channel",
+                    "module": "sport5", "mode": 10, "linkDetails": {"ch": "studioUrl", "link": "https://original.example/live.m3u8"}}
         merged = merge_custom_channels([original])
-        self.assertEqual(next(c for c in merged if c["channelID"] == "ch_sport5")["name"], original["name"])
+        primary = next(c for c in merged if c["channelID"] == "ch_sport5")
+        alternate = next(c for c in merged if c["channelID"] == "ch_sport5_live")
+        self.assertLess(merged.index(primary), merged.index(alternate))
+        self.assertEqual(primary["name"], "ספורט 5")
+        self.assertEqual(primary["module"], original["module"])
+        self.assertEqual(primary["mode"], original["mode"])
+        self.assertEqual(primary["linkDetails"]["link"], original["linkDetails"]["link"])
+        self.assertTrue(primary["linkDetails"]["vpn"])
+        self.assertEqual((primary["index"], primary["channelNumber"], primary["tvgID"]), (15, "55", "sport5"))
+        self.assertEqual((alternate["index"], alternate["channelNumber"], alternate["tvgID"]), (15, "55", "sport5"))
         channels = [c for c in merged if c.get("streamProvider") == "nextbet"]
         self.assertEqual(len(channels), 14)
         self.assertEqual({c["streamSlug"] for c in channels}, source.CHANNEL_SLUGS)
@@ -30,7 +40,7 @@ class NextbetStreamsTests(unittest.TestCase):
             channel = next(c for c in channels if c["streamSlug"] == f"yes-{number}")
             self.assertEqual(channel["name"], f"ספורט {number}")
 
-    def test_new_channels_have_separate_guide_rows_from_existing_channels(self):
+    def test_only_main_sport5_shares_a_guide_row_with_its_existing_source(self):
         backend = Path(__file__).resolve().parents[1]
         builtin = json.loads((backend / "plugin_video_idanplus/resources/channels.json").read_text())
         custom = json.loads((backend / "data/custom_channels.json").read_text())
@@ -41,10 +51,13 @@ class NextbetStreamsTests(unittest.TestCase):
             and "index" in c
         }
         added = [c for c in custom if c.get("channelID") in added_ids]
-        # The web guide groups sources by index; each new channel needs its own row.
+        # Only the main Sport 5 source intentionally shares an existing guide row.
         self.assertEqual(len({c["index"] for c in added}), 14)
         for channel in added:
-            self.assertNotIn(channel["index"], existing_indices)
+            if channel["channelID"] == "ch_sport5_live":
+                self.assertEqual(channel["index"], builtin["ch_sport5"]["index"])
+            else:
+                self.assertNotIn(channel["index"], existing_indices)
 
     def test_all_channel_logos_are_local_with_documented_sources(self):
         root = Path(__file__).resolve().parents[2]
