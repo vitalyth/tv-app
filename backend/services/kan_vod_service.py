@@ -4,10 +4,11 @@ import sqlite3
 import time
 from urllib.parse import quote
 
+from config import get_vod_db_path
 from scripts import kan_db_scanner
 
 
-KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
+KAN_VOD_DB_PATH = get_vod_db_path()
 KAN_VOD_RETRIES = int(os.getenv("KAN_VOD_RETRIES", "3"))
 KAN_VOD_RETRY_DELAY_SECONDS = float(os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1"))
 KAN_VOD_STREAM_BATCH_SIZE = int(os.getenv("KAN_VOD_STREAM_BATCH_SIZE", "20"))

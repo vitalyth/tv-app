@@ -13,6 +13,9 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
+from config import get_vod_db_path
+
+
 def _run_kan_scan(args: argparse.Namespace) -> dict:
     command = [
         sys.executable,
@@ -285,7 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument(
         "--db",
-        default=os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db"),
+        default=get_vod_db_path(),
         help="SQLite DB path shared by VOD providers.",
     )
     scan.add_argument("--incremental", action="store_true", help="Use incremental mode where supported")

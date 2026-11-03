@@ -461,3 +461,13 @@ All EPG import jobs share `EPG_INTERVAL_SECONDS` (seconds, default `10800`).
 Set `EPG_INTERVAL_SECONDS=7200` to refresh every channel group every two hours.
 Jobs remain separate to avoid duplicate imports and isolate source failures,
 with no channel-specific interval settings.
+
+### Shared VOD database path
+
+Set `VOD_DB_PATH` to the populated SQLite database shared by VOD providers.
+The API, scheduler and `scripts/vod_db_scanner.py` use this same path. Provider
+settings (`KESHET_VOD_DB_PATH`, legacy `KESHT_VOD_DB_PATH`, `RESHET_VOD_DB_PATH`,
+`C14_VOD_DB_PATH`, `I24_VOD_DB_PATH`) remain optional overrides. Deployments
+using only `KAN_VOD_DB_PATH` retain that legacy path; without either setting,
+the default remains `db/kan_vod.db`. This prevents a CasaOS deployment using
+`VOD_DB_PATH=/app/db/vod.db` from reading an empty `db/kan_vod.db` instead.

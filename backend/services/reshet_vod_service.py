@@ -9,11 +9,10 @@ from urllib.parse import quote, urljoin
 
 import requests
 
+from config import get_vod_db_path
 
-RESHET_VOD_DB_PATH = os.getenv(
-    "RESHET_VOD_DB_PATH",
-    os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db"),
-)
+
+RESHET_VOD_DB_PATH = get_vod_db_path('RESHET_VOD_DB_PATH')
 RESHET_VOD_RETRIES = int(os.getenv("RESHET_VOD_RETRIES", os.getenv("KAN_VOD_RETRIES", "3")))
 RESHET_VOD_RETRY_DELAY_SECONDS = float(
     os.getenv("RESHET_VOD_RETRY_DELAY_SECONDS", os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1"))

@@ -10,11 +10,10 @@ from urllib.parse import quote, urljoin
 
 import requests
 
+from config import get_vod_db_path
 
-KESHT_VOD_DB_PATH = os.getenv(
-    "KESHET_VOD_DB_PATH",
-    os.getenv("KESHT_VOD_DB_PATH", os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")),
-)
+
+KESHT_VOD_DB_PATH = get_vod_db_path('KESHET_VOD_DB_PATH', 'KESHT_VOD_DB_PATH')
 KESHT_VOD_RETRIES = int(os.getenv(
     "KESHET_VOD_RETRIES",
     os.getenv("KESHT_VOD_RETRIES", os.getenv("KAN_VOD_RETRIES", "3")),
