@@ -7,8 +7,10 @@ from urllib.parse import quote
 
 import requests
 
+from config import get_vod_db_path
 
-I24_VOD_DB_PATH = os.getenv("I24_VOD_DB_PATH", os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db"))
+
+I24_VOD_DB_PATH = get_vod_db_path('I24_VOD_DB_PATH')
 I24_VOD_RETRIES = int(os.getenv("I24_VOD_RETRIES", os.getenv("KAN_VOD_RETRIES", "3")))
 I24_VOD_RETRY_DELAY_SECONDS = float(
     os.getenv("I24_VOD_RETRY_DELAY_SECONDS", os.getenv("KAN_VOD_RETRY_DELAY_SECONDS", "1"))

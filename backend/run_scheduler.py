@@ -6,10 +6,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import CACHE_DIR
+from config import CACHE_DIR, get_vod_db_path
 
 BASE_DIR = Path(__file__).resolve().parent
-KAN_VOD_DB_PATH = os.getenv("KAN_VOD_DB_PATH", "db/kan_vod.db")
+KAN_VOD_DB_PATH = get_vod_db_path()
 KESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("KESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 RESHET_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("RESHET_VOD_SCAN_LIMIT_PROGRAMS", "40")
 C14_VOD_SCAN_LIMIT_PROGRAMS = os.getenv("C14_VOD_SCAN_LIMIT_PROGRAMS", "40")
