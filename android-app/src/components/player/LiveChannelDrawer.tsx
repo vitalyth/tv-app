@@ -1,6 +1,8 @@
 import {useTVNavigationEventHandler} from '../../hooks/useTVNavigationEventHandler';
 import {channelDrawerLayout, CHANNEL_DRAWER_ANIMATION_MS, PLAYER_PANEL_INSET, PLAYER_PANEL_VERTICAL_INSET} from '../../media/playerLayout';
 import { liveEpgStore, useLiveEpg } from '../../state/liveEpg';
+import { currentTimeMs, formatProgramTimeRange } from '../../api/channels';
+import { normalizePrograms } from '../../api/programGuide';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -28,7 +30,7 @@ interface Props {
 }
 
 const ROW_HEIGHT = 52;
-const ACTIVE_ROW_HEIGHT = 112;
+const ACTIVE_ROW_HEIGHT = 156;
 
 function playingChannelIndex(channels: MediaItem[], item: MediaItem): number {
   const exact = channels.findIndex(channel => channel.id === item.id);
@@ -146,6 +148,17 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
       index - Math.floor(visibleCount / 2),
       channels.length - visibleCount,
     ),
+  );
+  const focusedChannel = channels[index];
+  const programs = normalizePrograms(
+    (focusedChannel?.sourcePayload as {programs?: unknown} | undefined)?.programs,
+  );
+  const now = currentTimeMs();
+  const currentProgram = programs.find(program => program.start <= now && program.end > now);
+  const currentTimeRange = focusedChannel?.timeRange ||
+    formatProgramTimeRange(currentProgram?.start, currentProgram?.end);
+  const nextProgram = programs.find(program =>
+    program.start > now && program.start >= (currentProgram?.end ?? now) && program.title.trim(),
   );
   return (
     <View testID="live-channel-drawer" style={styles.root}>
@@ -269,23 +282,42 @@ export const LiveChannelDrawer = memo(function LiveChannelDrawerView({
                       ) : null}
                     </View>
                     {selected ? (
-                      <View style={styles.preview}>
-                        {channel.backdropUrl || channel.imageUrl ? (
-                          <RemoteImage
-                            testID="drawer-active-program-image"
-                            uri={channel.backdropUrl || channel.imageUrl!}
-                            fallbackUri={channel.fallbackImageUrl}
-                            resizeMode="cover"
-                            style={styles.programImage}
-                          />
-                        ) : (
-                          <View style={styles.programImage} />
-                        )}
-                        <Text numberOfLines={2} style={styles.activeProgram}>
-                          {switchingChannelId === channel.id
-                            ? t('playerSourceConnecting')
-                            : channel.title}
-                        </Text>
+                      <View>
+                        <View style={styles.preview}>
+                          {channel.backdropUrl || channel.imageUrl ? (
+                            <RemoteImage
+                              testID="drawer-active-program-image"
+                              uri={channel.backdropUrl || channel.imageUrl!}
+                              fallbackUri={channel.fallbackImageUrl}
+                              resizeMode="cover"
+                              style={styles.programImage}
+                            />
+                          ) : (
+                            <View style={styles.programImage} />
+                          )}
+                          <View style={styles.metadata}>
+                            <Text numberOfLines={2} style={styles.activeProgram}>
+                              {switchingChannelId === channel.id
+                                ? t('playerSourceConnecting')
+                                : channel.title}
+                            </Text>
+                            {currentTimeRange ? (
+                              <Text testID="drawer-current-program-time" style={styles.programTime}>
+                                {currentTimeRange}
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                        {nextProgram ? (
+                          <View testID="drawer-next-program" style={styles.nextProgram}>
+                            <Text numberOfLines={1} style={styles.program}>
+                              {t('playerUpNext')}: {nextProgram.title}
+                            </Text>
+                            <Text style={styles.programTime}>
+                              {formatProgramTimeRange(nextProgram.start, nextProgram.end)}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                     ) : null}
                   </Pressable>
@@ -360,7 +392,9 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: '#182125',
   },
-  activeProgram: { flex: 1, color: '#ffffff', fontSize: 12, lineHeight: 17 },
+  activeProgram: { color: '#ffffff', fontSize: 12, lineHeight: 17 },
+  programTime: { color: '#aab9c1', fontSize: 10, lineHeight: 14, marginTop: 2 },
+  nextProgram: { marginTop: 5 },
   logo: { width: 32, height: 30 },
   number: { width: 35, color: '#ffffff', fontSize: 13, fontWeight: '700' },
   metadata: { flex: 1, minWidth: 0 },

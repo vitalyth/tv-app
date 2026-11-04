@@ -45,6 +45,7 @@ export const en = {
   // Player
   playerSources: 'Sources',
   playerChannels: 'Live channels',
+  playerUpNext: 'Up next',
   playerChannelsUnavailable: 'Unable to load live channels.',
   playerChannelUnavailable: 'Unable to play this channel. Choose another or try again.',
   playerSourceDialogTitle: 'Broadcast sources',

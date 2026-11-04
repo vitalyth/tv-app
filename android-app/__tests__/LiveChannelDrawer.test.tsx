@@ -4,6 +4,7 @@ import Renderer, { act } from 'react-test-renderer';
 import { StyleSheet, useTVEventHandler } from 'react-native';
 import { LiveChannelDrawer } from '../src/components/player/LiveChannelDrawer';
 import type { MediaItem } from '../src/media/player';
+import { currentTimeMs, formatProgramTimeRange } from '../src/api/channels';
 
 jest.mock('react-native/Libraries/Components/TV/useTVEventHandler', () => ({
   __esModule: true,
@@ -139,6 +140,50 @@ describe('fullscreen live channel list', () => {
     ).toBeLessThan(20);
     await act(async () => activate()());
     expect(select).toHaveBeenLastCalledWith(channels[25]);
+  });
+  it('shows current times and the earliest future program only for the focused channel', async () => {
+    const now = Math.floor(currentTimeMs() / 1000);
+    load.mockResolvedValue(channels.map(channel => ({
+      ...channel,
+      sourcePayload: {programs: [
+        {name: `Later ${channel.id}`, start: now + 3600, end: now + 5400},
+        {name: `Next ${channel.id}`, start: now + 1800, end: now + 3600},
+        {name: channel.title, start: now - 1800, end: now + 1800},
+        {name: 'Expired', start: now - 3600, end: now - 1800},
+      ]},
+    })));
+    await mount();
+    expect(renderer.root.findAllByProps({testID: 'drawer-current-program-time'})[0].props.children)
+      .toBe(formatProgramTimeRange((now - 1800) * 1000, (now + 1800) * 1000));
+    let tree = JSON.stringify(renderer.toJSON());
+    expect(tree).toContain('Next ch25');
+    expect(tree).toContain(formatProgramTimeRange((now + 1800) * 1000, (now + 3600) * 1000));
+    expect(tree).not.toContain('Next ch26');
+    expect(tree).not.toContain('Later ch25');
+    expect(tree).not.toContain('Expired');
+    await key('down');
+    tree = JSON.stringify(renderer.toJSON());
+    expect(tree).toContain('Next ch26');
+    expect(tree).not.toContain('Next ch25');
+    await key('up');
+    await act(async () => liveEpgStore.publish([{
+      ...channels[25],
+      timeRange: '12:00 - 13:00',
+      sourcePayload: {programs: [
+        {name: 'Updated next', start: now + 1800, end: now + 3600},
+      ]},
+    }]));
+    expect(JSON.stringify(renderer.toJSON())).toContain('Updated next');
+    expect(renderer.root.findAllByProps({testID: 'drawer-current-program-time'})[0].props.children)
+      .toBe('12:00 - 13:00');
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it('omits program times and upcoming details when no schedule is available', async () => {
+    await mount();
+    expect(renderer.root.findAllByProps({testID: 'drawer-current-program-time'})).toHaveLength(0);
+    expect(renderer.root.findAllByProps({testID: 'drawer-next-program'})).toHaveLength(0);
   });
   it('browses without switching and retained activation reads the latest highlighted channel', async () => {
     await mount();

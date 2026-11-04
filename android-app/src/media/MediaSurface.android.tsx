@@ -2,6 +2,7 @@ import Video, {
   type OnProgressData,
   type OnVideoTracksData,
   SelectedVideoTrackType,
+  SelectedTrackType,
   type SelectedVideoTrack,
 } from 'react-native-video';
 import { StyleSheet } from 'react-native';
@@ -16,6 +17,9 @@ const bufferConfig = {
   bufferForPlaybackAfterRebufferMs: 1500,
 };
 
+const disabledTrack = {type: SelectedTrackType.DISABLED};
+const systemTrack = {type: SelectedTrackType.SYSTEM};
+
 export function MediaSurface({
   streamUrl,
   streamType,
@@ -26,6 +30,7 @@ export function MediaSurface({
   disableAudioFocus = false,
   maxVideoHeight,
   maxBitRate,
+  preferSurfaceView = false,
   resizeMode = 'cover',
   paused = false,
   startPositionSeconds,
@@ -217,13 +222,17 @@ export function MediaSurface({
       paused={paused}
       controls={false}
       muted={isMuted}
+      // Muting alone still decodes, resamples and mixes every tile's audio.
+      // Release inaudible audio renderers while keeping all video players alive.
+      selectedAudioTrack={maxVideoHeight && isMuted ? disabledTrack : systemTrack}
+      selectedTextTrack={maxVideoHeight ? disabledTrack : systemTrack}
       disableFocus={disableAudioFocus}
       volume={1.0}
       maxBitRate={maxBitRate}
       repeat={isLive}
-      // Keep a TextureView throughout playback so native scale/translation
-      // animations remain smooth without replacing the video surface.
-      useTextureView={true}
+      // The primary surface stays a texture for continuous presentation changes.
+      // Extra tiles can bypass the UI compositor on physical Android TVs.
+      useTextureView={!preferSurfaceView}
       shutterColor="transparent"
       playInBackground={false}
       playWhenInactive={false}
