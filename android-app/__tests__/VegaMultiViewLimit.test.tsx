@@ -11,6 +11,7 @@ jest.mock('react-native/Libraries/Components/TV/useTVEventHandler', () => ({
 }));
 jest.mock('../src/components/RemoteImage', () => ({ RemoteImage: 'RemoteImage' }));
 jest.mock('../src/api/channels', () => ({
+  ...jest.requireActual('../src/api/channels'),
   getPlayableLiveChannels: jest.fn(async () => []),
   resolveLiveChannelStream: jest.fn(),
 }));

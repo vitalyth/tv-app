@@ -12,6 +12,7 @@ export interface MediaSurfaceProps {
   recoverVideoOnFocus?: boolean;
   maxVideoHeight?: number;
   maxBitRate?: number;
+  preferSurfaceView?: boolean;
   resizeMode?: 'cover' | 'contain';
   paused?: boolean;
   startPositionSeconds?: number;

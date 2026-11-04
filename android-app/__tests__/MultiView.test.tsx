@@ -46,6 +46,7 @@ jest.mock('../src/media/MediaSurface', () => ({
   },
 }));
 jest.mock('../src/api/channels', () => ({
+  ...jest.requireActual('../src/api/channels'),
   getPlayableLiveChannels: jest.fn(),
   resolveLiveChannelStream: jest.fn(),
 }));
@@ -140,14 +141,18 @@ describe('Multi View channel menu', () => {
     expect(original.props.resizeMode).toBe('contain');
     await enter();
     await add(1);
+    expect(surfaces().every(node => node.props.maxBitRate === 520000)).toBe(true);
     await add(2);
     await add(3);
     expect(surfaces()).toHaveLength(4);
     expect(surfaces()[0]).toBe(original);
+    expect(original.props.preferSurfaceView).toBeUndefined();
+    expect(surfaces().slice(1).every(node => node.props.preferSurfaceView === true)).toBe(true);
     expect(surfaces().every(node => node.props.resizeMode === 'contain')).toBe(true);
     expect(surfaces().every(node => node.props.maxVideoHeight === 180)).toBe(
       true,
     );
+    expect(surfaces().every(node => node.props.maxBitRate === 260000)).toBe(true);
     await act(async () =>
       controller.setMultiViewChannel(channels[4], streams[4], 4),
     );

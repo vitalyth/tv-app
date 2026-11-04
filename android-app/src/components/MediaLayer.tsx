@@ -14,10 +14,9 @@ import { MultiViewSurface } from '../media/MultiViewSurface';
 import { RemoteImage } from './RemoteImage';
 import {
   MULTIVIEW_MAX_HEIGHT,
-  MULTIVIEW_MAX_BITRATE,
   type MultiViewTile,
 } from '../media/player';
-import { multiViewTileLayout } from '../media/multiViewLayout';
+import { multiViewBitrateLimit, multiViewTileLayout } from '../media/multiViewLayout';
 import { tvPlatform } from '../platform/runtime';
 
 const scrimComposite = require('../assets/scrim_composite.png');
@@ -110,11 +109,12 @@ const ExtraMediaTile = memo(function ExtraMediaTileContent({
           item={entry.item}
           stream={entry.stream}
           disableAudioFocus
+          preferSurfaceView
           recoverVideoOnFocus={count > 2}
           paused={paused}
           isMuted={isMuted}
           maxVideoHeight={MULTIVIEW_MAX_HEIGHT}
-          maxBitRate={MULTIVIEW_MAX_BITRATE}
+          maxBitRate={multiViewBitrateLimit(count)}
           resizeMode="contain"
           onFirstFrame={reportPlaying}
           onError={reportError}
@@ -207,7 +207,7 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
             disableAudioFocus={tiled}
             recoverVideoOnFocus={tiled && count > 2}
             maxVideoHeight={tiled ? MULTIVIEW_MAX_HEIGHT : undefined}
-            maxBitRate={tiled ? MULTIVIEW_MAX_BITRATE : undefined}
+            maxBitRate={tiled ? multiViewBitrateLimit(count) : undefined}
             resizeMode={
               tiled || (isFullscreen && tvPlatform.id === 'android-tv')
                 ? 'contain'

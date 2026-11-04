@@ -13,6 +13,7 @@ jest.mock('react-native-video', () => {
       return ReactModule.createElement('Video', props);
     }),
     SelectedVideoTrackType: { AUTO: 'auto', RESOLUTION: 'resolution' },
+    SelectedTrackType: { SYSTEM: 'system', DISABLED: 'disabled' },
   };
 });
 
@@ -166,6 +167,41 @@ it('rejects 4K-only Android streams in Multi View rather than exhausting decoder
   act(() => { renderer = ReactTestRenderer.create(<MediaSurface streamUrl="https://example.com/4k.m3u8" maxVideoHeight={720} onFirstFrame={jest.fn()} onError={onError} />); });
   act(() => renderer.root.findByType('Video' as any).props.onVideoTracks({ videoTracks: [{ height: 2160 }] }));
   expect(onError).toHaveBeenCalledTimes(1);
+  act(() => renderer.unmount());
+});
+
+it('disables inaudible tile audio and restores audio on focus without replacing video', () => {
+  const props = {streamUrl: 'https://example.com/live.m3u8', maxVideoHeight: 180,
+    onFirstFrame: jest.fn(), onError: jest.fn()};
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {renderer = ReactTestRenderer.create(<MediaSurface {...props} isMuted />);});
+  const video = renderer.root.findByType('Video' as any);
+  const source = video.props.source;
+  expect(video.props.selectedAudioTrack).toEqual({type: 'disabled'});
+  expect(video.props.useTextureView).toBe(true);
+  expect(video.props.selectedTextTrack).toEqual({type: 'disabled'});
+  act(() => renderer.update(<MediaSurface {...props} isMuted={false} />));
+  expect(renderer.root.findByType('Video' as any)).toBe(video);
+  expect(video.props.source).toBe(source);
+  expect(video.props.paused).toBe(false);
+  expect(video.props.selectedAudioTrack).toEqual({type: 'system'});
+  act(() => renderer.update(<MediaSurface {...props} isMuted maxVideoHeight={undefined} />));
+  expect(video.props.selectedAudioTrack).toEqual({type: 'system'});
+  expect(video.props.selectedTextTrack).toEqual({type: 'system'});
+  act(() => renderer.unmount());
+});
+
+it('keeps an extra tile on a surface view across audio focus changes', () => {
+  const props = {streamUrl: 'https://example.com/live.m3u8', preferSurfaceView: true,
+    maxVideoHeight: 180, onFirstFrame: jest.fn(), onError: jest.fn()};
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {renderer = ReactTestRenderer.create(<MediaSurface {...props} isMuted />);});
+  const video = renderer.root.findByType('Video' as any);
+  expect(video.props.useTextureView).toBe(false);
+  act(() => renderer.update(<MediaSurface {...props} isMuted={false} />));
+  expect(renderer.root.findByType('Video' as any)).toBe(video);
+  expect(video.props.useTextureView).toBe(false);
+  expect(video.props.paused).toBe(false);
   act(() => renderer.unmount());
 });
 

@@ -6,11 +6,28 @@ not replace the primary player or resolve its stream again.
 
 The locally installed native video wrapper has a no-op `updateSurfaceView` method
 and independently adds a top-left LIVE badge. The postinstall scripts hide that
-badge and select a TextureView-backed PlayerView on Android TVs and emulators.
+badge and default to a TextureView-backed PlayerView on Android TVs and emulators.
 TextureView keeps video in the UI compositor so the channel drawer and video
 can animate together with the native animation driver. The same surface remains
 attached throughout playback; opening the drawer does not switch surface types
 or reconnect the stream. Vega is unaffected.
+
+Extra Android Multi View tiles request SurfaceView to avoid composing all four
+video frames through the application's RenderThread. `configure-surface-selection.js`
+implements the custom wrapper's previously empty `updateSurfaceView` method,
+using `PlayerView.switchTargetView` when a player is already attached. The primary
+player retains its TextureView; audio focus and drawer animations do not change
+surface types. Emulators retain TextureView. On physical API 24+ devices the
+extra surfaces participate in the grid's scale/translation animation.
+
+BRAVIA VH2 smoke test (2026-11-03, Sport 5/Plus/Max/Stars): SurfaceFlinger showed
+three extra SurfaceViews and all four pictures remained visible, including with
+the channel drawer open. Six short RenderThread samples averaged 27.5% of one
+CPU core before and 20.15% after. Process RSS was about 425–428 MB before and
+367–385 MB after. Total app/system CPU did not show a comparable consistent
+reduction: some composition work moves to SurfaceFlinger, and software video
+decoding remains expensive. These live-content samples are not a controlled
+frame-rate benchmark or long-duration stability test.
 
 These scripts are narrowly scoped to the custom wrapper. The texture patch does
 not alter upstream implementations with working surface selection, and fails if

@@ -1,7 +1,14 @@
 import type { ViewStyle } from 'react-native';
 import { tvPlatform } from '../platform/runtime';
 import { softwareMultiViewAvailable } from './nativeMultiView';
-import type { MultiViewState } from './player';
+import { MULTIVIEW_MAX_BITRATE, type MultiViewState } from './player';
+
+// Three/four Android tiles use the dense-grid budget. On the affected Sony TV
+// this also enables reserving hardware AVC decoders for HD-only streams.
+export function multiViewBitrateLimit(count: number): number {
+  return tvPlatform.id === 'android-tv' && count <= 2
+    ? MULTIVIEW_MAX_BITRATE * 2 : MULTIVIEW_MAX_BITRATE;
+}
 
 export const MULTIVIEW_MAX_STREAMS = tvPlatform.id === 'kepler' ? 2 : 4;
 

@@ -43,7 +43,10 @@ rejected in tile mode. Decoder errors and startup timeouts release the affected
 surface and leave other streams available.
 
 Android tile players use `disableFocus` to avoid competing audio-focus requests.
-Muting changes volume, never pause state. Without this, react-native-video pauses
+Inaudible Android tiles disable their audio track instead of only setting volume
+to zero; subtitles are also disabled in the grid. Focusing a tile restores its
+system audio track without replacing its video surface or changing pause state.
+Without `disableFocus`, react-native-video pauses
 earlier players on `AUDIOFOCUS_LOSS` when another tile starts.
 
 ### Experimental Vega Focus Recovery
@@ -100,6 +103,37 @@ controlled benchmark. The fourth stream still needs costly 1080p software AVC
 decoding. Lower bitrate selection cannot resize a stream that only has an HD
 rendition; further reductions there require a lower-quality source or upstream
 transcoding.
+
+BRAVIA follow-up (2026-11-03, Sport 5 / Plus / Max / Stars): disabling inaudible
+audio reduced AudioFlinger's active app tracks from four to one with all four
+video decoders still allocated (two hardware AVC, two software AVC). Short CPU
+samples remained in a similar range: software decoding about 138–163% and the
+app about 97–126%. This confirms removal of unnecessary audio processing, not a
+demonstrated improvement in video frame rate. HD software decoding remains the
+main bottleneck. No server changes were made.
+
+### BRAVIA decoder allocation for three/four tiles
+
+Sony API 31 uses a dense-grid decoder policy at the 260 kbit/s tile budget.
+One/two Android tiles use a 520 kbit/s budget and retain hardware-first decoding;
+the existing 180p selection target is unchanged. Vega retains its previous budget.
+The native dense-budget threshold matches `MULTIVIEW_MAX_BITRATE` in `player.ts`.
+
+In the dense grid, at most two clear AVC renderers at 720p or below prefer a
+software decoder, keeping hardware candidates available as fallback. Higher
+resolution streams retain hardware-first selection. Reservations are released
+on renderer disable/reset. Crossing the dense-grid boundary briefly stops and
+prepares an existing lower-resolution player to re-evaluate its decoder; the
+player object, stream URL, surface and position are retained. Focus changes do
+not trigger this operation. Other Android devices retain the default policy.
+
+BRAVIA test (2026-11-03, Sport 5/Plus/Max/Stars): native logs confirmed 960x540
+and 1280x720 software selection, leaving two hardware instances for the HD tiles.
+SurfaceFlinger presentation history measured about 25 fps on Plus and Stars,
+but only about 8 fps on the software-decoded Max tile. The software codec process
+still consumed substantial CPU. This improves which channels get hardware;
+it does not establish smooth playback for all four channels. All-HD grids still
+need software fallback beyond the two available hardware AVC instances.
 
 ## Verification
 
