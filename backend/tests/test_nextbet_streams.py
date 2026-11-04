@@ -16,7 +16,7 @@ from services.stream_service import get_custom_channel_stream
 
 
 class NextbetStreamsTests(unittest.TestCase):
-    def test_catalog_adds_all_source_channels_without_replacing_existing_sport5(self):
+    def test_catalog_keeps_nextbet_backups_when_freetv_is_primary(self):
         original = {"channelID": "ch_sport5", "index": 15, "name": "Existing sport channel",
                     "module": "sport5", "mode": 10, "linkDetails": {"ch": "studioUrl", "link": "https://original.example/live.m3u8"}}
         merged = merge_custom_channels([original])
@@ -24,9 +24,11 @@ class NextbetStreamsTests(unittest.TestCase):
         alternate = next(c for c in merged if c["channelID"] == "ch_sport5_live")
         self.assertLess(merged.index(primary), merged.index(alternate))
         self.assertEqual(primary["name"], "ספורט 5")
-        self.assertEqual(primary["module"], original["module"])
-        self.assertEqual(primary["mode"], original["mode"])
-        self.assertEqual(primary["linkDetails"]["link"], original["linkDetails"]["link"])
+        self.assertEqual(primary["module"], "custom")
+        previous = next(c for c in merged if c["channelID"] == "ch_sport5_previous")
+        self.assertEqual(previous["module"], original["module"])
+        self.assertEqual(previous["mode"], original["mode"])
+        self.assertEqual(previous["linkDetails"]["link"], original["linkDetails"]["link"])
         self.assertTrue(primary["linkDetails"]["vpn"])
         self.assertEqual((primary["index"], primary["channelNumber"], primary["tvgID"]), (15, "55", "sport5"))
         self.assertEqual((alternate["index"], alternate["channelNumber"], alternate["tvgID"]), (15, "55", "sport5"))
@@ -81,7 +83,8 @@ class NextbetStreamsTests(unittest.TestCase):
             if channel.get("streamProvider") != "nextbet":
                 continue
             with self.subTest(slug=channel["streamSlug"]):
-                self.assertTrue(get_custom_channel_stream(channel).startswith("https://"))
+                selected = get_custom_channel(f"{channel['channelID']}_previous") if channel.get("primarySource") else channel
+                self.assertTrue(get_custom_channel_stream(selected).startswith("https://"))
                 self.assertEqual(get.call_args.kwargs["params"]["stream"], channel["streamSlug"])
 
     @patch.object(source.session, "get")
@@ -117,7 +120,8 @@ class NextbetStreamsTests(unittest.TestCase):
         original = [{**data, "id": channel_id, "channelID": channel_id} for channel_id, data in builtin.items()]
         channels = merge_custom_channels(original)
         sources = [c for c in channels if c.get("index") == 1 and c.get("type") == "tv"]
-        self.assertEqual({c["channelID"] for c in sources}, {"ch_11", "ch_11b", "ch_11c", "ch_11d"})
+        self.assertEqual({c["channelID"] for c in sources},
+                         {"ch_11", "ch_11_previous", "ch_11b", "ch_11c", "ch_11d"})
         self.assertFalse(any(c.get("channelID") == "ch_nextbet_kan11" for c in channels))
         self.assertNotIn("kan-11", source.CHANNEL_SLUGS)
         self.assertEqual(next(c for c in sources if c["channelID"] == "ch_11")["logo"], "kan11.png")

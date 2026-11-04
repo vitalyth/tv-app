@@ -4,6 +4,10 @@ from services.nextbet_stream_service import resolve_stream as resolve_nextbet_st
 
 
 def get_custom_channel_stream(custom_channel):
+    preferred = custom_channel.get("primarySource") or {}
+    if preferred.get("streamUrl"):
+        return preferred["streamUrl"]
+
     if custom_channel.get("streamProvider") == "nextbet":
         return resolve_nextbet_stream(custom_channel.get("streamSlug"))
 
@@ -61,7 +65,7 @@ def get_stream(channel):
 
     moduleScript.Run(
         channel.name,
-        channel.channelID,
+        (custom_channel or {}).get("sourceChannelID") or channel.channelID,
         channel.mode,
         '',
         '1'
