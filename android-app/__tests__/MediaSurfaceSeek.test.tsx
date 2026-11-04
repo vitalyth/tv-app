@@ -13,7 +13,7 @@ jest.mock('react-native-video', () => {
       return ReactModule.createElement('Video', props);
     }),
     SelectedVideoTrackType: { AUTO: 'auto', RESOLUTION: 'resolution' },
-    SelectedTrackType: { SYSTEM: 'system', DISABLED: 'disabled' },
+    SelectedTrackType: { SYSTEM: 'system', DISABLED: 'disabled', INDEX: 'index' },
   };
 });
 
@@ -172,7 +172,7 @@ it('rejects 4K-only Android streams in Multi View rather than exhausting decoder
 
 it('disables inaudible tile audio and restores audio on focus without replacing video', () => {
   const props = {streamUrl: 'https://example.com/live.m3u8', maxVideoHeight: 180,
-    onFirstFrame: jest.fn(), onError: jest.fn()};
+    selectedSubtitleId: '0', onFirstFrame: jest.fn(), onError: jest.fn()};
   let renderer!: ReactTestRenderer.ReactTestRenderer;
   act(() => {renderer = ReactTestRenderer.create(<MediaSurface {...props} isMuted />);});
   const video = renderer.root.findByType('Video' as any);
@@ -187,7 +187,7 @@ it('disables inaudible tile audio and restores audio on focus without replacing 
   expect(video.props.selectedAudioTrack).toEqual({type: 'system'});
   act(() => renderer.update(<MediaSurface {...props} isMuted maxVideoHeight={undefined} />));
   expect(video.props.selectedAudioTrack).toEqual({type: 'system'});
-  expect(video.props.selectedTextTrack).toEqual({type: 'system'});
+  expect(video.props.selectedTextTrack).toEqual({type: 'disabled'});
   act(() => renderer.unmount());
 });
 
@@ -225,4 +225,37 @@ it('keeps native source and track selection stable across duplicate track events
   act(() => renderer.update(<MediaSurface {...props} maxVideoHeight={undefined} />));
   expect(video.props.progressUpdateInterval).toBe(250);
   act(() => renderer.unmount());
+});
+
+it('only exposes subtitle tracks with decoded data and changes selection without restarting playback', () => {
+  jest.useFakeTimers();
+  const onSubtitleTracks = jest.fn();
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  const props = {streamUrl: 'https://example.com/live.m3u8', onFirstFrame: jest.fn(), onError: jest.fn(), onSubtitleTracks};
+  act(() => {renderer = ReactTestRenderer.create(<MediaSurface {...props} />);});
+  const video = () => renderer.root.findByType('Video' as any);
+  expect(video().props.selectedTextTrack).toEqual({type: 'disabled'});
+  act(() => video().props.onLoad({textTracks: [{index: 0, language: 'heb', title: 'Track 1'}, {index: 2, language: 'eng', title: 'English CC'}]}));
+  expect(onSubtitleTracks).toHaveBeenLastCalledWith([]);
+  expect(video().props.selectedTextTrack).toEqual({type: 'index', value: 0});
+  expect(video().props.subtitleStyle.opacity).toBe(0);
+  act(() => {jest.advanceTimersByTime(200); video().props.onTextTrackDataChanged({subtitleTracks: 'שלום'});});
+  expect(onSubtitleTracks).toHaveBeenLastCalledWith([{id: '0', language: 'heb', label: 'עברית'}]);
+  act(() => {jest.advanceTimersByTime(200); video().props.onTextTrackDataChanged({subtitleTracks: 'Hello'});});
+  expect(onSubtitleTracks).toHaveBeenLastCalledWith([
+    {id: '0', language: 'heb', label: 'עברית'}, {id: '2', language: 'eng', label: 'English CC'},
+  ]);
+  const instance = video();
+  act(() => renderer.update(<MediaSurface {...props} selectedSubtitleId="2" />));
+  expect(video()).toBe(instance);
+  expect(video().props.selectedTextTrack).toEqual({type: 'index', value: 2});
+  expect(video().props.subtitleStyle.opacity).toBe(1);
+  act(() => renderer.update(<MediaSurface {...props} selectedSubtitleId="off" />));
+  expect(video().props.selectedTextTrack).toEqual({type: 'disabled'});
+  act(() => video().props.onTextTracks({textTracks: []}));
+  expect(onSubtitleTracks).toHaveBeenLastCalledWith([]);
+  act(() => renderer.update(<MediaSurface {...props} selectedSubtitleId="0" maxVideoHeight={180} />));
+  expect(video().props.selectedTextTrack).toEqual({type: 'disabled'});
+  act(() => renderer.unmount());
+  jest.useRealTimers();
 });

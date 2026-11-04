@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { type Channel, type Program } from "@/lib/channels-data";
 import ProgramDisplay from "@/components/program-display";
+import SubtitleControl from "@/components/player/subtitle-control";
 import { radioNowPlayingText, type RadioNowPlaying } from "@/hooks/useRadioNowPlaying";
 
 const PLAYER_VOLUME_STORAGE_KEY = "tv-player-volume-state";
@@ -39,6 +40,7 @@ type BottomControlsVisibility = {
   showVolume?: boolean;
   showLive?: boolean;
   showQuality?: boolean;
+  showSubtitles?: boolean;
   showCast?: boolean;
   showExpand?: boolean;
   showFullscreen?: boolean;
@@ -681,6 +683,7 @@ export default function CustomPlayerControls({
     showVolume: true,
     showLive: true,
     showQuality: true,
+    showSubtitles: true,
     showCast: false,
     showExpand: true,
     showFullscreen: true,
@@ -1049,6 +1052,15 @@ export default function CustomPlayerControls({
               >
                 LIVE
               </button>
+            )}
+
+            {bottomOptions.showSubtitles && !isRadioChannel && !isCasting && (
+              <SubtitleControl
+                player={player}
+                closeMenu={qualityOpen || volumeOpen || !show}
+                onOpen={() => {setQualityOpen(false); setVolumeOpen(false);}}
+                onInteraction={onInteraction}
+              />
             )}
 
             {canSelectQuality && (

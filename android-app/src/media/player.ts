@@ -47,6 +47,12 @@ export interface VideoQualityOption {
   active?: boolean;
 }
 
+export interface SubtitleOption {
+  id: string;
+  label: string;
+  language?: string;
+}
+
 export interface MediaItem {
   id: string;
   kind: MediaKind;

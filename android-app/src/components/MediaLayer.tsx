@@ -135,6 +135,8 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
     paused,
     setPaused,
     selectedQualityId,
+    selectedSubtitleId,
+    setSubtitleTracks,
     markError,
     markPlaying,
     updateProgress,
@@ -219,6 +221,8 @@ export function MediaLayer({channelDrawerOpen = false}: {channelDrawerOpen?: boo
                 : undefined
             }
             selectedQualityId={tiled ? 'auto' : selectedQualityId}
+            selectedSubtitleId={tiled ? 'off' : selectedSubtitleId}
+            onSubtitleTracks={setSubtitleTracks}
             registerSeekHandler={registerSeekHandler}
             onFirstFrame={markPlaying}
             onError={markError}

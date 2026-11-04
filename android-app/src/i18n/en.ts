@@ -44,6 +44,9 @@ export const en = {
 
   // Player
   playerSources: 'Sources',
+  playerSubtitles: 'Subtitles',
+  playerSubtitlesOff: 'Off',
+  playerSubtitleNumber: 'Subtitles {number}',
   playerChannels: 'Live channels',
   playerUpNext: 'Up next',
   playerChannelsUnavailable: 'Unable to load live channels.',

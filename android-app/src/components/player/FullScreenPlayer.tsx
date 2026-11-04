@@ -34,6 +34,7 @@ import {
 } from './PlayerBottomControls';
 import { QualityDialog } from './QualityDialog';
 import { SourceDialog } from './SourceDialog';
+import { SubtitleDialog } from './SubtitleDialog';
 import { LiveChannelDrawer } from './LiveChannelDrawer';
 import { WatchProgressService } from '../../services/watchProgress';
 import { LiveSourcePreferencesService } from '../../services/liveSourcePreferences';
@@ -47,7 +48,7 @@ interface FullScreenPlayerProps {
   onChannelDrawerChange?: (open: boolean) => void;
 }
 
-type DialogType = 'quality' | 'sources' | 'channels' | null;
+type DialogType = 'quality' | 'sources' | 'channels' | 'subtitles' | null;
 
 const CONTROLS_HIDE_DELAY_MS = 4500;
 const VOD_PROGRESS_SAVE_INTERVAL_MS = 5000;
@@ -117,6 +118,9 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     seekableEnd,
     videoQualities,
     selectedQualityId,
+    subtitleTracks,
+    selectedSubtitleId,
+    setSelectedSubtitle,
     togglePlayPause,
     setPaused,
     setSelectedQuality,
@@ -511,6 +515,13 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     setActiveDialog('sources');
   }, [clearHideTimer, wasJustRevealed]);
 
+  const handleOpenSubtitles = useCallback(() => {
+    if (wasJustRevealed()) return;
+    clearHideTimer();
+    setLastFocusedControl('subtitles');
+    setActiveDialog('subtitles');
+  }, [clearHideTimer, wasJustRevealed]);
+
   const handleOpenMultiView = useCallback(() => {
     if (wasJustRevealed()) {
       return;
@@ -530,6 +541,13 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
     setControlsVisible(true);
     resetHideTimer();
   }, [activeDialog, resetHideTimer]);
+
+  useEffect(() => {
+    if (activeDialog === 'subtitles' && subtitleTracks.length === 0) {
+      setLastFocusedControl('quality');
+      handleCloseDialog();
+    }
+  }, [activeDialog, subtitleTracks.length, handleCloseDialog]);
 
   const sourceOptions = useMemo(
     () =>
@@ -630,6 +648,8 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
             selectedQualityId={selectedQualityId}
             videoQualities={videoQualities}
             hasAlternateSources={sourceOptions.length > 1}
+            hasSubtitles={subtitleTracks.length > 0}
+            onOpenSubtitles={handleOpenSubtitles}
             lastFocusedControl={lastFocusedControl}
             onFocusControl={setLastFocusedControl}
             onTogglePlayPause={handleTogglePlayPause}
@@ -659,6 +679,15 @@ export const FullScreenPlayer = memo(function FullScreenPlayerView({
           qualities={videoQualities}
           selectedQualityId={selectedQualityId}
           onSelectQuality={setSelectedQuality}
+          onClose={handleCloseDialog}
+        />
+      ) : null}
+
+      {activeDialog === 'subtitles' ? (
+        <SubtitleDialog
+          tracks={subtitleTracks}
+          selectedId={selectedSubtitleId}
+          onSelect={setSelectedSubtitle}
           onClose={handleCloseDialog}
         />
       ) : null}
