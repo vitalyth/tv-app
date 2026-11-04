@@ -328,6 +328,20 @@ Sources: [yes sports lineup](https://www.yes.co.il/content/yes-magazine/sports-t
 and [HOT channel list](https://www.hot.net.il/heb/tv/channels/hotchannels/),
 checked November 2, 2026.
 
+### Preferred live sources
+
+An existing channel can set `primarySource.streamUrl` and optional
+`primarySource.linkDetails` in `data/custom_channels.json`. The preferred stream
+keeps the channel ID, number, logo and EPG; `linkDetails.vpn: true` routes playback
+through the VPN backend. The catalog currently prefers the verified FreeTV HLS
+sources for 16 existing channels.
+
+The previous source remains selectable under a generated `<channelID>_previous`
+ID, unless an equivalent source already exists. Addon resolvers still receive
+the original channel ID, and Nextbet alternatives still refresh their tokens.
+Equivalent stream URLs in the same channel group are deduplicated.
+Alternate sources are displayed as `גיבוי 1`, `גיבוי 2`, etc. in source order.
+
 ### Nextbet live channels
 
 The custom catalog includes 14 additional source channels alongside existing
@@ -337,7 +351,7 @@ not the similarly named yes movie channels. Existing IDs for Sport 5 and
 Sport 5 Max remain stable.
 
 Additional channels have their own guide indices. Sport 5 groups the original
-IdanPlus source (primary) and Nextbet source (alternate) under index 15 and
+IdanPlus and Nextbet sources under index 15 and
 channel number 55, with the shared `sport5` EPG. Kan 11 uses the existing `ch_11` entry
 and its existing backup sources under guide index 1, with the downloaded local
 Kan logo. No duplicate Kan entry is added for the unavailable source.

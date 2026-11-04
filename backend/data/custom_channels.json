@@ -5,7 +5,15 @@
     "channelNumber": "11",
     "image": "kan11.png",
     "logo": "kan11.png",
-    "orderNumber": 40
+    "orderNumber": 40,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/kan11/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_11b",
@@ -23,7 +31,15 @@
     "id": "ch_12",
     "channelID": "ch_12",
     "channelNumber": "12",
-    "orderNumber": 80
+    "orderNumber": 80,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/keshet_12/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_12b",
@@ -53,7 +69,15 @@
     "id": "ch_13",
     "channelID": "ch_13",
     "channelNumber": "13",
-    "orderNumber": 130
+    "orderNumber": 130,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/reshet_13/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_13b",
@@ -77,7 +101,15 @@
     "id": "ch_14",
     "channelID": "ch_14",
     "channelNumber": "14",
-    "orderNumber": 170
+    "orderNumber": 170,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/ch14/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_14b",
@@ -101,7 +133,15 @@
     "id": "ch_23",
     "channelID": "ch_23",
     "channelNumber": "80",
-    "orderNumber": 490
+    "orderNumber": 490,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/edu23/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_23b",
@@ -113,7 +153,15 @@
     "id": "ch_24",
     "channelID": "ch_24",
     "channelNumber": "24",
-    "orderNumber": 220
+    "orderNumber": 220,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/music24/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_bb",
@@ -200,7 +248,15 @@
     "id": "ch_33",
     "channelID": "ch_33",
     "channelNumber": "33",
-    "orderNumber": 310
+    "orderNumber": 310,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/makkan/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_33b",
@@ -246,7 +302,15 @@
     "label": "ספורט 5",
     "tvgID": "sport5",
     "image": "sport-5-square.svg",
-    "logo": "sport-5-square.svg"
+    "logo": "sport-5-square.svg",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/sport_5/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_100",
@@ -258,7 +322,15 @@
     "id": "ch_9",
     "channelID": "ch_9",
     "channelNumber": "9",
-    "orderNumber": 10
+    "orderNumber": 10,
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/ch9/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_i24news",
@@ -1554,7 +1626,15 @@
       "manifest_type": "hls"
     },
     "orderNumber": 450,
-    "channelNumber": "60"
+    "channelNumber": "60",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/sport_5_max/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_sport5_live",
@@ -1692,7 +1772,15 @@
       "manifest_type": "hls"
     },
     "orderNumber": 340,
-    "channelNumber": "50"
+    "channelNumber": "50",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/one_1/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_one2",
@@ -1715,7 +1803,15 @@
       "manifest_type": "hls"
     },
     "orderNumber": 330,
-    "channelNumber": "49"
+    "channelNumber": "49",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/one_2/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_sport5_extra_live",
@@ -1738,7 +1834,15 @@
       "manifest_type": "hls"
     },
     "orderNumber": 430,
-    "channelNumber": "58"
+    "channelNumber": "58",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/sport_5_live/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_sport5_plus",
@@ -1761,7 +1865,15 @@
       "manifest_type": "hls"
     },
     "orderNumber": 410,
-    "channelNumber": "56"
+    "channelNumber": "56",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/sport_5_plus/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_sport5_gold",
@@ -1784,7 +1896,15 @@
       "manifest_type": "hls"
     },
     "orderNumber": 420,
-    "channelNumber": "57"
+    "channelNumber": "57",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/sport_5_gold/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_sport5_stars",
@@ -1807,7 +1927,15 @@
       "manifest_type": "hls"
     },
     "orderNumber": 440,
-    "channelNumber": "59"
+    "channelNumber": "59",
+    "primarySource": {
+      "streamUrl": "https://d1zqtf09wb8nt5.cloudfront.net/livehls/oil/freetv/live/sport_5_starz/live.livx/playlist.m3u8",
+      "linkDetails": {
+        "vpn": true,
+        "manifest_type": "hls",
+        "referer": "https://tv.bestcams.net/"
+      }
+    }
   },
   {
     "id": "ch_eurosport1",
