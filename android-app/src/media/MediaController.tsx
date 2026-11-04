@@ -15,11 +15,13 @@ import type {
   MediaStream,
   PlaybackStatus,
   VideoQualityOption,
+  SubtitleOption,
   MultiViewState,
 } from './player';
 import { isSameMediaItem } from './player';
 import { multiViewMaxStreams } from './multiViewLayout';
 import { softwareMultiViewAvailable } from './nativeMultiView';
+import {preferredSubtitle, SubtitlePreferencesService, type SubtitlePreference} from '../services/subtitlePreferences';
 
 export interface MediaControllerValue {
   item?: MediaItem;
@@ -34,6 +36,10 @@ export interface MediaControllerValue {
   seekableEnd: number;
   videoQualities: VideoQualityOption[];
   selectedQualityId: string;
+  subtitleTracks: SubtitleOption[];
+  selectedSubtitleId: string;
+  setSubtitleTracks: (tracks: SubtitleOption[]) => void;
+  setSelectedSubtitle: (id: string) => void;
   multiView: MultiViewState | null;
   enterMultiView: () => void;
   setMultiViewBackend: (
@@ -288,6 +294,37 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     [],
   );
   const [selectedQualityId, setSelectedQualityId] = useState<string>('auto');
+  const [subtitleTracks, setSubtitleTracksState] = useState<SubtitleOption[]>([]);
+  const [subtitlePreference, setSubtitlePreference] = useState<SubtitlePreference>({enabled: false});
+  const subtitlePreferenceRevision = useRef(0);
+  useEffect(() => {
+    let active = true;
+    const revision = subtitlePreferenceRevision.current;
+    SubtitlePreferencesService.load().then(preference => {
+      if (active && revision === subtitlePreferenceRevision.current) setSubtitlePreference(preference);
+    });
+    return () => {active = false;};
+  }, []);
+  const selectedSubtitleId = preferredSubtitle(subtitleTracks, subtitlePreference)?.id ?? 'off';
+  const setSelectedSubtitle = useCallback((id: string) => {
+    const track = subtitleTracks.find(option => option.id === id);
+    if (id !== 'off' && !track) return;
+    const preference = {enabled: Boolean(track), language: track?.language, label: track?.label};
+    subtitlePreferenceRevision.current += 1;
+    setSubtitlePreference(preference);
+    void SubtitlePreferencesService.save(preference);
+  }, [subtitleTracks]);
+  useEffect(() => {
+    setSubtitleTracksState([]);
+  }, [item?.id, stream?.url]);
+
+  const setSubtitleTracks = useCallback((tracks: SubtitleOption[]) => {
+    setSubtitleTracksState(previous =>
+      previous.length === tracks.length && previous.every((track, index) =>
+        track.id === tracks[index].id && track.label === tracks[index].label &&
+        track.language === tracks[index].language) ? previous : tracks);
+  }, []);
+
   const seekHandlerRef = useRef<((seconds: number) => void) | null>(null);
 
   const removeMultiViewChannel = useCallback(
@@ -597,6 +634,10 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       seekableEnd,
       videoQualities,
       selectedQualityId,
+      subtitleTracks,
+      selectedSubtitleId,
+      setSubtitleTracks,
+      setSelectedSubtitle,
       play,
       playFullscreen,
       openFullscreen,
@@ -632,6 +673,10 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       playFullscreen,
       presentation,
       selectedQualityId,
+      subtitleTracks,
+      selectedSubtitleId,
+      setSubtitleTracks,
+      setSelectedSubtitle,
       seekableEnd,
       seekableStart,
       seekTo,

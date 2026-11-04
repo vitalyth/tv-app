@@ -1,6 +1,7 @@
 import Video, {
   type OnProgressData,
   type OnVideoTracksData,
+  type OnTextTracksData,
   SelectedVideoTrackType,
   SelectedTrackType,
   type SelectedVideoTrack,
@@ -8,7 +9,8 @@ import Video, {
 import { StyleSheet } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MediaSurfaceProps } from './MediaSurface.types';
-import type { VideoQualityOption } from './player';
+import type { VideoQualityOption, SubtitleOption } from './player';
+import {subtitleOptions, selectedSubtitleTrack} from './subtitles';
 
 const bufferConfig = {
   minBufferMs: 2500,
@@ -19,6 +21,9 @@ const bufferConfig = {
 
 const disabledTrack = {type: SelectedTrackType.DISABLED};
 const systemTrack = {type: SelectedTrackType.SYSTEM};
+const hiddenSubtitles = {opacity: 0};
+const visibleSubtitles = {opacity: 1};
+const subtitleKey = (track?: SubtitleOption) => track ? [track.id, track.language, track.label].join("|") : "";
 
 export function MediaSurface({
   streamUrl,
@@ -35,6 +40,7 @@ export function MediaSurface({
   paused = false,
   startPositionSeconds,
   selectedQualityId = 'auto',
+  selectedSubtitleId = 'off',
   registerSeekHandler,
   style,
   onFirstFrame,
@@ -44,6 +50,7 @@ export function MediaSurface({
   onEnd,
   onProgress,
   onVideoTracks,
+  onSubtitleTracks,
 }: MediaSurfaceProps) {
   const videoRef = useRef<any>(null);
   const [activeSource, setActiveSource] = useState({
@@ -210,7 +217,47 @@ export function MediaSurface({
 
   const source = useMemo(() => ({
     uri: activeSource.url, type: activeSource.type || 'm3u8',
+    // Inspect HLS media as well as the manifest to discover embedded captions.
+    textTracksAllowChunklessPreparation: false,
   }), [activeSource.url, activeSource.type]);
+
+  const [subtitleCandidates, setSubtitleCandidates] = useState<SubtitleOption[]>([]);
+  const [verifiedSubtitleIds, setVerifiedSubtitleIds] = useState<Set<string>>(new Set());
+  const [subtitleProbeIndex, setSubtitleProbeIndex] = useState(0);
+  const pendingSubtitles = useMemo(() => subtitleCandidates.filter(track => !verifiedSubtitleIds.has(subtitleKey(track))),
+    [subtitleCandidates, verifiedSubtitleIds]);
+  const showingSubtitle = selectedSubtitleId !== 'off' && verifiedSubtitleIds.has(subtitleKey(subtitleCandidates.find(track => track.id === selectedSubtitleId)));
+  const nativeSubtitleId = showingSubtitle ? selectedSubtitleId
+    : pendingSubtitles[subtitleProbeIndex % Math.max(1, pendingSubtitles.length)]?.id ?? 'off';
+  const subtitleProbeRef = useRef({id: nativeSubtitleId, key: "", since: Date.now()});
+  useEffect(() => {
+    subtitleProbeRef.current = {id: nativeSubtitleId, key: subtitleKey(subtitleCandidates.find(track => track.id === nativeSubtitleId)), since: Date.now()};
+  }, [nativeSubtitleId, subtitleCandidates, activeSource.url]);
+  useEffect(() => {
+    if (showingSubtitle || !pendingSubtitles.length || paused || maxVideoHeight) return;
+    const timer = setTimeout(() => setSubtitleProbeIndex(index => index + 1), 8000);
+    return () => clearTimeout(timer);
+  }, [showingSubtitle, pendingSubtitles, subtitleProbeIndex, paused, maxVideoHeight]);
+  const handleTextTracks = useCallback((data: OnTextTracksData) => {
+    const options = subtitleOptions(data.textTracks ?? []);
+    setSubtitleCandidates(previous => previous.length === options.length && previous.every((track, index) =>
+      track.id === options[index].id && track.label === options[index].label && track.language === options[index].language)
+      ? previous : options);
+  }, []);
+  const textTrack = useMemo(
+    () => selectedSubtitleTrack(nativeSubtitleId, Boolean(maxVideoHeight)),
+    [nativeSubtitleId, maxVideoHeight],
+  );
+
+  useEffect(() => {
+    setSubtitleCandidates([]);
+    setVerifiedSubtitleIds(new Set());
+    setSubtitleProbeIndex(0);
+    onSubtitleTracks?.([]);
+  }, [activeSource.url, onSubtitleTracks]);
+  useEffect(() => {
+    onSubtitleTracks?.(subtitleCandidates.filter(track => verifiedSubtitleIds.has(subtitleKey(track))));
+  }, [subtitleCandidates, verifiedSubtitleIds, onSubtitleTracks]);
 
   return (
     <Video
@@ -225,7 +272,8 @@ export function MediaSurface({
       // Muting alone still decodes, resamples and mixes every tile's audio.
       // Release inaudible audio renderers while keeping all video players alive.
       selectedAudioTrack={maxVideoHeight && isMuted ? disabledTrack : systemTrack}
-      selectedTextTrack={maxVideoHeight ? disabledTrack : systemTrack}
+      selectedTextTrack={textTrack}
+      subtitleStyle={showingSubtitle && !maxVideoHeight ? visibleSubtitles : hiddenSubtitles}
       disableFocus={disableAudioFocus}
       volume={1.0}
       maxBitRate={maxBitRate}
@@ -238,7 +286,8 @@ export function MediaSurface({
       playWhenInactive={false}
       ignoreSilentSwitch="ignore"
       onReadyForDisplay={handleFirstFrame}
-      onLoad={() => {
+      onLoad={data => {
+        handleTextTracks({textTracks: data?.textTracks ?? []});
         const position = fallbackPositionRef.current ?? startPositionSeconds;
         if (!isLive && position && position > 0) {
           videoRef.current?.seek(position);
@@ -254,6 +303,13 @@ export function MediaSurface({
       progressUpdateInterval={maxVideoHeight ? 1000 : 250}
       onProgress={handleProgress}
       onVideoTracks={handleVideoTracks}
+      onTextTracks={handleTextTracks}
+      onTextTrackDataChanged={data => {
+        const probe = subtitleProbeRef.current;
+        if (!data.subtitleTracks?.trim() || probe.id === 'off' || !probe.key || maxVideoHeight ||
+            Date.now() - probe.since < 150) return;
+        setVerifiedSubtitleIds(previous => previous.has(probe.key) ? previous : new Set([...previous, probe.key]));
+      }}
       selectedVideoTrack={selectedVideoTrack}
       onError={handleError}
       onBuffer={({isBuffering}) => onBuffer?.(isBuffering)}

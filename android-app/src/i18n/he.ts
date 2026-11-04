@@ -44,6 +44,9 @@ export const he = {
 
   // Player
   playerSources: 'מקורות',
+  playerSubtitles: 'כתוביות',
+  playerSubtitlesOff: 'כבוי',
+  playerSubtitleNumber: 'כתוביות {number}',
   playerChannels: 'ערוצים חיים',
   playerUpNext: 'התוכנית הבאה',
   playerChannelsUnavailable: 'לא ניתן לטעון את הערוצים.',

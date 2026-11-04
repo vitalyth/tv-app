@@ -1,5 +1,5 @@
 import type { StyleProp, ViewStyle } from 'react-native';
-import type { MediaStreamType, VideoQualityOption } from './player';
+import type { MediaStreamType, VideoQualityOption, SubtitleOption } from './player';
 
 export interface MediaSurfaceProps {
   streamUrl: string;
@@ -17,6 +17,7 @@ export interface MediaSurfaceProps {
   paused?: boolean;
   startPositionSeconds?: number;
   selectedQualityId?: string;
+  selectedSubtitleId?: string;
   registerSeekHandler?: (handler: (seconds: number) => void) => () => void;
   style?: StyleProp<ViewStyle>;
   onFirstFrame: () => void;
@@ -33,4 +34,5 @@ export interface MediaSurfaceProps {
     seekableEnd?: number;
   }) => void;
   onVideoTracks?: (tracks: VideoQualityOption[]) => void;
+  onSubtitleTracks?: (tracks: SubtitleOption[]) => void;
 }

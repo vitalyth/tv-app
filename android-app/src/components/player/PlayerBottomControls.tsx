@@ -23,7 +23,8 @@ export type ControlId =
   | 'live'
   | 'sources'
   | 'multiview'
-  | 'quality';
+  | 'quality'
+  | 'subtitles';
 
 interface PlayerBottomControlsProps {
   item: MediaItem;
@@ -35,6 +36,8 @@ interface PlayerBottomControlsProps {
   selectedQualityId: string;
   videoQualities: VideoQualityOption[];
   hasAlternateSources: boolean;
+  hasSubtitles?: boolean;
+  onOpenSubtitles?: () => void;
   lastFocusedControl: ControlId;
   onFocusControl: (id: ControlId) => void;
   onTogglePlayPause: () => void;
@@ -108,6 +111,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   selectedQualityId,
   videoQualities,
   hasAlternateSources,
+  hasSubtitles = false,
+  onOpenSubtitles,
   lastFocusedControl,
   onFocusControl,
   onTogglePlayPause,
@@ -198,6 +203,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
   const sourcesRef = useRef<View>(null);
   const multiviewRef = useRef<View>(null);
   const qualityRef = useRef<View>(null);
+  const subtitlesRef = useRef<View>(null);
   const timelineRef = useRef<View>(null);
   const focusRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -210,6 +216,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           ? timelineRef
           : id === 'live' && isLive
           ? liveRef
+          : id === 'subtitles' && hasSubtitles
+          ? subtitlesRef
           : id === 'quality'
           ? qualityRef
           : id === 'sources' && showSources
@@ -219,7 +227,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           : playRef;
       target.current?.requestTVFocus?.();
     },
-    [isLive, showSources],
+    [isLive, showSources, hasSubtitles],
   );
 
   const clearFocusRecovery = useCallback(() => {
@@ -256,6 +264,11 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 
   // Restore focus when controls reappear without refocusing an active control.
   useEffect(() => {
+    if (lastFocusedControl === 'subtitles' && !hasSubtitles) {
+      focusedControlRef.current = null;
+      onFocusControl('quality');
+      return;
+    }
     if (focusedControlRef.current === lastFocusedControl) {
       return;
     }
@@ -263,7 +276,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       requestControlFocus(lastFocusedControl);
     }, 50);
     return () => clearTimeout(timer);
-  }, [lastFocusedControl, requestControlFocus]);
+  }, [lastFocusedControl, requestControlFocus, hasSubtitles, onFocusControl]);
 
   // Handle remote DPAD left/right explicitly to bridge the flexSpacer gap seamlessly
   useTVNavigationEventHandler(event => {
@@ -285,18 +298,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
     }
     if (focusedControl === 'timeline') {
       if (event.eventType === 'down') {
-        const previous = previousRowControlRef.current;
-        const target =
-          previous === 'live' && isLive
-            ? liveRef
-            : previous === 'quality'
-            ? qualityRef
-            : previous === 'sources' && showSources
-            ? sourcesRef
-            : previous === 'multiview' && isLive
-            ? multiviewRef
-            : playRef;
-        target.current?.requestTVFocus?.();
+        requestControlFocus(previousRowControlRef.current);
       } else if (
         canSeek &&
         (event.eventType === 'left' || event.eventType === 'right')
@@ -306,44 +308,16 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       return;
     }
 
-    if (event.eventType === 'right') {
-      if (focusedControl === 'play-pause') {
-        if (isLive) {
-          liveRef.current?.requestTVFocus?.();
-          return;
-        }
-        const next = showSources ? 'sources' : isLive ? 'multiview' : 'quality';
-        const target =
-          next === 'sources'
-            ? sourcesRef
-            : next === 'multiview'
-            ? multiviewRef
-            : qualityRef;
-        target.current?.requestTVFocus?.();
-      } else if (focusedControl === 'live') {
-        (showSources ? sourcesRef : multiviewRef).current?.requestTVFocus?.();
-      } else if (focusedControl === 'sources') {
-        multiviewRef.current?.requestTVFocus?.();
-      } else if (focusedControl === 'multiview') {
-        qualityRef.current?.requestTVFocus?.();
-      } else if (focusedControl === 'quality') {
-        qualityRef.current?.requestTVFocus?.();
-      }
-    } else if (event.eventType === 'left') {
-      if (focusedControl === 'quality') {
-        const prev = isLive ? 'multiview' : 'play-pause';
-        const target = prev === 'multiview' ? multiviewRef : playRef;
-        target.current?.requestTVFocus?.();
-      } else if (focusedControl === 'multiview') {
-        const target = showSources ? sourcesRef : liveRef;
-        target.current?.requestTVFocus?.();
-      } else if (focusedControl === 'sources') {
-        liveRef.current?.requestTVFocus?.();
-      } else if (focusedControl === 'live') {
-        playRef.current?.requestTVFocus?.();
-      } else if (focusedControl === 'play-pause') {
-        playRef.current?.requestTVFocus?.();
-      }
+    if (event.eventType === 'right' || event.eventType === 'left') {
+      const controls: ControlId[] = [
+        'play-pause', ...(isLive ? ['live' as const] : []),
+        ...(showSources ? ['sources' as const] : []),
+        ...(isLive ? ['multiview' as const] : []),
+        ...(hasSubtitles ? ['subtitles' as const] : []), 'quality',
+      ];
+      const direction = event.eventType === 'right' ? 1 : -1;
+      const index = controls.indexOf(focusedControl);
+      requestControlFocus(controls[Math.max(0, Math.min(controls.length - 1, index + direction))]);
     }
   });
 
@@ -415,6 +389,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             liveRef.current,
             sourcesRef.current,
             multiviewRef.current,
+            subtitlesRef.current,
             qualityRef.current,
           ].filter(Boolean) as any
         }
@@ -433,7 +408,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
               ? (sourcesRef.current as any)
               : isLive
               ? (multiviewRef.current as any)
-              : (qualityRef.current as any)
+              : ((hasSubtitles ? subtitlesRef : qualityRef).current as any)
           }
           onFocus={() => handleFocus('play-pause')}
           onBlur={() => handleBlur('play-pause')}
@@ -555,7 +530,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
                 ? (sourcesRef.current as any)
                 : (liveRef.current as any)
             }
-            nextFocusRight={qualityRef.current as any}
+            nextFocusRight={(hasSubtitles ? subtitlesRef : qualityRef).current as any}
             onFocus={() => handleFocus('multiview')}
             onBlur={() => handleBlur('multiview')}
             onPress={onOpenMultiView}
@@ -587,6 +562,25 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           </Pressable>
         ) : null}
 
+        {hasSubtitles ? (
+          <Pressable
+            ref={subtitlesRef}
+            testID="subtitles-button"
+            hasTVPreferredFocus={lastFocusedControl === 'subtitles'}
+            nextFocusLeft={(isLive ? multiviewRef : playRef).current as any}
+            nextFocusRight={qualityRef.current as any}
+            onFocus={() => handleFocus('subtitles')}
+            onBlur={() => handleBlur('subtitles')}
+            onPress={onOpenSubtitles}
+            style={({focused}) => [styles.actionCard, focused && styles.actionCardFocused]}
+          >
+            {({focused}) => <>
+              <Text style={[styles.actionText, focused && styles.actionTextFocused]}>CC</Text>
+              <Text style={[styles.actionText, focused && styles.actionTextFocused]}>{t('playerSubtitles')}</Text>
+            </>}
+          </Pressable>
+        ) : null}
+
         {/* Quality Button */}
         <Pressable
           ref={qualityRef}
@@ -594,7 +588,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           focusable={true}
           hasTVPreferredFocus={lastFocusedControl === 'quality'}
           nextFocusLeft={
-            isLive ? (multiviewRef.current as any) : (playRef.current as any)
+            (hasSubtitles ? subtitlesRef : isLive ? multiviewRef : playRef).current as any
           }
           onFocus={() => handleFocus('quality')}
           onBlur={() => handleBlur('quality')}

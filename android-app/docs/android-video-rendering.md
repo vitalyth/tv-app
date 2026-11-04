@@ -4,6 +4,26 @@ Android fullscreen uses `contain` to preserve the complete source frame. Backgro
 playback retains `cover`; Multi View also uses `contain`. Presentation changes do
 not replace the primary player or resolve its stream again.
 
+Android fullscreen exposes a subtitle selector for live and VOD playback only
+when decoded subtitle data has been received. It lists available track names or
+languages and an Off option; selection updates the existing player without
+reloading the stream. Subtitles default to Off; enabled/disabled and preferred
+language are saved locally and restored across source changes and app restarts.
+Track indices are never reused across sources; the preference is matched by
+language/name, falling back to an available verified track. Empty track lists do
+not erase the user's preference.
+The native subtitle renderer handles supported embedded DVB/CEA tracks and HLS
+subtitle renditions. Burned-in captions cannot be switched off. Multi View keeps
+text rendering disabled to preserve its existing playback budget. Discovery and
+selection are currently wired to Android's react-native-video surface.
+HLS chunkless preparation is disabled to discover captions inside the media.
+While CC is Off, text tracks are sampled one at a time with the subtitle overlay
+hidden; an empty service is not exposed in the menu and is sampled again later.
+Once a verified track is showing, probing stops to avoid interrupting captions.
+The subtitle-cues postinstall patch also reports bitmap DVB cue data. Multi View
+does not probe or render captions. Validated tracks remain available during
+pauses in dialogue and are cleared when the stream changes.
+
 The locally installed native video wrapper has a no-op `updateSurfaceView` method
 and independently adds a top-left LIVE badge. The postinstall scripts hide that
 badge and default to a TextureView-backed PlayerView on Android TVs and emulators.

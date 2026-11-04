@@ -113,6 +113,27 @@ describe('FullScreenPlayer', () => {
     };
   }
 
+  it.each([mockLiveItem, mockVodItem])('selects available subtitles for $kind and hides controls after a source change', async mediaItem => {
+    let controller!: ReturnType<typeof useMediaController>;
+    function Probe() {controller = useMediaController(); return null;}
+    await act(async () => {
+      activeRenderer = ReactTestRenderer.create(<MediaControllerProvider><Probe /><PlayerTestHarness item={mediaItem} onExit={jest.fn()} /></MediaControllerProvider>);
+    });
+    expect(activeRenderer!.root.findAllByProps({testID: 'subtitles-button'})).toHaveLength(0);
+    await act(async () => controller.setSubtitleTracks([{id: '0', label: 'עברית'}]));
+    await act(async () => activeRenderer!.root.findByProps({testID: 'subtitles-button'}).props.onPress());
+    await act(async () => activeRenderer!.root.findByProps({testID: 'subtitle-option-0'}).props.onPress());
+    expect(controller.selectedSubtitleId).toBe('0');
+    expect(activeRenderer!.root.findAllByProps({testID: 'subtitle-option-0'})).toHaveLength(0);
+    await act(async () => activeRenderer!.root.findByProps({testID: 'subtitles-button'}).props.onPress());
+    await act(async () => activeRenderer!.root.findByProps({testID: 'subtitle-option-off'}).props.onPress());
+    expect(controller.selectedSubtitleId).toBe('off');
+    await act(async () => activeRenderer!.root.findByProps({testID: 'subtitles-button'}).props.onPress());
+    await act(async () => controller.playFullscreen(mediaItem, {url: 'https://example.com/other.m3u8'}));
+    expect(activeRenderer!.root.findAllByProps({testID: 'subtitles-button'})).toHaveLength(0);
+    expect(activeRenderer!.root.findAllByProps({testID: 'subtitle-option-off'})).toHaveLength(0);
+  });
+
   it.each([
     ['up', 1], ['down', 2],
   ] as const)('switches hidden live playback with %s without revealing panels', async (eventType, targetIndex) => {

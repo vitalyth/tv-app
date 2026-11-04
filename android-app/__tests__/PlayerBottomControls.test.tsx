@@ -61,6 +61,7 @@ describe('PlayerBottomControls timeline', () => {
     seekableStart?: number,
     seekableEnd?: number,
     timeRange?: string,
+    hasSubtitles = false,
   ) {
     function Harness() {
       const [focused, setFocused] = React.useState<ControlId>('play-pause');
@@ -75,6 +76,8 @@ describe('PlayerBottomControls timeline', () => {
           selectedQualityId={selectedQualityId}
           videoQualities={videoQualities}
           hasAlternateSources={false}
+          hasSubtitles={hasSubtitles}
+          onOpenSubtitles={jest.fn()}
           lastFocusedControl={focused}
           onFocusControl={setFocused}
           onSeek={onSeek}
@@ -372,6 +375,28 @@ describe('PlayerBottomControls timeline', () => {
     );
     await press('right');
     expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it.each(['live', 'vod'] as const)('includes available subtitles in %s remote navigation', async kind => {
+    await render(kind, 120, 300, 'auto', [], undefined, undefined, undefined, true);
+    await focus('quality-button');
+    await press('left');
+    expect(focusRequests.get('subtitles-button')).toHaveBeenCalled();
+    await focus('subtitles-button');
+    await press('right');
+    expect(focusRequests.get('quality-button')).toHaveBeenCalled();
+    await press('up');
+    await focus('player-timeline');
+    await press('down');
+    expect(focusRequests.get('subtitles-button')).toHaveBeenCalledTimes(2);
+    await focus('subtitles-button');
+    await press('left');
+    expect(focusRequests.get(kind === 'live' ? 'multiview-button' : 'play-pause-button')).toHaveBeenCalled();
+  });
+
+  it('hides the subtitle control when no subtitle tracks are available', async () => {
+    await render();
+    expect(renderer.root.findAllByProps({testID: 'subtitles-button'})).toHaveLength(0);
   });
 
   it('returns to reported playback if a seek is not acknowledged', async () => {
