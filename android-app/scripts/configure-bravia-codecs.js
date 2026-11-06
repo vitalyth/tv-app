@@ -7,7 +7,7 @@ const replacement = 'new TvAppRenderersFactory(getContext(), () -> TvAppRenderer
 
 const bitrateOriginal = `    public void setMaxBitRateModifier(int newMaxBitRate) {
         maxBitRate = newMaxBitRate;`;
-const bitrateReplacement = `    public void setMaxBitRateModifier(int newMaxBitRate) {
+const legacyBitrateReplacement = `    public void setMaxBitRateModifier(int newMaxBitRate) {
         // TVAPP_TILE_DECODER_BALANCE: a mode change must also re-evaluate an
         // existing low-resolution decoder, not just future player instances.
         boolean tileModeChanged = TvAppRenderersFactory.isDenseTileBitrate(maxBitRate)
@@ -22,6 +22,11 @@ const bitrateReplacement = `    public void setMaxBitRateModifier(int newMaxBitR
             }, 100);
         }`;
 
+const bitrateReplacement = `    public void setMaxBitRateModifier(int newMaxBitRate) {
+        // TVAPP_TILE_DECODER_CONTINUITY: select policy for future codec creation;
+        // update ABR below without stopping an already-playing decoder.
+        maxBitRate = newMaxBitRate;`;
+
 function configureBraviaCodecs(source) {
   if (!source.includes(replacement)) {
     if (source.includes(legacyReplacement)) {
@@ -33,7 +38,10 @@ function configureBraviaCodecs(source) {
       source = source.replace(original, replacement);
     }
   }
-  if (!source.includes('TVAPP_TILE_DECODER_BALANCE')) {
+  if (source.includes(legacyBitrateReplacement)) {
+    source = source.replace(legacyBitrateReplacement, bitrateReplacement);
+  }
+  if (!source.includes('TVAPP_TILE_DECODER_CONTINUITY')) {
     if (!source.includes(bitrateOriginal)) {
       throw new Error('Native bitrate setter changed; review tile decoder balancing.');
     }

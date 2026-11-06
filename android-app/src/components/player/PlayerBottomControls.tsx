@@ -44,7 +44,7 @@ interface PlayerBottomControlsProps {
   onSeek: (seconds: number) => void;
   onOpenQuality: () => void;
   onOpenSources: () => void;
-  onOpenMultiView: () => void;
+  onOpenMultiView?: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -123,6 +123,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 }: PlayerBottomControlsProps) {
   const isLive = item.kind === 'live';
   const showSources = isLive && hasAlternateSources;
+  const showMultiView = isLive && Boolean(onOpenMultiView);
   const hasLiveRange =
     Number.isFinite(seekableStart) &&
     Number.isFinite(seekableEnd) &&
@@ -222,12 +223,12 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           ? qualityRef
           : id === 'sources' && showSources
           ? sourcesRef
-          : id === 'multiview' && isLive
+          : id === 'multiview' && showMultiView
           ? multiviewRef
           : playRef;
       target.current?.requestTVFocus?.();
     },
-    [isLive, showSources, hasSubtitles],
+    [isLive, showSources, showMultiView, hasSubtitles],
   );
 
   const clearFocusRecovery = useCallback(() => {
@@ -264,7 +265,8 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
 
   // Restore focus when controls reappear without refocusing an active control.
   useEffect(() => {
-    if (lastFocusedControl === 'subtitles' && !hasSubtitles) {
+    if ((lastFocusedControl === 'subtitles' && !hasSubtitles) ||
+        (lastFocusedControl === 'multiview' && !showMultiView)) {
       focusedControlRef.current = null;
       onFocusControl('quality');
       return;
@@ -276,7 +278,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       requestControlFocus(lastFocusedControl);
     }, 50);
     return () => clearTimeout(timer);
-  }, [lastFocusedControl, requestControlFocus, hasSubtitles, onFocusControl]);
+  }, [lastFocusedControl, requestControlFocus, hasSubtitles, showMultiView, onFocusControl]);
 
   // Handle remote DPAD left/right explicitly to bridge the flexSpacer gap seamlessly
   useTVNavigationEventHandler(event => {
@@ -312,7 +314,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
       const controls: ControlId[] = [
         'play-pause', ...(isLive ? ['live' as const] : []),
         ...(showSources ? ['sources' as const] : []),
-        ...(isLive ? ['multiview' as const] : []),
+        ...(showMultiView ? ['multiview' as const] : []),
         ...(hasSubtitles ? ['subtitles' as const] : []), 'quality',
       ];
       const direction = event.eventType === 'right' ? 1 : -1;
@@ -406,7 +408,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
               ? (liveRef.current as any)
               : showSources
               ? (sourcesRef.current as any)
-              : isLive
+              : showMultiView
               ? (multiviewRef.current as any)
               : ((hasSubtitles ? subtitlesRef : qualityRef).current as any)
           }
@@ -486,7 +488,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             focusable={true}
             hasTVPreferredFocus={lastFocusedControl === 'sources'}
             nextFocusLeft={liveRef.current as any}
-            nextFocusRight={multiviewRef.current as any}
+            nextFocusRight={(showMultiView ? multiviewRef : hasSubtitles ? subtitlesRef : qualityRef).current as any}
             onFocus={() => handleFocus('sources')}
             onBlur={() => handleBlur('sources')}
             onPress={onOpenSources}
@@ -519,7 +521,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
         ) : null}
 
         {/* LIVE ONLY: Multi View */}
-        {isLive ? (
+        {showMultiView ? (
           <Pressable
             ref={multiviewRef}
             testID="multiview-button"
@@ -567,7 +569,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
             ref={subtitlesRef}
             testID="subtitles-button"
             hasTVPreferredFocus={lastFocusedControl === 'subtitles'}
-            nextFocusLeft={(isLive ? multiviewRef : playRef).current as any}
+            nextFocusLeft={(showMultiView ? multiviewRef : showSources ? sourcesRef : isLive ? liveRef : playRef).current as any}
             nextFocusRight={qualityRef.current as any}
             onFocus={() => handleFocus('subtitles')}
             onBlur={() => handleBlur('subtitles')}
@@ -588,7 +590,7 @@ export const PlayerBottomControls = memo(function PlayerBottomControlsView({
           focusable={true}
           hasTVPreferredFocus={lastFocusedControl === 'quality'}
           nextFocusLeft={
-            (hasSubtitles ? subtitlesRef : isLive ? multiviewRef : playRef).current as any
+            (hasSubtitles ? subtitlesRef : showMultiView ? multiviewRef : showSources ? sourcesRef : isLive ? liveRef : playRef).current as any
           }
           onFocus={() => handleFocus('quality')}
           onBlur={() => handleBlur('quality')}

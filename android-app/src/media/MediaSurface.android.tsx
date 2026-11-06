@@ -63,6 +63,7 @@ export function MediaSurface({
   const currentPositionRef = useRef(startPositionSeconds ?? 0);
   const pendingResumeRef = useRef(startPositionSeconds ?? 0);
   const fallbackPositionRef = useRef<number | undefined>(undefined);
+  const lastVideoTracks = useRef<VideoQualityOption[]>([]);
   const [trackHeights, setTrackHeights] = useState<number[]>([]);
 
   useEffect(() => {
@@ -92,6 +93,7 @@ export function MediaSurface({
     pendingResumeRef.current = startPositionSeconds ?? 0;
     fallbackPositionRef.current = undefined;
     setTrackHeights([]);
+    lastVideoTracks.current = [];
     setActiveSource({ url: streamUrl, type: streamType || 'm3u8' });
   }, [streamType, streamUrl]);
 
@@ -172,10 +174,16 @@ export function MediaSurface({
         }
       }
 
+      lastVideoTracks.current = trackOptions;
       onVideoTracks?.(trackOptions);
     },
     [onVideoTracks, selectedQualityId],
   );
+
+  // A surviving tile may become primary without loading the stream again.
+  useEffect(() => {
+    if (lastVideoTracks.current.length) onVideoTracks?.(lastVideoTracks.current);
+  }, [onVideoTracks]);
 
   const handleError = useCallback(() => {
     if (fallbackStreamUrl && !usingFallback.current) {
@@ -195,6 +203,10 @@ export function MediaSurface({
   const selectedVideoTrack = useMemo<SelectedVideoTrack>(() => {
     if (maxVideoHeight && trackHeights.length) {
       const allowed = trackHeights.filter(height => height <= maxVideoHeight);
+      const requested = Number(selectedQualityId);
+      if (selectedQualityId !== 'auto' && allowed.includes(requested)) {
+        return {type: SelectedVideoTrackType.RESOLUTION, value: requested};
+      }
       return {
         type: SelectedVideoTrackType.RESOLUTION,
         value: allowed.length
@@ -249,12 +261,14 @@ export function MediaSurface({
     [nativeSubtitleId, maxVideoHeight],
   );
 
+  const subtitleReporter = useRef(onSubtitleTracks);
+  subtitleReporter.current = onSubtitleTracks;
   useEffect(() => {
     setSubtitleCandidates([]);
     setVerifiedSubtitleIds(new Set());
     setSubtitleProbeIndex(0);
-    onSubtitleTracks?.([]);
-  }, [activeSource.url, onSubtitleTracks]);
+    subtitleReporter.current?.([]);
+  }, [activeSource.url]);
   useEffect(() => {
     onSubtitleTracks?.(subtitleCandidates.filter(track => verifiedSubtitleIds.has(subtitleKey(track))));
   }, [subtitleCandidates, verifiedSubtitleIds, onSubtitleTracks]);
@@ -265,7 +279,7 @@ export function MediaSurface({
       key={activeSource.url}
       source={source}
       style={[styles.surface, style]}
-      resizeMode={resizeMode}
+      resizeMode={maxVideoHeight ? 'contain' : resizeMode}
       paused={paused}
       controls={false}
       muted={isMuted}

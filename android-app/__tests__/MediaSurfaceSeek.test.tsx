@@ -259,3 +259,22 @@ it('only exposes subtitle tracks with decoded data and changes selection without
   act(() => renderer.unmount());
   jest.useRealTimers();
 });
+
+
+it('keeps Multi View contained and honors only quality choices within the tile budget without replacing video', () => {
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  const props = {streamUrl: 'https://example.com/grid.m3u8', maxVideoHeight: 180,
+    maxBitRate: 260000, resizeMode: 'cover' as const, onFirstFrame: jest.fn(), onError: jest.fn()};
+  act(() => {renderer = ReactTestRenderer.create(<MediaSurface {...props} selectedQualityId="auto" />);});
+  const video = renderer.root.findByType('Video' as any);
+  expect(video.props.resizeMode).toBe('contain');
+  act(() => video.props.onVideoTracks({videoTracks: [{height: 144}, {height: 180}, {height: 720}]}));
+  expect(video.props.selectedVideoTrack.value).toBe(180);
+  act(() => renderer.update(<MediaSurface {...props} selectedQualityId="144" />));
+  expect(video.props.selectedVideoTrack.value).toBe(144);
+  act(() => renderer.update(<MediaSurface {...props} selectedQualityId="720" />));
+  expect(video.props.selectedVideoTrack.value).toBe(180);
+  expect(renderer.root.findByType('Video' as any)).toBe(video);
+  expect(video.props.source.uri).toBe(props.streamUrl);
+  act(() => renderer.unmount());
+});

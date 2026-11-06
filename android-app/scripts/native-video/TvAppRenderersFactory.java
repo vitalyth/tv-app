@@ -20,8 +20,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Balance dense Sony grids and safely release Sony's software AVC surfaces. */
 public final class TvAppRenderersFactory extends DefaultRenderersFactory {
-    // Matches MULTIVIEW_MAX_BITRATE in src/media/player.ts. One/two Android
-    // tiles use twice this budget and retain normal hardware-first selection.
+    // Matches the stable Multi View budget in src/media/player.ts. Reserve
+    // software slots from entry, without stopping existing codecs on tile edits.
     private static final int DENSE_GRID_BITRATE_LIMIT = 260000;
     private static final AtomicInteger softwareReservations = new AtomicInteger();
     private final BooleanSupplier tileMode;

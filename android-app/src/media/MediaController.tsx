@@ -21,6 +21,7 @@ import type {
 import { isSameMediaItem } from './player';
 import { multiViewMaxStreams } from './multiViewLayout';
 import { softwareMultiViewAvailable } from './nativeMultiView';
+import {multiViewSessionKey} from './multiViewSessions';
 import {preferredSubtitle, SubtitlePreferencesService, type SubtitlePreference} from '../services/subtitlePreferences';
 
 export interface MediaControllerValue {
@@ -38,7 +39,7 @@ export interface MediaControllerValue {
   selectedQualityId: string;
   subtitleTracks: SubtitleOption[];
   selectedSubtitleId: string;
-  setSubtitleTracks: (tracks: SubtitleOption[]) => void;
+  setSubtitleTracks: (tracks: SubtitleOption[], ownerKey?: string) => void;
   setSelectedSubtitle: (id: string) => void;
   multiView: MultiViewState | null;
   enterMultiView: () => void;
@@ -54,6 +55,7 @@ export interface MediaControllerValue {
   setMultiViewPrimary: (item: MediaItem, stream: MediaStream) => void;
   removeMultiViewChannel: (tile?: number) => void;
   setMultiViewAudio: (tile: number) => void;
+  setMultiViewActiveTile: (tile: number) => void;
   markMultiViewPlaying: (tile?: number) => void;
   markMultiViewError: (tile?: number) => void;
   play: (item: MediaItem, stream: MediaStream) => void;
@@ -106,9 +108,12 @@ export type MediaControllerActions = Pick<
   | 'setMultiViewPrimary'
   | 'removeMultiViewChannel'
   | 'setMultiViewAudio'
+  | 'setMultiViewActiveTile'
   | 'markMultiViewPlaying'
   | 'markMultiViewError'
 >;
+
+const EMPTY_SUBTITLE_TRACKS: SubtitleOption[] = [];
 
 const MediaControllerContext = createContext<MediaControllerValue | null>(null);
 const MediaControllerActionsContext =
@@ -138,6 +143,15 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
   const [multiView, setMultiView] = useState<MultiViewState | null>(null);
   const multiViewRef = useRef(multiView);
   multiViewRef.current = multiView;
+
+  const setMultiViewActiveTile = useCallback((tile: number) => {
+    if (!Number.isFinite(tile)) return;
+    setMultiView(previous => {
+      if (!previous) return previous;
+      const activeTile = Math.max(0, Math.min(previous.tiles.length, Math.floor(tile)));
+      return (previous.activeTile ?? 0) === activeTile ? previous : {...previous, activeTile};
+    });
+  }, []);
 
   const epg = useLiveEpg();
   useEffect(() => {
@@ -294,7 +308,14 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     [],
   );
   const [selectedQualityId, setSelectedQualityId] = useState<string>('auto');
-  const [subtitleTracks, setSubtitleTracksState] = useState<SubtitleOption[]>([]);
+  const subtitleMainIndex = Math.min(multiView?.activeTile ?? 0, multiView?.tiles.length ?? 0);
+  const subtitleMainItem = subtitleMainIndex === 0 ? item : multiView?.tiles[subtitleMainIndex - 1]?.item;
+  const subtitleMainStream = subtitleMainIndex === 0 ? stream : multiView?.tiles[subtitleMainIndex - 1]?.stream;
+  const subtitleOwner = subtitleMainItem && subtitleMainStream ? multiViewSessionKey(subtitleMainItem, subtitleMainStream) : '';
+  const subtitleOwnerRef = useRef(subtitleOwner);
+  subtitleOwnerRef.current = subtitleOwner;
+  const [subtitleState, setSubtitleTracksState] = useState<{owner: string; tracks: SubtitleOption[]}>({owner: '', tracks: []});
+  const subtitleTracks = subtitleState.owner === subtitleOwner ? subtitleState.tracks : EMPTY_SUBTITLE_TRACKS;
   const [subtitlePreference, setSubtitlePreference] = useState<SubtitlePreference>({enabled: false});
   const subtitlePreferenceRevision = useRef(0);
   useEffect(() => {
@@ -314,15 +335,13 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
     setSubtitlePreference(preference);
     void SubtitlePreferencesService.save(preference);
   }, [subtitleTracks]);
-  useEffect(() => {
-    setSubtitleTracksState([]);
-  }, [item?.id, stream?.url]);
-
-  const setSubtitleTracks = useCallback((tracks: SubtitleOption[]) => {
+  const setSubtitleTracks = useCallback((tracks: SubtitleOption[], ownerKey?: string) => {
+    const owner = ownerKey ?? subtitleOwnerRef.current;
+    if (owner !== subtitleOwnerRef.current) return;
     setSubtitleTracksState(previous =>
-      previous.length === tracks.length && previous.every((track, index) =>
+      previous.owner === owner && previous.tracks.length === tracks.length && previous.tracks.every((track, index) =>
         track.id === tracks[index].id && track.label === tracks[index].label &&
-        track.language === tracks[index].language) ? previous : tracks);
+        track.language === tracks[index].language) ? previous : {owner, tracks});
   }, []);
 
   const seekHandlerRef = useRef<((seconds: number) => void) | null>(null);
@@ -342,7 +361,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
         const next = current.tiles[0];
         setItem(next.item);
         setStreamSource({ item: next.item, stream: next.stream });
-        setStatus('loading');
+        setStatus(next.status);
         setCurrentTime(0);
         setDuration(0);
         setSeekableStart(0);
@@ -356,7 +375,11 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
         setMultiView(null);
         setPresentation('fullscreen');
       } else {
-        setMultiView({ ...current, tiles, audioTile: -1 });
+        const active = current.activeTile ?? 0;
+        const activeTile = active === tile ? 0 : active > tile ? active - 1 : active;
+        const audioTile = current.audioTile === tile ? -1
+          : current.audioTile > tile ? current.audioTile - 1 : current.audioTile;
+        setMultiView({ ...current, tiles, activeTile, audioTile });
       }
     },
     [setPresentation],
@@ -384,6 +407,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
 
   const multiViewActions = useMemo(
     () => ({
+      setMultiViewActiveTile,
       setMultiViewBackend,
       enterMultiView,
       exitMultiView,
@@ -395,6 +419,7 @@ export function MediaControllerProvider({ children }: PropsWithChildren) {
       markMultiViewError,
     }),
     [
+      setMultiViewActiveTile,
       setMultiViewBackend,
       enterMultiView,
       exitMultiView,

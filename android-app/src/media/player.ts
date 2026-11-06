@@ -31,6 +31,7 @@ export interface MultiViewTile {
 
 export interface MultiViewState {
   backend?: 'platform' | 'software';
+  activeTile?: number;
   tiles: MultiViewTile[];
   audioTile: number;
 }

@@ -1,7 +1,7 @@
 import {useTVNavigationEventHandler} from '../../hooks/useTVNavigationEventHandler';
 import {liveEpgStore} from '../../state/liveEpg';
 import {useChannelDrawerViewport} from '../../hooks/useChannelDrawerViewport';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   BackHandler,
@@ -23,7 +23,8 @@ import {
 } from '../../media/MediaController';
 import {
   multiViewMaxStreams,
-  multiViewTileLayout,
+  multiViewToolbarLayout,
+  multiViewFocusLayout,
 } from '../../media/multiViewLayout';
 import { isSameMediaItem, type MediaItem } from '../../media/player';
 import { tvPlatform } from '../../platform/runtime';
@@ -31,6 +32,14 @@ import { t } from '../../i18n';
 import { RemoteImage } from '../RemoteImage';
 import { LiveChannelDrawer } from './LiveChannelDrawer';
 import { softwareMultiViewAvailable } from '../../media/nativeMultiView';
+import {PlayerTopInfo} from './PlayerTopInfo';
+import {PlayerBottomControls, type ControlId} from './PlayerBottomControls';
+import {QualityDialog} from './QualityDialog';
+import {SubtitleDialog} from './SubtitleDialog';
+import {SourceDialog} from './SourceDialog';
+import {multiViewSessionKey, useMultiViewPlayback} from '../../media/multiViewSessions';
+import {getLiveChannelSourceOptions, selectLiveChannelSource} from '../../api/channels';
+import {MultiViewTileFrame} from './MultiViewTileFrame';
 
 type Action = 'add' | 'change' | 'fullscreen' | 'remove' | 'backend';
 type Picker = { index: number; replace: boolean };
@@ -50,8 +59,16 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
   const { width, height } = useWindowDimensions();
   const count = (controller.multiView?.tiles.length ?? 0) + 1;
   const maxStreams = multiViewMaxStreams(controller.multiView?.backend);
-  const [tile, setTile] = useState(0);
-  const focusedTile = Math.min(tile, count - 1);
+  const tile = controller.multiView?.activeTile ?? 0;
+  const setTile = media.setMultiViewActiveTile;
+  const activeTile = Math.min(tile, count - 1);
+  const [navigationTile, setNavigationTile] = useState<number | null>(null);
+  const smallTiles = Array.from({length: count}, (_, index) => index).filter(index => index !== activeTile);
+  const focusedTile = smallTiles.includes(navigationTile ?? -1) ? navigationTile! : smallTiles[0] ?? activeTile;
+  const [activeFocused, setActiveFocused] = useState(false);
+  const [activePanelsVisible, setActivePanelsVisible] = useState(false);
+  const [activeDialog, setActiveDialog] = useState<'quality' | 'sources' | 'subtitles' | null>(null);
+  const [panelControl, setPanelControl] = useState<ControlId>('play-pause');
   const [action, setAction] = useState<Action | null>(null);
   const [infoVisible, setInfoVisible] = useState(true);
   const [picker, setPicker] = useState<Picker | null>(() =>
@@ -67,6 +84,48 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
   const request = useRef(0);
   const lastInteraction = useRef(0);
   const anchor = useRef<View & { requestTVFocus?: () => void }>(null);
+  const actionButtons = useRef<Partial<Record<Action, View & {requestTVFocus?: () => void}>>>({});
+  const activeHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const panelsVisibleRef = useRef(false);
+  const panelsRevealedAt = useRef(0);
+  const clearActiveHideTimer = useCallback(() => {
+    if (activeHideTimer.current !== null) clearTimeout(activeHideTimer.current);
+    activeHideTimer.current = null;
+  }, []);
+  const showActivePanels = useCallback(() => {
+    if (!panelsVisibleRef.current) panelsRevealedAt.current = Date.now();
+    panelsVisibleRef.current = true;
+    setActivePanelsVisible(true);
+    clearActiveHideTimer();
+    activeHideTimer.current = setTimeout(() => {
+      activeHideTimer.current = null;
+      panelsVisibleRef.current = false;
+      setActivePanelsVisible(false);
+    }, PANELS_HIDE_DELAY_MS);
+  }, [clearActiveHideTimer]);
+  const focusActivePlayer = useCallback(() => {
+    clearActiveHideTimer();
+    panelsVisibleRef.current = false;
+    setActivePanelsVisible(false);
+    setAction(null);
+    setActiveFocused(true);
+    setPanelControl('play-pause');
+  }, [clearActiveHideTimer]);
+  const focusPanelControl = useCallback((id: ControlId) => {
+    setPanelControl(id);
+    showActivePanels();
+  }, [showActivePanels]);
+  const interactWithPanel = (handler: () => void) => {
+    // A Select that reveals controls must not also activate the newly focused button.
+    if (Date.now() - panelsRevealedAt.current < 350) return;
+    handler();
+    showActivePanels();
+  };
+  useEffect(() => {
+    if (activeFocused && !activeDialog && !picker && panelsVisibleRef.current) showActivePanels();
+    else clearActiveHideTimer();
+    return clearActiveHideTimer;
+  }, [activeFocused, activeDialog, picker, activeTile, showActivePanels, clearActiveHideTimer]);
   const actions: Action[] = [
     'fullscreen',
     ...(count < maxStreams ? ['add' as const] : []),
@@ -75,22 +134,28 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
     ...(softwareMultiViewAvailable && count <= 2 ? ['backend' as const] : []),
   ];
   const selected =
-    focusedTile === 0
+    activeTile === 0
       ? controller.item
-      : controller.multiView?.tiles[focusedTile - 1]?.item;
+      : controller.multiView?.tiles[activeTile - 1]?.item;
   useEffect(() => {
     setInfoVisible(true);
     const timer = setTimeout(() => setInfoVisible(false), PANELS_HIDE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [focusedTile, selected?.id]);
+  }, [focusedTile, activeTile, activeFocused, selected?.id]);
   const selectedStatus =
-    focusedTile === 0
+    activeTile === 0
       ? controller.status
-      : controller.multiView?.tiles[focusedTile - 1]?.status;
+      : controller.multiView?.tiles[activeTile - 1]?.status;
   const latest = useRef({
     controller,
     media,
-    tile: focusedTile,
+    tile: activeTile,
+    focusedTile,
+    smallTiles,
+    activeFocused,
+    activePanelsVisible,
+    activeDialog,
+    panelControl,
     action,
     picker,
     count,
@@ -101,7 +166,13 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
   latest.current = {
     controller,
     media,
-    tile: focusedTile,
+    tile: activeTile,
+    focusedTile,
+    smallTiles,
+    activeFocused,
+    activePanelsVisible,
+    activeDialog,
+    panelControl,
     action,
     picker,
     count,
@@ -110,37 +181,38 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
     selectedStatus,
   };
 
+  const audioTile = activeFocused || action || picker ? activeTile : focusedTile;
+  const audioStatus = audioTile === 0 ? controller.status : controller.multiView?.tiles[audioTile - 1]?.status;
+  const desiredAudioTile = audioStatus === 'playing' ? audioTile : -1;
+  const currentAudioTile = controller.multiView?.audioTile ?? -1;
   useEffect(() => {
-    setMultiViewAudio(selectedStatus === 'playing' ? focusedTile : -1);
-  }, [focusedTile, selectedStatus, setMultiViewAudio]);
+    if (currentAudioTile !== desiredAudioTile) setMultiViewAudio(desiredAudioTile);
+  }, [desiredAudioTile, currentAudioTile, setMultiViewAudio]);
 
   const closePicker = useCallback(() => {
     request.current += 1;
     lastInteraction.current = Date.now();
     setPicker(null);
+    setActiveFocused(false);
     setAction(null);
     setResolving(undefined);
     setError(undefined);
   }, []);
   useEffect(() => {
     if (!picker) {
-      const timer = setTimeout(() => anchor.current?.requestTVFocus?.(), 80);
+      const timer = setTimeout(() => {
+        if (action) actionButtons.current[action]?.requestTVFocus?.();
+        else if (!activeFocused) anchor.current?.requestTVFocus?.();
+      }, 80);
       return () => clearTimeout(timer);
     }
-  }, [picker]);
+  }, [picker, action, activeFocused]);
   useEffect(
     () => () => {
       request.current += 1;
     },
     [],
   );
-  useEffect(() => {
-    if (!action) {
-      return;
-    }
-    const timer = setTimeout(() => setAction(null), PANELS_HIDE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [action, focusedTile, picker]);
   useEffect(() => {
     if (controller.status !== 'loading' || controller.paused) {
       return;
@@ -165,6 +237,7 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
     }
     setError(undefined);
     setAction(null);
+    setActiveFocused(false);
     setPicker({ index: replace ? current.tile : current.count, replace });
   }, []);
   const loadChannels = useCallback(() => {
@@ -185,7 +258,9 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
       const existing = exact >= 0 ? exact : playing.findIndex(entry => isSameMediaItem(entry.item, channel));
       if (existing >= 0 && playing[existing].status !== 'error') {
         setTile(existing);
+        setNavigationTile(current.tile);
         closePicker();
+        focusActivePlayer();
         return;
       }
       const targetIndex = existing >= 0 ? existing : current.picker.index;
@@ -203,7 +278,9 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
           current.media.setMultiViewChannel(channel, stream, targetIndex);
         }
         setTile(targetIndex);
+        setNavigationTile(current.tile);
         closePicker();
+        focusActivePlayer();
       } catch {
         if (sequence === request.current) {
           setResolving(undefined);
@@ -211,7 +288,7 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
         }
       }
     },
-    [closePicker],
+    [closePicker, focusActivePlayer],
   );
 
   const runAction = useCallback(
@@ -239,33 +316,48 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
           const next = current.controller.multiView?.tiles[current.tile - 1];
           if (next?.status === 'playing') {
             current.media.playFullscreen(next.item, next.stream);
+            // This decoder is already playing and survives the role change.
+            current.media.markPlaying();
           }
         }
       } else if (command === 'remove' && current.count > 1) {
         current.media.removeMultiViewChannel(current.tile);
-        setTile(Math.min(current.tile, current.count - 2));
-        setAction(null);
+        setTile(0);
+        setNavigationTile(null);
+        focusActivePlayer();
       }
     },
-    [openPicker],
+    [openPicker, focusActivePlayer],
   );
   const activate = useCallback(() => {
     const current = latest.current;
     if (current.picker || Date.now() - lastInteraction.current < 350) {
       return;
     }
-    if (current.action === null) {
-      setAction('fullscreen');
-    } else {
+    if (current.activeFocused || current.activeDialog) return;
+    if (current.action !== null) {
       runAction(current.action);
+    } else if (current.smallTiles.length) {
+      setTile(current.focusedTile);
+      setNavigationTile(current.tile);
+      focusActivePlayer();
     }
-  }, [runAction]);
+  }, [runAction, focusActivePlayer]);
 
   useTVNavigationEventHandler(event => {
     if (event.eventKeyAction === 1) {
       return;
     }
     const current = latest.current;
+    const panelInteraction = ['up', 'down', 'left', 'right', 'select', 'longSelect', 'enter',
+      'info', 'playpause', 'playPause', 'play', 'pause', 'rewind', 'fastForward'].includes(event.eventType);
+    if (current.activeFocused && !current.activeDialog && !current.picker && panelInteraction) {
+      if (current.activePanelsVisible) showActivePanels();
+      else if (['select', 'longSelect', 'enter'].includes(event.eventType)) {
+        showActivePanels();
+        return;
+      }
+    }
     if (tvPlatform.id !== 'kepler') {
       if (event.eventType === 'playpause' || event.eventType === 'playPause') {
         current.media.togglePlayPause();
@@ -282,51 +374,69 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
       }
       return;
     }
-    if (event.eventType === 'left') {
-      if (current.action) {
-        const index = current.actions.indexOf(current.action);
-        setAction(
-          current.actions[(index - 1 + current.actions.length) % current.actions.length],
-        );
-      } else {
-        setTile(Math.max(0, current.tile - 1));
+    if (current.activeDialog) return;
+    if (current.activeFocused) {
+      if (!current.activePanelsVisible) {
+        if (event.eventType === 'right' && current.smallTiles.length) setActiveFocused(false);
+        else if (event.eventType === 'down') {
+          setActiveFocused(false);
+          setAction('fullscreen');
+        }
+        return;
+      }
+      // Inner player controls own Left/Right and timeline navigation.
+      if (event.eventType === 'down' && current.panelControl !== 'timeline') {
+        setActiveFocused(false);
+        setAction('fullscreen');
+      } else if (event.eventType === 'up' && current.panelControl === 'timeline') {
+        setActiveFocused(false);
+        setNavigationTile(current.smallTiles[0] ?? null);
       }
       return;
     }
-    if (event.eventType === 'right') {
+    if (event.eventType === 'left' || event.eventType === 'right') {
       if (current.action) {
         const index = current.actions.indexOf(current.action);
-        setAction(
-          current.actions[
-            (index + 1) %
-              current.actions.length
-          ],
-        );
-      } else if (current.tile === current.count - 1) {
-        openPicker();
-      } else {
-        setTile(
-          Math.max(0, Math.min(current.count - 1, current.tile + 1)),
-        );
+        const direction = event.eventType === 'left' ? -1 : 1;
+        setAction(current.actions[(index + direction + current.actions.length) % current.actions.length]);
       }
-    } else if (event.eventType === 'up' || event.eventType === 'down') {
-      setAction(null);
-      setTile(
-        Math.max(
-          0,
-          Math.min(
-            current.count - 1,
-            current.tile + (event.eventType === 'up' ? -2 : 2),
-          ),
-        ),
-      );
+      else if (event.eventType === 'left') {
+        focusActivePlayer();
+      }
+      // Horizontal arrows never open the picker or select the large player.
+      return;
+    }
+    if (event.eventType === 'up' || event.eventType === 'down') {
+      if (current.action) {
+        if (event.eventType === 'up') {
+          focusActivePlayer();
+        }
+      } else {
+        const index = current.smallTiles.indexOf(current.focusedTile);
+        if (event.eventType === 'up' && index <= 0) {
+          focusActivePlayer();
+        } else if (event.eventType === 'down' && index >= current.smallTiles.length - 1) {
+          setAction('fullscreen');
+        } else {
+          const next = Math.max(0, index + (event.eventType === 'up' ? -1 : 1));
+          setNavigationTile(current.smallTiles[next] ?? null);
+        }
+      }
     }
   });
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
-        if (latest.current.picker) {
+        if (latest.current.activeDialog) {
+          request.current += 1;
+          setResolving(undefined);
+          setError(undefined);
+          setActiveDialog(null);
+        } else if (latest.current.activeFocused) {
+          setActiveFocused(false);
+          setAction('fullscreen');
+        } else if (latest.current.picker) {
           closePicker();
         } else {
           latest.current.media.exitMultiView();
@@ -336,6 +446,29 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
     );
     return () => subscription.remove();
   }, [closePicker]);
+
+  const activeStream = activeTile === 0 ? controller.stream : controller.multiView?.tiles[activeTile - 1]?.stream;
+  const playback = useMultiViewPlayback(activeFocused && activePanelsVisible && selected && activeStream ? multiViewSessionKey(selected, activeStream) : '');
+  const sourceOptions = useMemo(() => selected ? getLiveChannelSourceOptions(selected, activeStream?.sourceId) : [], [selected, activeStream?.sourceId]);
+  const changeSource = async (sourceId: string) => {
+    if (!selected) return;
+    const source = selectLiveChannelSource(selected, sourceId);
+    if (!source) return;
+    const sequence = ++request.current;
+    setResolving(sourceId);
+    setError(undefined);
+    try {
+      const stream = await resolveLiveChannelStream(source, {useSavedSource: false});
+      if (sequence !== request.current) return;
+      if (activeTile === 0) media.setMultiViewPrimary(selected, stream);
+      else media.setMultiViewChannel(selected, stream, activeTile);
+      setActiveDialog(null);
+    } catch {
+      if (sequence === request.current) setError(t('playerChannelUnavailable'));
+    } finally {
+      if (sequence === request.current) setResolving(undefined);
+    }
+  };
 
   if (!controller.item || !controller.multiView) {
     return null;
@@ -369,9 +502,9 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
         ref={anchor}
         testID="multiview-focus"
         hasTVPreferredFocus
-        focusable={!picker}
+        focusable={!picker && !action && !activeFocused && !activeDialog}
         accessibilityLabel={
-          action ? labels[action] : selected?.channelName || selected?.title
+          action ? labels[action] : (focusedTile === 0 ? controller.item : controller.multiView?.tiles[focusedTile - 1]?.item)?.channelName
         }
         onPress={activate}
         style={styles.anchor}
@@ -382,35 +515,42 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
         style={[StyleSheet.absoluteFill, viewportStyle]}
       >
       {tiles.map((entry, index) => (
-        <View
+        <MultiViewTileFrame
           key={entry.item.id}
+          index={index} count={count} activeTile={activeTile} width={width} height={height}
+          animateFocus={controller.multiView?.backend !== 'software'}
           testID={`multiview-tile-${index}`}
           style={[
-            multiViewTileLayout(index, count, width, height),
             styles.tile,
-            focusedTile === index && styles.focused,
+            !action && !activeDialog && (activeFocused ? index === activeTile : focusedTile === index && index !== activeTile) && styles.focused,
           ]}
           pointerEvents="box-none"
         >
           <Pressable
+            testID={`multiview-select-${index}`}
             focusable={false}
             accessibilityLabel={entry.item.channelName || entry.item.title}
             style={StyleSheet.absoluteFill}
             onPress={() => {
+              if (index === activeTile) {
+                setAction(null); setActiveFocused(true); setPanelControl('play-pause'); showActivePanels();
+                return;
+              }
               setTile(index);
-              setAction('fullscreen');
+              setNavigationTile(activeTile);
+              focusActivePlayer();
             }}
           />
           {entry.status === 'loading' ? (
-            <Text pointerEvents="none" style={styles.state}>
-              {t('playerSourceConnecting')}
-            </Text>
+            <View testID={`multiview-placeholder-${index}`} pointerEvents="none" style={styles.placeholder}>
+              <Text style={styles.state}>{t('playerSourceConnecting')}</Text>
+            </View>
           ) : entry.status === 'error' ? (
             <View pointerEvents="none" style={styles.failure}>
               <Text style={styles.state}>{t('multiPlaybackError')}</Text>
             </View>
           ) : null}
-          {infoVisible ? (
+          {infoVisible && !(index === activeTile && activeFocused) ? (
           <View testID={`multiview-caption-${index}`} pointerEvents="none" style={styles.caption}>
             {entry.item.fallbackImageUrl ? (
               <RemoteImage
@@ -430,13 +570,51 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
             </View>
           </View>
           ) : null}
-          {focusedTile === index && action && !picker ? (
+
+
+        </MultiViewTileFrame>
+      ))}
+          {activeFocused && !activeDialog && !picker ? (
+            <View testID="multiview-active-panels" style={[multiViewFocusLayout(activeTile, count, width, height, activeTile), styles.activePanels]} pointerEvents="box-none">
+              {infoVisible || activePanelsVisible ? <PlayerTopInfo item={selected || controller.item} /> : null}
+              <View style={{flex: 1}} pointerEvents="none" />
+              {activePanelsVisible ? <PlayerBottomControls
+                item={selected || controller.item} paused={playback.paused}
+                currentTime={playback.currentTime} duration={playback.duration}
+                seekableStart={playback.seekableStart} seekableEnd={playback.seekableEnd}
+                selectedQualityId={playback.selectedQualityId} videoQualities={playback.videoQualities}
+                hasAlternateSources={sourceOptions.length > 1}
+                hasSubtitles={controller.subtitleTracks.length > 0}
+                onOpenSubtitles={() => interactWithPanel(() => setActiveDialog('subtitles'))}
+                lastFocusedControl={panelControl} onFocusControl={focusPanelControl}
+                onTogglePlayPause={() => interactWithPanel(playback.togglePaused)}
+                onSeek={seconds => interactWithPanel(() => playback.seekTo(seconds))}
+                onOpenQuality={() => interactWithPanel(() => setActiveDialog('quality'))}
+                onOpenSources={() => interactWithPanel(() => {setError(undefined); setActiveDialog('sources');})}
+              /> : null}
+            </View>
+          ) : null}
+
+      {activeFocused && !activePanelsVisible && !activeDialog && !picker ? (
+        <Pressable testID="multiview-active-activator" focusable hasTVPreferredFocus
+          accessibilityLabel={selected?.channelName || selected?.title}
+          style={[multiViewFocusLayout(activeTile, count, width, height, activeTile), styles.activePanels]}
+          onPress={showActivePanels}
+        />
+      ) : null}
+      {!picker ? (
+            <View testID="multiview-toolbar" style={multiViewToolbarLayout(count, width, height, activeTile)}>
             <View style={styles.controls}>
               {actions.map(command => (
                 <Pressable
                   key={command}
                   testID={`multiview-${command}`}
-                  focusable={false}
+                  ref={node => {
+                    if (node) actionButtons.current[command] = node;
+                    else delete actionButtons.current[command];
+                  }}
+                  focusable={!activeFocused && !activeDialog && action === command}
+                  onFocus={() => setAction(command)}
                   accessibilityLabel={labels[command]}
                   accessibilityRole="button"
                   accessibilityState={{ selected: action === command }}
@@ -459,10 +637,22 @@ export function MultiViewPlayer({onChannelDrawerChange}: {onChannelDrawerChange?
                 <Text style={styles.decoderLabel}>{labels.backend}</Text>
               ) : null}
             </View>
+            </View>
           ) : null}
-        </View>
-      ))}
       </Animated.View>
+      {activeDialog === 'quality' ? <QualityDialog
+        qualities={playback.videoQualities.length ? playback.videoQualities : [{id: 'auto', label: 'Auto'}]}
+        selectedQualityId={playback.selectedQualityId}
+        onSelectQuality={playback.setQuality} onClose={() => setActiveDialog(null)}
+      /> : null}
+      {activeDialog === 'subtitles' ? <SubtitleDialog tracks={controller.subtitleTracks}
+        selectedId={controller.selectedSubtitleId} onSelect={controller.setSelectedSubtitle}
+        onClose={() => setActiveDialog(null)}
+      /> : null}
+      {activeDialog === 'sources' ? <SourceDialog sources={sourceOptions}
+        channelLabel={selected?.channelName} switchingSourceId={resolving} error={error}
+        onSelectSource={changeSource}
+      /> : null}
       {picker ? (
         <LiveChannelDrawer
           item={selected || controller.item}
@@ -497,28 +687,26 @@ const styles = StyleSheet.create({
   focused: { borderColor: '#16d7d7' },
   caption: {
     position: 'absolute',
-    bottom: 12,
-    left: 12,
-    right: 12,
-    height: 76,
+    top: 8,
+    left: 8,
+    right: 8,
+    height: 46,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.10)',
     overflow: 'hidden',
-    padding: 12,
-    gap: 10,
+    padding: 6,
+    gap: 6,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(10, 14, 20, 0.80)',
   },
-  logo: { width: 40, height: 40 },
+  logo: { width: 28, height: 28 },
   metadata: { flex: 1, minWidth: 0 },
-  channel: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  program: { color: '#d2d7da', fontSize: 12, marginTop: 3 },
+  channel: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
+  program: { color: '#d2d7da', fontSize: 10, marginTop: 1 },
   controls: {
-    position: 'absolute',
-    right: 18,
-    top: 18,
+    alignSelf: 'center',
     flexDirection: 'row',
     gap: 4,
     padding: 5,
@@ -539,6 +727,13 @@ const styles = StyleSheet.create({
   icon: { width: 22, height: 22, tintColor: '#ffffff' },
   iconFocused: { tintColor: '#031012' },
   state: { color: '#ffffff', fontSize: 14, textAlign: 'center', padding: 16 },
+  activePanels: {position: 'absolute', borderRadius: 8, overflow: 'hidden', zIndex: 3},
+  placeholder: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#121b27',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   failure: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#101619',
